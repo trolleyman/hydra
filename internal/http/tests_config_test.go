@@ -19,7 +19,7 @@ func runnersByName(rs []config.TestScript) map[string]config.TestScript {
 }
 
 // A branch's own [[tests]] edits (changed command, added/removed runner) are read
-// from the ref being compared, mirroring [[artifacts]] — the whole point of the
+// from the ref being compared, mirroring [[artifacts]] - the whole point of the
 // "agent can change its own tests" behavior.
 func TestTestRunnersFor_ReadsRefConfig(t *testing.T) {
 	base := `
@@ -105,7 +105,7 @@ unsafe_host = true
 
 	right := runnersByName(s.testRunnersFor(root, hydratests.Version{Ref: "HEAD"}, trusted))
 	if right["audited"].UnsafeHost {
-		t.Error("branch modified the command — unsafe_host must be stripped")
+		t.Error("branch modified the command - unsafe_host must be stripped")
 	}
 	if right["sneaky"].UnsafeHost {
 		t.Error("branch-introduced unsafe_host command must be stripped")
@@ -148,10 +148,10 @@ enabled = false
 		t.Errorf("duplicate name: got %q, want first definition", got["unit"].Command)
 	}
 	if _, ok := got["vetoed"]; ok {
-		t.Error("root disabled 'vetoed' by name — it must be dropped")
+		t.Error("root disabled 'vetoed' by name - it must be dropped")
 	}
 	if _, ok := got["selfoff"]; ok {
-		t.Error("branch disabled 'selfoff' (enabled=false) — it must be dropped")
+		t.Error("branch disabled 'selfoff' (enabled=false) - it must be dropped")
 	}
 }
 

@@ -2,7 +2,7 @@
 // installs so a project's Hydra server comes up headless (on login/boot) instead
 // of only in a foreground terminal. Today that's a systemd --user unit; the
 // rendering is a pure function kept here (not in the magefile) so it can be
-// unit-tested — the mage target itself does the file IO and can't be run in CI.
+// unit-tested - the mage target itself does the file IO and can't be run in CI.
 package service
 
 import (

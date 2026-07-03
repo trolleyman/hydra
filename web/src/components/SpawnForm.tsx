@@ -220,18 +220,18 @@ export function SpawnForm({
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a spawn consumes the
-  // prompt — then we revoke them all at once (and otherwise until reload, like
+  // prompt - then we revoke them all at once (and otherwise until reload, like
   // the cache itself).
   const objectUrlsRef = useRef<Set<string>>(new Set())
   // Index into the image-only attachment list while the lightbox is open; null
   // when closed.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
-  // Numbers generically-named pasted images (image.png, image.png, …) as
-  // image1.png, image2.png, … so each can be referred to distinctly in the
+  // Numbers generically-named pasted images (image.png, image.png, ...) as
+  // image1.png, image2.png, ... so each can be referred to distinctly in the
   // prompt. Per project + layout (persisted via imageCounterKey) so the count
   // doesn't bleed across projects, and reset after a successful spawn.
   const imageCounterRef = useRef(0)
-  // Numbers pasted-text attachments (pasted-text-1.txt, …) so each large paste
+  // Numbers pasted-text attachments (pasted-text-1.txt, ...) so each large paste
   // gets a distinct, referenceable filename. Session-only, reset after a spawn.
   const pastedTextCounterRef = useRef(0)
   // The most recent large text paste that was turned into an attachment. An
@@ -265,7 +265,7 @@ export function SpawnForm({
   }, [agentType, model])
 
   // Load the project's branches for the base-branch selector. `defaultSelection`
-  // also resets the chosen base to the current branch — done on the initial load
+  // also resets the chosen base to the current branch - done on the initial load
   // for a project, but NOT on the background refresh that fires when the dropdown
   // is opened (which must preserve whatever the user picked). The background
   // refresh keeps the cached list visible and just swaps in fresh branches, so a
@@ -415,7 +415,7 @@ export function SpawnForm({
   }
 
   // Per-project attachments + image counter, swapped in/out as the project (or
-  // layout) changes so each box keeps its own — just like the text draft. The
+  // layout) changes so each box keeps its own - just like the text draft. The
   // attachments live in an in-session module cache (their thumbnails are object
   // URLs that can't be persisted); the counter is mirrored to localStorage.
   const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
@@ -453,8 +453,8 @@ export function SpawnForm({
 
   // Clipboard screenshots all arrive named "image.png", so a multi-image prompt
   // ends up with several indistinguishable attachments. Rename those generic
-  // (or unnamed) images to image1.png, image2.png, … so the on-disk path — and
-  // therefore the reference the user can type in the prompt — is unique. Files
+  // (or unnamed) images to image1.png, image2.png, ... so the on-disk path - and
+  // therefore the reference the user can type in the prompt - is unique. Files
   // with a real name (e.g. a dragged "diagram.png") keep it.
   function numberGenericImage(file: File): File {
     if (!isImageFile(file)) return file
@@ -477,8 +477,8 @@ export function SpawnForm({
     // Adding a chip is its own undo step.
     commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
     // The upload resolving isn't a user action, so patch this chip across the
-    // whole timeline (reconcile) instead of pushing a new undo step — undoing to
-    // an earlier snapshot still sees the settled path, not a stale "uploading…".
+    // whole timeline (reconcile) instead of pushing a new undo step - undoing to
+    // an earlier snapshot still sees the settled path, not a stale "uploading...".
     uploadFile(projectId, file)
       .then((res) => reconcile(id, { path: res.path, uploading: false }))
       .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
@@ -498,7 +498,7 @@ export function SpawnForm({
   }
 
   function removeAttachment(id: number) {
-    // Don't revoke the preview URL here — an undo can bring this chip back. URLs
+    // Don't revoke the preview URL here - an undo can bring this chip back. URLs
     // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
     commit(
       (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
@@ -520,7 +520,7 @@ export function SpawnForm({
       return
     }
 
-    // A Shift-held paste means "paste for real" — let the browser insert the
+    // A Shift-held paste means "paste for real" - let the browser insert the
     // text as-is, never attaching it.
     if (literal) return
 
@@ -532,7 +532,7 @@ export function SpawnForm({
     if (last && last.text === text) {
       // Second paste of the same block: the user wants it inline after all. Drop
       // the chip AND splice the text in (fenced if it's code) as ONE undo step,
-      // so a single Ctrl+Z reverses the inline — putting the block back in a chip.
+      // so a single Ctrl+Z reverses the inline - putting the block back in a chip.
       e.preventDefault()
       const insert = last.lang ? fenceCode(text, last.lang) : text
       const ta = textareaRef.current
@@ -581,7 +581,7 @@ export function SpawnForm({
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
-  // Image attachments (those with a preview), in chip order — the lightbox
+  // Image attachments (those with a preview), in chip order - the lightbox
   // navigates this list, and each thumbnail opens its own index here.
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
@@ -599,7 +599,7 @@ export function SpawnForm({
       const base = prompt.trim()
       const finalPrompt = paths ? (base ? `${base}\n\n${paths}` : paths) : base
       // Seed the new head's PTY at this browser's last terminal width and either
-      // its last height or the user's configured default — so the agent renders
+      // its last height or the user's configured default - so the agent renders
       // at the right size from its first paint instead of the 80x24 default (its
       // narrow-wrapped scrollback can't be re-flowed once a wide client attaches).
       const geom = spawnGeometry()
@@ -616,7 +616,7 @@ export function SpawnForm({
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       if (draftKey) writeLocal(draftKey, null)
       if (scrollKey) writeLocal(scrollKey, null)
-      // The prompt is sent — free every preview URL minted this session (including
+      // The prompt is sent - free every preview URL minted this session (including
       // ones only reachable via undo history) and clear the composer.
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
       objectUrlsRef.current.clear()
@@ -665,7 +665,7 @@ export function SpawnForm({
         onSelect={setBaseBranch}
         onOpen={() => void refreshBranches(false)}
         title={compactSel
-          ? `Base branch: ${baseBranch || 'current'} — pick an agent branch to stack on it`
+          ? `Base branch: ${baseBranch || 'current'} - pick an agent branch to stack on it`
           : 'Base branch to create the agent from (pick an agent branch to stack on it)'}
         triggerIcon={compactSel ? GitBranch : undefined}
         flexible={compactSel}
@@ -704,7 +704,7 @@ export function SpawnForm({
       handleSubmit(e as unknown as React.FormEvent)
     }
     // Undo/redo over the composer's own history (text + attachments). Only on the
-    // prompt textarea — the agent-id field keeps its native per-field undo. Our
+    // prompt textarea - the agent-id field keeps its native per-field undo. Our
     // stack drives these because pastes-turned-chips call preventDefault, so the
     // browser's textarea undo never recorded them. Cmd/Ctrl+Z undo, +Shift redo,
     // and Ctrl+Y redo (Windows convention).
@@ -762,7 +762,7 @@ export function SpawnForm({
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
-              placeholder={disabled ? 'Select a project first…' : 'Describe a task…'}
+              placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
               rows={3}
               disabled={loading || disabled}
               wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
@@ -789,7 +789,7 @@ export function SpawnForm({
                 disabled={!canSubmit || loading || disabled}
                 className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
-                {loading ? '…' : 'Spawn'}
+                {loading ? '...' : 'Spawn'}
               </button>
             </div>
             {renderResizeHandle()}
@@ -816,7 +816,7 @@ export function SpawnForm({
           <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
             Spawn an Agent
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Describe what you need — and consider it done.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Describe what you need - and consider it done.</p>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -835,7 +835,7 @@ export function SpawnForm({
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
-                placeholder="Describe what you need…"
+                placeholder="Describe what you need..."
                 rows={6}
                 disabled={loading}
                 wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
@@ -844,7 +844,7 @@ export function SpawnForm({
 
               {renderAttachments('md')}
 
-              {/* Footer bar — stacks the controls above the Spawn button on
+              {/* Footer bar - stacks the controls above the Spawn button on
                   narrow screens instead of overflowing the card */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-3 shrink-0">
                 <div className="flex items-center gap-2 min-w-0 flex-wrap sm:flex-1">
@@ -873,7 +873,7 @@ export function SpawnForm({
                     {loading ? (
                       <>
                         <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                        Spawning…
+                        Spawning...
                       </>
                     ) : (
                       <>

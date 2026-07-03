@@ -103,7 +103,7 @@ func StopDaemon(ctx context.Context, projectRoot string) error {
 			// Belt-and-suspenders: only signal a PID we can confirm is a hydra
 			// daemon. The socket ping above already implies a live daemon, but a
 			// stale pidfile plus PID reuse could otherwise point us at an
-			// unrelated process — we must never SIGTERM something we don't own.
+			// unrelated process - we must never SIGTERM something we don't own.
 			if pidIsHydraDaemon(pid) {
 				if proc, err := os.FindProcess(pid); err == nil {
 					_ = proc.Signal(syscall.SIGTERM)
@@ -127,7 +127,7 @@ func StopDaemon(ctx context.Context, projectRoot string) error {
 // guard before signalling so a stale pidfile (after PID reuse) can never make us
 // TERM an unrelated process. It inspects /proc/<pid>/cmdline for the hidden
 // `__daemon` subcommand. On platforms without /proc (or if the cmdline can't be
-// read) it returns true so behaviour is unchanged — the socket-ping guard in
+// read) it returns true so behaviour is unchanged - the socket-ping guard in
 // StopDaemon already establishes that a live hydra daemon is answering.
 func pidIsHydraDaemon(pid int) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))

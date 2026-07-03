@@ -31,8 +31,8 @@ const GRAY = 'bg-gray-300 dark:bg-gray-600'
 describe('statusDotClass', () => {
   // statusDotClass switches on the raw sandbox session_status. The backend only
   // ever emits pending|building|starting|running|stopped|exited (db model_*.go,
-  // heads/heads.go) — never Docker's legacy `Up …`/`Exited (…)`/`created`
-  // strings — so only running and exited get a dedicated colour; everything else
+  // heads/heads.go) - never Docker's legacy `Up ...`/`Exited (...)`/`created`
+  // strings - so only running and exited get a dedicated colour; everything else
   // (including the pre-session states) falls through to the muted grey dot.
   it('maps running to green', () => {
     expect(statusDotClass('running')).toBe('bg-green-500')
@@ -110,7 +110,7 @@ describe('agentStatusBadge', () => {
     ['merging', 'merging', TONE_BADGE.green],
     ['ended', 'ended', TONE_BADGE.muted],
     ['exited', 'exited', TONE_BADGE.red],
-  ])('%s → { %s, … }', (status, label, className) => {
+  ])('%s → { %s, ... }', (status, label, className) => {
     expect(agentStatusBadge(status)).toEqual({ label, className })
   })
 

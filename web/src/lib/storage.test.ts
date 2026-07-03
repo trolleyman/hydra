@@ -81,7 +81,7 @@ describe('key builders: distinctness and stability', () => {
   })
 
   it('null projectId does not collide with a literal "_" projectId differently than documented', () => {
-    // Both map to the same stable shape — that is the documented behaviour.
+    // Both map to the same stable shape - that is the documented behaviour.
     expect(agentViewPrefsKey(null, 'a')).toBe(agentViewPrefsKey('_', 'a'))
   })
 

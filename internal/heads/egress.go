@@ -26,10 +26,10 @@ const (
 	EgressUnrestricted EgressMode = "unrestricted"
 	// EgressOff: network disabled entirely (the hard off-switch).
 	EgressOff EgressMode = "off"
-	// EgressHard: allow-list enforced in a pasta netns + nft lock — a real,
+	// EgressHard: allow-list enforced in a pasta netns + nft lock - a real,
 	// inescapable boundary.
 	EgressHard EgressMode = "filtered-hard"
-	// EgressAdvisory: allow-list enforced by the proxy via HTTP(S)_PROXY only —
+	// EgressAdvisory: allow-list enforced by the proxy via HTTP(S)_PROXY only -
 	// filters every proxy-respecting client, but a determined process in the
 	// shared net namespace can bypass it (pasta/nft unavailable on this host).
 	EgressAdvisory EgressMode = "filtered-advisory"
@@ -59,8 +59,8 @@ var egressProxies = struct {
 //     unavailable, degrade to advisory with a warning, unless Strict, in which
 //     case fail closed (no network).
 //
-// The proxy enforces the effective allow-list — the built-in DefaultAllowedHosts
-// unioned with net.AllowedHosts — minus net.BlockedHosts, which overrides it.
+// The proxy enforces the effective allow-list - the built-in DefaultAllowedHosts
+// unioned with net.AllowedHosts - minus net.BlockedHosts, which overrides it.
 func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled || net.Mode == sandbox.NetOff {
@@ -156,7 +156,7 @@ func stopEgressProxy(id string) {
 }
 
 // egressApprovalTimeout bounds how long a blocked outbound connection waits for a
-// user decision before it is denied (matching the security gate's ask timeout —
+// user decision before it is denied (matching the security gate's ask timeout -
 // see internal/cli/gate.go). On timeout the agent gets the same 403 it would have
 // gotten under a silent deny, just after giving the user a chance to approve.
 const egressApprovalTimeout = 5 * time.Minute
@@ -263,7 +263,7 @@ func (e *egressApprover) writeApprovalStatus(summary string) {
 }
 
 // restoreRunning clears the policy-approval wait, but only if it still owns the
-// status (nothing newer — e.g. the agent's own hook — has moved it on).
+// status (nothing newer - e.g. the agent's own hook - has moved it on).
 func (e *egressApprover) restoreRunning() {
 	if s := ReadAgentStatus(e.projectRoot, e.id); s != nil &&
 		(s.NotificationType == nil || *s.NotificationType != gate.NotificationPolicyApproval) {

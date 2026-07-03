@@ -23,9 +23,9 @@ type SimulationServer struct {
 // a comparison in separate server boots and hashes the resulting screenshots, so
 // any value that moves with the real clock (an agent's "spawned X ago", the
 // artifacts panel's elapsed timer) would make otherwise-identical renders differ
-// and show up as a spurious visual change. Pinning the server's clock — together
+// and show up as a spurious visual change. Pinning the server's clock - together
 // with the screenshot script pinning the browser's clock to the SAME instant
-// (web/scripts/screenshots/take-screenshots.ts, page.clock) — makes every duration
+// (web/scripts/screenshots/take-screenshots.ts, page.clock) - makes every duration
 // label deterministic, down to the second. Keep the two instants in sync.
 func simNow() time.Time {
 	return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -134,12 +134,12 @@ const simAgent1Prompt = "Let agents be renamed with a human-friendly title inste
 // markdown renderer thoroughly: `code`, *italic* and **bold** runs, a long
 // inline-code reference that wraps across lines, a line that mixes code with
 // prose (to prove a code span doesn't change the line height), and a literal
-// "$ …" run that must stay ordinary code in a prompt (the $-command override is
+// "$ ..." run that must stay ordinary code in a prompt (the $-command override is
 // activity-only). It is also long enough to overflow the detail PromptBlock's
 // max height so the bottom-fade-on-scroll is visible.
 const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
-	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs — but leave #headings alone.\n" +
-	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown — but do that *only* for activity, never for a prompt.\n" +
+	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs - but leave #headings alone.\n" +
+	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown - but do that *only* for activity, never for a prompt.\n" +
 	"- A long inline-code reference such as `web/src/components/AgentComponents.tsx` must wrap across lines cleanly, and a line that contains `code` must stay exactly as tall as a `plain` one.\n" +
 	"- A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` should wrap mid-span, with each line fragment keeping its own rounded code background.\n" +
 	"- Proof the override is activity-only: this literal `$ run-this-command --now` sitting inside the prompt should stay ordinary code, not a highlighted command line.\n" +
@@ -150,12 +150,12 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 
 // simAgent2Prompt is agent-2's seeded prompt. It opens with task text, then
-// lists upload paths the way the spawn form appends them — three images and one
-// non-image (.pdf) — so the agent-2 detail page's PromptBlock renders them as
+// lists upload paths the way the spawn form appends them - three images and one
+// non-image (.pdf) - so the agent-2 detail page's PromptBlock renders them as
 // attachment chips (image thumbnails + a generic icon) instead of raw links.
 // agent-2 already sits in ListAgents, so its detail page renders straight from
 // the store (no one-shot getAgent, which never resolves in simulation), and no
-// other shot captures its detail view — so adding this prompt is churn-free. See
+// other shot captures its detail view - so adding this prompt is churn-free. See
 // take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
 // fixed image so they render deterministically.
 const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
@@ -197,12 +197,12 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		},
 		{
 			// Finished its turn with a terse closing instruction. "run it" is a
-			// suggested next message — short, single-clause — so the sidebar marks
+			// suggested next message - short, single-clause - so the sidebar marks
 			// it with a `❯ ` caret (see isSuggestedNextMessage in AgentComponents),
 			// in contrast to agent-2's multi-sentence report, which stays plain.
 			// Also carries the blue unread-changes dot: it went quiet (running→
 			// finished) while you were away, the classic case the blue marker is
-			// for — distinct from agent-2's red needs-input marker right below it.
+			// for - distinct from agent-2's red needs-input marker right below it.
 			Id:               "agent-1",
 			Title:            ptr("Add renameable agent titles"),
 			AgentType:        "claude",
@@ -241,14 +241,14 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    needsInput,
 				Timestamp: simNow().Format(time.RFC3339),
-				// A multi-line message — the sidebar's activity row collapses it to a
+				// A multi-line message - the sidebar's activity row collapses it to a
 				// single truncated line (singleLine), so a code block can no longer
 				// render as a multi-line block and clip.
 				LastMessage: ptr("Two providers expose refresh tokens differently:\n```\nGoogle: offline access\nGitHub: no refresh\n```\nShould I store refresh tokens or re-auth on expiry?"),
 			},
 		},
 		{
-			// Deeply-nested refactor — exercises the diff tree's VS Code-style
+			// Deeply-nested refactor - exercises the diff tree's VS Code-style
 			// "compact folders" rendering (see GetAgentDiff for agent-3).
 			Id:            "agent-3",
 			Title:         ptr("Refactor auth into nested packages"),
@@ -262,14 +262,14 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 				Status:    running,
 				Timestamp: simNow().Format(time.RFC3339),
 				// A "$"-prefixed activity renders as a command (whole line styled
-				// as code), overriding markdown — demos the activity-only override.
+				// as code), overriding markdown - demos the activity-only override.
 				Activity: ptr("$ go test ./internal/heads/ -run TestResumeLazy"),
 			},
 		},
 		{
 			// A plain needs-input agent asking a clarifying question. (Security-gate
-			// approval cards are documented as their own harness shots —
-			// agent-approvals-*.png — not via a live simulated agent, so nothing
+			// approval cards are documented as their own harness shots -
+			// agent-approvals-*.png - not via a live simulated agent, so nothing
 			// here sits in a policy_approval wait; otherwise the global approval
 			// toasts would leak onto every simulated page.)
 			Id:                 "agent-approval",
@@ -291,7 +291,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		{
 			// Auto-merge armed AND blocked on you: it queued a merge (tests already
 			// green) but is now asking a question (needs_input), so the "Merge queued"
-			// pill's tooltip reports it's waiting on YOU — the agent-status gate, not
+			// pill's tooltip reports it's waiting on YOU - the agent-status gate, not
 			// tests (merge-queued-tooltip shot).
 			Id:            "agent-queued",
 			Title:         ptr("Add a command palette"),
@@ -304,7 +304,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      needsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P - which do you prefer?"),
 			},
 		},
 	}
@@ -457,7 +457,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      api.NeedsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P - which do you prefer?"),
 			},
 			Tests:          simTestSummary("agent-queued"),
 			MergeWhenGreen: ptr(true),
@@ -570,7 +570,7 @@ func simTestRunners(id string) []api.TestRunResult {
 			{Name: "host allowed", Status: api.TestCasePassed, Path: ptr("internal/sandbox/net_test.go"), Scope: ptr([]string{"TestHostAllowed"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(88), DurationMs: ptr(int64(2))},
 			// PathMissing: the runner reported a file the checkout doesn't have (a
 			// stale/renamed path). The CaseTree flags the file row amber and drops the
-			// open-in-repo link — informational, it doesn't change the verdict.
+			// open-in-repo link - informational, it doesn't change the verdict.
 			{Name: "parses legacy config", Status: api.TestCasePassed, Path: ptr("internal/config/legacy_test.go"), Scope: ptr([]string{"TestParseLegacy"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(17), DurationMs: ptr(int64(1)), PathMissing: ptr(true)},
 			// A JUnit runner reports dotted classnames (org.trolleyman.pocoapoco.db.CodesTest):
 			// the lowercase package segments classify as "module" ({} braces) and the
@@ -597,7 +597,7 @@ func simTestRunners(id string) []api.TestRunResult {
 		}}
 	}
 	if id == "agent-3" {
-		// Running, no failures yet — matches agent-3's running verdict summary so the
+		// Running, no failures yet - matches agent-3's running verdict summary so the
 		// panel and the sidebar/merge-gate agree (it backs the running gate dialog).
 		return []api.TestRunResult{{
 			Name: "go", Status: api.TestStatusRunning,
@@ -613,7 +613,7 @@ func simTestRunners(id string) []api.TestRunResult {
 		// Three runs in flight, for the running-state screenshots. "go" declared a
 		// ::hydra:test:total:: (142) so its bar is determinate (84/142); "eslint"
 		// is a streamed run with NO declared total AND no prior run to estimate
-		// from — tallies tick but there's no denominator — so its bar is the
+		// from - tallies tick but there's no denominator - so its bar is the
 		// indeterminate sliding barber pole. "playwright" also declared no total
 		// but a prior run seeded an ESTIMATED denominator (shown as "~48"), so its
 		// bar is determinate and the count reads 31/~48.
@@ -670,7 +670,7 @@ func simTestSummary(id string) *api.TestSummary {
 		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(151), Passed: ptr(144), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
 	case "agent-queued":
 		// Tests already green, so the merge-when-green queue is waiting purely on the
-		// agent (which is at needs_input) — what merge-queued-tooltip demonstrates.
+		// agent (which is at needs_input) - what merge-queued-tooltip demonstrates.
 		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(88), Passed: ptr(88), DurationMs: ptr(int64(2600))}
 	case "agent-3":
 		// Running but NOT armed (unlike agent-md), so its Merge button opens the
@@ -1191,10 +1191,10 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 		//   - internal/app/services/...        two sibling chains (auth, billing)
 		//                                      under one trunk: the trunk folds to
 		//                                      `internal/app/services`, then each
-		//                                      branch folds independently — auth's
+		//                                      branch folds independently - auth's
 		//                                      chain stops at `google` because it
 		//                                      holds two files.
-		//   - web/src/{index.ts,components/…}  `web` folds into `src`, but `src`
+		//   - web/src/{index.ts,components/...}  `web` folds into `src`, but `src`
 		//                                      holds a file AND a folder so the
 		//                                      chain stops there (no over-merging).
 		// agent-3 also conflicts with its base branch, so its diff carries the
@@ -1214,7 +1214,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					api.DiffLine{Type: api.Context, Content: "# Hydra", OldLineNum: ptr(1), NewLineNum: ptr(1)},
 					api.DiffLine{Type: api.Addition, Content: "Now with deeply nested auth providers.", NewLineNum: ptr(2)},
 					// A deliberately long line to exercise the unified diff's soft
-					// wrapping (whitespace-pre-wrap) on narrow / mobile viewports —
+					// wrapping (whitespace-pre-wrap) on narrow / mobile viewports -
 					// it should reflow across several rows rather than overflow.
 					api.DiffLine{Type: api.Addition, Content: "This intentionally very long line verifies that the diff viewer wraps prose gracefully on small screens instead of forcing a horizontal scrollbar: lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.", NewLineNum: ptr(3)},
 					// A long unbroken token to exercise break-words (a URL/path with
@@ -1283,8 +1283,8 @@ func simFile(path string, ct api.DiffFileChangeType, add, del int, header string
 // actually has, so its memory is bounded by the checkout. The simulation has no
 // backing file: expandHunkContext *synthesizes* one "context line N" per
 // requested line, per hunk, so an unbounded client value (e.g. a stray
-// ?context=5000000) allocates millions of DiffLines — each with a heap string
-// and two heap *int — across every hunk, ballooning RSS into the gigabytes (a
+// ?context=5000000) allocates millions of DiffLines - each with a heap string
+// and two heap *int - across every hunk, ballooning RSS into the gigabytes (a
 // single large request OOM-kills the process). The mock diffs are tiny and the
 // UI only ever asks for gapSize/2 (tens of lines), so this ceiling is far above
 // any legitimate request while keeping a hostile/buggy one cheap.
@@ -1300,7 +1300,7 @@ func simContext(params api.GetAgentDiffParams) int {
 // simApplyContext renders a fixture diff at the requested context. For a
 // full_context request it reconstructs each file as a single contiguous
 // whole-file hunk (mirroring `git diff -U<huge>` in production) so the diff
-// viewer drives its full-content reveal model — compact, with "··· N lines ···"
+// viewer drives its full-content reveal model - compact, with "··· N lines ···"
 // collapses and no fabricated edge arrows. Otherwise it just widens each hunk's
 // surrounding context (network-expand on demand).
 func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.DiffFile {
@@ -1324,7 +1324,7 @@ func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.
 // Line numbers are recomputed from the line types rather than trusting the
 // fixtures' stated numbers: the hand-written fixtures don't always keep the
 // old/new offset consistent across hunks, and any inconsistency would make the
-// reconstructed content non-contiguous — which the client rejects, falling back
+// reconstructed content non-contiguous - which the client rejects, falling back
 // to rendering the whole thing uncollapsed (a wall of synthetic lines). The old
 // side stays the source of truth for gap sizing (it's monotonic in the
 // fixtures); new line numbers are derived so the result is always a valid,
@@ -1450,11 +1450,11 @@ func simSVG(label, color string, w, h int) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
 
-// simSVGUI renders a minimal, abstract UI mock — a header title, a body panel,
+// simSVGUI renders a minimal, abstract UI mock - a header title, a body panel,
 // a small centred tile, and a status badge in the top-right corner. The
 // before/after sides of a changed image pass the same title/theme but a
 // different accent colour + badge label, so only the centred tile and the
-// top-right badge differ between them — everything else is identical. Two small,
+// top-right badge differ between them - everything else is identical. Two small,
 // separated changed regions keep the demos honest without painting over the
 // whole frame: the pixel-diff "Highlight" overlay marks just those two spots,
 // and the centred tile gives the before/after slider (a horizontal mid-frame
@@ -1575,7 +1575,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// still building: the LEFT (before) side exited non-zero (empty live log +
 		// persisted log URL + left_error), the RIGHT (after) side is still rendering.
 		// The whole set stays "generating", but the failed side's live log gets the
-		// red error border immediately — it must NOT read as a clean (green) finish
+		// red error border immediately - it must NOT read as a clean (green) finish
 		// just because its live log drained. The still-generating side stays neutral.
 		{
 			Name:          "components",
@@ -1661,7 +1661,7 @@ func artTags(tags ...string) *[]string {
 //
 // Each file's Width/Height is the resolution a real capture at that viewport would
 // have (≈1440×880 desktop, 960×1920 phone), NOT the small size the placeholder SVG
-// is drawn at — the SVG is vector and scales to fill its tile, so it stands in for a
+// is drawn at - the SVG is vector and scales to fill its tile, so it stands in for a
 // full-resolution screenshot. Sizing them realistically keeps the masonry's
 // resolution-aware span (which would otherwise treat a 360px SVG as a tiny image and
 // shrink its tile on a high-DPI screen) laying the demo out like real artifacts.
@@ -1675,7 +1675,7 @@ func simReadyChangedSet() api.ArtifactSet {
 			// top-right status badge (grey "Draft" → green "Live"), so the pixel-diff
 			// Highlight marks only those two spots rather than the whole frame, and
 			// the centred change gives the before/after slider something to reveal as
-			// it wipes through the middle — see simSVGUI.
+			// it wipes through the middle - see simSVGUI.
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
@@ -1684,7 +1684,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
 				Width:      ptr(1440), Height: ptr(880),
 				// Only the centred tile + status badge moved, so a small fraction of
-				// pixels differ — below a ~10% threshold this reads as "identical".
+				// pixels differ - below a ~10% threshold this reads as "identical".
 				ChangeRatio: ptr(0.03),
 			},
 			{
@@ -1704,7 +1704,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
 				Width:      ptr(960), Height: ptr(1920),
 				// A larger fraction differs here, so this one stays "modified" past a
-				// ~10% threshold — contrasting with the near-identical home shots.
+				// ~10% threshold - contrasting with the near-identical home shots.
 				ChangeRatio: ptr(0.18),
 			},
 			{
@@ -1758,7 +1758,7 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	// No simulated agent parks a live gate approval — the approval cards are
+	// No simulated agent parks a live gate approval - the approval cards are
 	// documented as their own harness screenshots (agent-approvals-*.png) so they
 	// don't leak onto every simulated page. Always return an empty set.
 	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: []api.ApprovalRequest{}})
@@ -1992,7 +1992,7 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 		{
 			// A pure rename (no content change): the whole file is shipped as
 			// all-context lines so the viewer shows it normally rather than a bare
-			// "No changes" — see GetRepositoryDiff's rename synthesis.
+			// "No changes" - see GetRepositoryDiff's rename synthesis.
 			Path:       "internal/heads/renderer.go",
 			OldPath:    ptr("internal/heads/render.go"),
 			ChangeType: api.DiffFileChangeTypeRenamed,
@@ -2222,7 +2222,7 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 
 // HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.
 // The simulation has no real worktree or refs, so it ignores ref/worktree and
-// resolves purely by path — mirroring HandleRepositoryBlob — which is enough to
+// resolves purely by path - mirroring HandleRepositoryBlob - which is enough to
 // back the diff viewer's image differ in the frontend simulation.
 func (s *SimulationServer) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
 	s.HandleRepositoryBlob(w, r)
@@ -2329,13 +2329,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	// the ShellEditor's bash highlighting and line-number gutter. Only the
 	// project scope carries it; the user scope (fetched as the *inherited*
 	// config when editing the project) leaves it empty, matching a realistic
-	// setup where a project overrides the global default — so the editor isn't
+	// setup where a project overrides the global default - so the editor isn't
 	// shadowed by a redundant "Inherited:" echo of its own value.
 	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
-			// Hard egress mode with extra allow-listed hosts + a blocked host —
+			// Hard egress mode with extra allow-listed hosts + a blocked host -
 			// drives the settings network screenshot (mode dropdown + allowed/blocked
 			// host editors populated).
 			Network: &api.NetworkConfig{
@@ -2359,14 +2359,14 @@ func (s *SimulationServer) SaveConfig(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, projectId string) {
-	// mobile-app's emulator pool has crashed out (exhausted restarts) — drives the
+	// mobile-app's emulator pool has crashed out (exhausted restarts) - drives the
 	// failed-service badge and the top-bar warning indicator in the screenshots.
 	// Every other project's pool is healthy.
 	if projectId == "mobile-app" {
 		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 			Services: []api.ServiceStatus{
 				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
-					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration — /dev/kvm not found)")},
+					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration - /dev/kvm not found)")},
 			},
 		})
 		return
@@ -2427,7 +2427,7 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	// rather than pacing it with sleeps: the screenshot generator captures this
 	// terminal, and a wall-clock-paced stream means a capture catches a
 	// nondeterministic number of "Step N/3" lines depending on how long its
-	// navigate+settle happened to take — which shows up as a spurious diff
+	// navigate+settle happened to take - which shows up as a spurious diff
 	// between the before/after renders. Writing every line up front makes the
 	// captured terminal a fixed, complete transcript.
 	sendStatusUpdate(conn, "building")
@@ -2461,7 +2461,7 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 // HandleEventsWS mirrors the real server's events stream. Simulation data is
 // static, so it just sends the one-time "refetch everything" nudge on connect and
 // then holds the connection open (ignoring client messages) until the peer
-// closes — enough for the client to do its initial load without a reconnect loop.
+// closes - enough for the client to do its initial load without a reconnect loop.
 func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -2534,7 +2534,7 @@ func (s *SimulationServer) HandleTestsWS(w http.ResponseWriter, r *http.Request)
 // when the requested context is greater than the default 3.
 // expandHunkContext pads a hunk with up to extraCtx synthetic context lines on
 // each side. The prefix stops at line 1 and the suffix stops at the file's known
-// extent (fileLastOld/fileLastNew — the largest line numbers across the file's
+// extent (fileLastOld/fileLastNew - the largest line numbers across the file's
 // real hunks), so a full-context request (git diff -U<huge> in production)
 // returns the complete short fixture rather than an unbounded fabricated tail.
 func expandHunkContext(hunk api.DiffHunk, extraCtx, fileLastOld, fileLastNew int, fileExt string) api.DiffHunk {

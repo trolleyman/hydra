@@ -3,7 +3,7 @@ import { RepositoryView } from '../../components/RepositoryView'
 
 // The repository browser. This parent route stays mounted for both the bare
 // (/project/X/repository) and the deep (/project/X/repository/<ref>/<path>)
-// URLs — the deep form is the splat child in repository.$.tsx, which renders
+// URLs - the deep form is the splat child in repository.$.tsx, which renders
 // nothing itself but keeps those URLs valid (PLAN.md #41f). Keeping a single
 // mounted RepositoryView means clicking a file just updates the URL/params
 // without remounting (and so without refetching the tree).

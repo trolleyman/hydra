@@ -8,7 +8,7 @@ import { ShellEditor } from '../ShellEditor'
 import { EnabledToggle } from './shared'
 
 // ── ServicesEditor ────────────────────────────────────────────────────────────
-// Edits the per-project [[services]] — long-running commands the daemon
+// Edits the per-project [[services]] - long-running commands the daemon
 // supervises while the project is open (e.g. a host-side emulator pool). Shows
 // each service's live status and offers a restart that picks up saved config.
 
@@ -68,7 +68,7 @@ export function ServicesEditor({
 
   const statusByName = new Map(statuses.map((s) => [s.name, s]))
   // Services are gated on activity: they run only while the project has an agent.
-  // When every live service is paused, the project is idle — surface why.
+  // When every live service is paused, the project is idle - surface why.
   const anyPaused = statuses.some((s) => s.state === 'paused')
   const allPaused = statuses.length > 0 && statuses.every((s) => s.state === 'paused')
 
@@ -102,7 +102,7 @@ export function ServicesEditor({
         </div>
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Services</h2>
         <InfoTooltip title="Project Services">
-          <p>Long-running commands the daemon supervises while this project is open — e.g. a host-side pool of Android emulators shared by every head.</p>
+          <p>Long-running commands the daemon supervises while this project is open - e.g. a host-side pool of Android emulators shared by every head.</p>
           <p className="mt-1.5">Each service starts when the project opens, restarts with backoff if it exits unexpectedly (up to <strong>max restarts</strong>), and is process-group-killed on shutdown, project removal, or a config save.</p>
           <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> from the project root, with <code className="text-blue-300">HYDRA_PROJECT_ROOT</code> and <code className="text-blue-300">HYDRA_SERVICE_NAME</code> set.</p>
         </InfoTooltip>
@@ -114,7 +114,7 @@ export function ServicesEditor({
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
         >
           <RotateCw className={`w-3.5 h-3.5 ${restarting ? 'animate-spin' : ''}`} />
-          {restarting ? 'Restarting…' : 'Restart Services'}
+          {restarting ? 'Restarting...' : 'Restart Services'}
         </button>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
@@ -125,7 +125,7 @@ export function ServicesEditor({
         <div className="flex items-start gap-2 mb-4 text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
           <PauseCircle className="w-4 h-4 mt-px shrink-0 text-slate-500 dark:text-slate-400" />
           <span>
-            {allPaused ? 'Services are paused' : 'Some services are paused'} — this project has no active agents.
+            {allPaused ? 'Services are paused' : 'Some services are paused'} - this project has no active agents.
             They start automatically when you spawn an agent, and stop again about 60&nbsp;seconds after the last
             agent is removed, so an idle project doesn&rsquo;t keep a resource pool open.
           </span>
@@ -147,7 +147,7 @@ export function ServicesEditor({
                   <div className="flex items-center gap-2">
                     <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
                     {!enabled && (
-                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">— not supervised</span>
+                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">- not supervised</span>
                     )}
                   </div>
                   <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
@@ -189,7 +189,7 @@ export function ServicesEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Run on host (no sandbox)
                         <InfoTooltip title="Host Execution">
-                          <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network and credentials.</p>
+                          <p>Runs the command directly on the host with <strong>no sandbox</strong> - full access to your machine, network and credentials.</p>
                           <p className="mt-1.5">Required for services that need host devices the sandbox hides, e.g. <code className="text-blue-300">/dev/kvm</code> for emulators.</p>
                         </InfoTooltip>
                       </span>

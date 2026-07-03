@@ -5,7 +5,7 @@
 // be serialized, so they live in this module-level cache instead. Keying by the
 // same project+layout shape as the prompt draft means switching projects swaps a
 // box's attachments out and back in, just like its text does. The cache is lost
-// on a full page reload (the object URLs would be dead anyway) — the image
+// on a full page reload (the object URLs would be dead anyway) - the image
 // numbering counter is mirrored to localStorage separately so it stays
 // per-project across reloads (see imageCounterKey / SpawnForm).
 

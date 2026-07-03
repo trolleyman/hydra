@@ -94,7 +94,7 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 // transition must persist before the poller raises the unread-changes flag.
 // It exists because a head that ends its turn to await a *background subagent*
 // briefly writes "finished" to the shared per-head status.json (its Stop hook),
-// and the subagent — which runs in the same sandbox and writes the same file —
+// and the subagent - which runs in the same sandbox and writes the same file -
 // resets it to "running" again within ~1s via its own tool hooks. Without this
 // grace the 1s poller would latch a spurious unread dot on that blip even though
 // the head is still working and resumes on its own. A genuine finish (nothing
@@ -102,7 +102,7 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 const graceUnread = 5 * time.Second
 
 // SettleFunc is called by the poller the moment a head transitions into a
-// resting status (finished / waiting / needs_input) — a definitive "the agent
+// resting status (finished / waiting / needs_input) - a definitive "the agent
 // stopped editing" signal. The daemon wires it to the artifact prefetcher so a
 // head's screenshots are pre-generated at once instead of waiting for the slower
 // worktree-settle sweep. It must not block the poller (the caller runs it in its
@@ -133,7 +133,7 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 }
 
 // RunJSONStatusPollerOnce performs a single JSON status polling cycle. It uses a
-// throwaway debouncer, so deferred unread flags never mature within one call —
+// throwaway debouncer, so deferred unread flags never mature within one call -
 // it is only the boot warmup; the long-lived RunJSONStatusPoller loop owns the
 // persistent debouncer that actually resolves them. It fires no settle hook: boot
 // warmup is the periodic prefetcher's job, not a fresh transition.
@@ -177,7 +177,7 @@ func (d *unreadDebouncer) forget(id string) {
 // poller uses it when an agent's session ends: a pending entry means the agent
 // had reached finished/waiting and we were still riding out the grace window to
 // tell a genuine finish from a transient subagent blip. A blip keeps the same
-// session alive, so the session ending is definitive proof of a real finish —
+// session alive, so the session ending is definitive proof of a real finish -
 // the caller raises the flag now instead of dropping it.
 func (d *unreadDebouncer) take(id string) bool {
 	if _, ok := d.pending[id]; !ok {
@@ -209,9 +209,9 @@ func (d *unreadDebouncer) ready(id, status string, now time.Time) bool {
 
 // StatusFile is the on-disk shape of a per-head status.json. trigger_hook (the
 // writer) and the poller (the reader) share this type. It currently adds nothing
-// to the API-facing AgentStatusInfo — the immediacy of a wait is now encoded in
+// to the API-facing AgentStatusInfo - the immediacy of a wait is now encoded in
 // the status value itself (needs_input vs waiting) rather than in a side channel
-// — but it stays as the named on-disk type so the read/write split is explicit
+// - but it stays as the named on-disk type so the read/write split is explicit
 // and future internal-only fields have a home.
 type StatusFile struct {
 	api.AgentStatusInfo
@@ -233,9 +233,9 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 	for _, a := range agents {
 		if a.SessionStatus != "running" {
 			// The session has ended. If a deferred unread was still pending for
-			// this agent — it had reached finished/waiting and we were riding out
+			// this agent - it had reached finished/waiting and we were riding out
 			// the grace window to tell a real finish from a transient subagent
-			// blip — the session exiting confirms a genuine finish (a blip keeps
+			// blip - the session exiting confirms a genuine finish (a blip keeps
 			// the same session alive; only a real end stops it). Raise the flag now
 			// instead of dropping it, so the unread dot still appears for an agent
 			// that finishes and exits before the grace window elapses. This is
@@ -275,7 +275,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// Only a change the client actually renders is worth an agents_changed
 			// event: the status string flipping, or the unread flag being raised
 			// (immediate). A running agent rewrites status.json on every tool call,
-			// advancing the timestamp while staying "running" — we must persist that
+			// advancing the timestamp while staying "running" - we must persist that
 			// so statusTimeAfter stops re-firing, but it yields an identical
 			// AgentResponse (the timestamp isn't exposed), so emitting an event for it
 			// just makes every connected client refetch agents (and, via the frontend,
@@ -296,7 +296,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			case prevRunning && (agentStatus == "finished" || agentStatus == "waiting"):
 				deb.arm(a.ID, agentStatus, now)
 			case agentStatus == "running" || agentStatus == "starting":
-				// Activity resumed (e.g. the subagent's next tool hook) — cancel
+				// Activity resumed (e.g. the subagent's next tool hook) - cancel
 				// any pending flag before it can mature.
 				deb.forget(a.ID)
 			}
@@ -334,7 +334,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 	// A raised unread flag also moves this project's cross-project unread total,
 	// which drives the "updates elsewhere" indicator and the browser-tab dot on
 	// clients viewing *other* projects (their per-project agents_changed never
-	// reaches them). Broadcast projects_changed so they refetch the project list —
+	// reaches them). Broadcast projects_changed so they refetch the project list -
 	// but only when an unread flag actually went up, so ordinary status churn
 	// still stays off this cross-project path and the hot 1s loop stays cheap. The
 	// read/clear path does the same from the API handler (notifyAgentsChanged).
@@ -378,7 +378,7 @@ func mapAgentStatus(s api.AgentStatus) string {
 
 // statusTimeAfter reports whether status timestamp a is strictly after b. Both
 // are RFC3339/RFC3339Nano; an unparseable a never wins, and an unparseable (or
-// empty) b loses to any valid a. Parsing — rather than string comparison —
+// empty) b loses to any valid a. Parsing - rather than string comparison -
 // matters because status writes can collide within a single second (the spawn
 // "starting" write and the SessionStart "running" hook), and the trailing-zero
 // trimming in RFC3339Nano makes lexical ordering unreliable.

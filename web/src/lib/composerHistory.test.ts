@@ -38,7 +38,7 @@ describe('composerHistory', () => {
   })
 
   it('walks the user scenario back step by step', () => {
-    // text… → paste image → typeA → paste text → re-paste inlines → typeB
+    // text... → paste image → typeA → paste text → re-paste inlines → typeB
     const c = clock()
     let h = initHistory(snap('text'))
     const img = att(1, { filename: 'image1.png', previewUrl: 'blob:img' })
@@ -50,7 +50,7 @@ describe('composerHistory', () => {
     h = commitHistory(h, snap('textA', [img]), true, c.next())
     // paste text attachment (structural)
     h = commitHistory(h, snap('textA', [img, txt]), false, c.next())
-    // re-paste inlines it: chip removed AND text spliced in — one atomic step
+    // re-paste inlines it: chip removed AND text spliced in - one atomic step
     h = commitHistory(h, snap('textA<inlined>', [img]), false, c.next())
     // typeB (typing burst)
     h = commitHistory(h, snap('textA<inlined>B', [img]), true, c.next())
@@ -189,7 +189,7 @@ describe('useComposerHistory', () => {
     const { result } = renderHook(() => useComposerHistory(snap('')))
     const chip = att(3, { filename: 'p.txt' })
 
-    // Attach (uploading), then type — mirrors a real paste followed by typing.
+    // Attach (uploading), then type - mirrors a real paste followed by typing.
     act(() => result.current.commit((p) => makeSnapshot(p.prompt, [chip], 0, 0), false))
     act(() => result.current.commit((p) => makeSnapshot('x', p.attachments, 1, 1), true))
     // Upload resolves out-of-band (no new undo step).
@@ -197,7 +197,7 @@ describe('useComposerHistory', () => {
 
     expect(result.current.present.attachments[0]).toMatchObject({ path: '/abs/p.txt', uploading: false })
 
-    // Undo the typing step — the attachment is still settled, not "uploading".
+    // Undo the typing step - the attachment is still settled, not "uploading".
     act(() => { result.current.undo() })
     expect(result.current.present.prompt).toBe('')
     expect(result.current.present.attachments[0]).toMatchObject({ path: '/abs/p.txt', uploading: false })

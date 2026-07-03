@@ -17,7 +17,7 @@
 // protocol, kept out of the log by Hydra).
 //
 // With -total it instead reads a `go test -json -list '.*'` stream, counts the
-// listed test functions and emits a single ::hydra:test:total:: marker — the
+// listed test functions and emits a single ::hydra:test:total:: marker - the
 // progress denominator. Subtests can't be known upfront so the count is a
 // floor; Hydra treats an overshooting denominator gracefully. It always exits
 // 0: a build failure here is surfaced by the real run that follows.
@@ -65,7 +65,7 @@ func newScanner() *bufio.Scanner {
 
 // listedTestRe matches one `go test -list` output line: a bare Test/Fuzz
 // function name (they arrive as package-level output events). Benchmarks are
-// excluded — they don't run without -bench — and Examples too: one without an
+// excluded - they don't run without -bench - and Examples too: one without an
 // output comment never runs, and an undercount only overshoots the denominator,
 // which Hydra clamps, while an overcount would leave progress stuck short of
 // 100%.
@@ -73,7 +73,7 @@ var listedTestRe = regexp.MustCompile(`^(Test|Fuzz)\S*$`)
 
 // runTotal implements -total: count the test functions a `go test -json -list`
 // stream declares and emit the ::hydra:test:total:: denominator. Build failures
-// are ignored (exit 0) — the real test run right after reports them properly.
+// are ignored (exit 0) - the real test run right after reports them properly.
 func runTotal() error {
 	sc := newScanner()
 	n := 0
@@ -108,7 +108,7 @@ func runTests() error {
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 || line[0] != '{' {
-			continue // non-JSON noise (e.g. a build error banner) — ignore
+			continue // non-JSON noise (e.g. a build error banner) - ignore
 		}
 		var e event
 		if err := json.Unmarshal(line, &e); err != nil {
@@ -143,8 +143,8 @@ func runTests() error {
 			pkgOut[e.Package] = append(pkgOut[e.Package], e.Output)
 		case "fail":
 			failed = true
-			// Only surface a package-level failure when no test reported it —
-			// i.e. a build/setup failure — so ordinary test failures aren't
+			// Only surface a package-level failure when no test reported it -
+			// i.e. a build/setup failure - so ordinary test failures aren't
 			// duplicated by the package's "FAIL pkg" summary line.
 			if !testsSeen[e.Package] {
 				fmt.Println("::hydra:test:fail:: " + e.Package + " › (build) | " + escape(cleanMsg(pkgOut[e.Package])))

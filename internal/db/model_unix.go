@@ -27,27 +27,27 @@ type Agent struct {
 	Title     string
 	Ephemeral bool `gorm:"default:false"`
 
-	// Session — updated by the liveness reconciler
+	// Session - updated by the liveness reconciler
 	SessionPID    int    // PID of the running sandbox session, 0 if not running
 	SessionStatus string `gorm:"default:pending"` // pending|building|starting|running|stopped
 
-	// Terminal — last PTY geometry a client reported for this head, used to seed
+	// Terminal - last PTY geometry a client reported for this head, used to seed
 	// a clientless resume (daemon boot, TUI) at the right width instead of 80x24.
 	// 0 = never reported.
 	TermRows int
 	TermCols int
 
-	// Agent — updated by JSON poller reading .hydra/local/status/<id>.json
+	// Agent - updated by JSON poller reading .hydra/local/status/<id>.json
 	AgentStatus     *string // starting|running|needs_input|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
 
-	// HasUnreadChanges is set when the agent needs the user's eyes — it reaches
-	// needs_input (at once) or settles into waiting/finished (deferred) — and is
+	// HasUnreadChanges is set when the agent needs the user's eyes - it reaches
+	// needs_input (at once) or settles into waiting/finished (deferred) - and is
 	// cleared when the user opens the agent. Drives the "unread changes" dot in
 	// the UI. Set by the JSON poller.
 	HasUnreadChanges bool `gorm:"default:false"`
 
-	// Operation — set atomically before long operations
+	// Operation - set atomically before long operations
 	HeadStatus string  `gorm:"default:idle"` // idle|killing|merging
 	LastError  *string // error message from failed operation
 

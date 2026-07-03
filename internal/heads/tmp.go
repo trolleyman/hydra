@@ -11,7 +11,7 @@ import (
 // headTmpDir is a head's private /tmp: a host-backed scratch directory under the
 // project's .hydra/local, keyed by head ID. It is bound over /tmp inside the
 // head's sandbox (sandbox.Options.TmpDir → linux.go) so the agent's temp files
-// — Claude's scratchpad, test-framework extractions, build junk — stay isolated
+// - Claude's scratchpad, test-framework extractions, build junk - stay isolated
 // per head and are reclaimed on teardown instead of accumulating on the host's
 // shared /tmp.
 func headTmpDir(projectRoot, id string) string {

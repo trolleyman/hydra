@@ -2,7 +2,7 @@ import { formatError } from '../api/format_error'
 import { useToastStore } from '../stores/toastStore'
 
 // Discriminated result so callers can branch on success even when the action
-// resolves to `undefined`/`void` (e.g. a fire-and-forget POST) — a bare
+// resolves to `undefined`/`void` (e.g. a fire-and-forget POST) - a bare
 // `T | undefined` return couldn't tell "succeeded with no value" from "failed".
 export type ToastResult<T> = { ok: true; value: T } | { ok: false; error: unknown }
 

@@ -8,12 +8,12 @@
 // The extra problem video has over images is TIME: to compare an animation you have
 // to look at the SAME frame on each side. So both <video> elements are driven by one
 // shared transport (play/pause + scrubber) and a sync loop keeps the two within a
-// frame of each other — see useVideoSync. Only one mode renders at a time, so at most
+// frame of each other - see useVideoSync. Only one mode renders at a time, so at most
 // two videos are ever attached; each mode registers its <video>s with the controller
 // via callback refs and the controller re-seeks them to the shared clock on attach,
 // which makes switching modes (a remount) seamless.
 //
-// WebP animations aren't handled here — the browser plays them in an <img> with no
+// WebP animations aren't handled here - the browser plays them in an <img> with no
 // seek/sync API, so they can't be frame-aligned; only .webm gets the video viewer.
 import { useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
@@ -25,21 +25,21 @@ import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
 import { ABControlsContext } from './artifactDiffContext'
 
 // Minimum tile width (CSS px) a video needs so VideoTransport's fixed-size controls
-// — three step/play buttons, two time labels, the seek slider's 80px floor, the
-// loop toggle and the speed select, plus gaps — fit on one row without overflowing.
+// - three step/play buttons, two time labels, the seek slider's 80px floor, the
+// loop toggle and the speed select, plus gaps - fit on one row without overflowing.
 // The masonry floors a video tile's span to cover this, overriding the resolution
 // cap that would otherwise shrink a small clip below its own control bar (see
 // MasonryGrid spanOf). Images have no such chrome, so this is video-only.
 export const VIDEO_MIN_TILE_PX = 360
 
 // Max drift (seconds) between the two videos before the sync loop nudges the
-// follower onto the master's clock. ~1.5 frames at 60fps — tight enough that the
+// follower onto the master's clock. ~1.5 frames at 60fps - tight enough that the
 // pair reads as one animation, loose enough not to thrash on normal jitter.
 const SYNC_TOL = 0.08
 // HTML5 video exposes no frame rate, so a single-frame step needs one supplied. A
 // command can declare it in the artifact's <file>.meta sidecar ({"fps": 60}); this
 // is the fallback when the sidecar omits it. 30fps is the common case for screen
-// recordings/animation artifacts — at worst a missing-sidecar step is a touch
+// recordings/animation artifacts - at worst a missing-sidecar step is a touch
 // coarse/fine, which is fine for eyeballing a frame-by-frame diff.
 const DEFAULT_FPS = 30
 // The Highlight view recomputes a full-frame pixel diff on a timer rather than
@@ -68,7 +68,7 @@ function useVideoSync(fps?: number | null) {
 
   // Refs mirror the state the attach/sync callbacks read, so those stay stable
   // (no re-attach on every render) while still seeing the latest values. Synced
-  // after commit — the callbacks that read them only fire on later events.
+  // after commit - the callbacks that read them only fire on later events.
   const playingRef = useRef(playing)
   const rateRef = useRef(rate)
   const loopRef = useRef(loop)
@@ -289,12 +289,12 @@ function VideoSideBySide({ controller, left, right, aspect }: { controller: Cont
 // videos stay mounted and in sync; Before/After flip which is visible, by button or
 // by clicking the frame. Ticking Highlight overlays the magenta pixel-diff,
 // recomputed continuously as the synced pair plays/scrubs, on top of whichever side
-// is shown — so the changes stay marked as you flip Before↔After. Highlight is
-// disabled when only one side exists (an added/removed file — nothing to diff).
+// is shown - so the changes stay marked as you flip Before↔After. Highlight is
+// disabled when only one side exists (an added/removed file - nothing to diff).
 function VideoAB({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   const canDiff = !!left && !!right
   // Panel-wide controls (diff viewer) win when present; else this tile's own toggles
-  // (repository browser). Mirrors the image ABSwitch — see ABControlsContext.
+  // (repository browser). Mirrors the image ABSwitch - see ABControlsContext.
   const global = useContext(ABControlsContext)
   const [localView, setLocalView] = useState<'before' | 'after'>('after')
   const [localHighlight, setLocalHighlight] = useState(false)
@@ -360,7 +360,7 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
 
   return (
     <div className="min-w-0">
-      {/* Standalone tile only — under the diff viewer the controls live in the panel header. */}
+      {/* Standalone tile only - under the diff viewer the controls live in the panel header. */}
       {!global && (
         <div className="flex flex-wrap items-center gap-1 mb-1">
           <SegmentedToggle

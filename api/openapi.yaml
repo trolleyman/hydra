@@ -306,7 +306,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Conflict (a head with this ID already exists — active, archived, or in another project)
+          description: Conflict (a head with this ID already exists - active, archived, or in another project)
           content:
             application/json:
               schema:
@@ -431,7 +431,7 @@ paths:
             Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked
             with 409 tests_failing / tests_errored when the head's configured
             tests are failing, errored, or still running. force=true merges
-            anyway — covering both "don't wait" (tests still running) and
+            anyway - covering both "don't wait" (tests still running) and
             "override" (tests red). Merge-conflict and operation-in-progress
             checks still apply.
         - in: query
@@ -442,7 +442,7 @@ paths:
             default: true
           description: >-
             Whether to tear the agent down after the merge. Default (true)
-            merges the branch and closes the head — session killed, worktree
+            merges the branch and closes the head - session killed, worktree
             and branch removed, archived as "merged". close=false merges the
             branch but keeps the agent running: session, worktree, branch and
             uncommitted work all survive, and the agent's diff resets to only
@@ -767,7 +767,7 @@ paths:
             type: string
             enum: [left, right]
           description: >
-            Limits a refresh to a single side — "left" (before) or "right"
+            Limits a refresh to a single side - "left" (before) or "right"
             (after). Ignored unless refresh names a script; when omitted both
             sides are regenerated.
       responses:
@@ -798,7 +798,7 @@ paths:
         for the head's current commit (or working tree). Generation runs in the
         background and is cached per commit SHA; a runner with status "running"
         should be polled. Returns an empty list when the project configures no
-        test runners. Single-sided — there is no before/after comparison (PLAN
+        test runners. Single-sided - there is no before/after comparison (PLAN
         #68).
       operationId: getAgentTests
       parameters:
@@ -855,7 +855,7 @@ paths:
 
   /api/projects/{project_id}/agents/{id}/merge-when-green:
     post:
-      summary: Arm auto-merge — merge this head when its tests settle passing
+      summary: Arm auto-merge - merge this head when its tests settle passing
       description: >
         Arms "merge when green" (PLAN #68): the daemon merges this head as soon
         as its tests settle passing, and disarms it (with a notification) if they
@@ -1272,7 +1272,7 @@ paths:
         Returns the diff between two arbitrary refs (branches or commits) in the
         project's repository. Used by the repository browser's diff view to
         compare the branch being viewed against another branch. Uses a two-dot
-        diff (base..head) — the literal difference between the two trees.
+        diff (base..head) - the literal difference between the two trees.
       operationId: getRepositoryDiff
       parameters:
         - in: path
@@ -1570,7 +1570,7 @@ paths:
         them with the given message; other dirty paths are left untouched.
         Backs the sidebar's uncommitted-changes warning, whose main job is
         sweeping up config edits the web UI itself writes to
-        .hydra/config.toml — the UI sends the paths it showed the user.
+        .hydra/config.toml - the UI sends the paths it showed the user.
         Requested paths that are no longer dirty are skipped. Returns the
         refreshed push status.
       operationId: commitRepository
@@ -1618,7 +1618,7 @@ paths:
       summary: List the artifact scripts configured at a ref
       description: >-
         Lists the names of the enabled [[artifacts]] scripts defined in the
-        ref's .hydra/config.toml. This is cheap — it only reads config and does
+        ref's .hydra/config.toml. This is cheap - it only reads config and does
         NOT generate anything. The repository browser uses it to decide whether
         to show the dynamic ".hydra/artifacts" folder and what to list inside it.
       operationId: getRepositoryArtifacts
@@ -1660,7 +1660,7 @@ paths:
       summary: Generate (or load) one artifact script's output for a ref
       description: >-
         Runs (or returns the cached result of) the named [[artifacts]] script
-        against a single ref and reports its outputs single-sided (no diff —
+        against a single ref and reports its outputs single-sided (no diff -
         the repository browser shows one ref at a time). Generation is lazy:
         this is only called when the user opens the script in the browser.
       operationId: getRepositoryArtifact
@@ -1954,7 +1954,7 @@ components:
         error:
           type: string
           nullable: true
-          description: Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+          description: Why usage is unavailable (CLI missing, not a subscription account, parse failure, ...).
         captured_at:
           type: string
           format: date-time
@@ -1972,7 +1972,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: When the current session limit resets (derived from the relative "Resets in …" text).
+          description: When the current session limit resets (derived from the relative "Resets in ..." text).
         session_reset_text:
           type: string
           nullable: true
@@ -2043,7 +2043,7 @@ components:
           description: >-
             Explicit identifier for the agent (letters/digits plus ._-, usable
             as a git branch component). When omitted, the server derives a slug
-            from the prompt and uniquifies it with a -2/-3… suffix, so spawns
+            from the prompt and uniquifies it with a -2/-3... suffix, so spawns
             can never collide. An explicit ID that already exists (active,
             archived, or in another project) fails with 409 instead of
             overwriting the existing head.
@@ -2141,7 +2141,7 @@ components:
           description: "Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)"
         last_message_is_suggested_next_message:
           type: boolean
-          description: "True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret."
+          description: "True when last_message reads as a suggested next message - a terse instruction you could send straight back to the agent (e.g. 'run it') - rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret."
         notification_type:
           type: string
           description: "Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications."
@@ -2190,7 +2190,7 @@ components:
             Network egress posture for a live head: "off" (no network),
             "unrestricted" (network on, host filtering off → every host
             reachable), "filtered-hard" (allow-list enforced in a pasta netns +
-            nft lock — an inescapable boundary), "filtered-advisory" (allow-list
+            nft lock - an inescapable boundary), "filtered-advisory" (allow-list
             enforced by the proxy via HTTP(S)_PROXY only; a determined process can
             bypass it), or absent/empty (the head isn't live).
         agent_status:
@@ -2200,7 +2200,7 @@ components:
           description: True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
         archived:
           type: boolean
-          description: True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+          description: True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
         end_state:
           type: string
           nullable: true
@@ -2231,7 +2231,7 @@ components:
           type: integer
         warnings:
           type: integer
-          description: Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
+          description: Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
         duration_ms:
           type: integer
           format: int64
@@ -2698,13 +2698,13 @@ components:
           description: One-line explanation of why the gate parked the call
         summary:
           type: string
-          description: Human-readable "wants to …" summary for the approval card
+          description: Human-readable "wants to ..." summary for the approval card
         rw:
           type: string
           nullable: true
           description: >-
             Read/write classification of an mcp_tool request ("read", "write", or
-            absent when unknown/not applicable). Best-effort heuristic — a badge
+            absent when unknown/not applicable). Best-effort heuristic - a badge
             hint, not a guarantee.
         url:
           type: string
@@ -2748,7 +2748,7 @@ components:
           enum: [off, unrestricted, advisory, hard, on]
           description: >-
             Egress posture: "off" (no network), "unrestricted" (network, no host
-            filtering), "advisory" (proxy-only host filtering — every honest
+            filtering), "advisory" (proxy-only host filtering - every honest
             client is filtered, but escapable), or "hard" (inescapable pasta+nft
             netns, failing closed where the tooling is unavailable unless
             strict=false; "on" is a synonym for "hard"). Null/unset = default
@@ -2783,7 +2783,7 @@ components:
           nullable: true
           description: >-
             Outbound hosts (exact host or *.suffix) denied even when otherwise
-            allowed — overrides both allowed_hosts and the built-in defaults.
+            allowed - overrides both allowed_hosts and the built-in defaults.
         allowed_loopback_ports:
           type: array
           items:
@@ -2792,7 +2792,7 @@ components:
           description: >-
             Host-loopback TCP ports reachable from the sandbox even under mode
             "hard", whose network namespace otherwise cuts off the host's
-            127.0.0.1 — for host-local daemons that hardcode loopback, e.g.
+            127.0.0.1 - for host-local daemons that hardcode loopback, e.g.
             adb's server on 5037. No effect in other modes (they share the
             host loopback already).
 
@@ -2824,7 +2824,7 @@ components:
         pre_spawn_script:
           type: string
           nullable: true
-          description: Bash script run inside the sandbox before every agent launch — both spawn and resume — so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
+          description: Bash script run inside the sandbox before every agent launch - both spawn and resume - so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
         pre_exit_script:
           type: string
           nullable: true
@@ -2895,7 +2895,7 @@ components:
           description: The server key as it appears under mcpServers.
         source:
           type: string
-          description: Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
+          description: Where it was found - "user" (~/.claude.json) or "project" (.mcp.json).
 
     ArtifactScript:
       type: object
@@ -2913,10 +2913,10 @@ components:
           description: Max seconds the command may run (0 = built-in default)
         unsafe_host:
           type: boolean
-          description: Run on the host with NO sandbox — full access to the machine and credentials (default false)
+          description: Run on the host with NO sandbox - full access to the machine and credentials (default false)
         clean_ignored:
           type: boolean
-          description: Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+          description: Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
         strict:
           type: boolean
           nullable: true
@@ -2939,7 +2939,7 @@ components:
           description: Shell command run via `bash -c` from the project root
         host:
           type: boolean
-          description: Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+          description: Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
         max_restarts:
           type: integer
           nullable: true
@@ -2968,7 +2968,7 @@ components:
           type: string
           nullable: true
           description: >-
-            How results are read — "junit" (default; parse *.xml/*.json report
+            How results are read - "junit" (default; parse *.xml/*.json report
             files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse
             `::hydra:test:*::` markers streamed live from stdout; the
             accumulated cases are the report, no file needed).
@@ -2977,7 +2977,7 @@ components:
           description: Max seconds the command may run (0 = built-in default)
         unsafe_host:
           type: boolean
-          description: Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
+          description: Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
         clean_ignored:
           type: boolean
           description: Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
@@ -3017,19 +3017,19 @@ components:
         path:
           type: string
           nullable: true
-          description: Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+          description: Repo-relative filesystem location - a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
         scope:
           type: array
           items:
             type: string
           nullable: true
-          description: Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+          description: Logical nesting chain between path and name - a class chain (com › example › FooTest), describe chain, or Go subtest parent.
         scope_kinds:
           type: array
           items:
             type: string
           nullable: true
-          description: Per-level kind for `scope`, parallel to it — "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
+          description: Per-level kind for `scope`, parallel to it - "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
         line:
           type: integer
           nullable: true
@@ -3053,7 +3053,7 @@ components:
         path_missing:
           type: boolean
           nullable: true
-          description: True when `path` names a file that was not found in the checkout the report was parsed against — a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+          description: True when `path` names a file that was not found in the checkout the report was parsed against - a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
 
     TestRunResult:
       type: object
@@ -3079,7 +3079,7 @@ components:
           type: integer
         warnings:
           type: integer
-          description: Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
+          description: Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate.
         duration_ms:
           type: integer
           format: int64
@@ -3087,7 +3087,7 @@ components:
         error:
           type: string
           nullable: true
-          description: Set when status is "errored" — the command couldn't produce a verdict.
+          description: Set when status is "errored" - the command couldn't produce a verdict.
         ref:
           type: string
           nullable: true
@@ -3194,7 +3194,7 @@ components:
             (a user viewing a diff) and background (proactive pre-generation)
             work (artifact_concurrency in config.toml). Generations can be heavy
             (a full build per ref, RAM-hungry tooling like emulators), so this
-            caps parallelism — lower it for memory-hungry generators. Foreground
+            caps parallelism - lower it for memory-hungry generators. Foreground
             requests are served before queued background ones; a running
             generation is never preempted. 0 means unlimited (no cap);
             null/absent uses the built-in default.
@@ -3274,7 +3274,7 @@ components:
           description: >-
             Labels for this file, read from a sibling JSON sidecar
             (<file>.meta, {"tags": [...]}). A "category::value" tag is a
-            scoped label — only one value per category survives. Drives the
+            scoped label - only one value per category survives. Drives the
             artifacts panel's tag badges and filter. Null/absent when the file
             has no tags.
         unverified:
@@ -3283,7 +3283,7 @@ components:
           description: >-
             True only for a video file reported as "modified" whose verdict is a
             raw byte-hash comparison because ffmpeg was unavailable to verify it
-            frame-by-frame — so the change may be spurious (e.g. only container
+            frame-by-frame - so the change may be spurious (e.g. only container
             metadata differs). Absent/false for images and for frame-verified
             video. The UI shows a caveat badge when set.
         change_ratio:
@@ -3331,7 +3331,7 @@ components:
             Pixel density (device-scale factor) the media was captured at, read
             from its sidecar (<file>.meta, {"dpi": 2}). The grid sizes a tile by
             the media's logical width (width / dpi) so a shot captured at 2x lays
-            out the same as the same shot at 1x — only crisper. Null/absent → 1.
+            out the same as the same shot at 1x - only crisper. Null/absent → 1.
 
     ArtifactSet:
       type: object
@@ -3350,7 +3350,7 @@ components:
           type: string
           nullable: true
           description: >-
-            Set only when the whole set failed (status "error") — i.e. both
+            Set only when the whole set failed (status "error") - i.e. both
             sides failed, or a side could not be loaded at all. When just one
             side fails while the other renders, status stays "ready" and the
             failure is reported in left_error / right_error instead.
@@ -3361,7 +3361,7 @@ components:
             Error message from the LEFT (before) generation when that side
             failed but the RIGHT side still rendered, so the panel can show the
             available images alongside a warning. Null when the left side
-            succeeded (or when the whole set failed — see error).
+            succeeded (or when the whole set failed - see error).
         right_error:
           type: string
           nullable: true

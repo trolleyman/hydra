@@ -159,8 +159,8 @@ func TestMigrateClaudeSessionDirsIn(t *testing.T) {
 	oldWorktreesDir := filepath.Join(GetHydraDirFromProjectRoot(root), "worktrees")
 	newWorktreesDir := filepath.Join(GetHydraLocalDirFromProjectRoot(root), "worktrees")
 
-	// h1: has Claude history at the old slug — must move to the new slug.
-	// h2: present worktree but no Claude history — must be skipped, no error.
+	// h1: has Claude history at the old slug - must move to the new slug.
+	// h2: present worktree but no Claude history - must be skipped, no error.
 	writeFile(t, filepath.Join(newWorktreesDir, "h1", ".keep"), "")
 	writeFile(t, filepath.Join(newWorktreesDir, "h2", ".keep"), "")
 	oldSlug := ClaudeProjectsSlug(filepath.Join(oldWorktreesDir, "h1"))

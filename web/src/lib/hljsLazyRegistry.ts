@@ -1,7 +1,7 @@
 // AUTO-GENERATED lazy highlight.js language registry (see hljs.ts for the eager
 // set). Each entry code-splits into its own on-demand chunk so the diff viewer can
 // colourise files in languages beyond the common eager set WITHOUT bundling them
-// into the initial download — the grammar is fetched only when a file needs it.
+// into the initial download - the grammar is fetched only when a file needs it.
 // Regenerate by re-running the generator in the commit that added this file.
 import type { LanguageFn } from "highlight.js";
 

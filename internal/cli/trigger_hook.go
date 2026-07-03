@@ -97,7 +97,7 @@ func currentStatus() api.AgentStatus {
 // subagentStale is how long a sub-agent marker survives without a refresh before
 // it's treated as gone. A live sub-agent refreshes its marker on every tool hook
 // (far more often than this), so the TTL only reclaims a marker whose
-// SubagentStop was never delivered — it must not fire while a real sub-agent is
+// SubagentStop was never delivered - it must not fire while a real sub-agent is
 // still working, hence a generous window.
 const subagentStale = 5 * time.Minute
 
@@ -135,7 +135,7 @@ func markSubagentActive(id string) {
 
 // refreshSubagentActive bumps an existing marker's mtime (keeping a long-running
 // sub-agent from ageing out) but never resurrects one whose SubagentStop already
-// removed it — so a late tool hook arriving after stop can't wedge the parent.
+// removed it - so a late tool hook arriving after stop can't wedge the parent.
 func refreshSubagentActive(id string) {
 	dir := subagentsDir()
 	if dir == "" || id == "" {
@@ -251,7 +251,7 @@ var triggerHookCmd = &cobra.Command{
 		}
 
 		if err := runTriggerHook(args[0], eventOverride, logFile, os.Stdout); err != nil {
-			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
+			// Log to status_log.jsonl and stderr but don't propagate - hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
 			if logFile != nil {
 				appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
@@ -261,7 +261,7 @@ var triggerHookCmd = &cobra.Command{
 	},
 }
 
-// approvePermission writes the PermissionRequest hook's "allow" decision to w —
+// approvePermission writes the PermissionRequest hook's "allow" decision to w -
 // the JSON Claude Code reads on stdout to auto-approve a permission prompt
 // without ever showing it to the user. Schema: hooks docs, "PermissionRequest".
 func approvePermission(w io.Writer) {
@@ -301,7 +301,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 	// NOT drive the main agent's status: a sub-agent's tool call would otherwise
 	// overwrite the parent's real state (e.g. flip a needs_input/finished parent
 	// back to running). Sub-agent hooks carry an agent_id the main agent's hooks
-	// lack — use it to bracket sub-agent lifetime (so the main Stop can tell a
+	// lack - use it to bracket sub-agent lifetime (so the main Stop can tell a
 	// real finish from "still running sub-agents") and otherwise ignore them.
 	agentID := stringField(input, "agent_id")
 	switch event {
@@ -327,7 +327,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 	// never a suggested next message, even when its shape looks terse.
 	lastMessageIsQuestion := false
 	// notificationType carries Claude's `notification_type` for Notification
-	// events (idle_prompt, permission_prompt, elicitation_dialog, …). It selects
+	// events (idle_prompt, permission_prompt, elicitation_dialog, ...). It selects
 	// between the explicit "the agent is asking you" prompt (status needs_input,
 	// surfaced at once) and the idle "gone quiet" nudge (status waiting, deferred).
 	notificationType := ""
@@ -338,8 +338,8 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 	switch event {
 	case "SessionStart", "sessionStart":
 		// A resume (claude --continue / --resume, source="resume") restores a
-		// prior conversation and then sits idle waiting for the user — it is not
-		// actively working — so report it as waiting. A fresh startup
+		// prior conversation and then sits idle waiting for the user - it is not
+		// actively working - so report it as waiting. A fresh startup
 		// (source="startup", "clear", "compact") proceeds to work on the submitted
 		// prompt (a UserPromptSubmit follows), so it stays running. Without a
 		// resume signal we can't tell a restored session from a working one apart,
@@ -347,7 +347,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		//
 		// But don't downgrade a terminal status: a head that had finished (or was
 		// stopped) before the daemon restarted is restored, not freshly waiting on
-		// the user — flipping it to "waiting" here would spuriously revert a finished
+		// the user - flipping it to "waiting" here would spuriously revert a finished
 		// head on every restart. ResumeHead seeds the same terminal status into
 		// status.json before launch, so currentStatus() sees it here.
 		if stringField(input, "source") == "resume" {
@@ -370,7 +370,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		// The turn ended, so the agent has finished its work. The "waiting on
 		// the user" case isn't inferred here: agents don't expose an explicit
 		// "I need input" signal on turn end, and guessing from the message text
-		// (e.g. a trailing '?') misfires too often — plenty of finished turns
+		// (e.g. a trailing '?') misfires too often - plenty of finished turns
 		// end on a question. Genuine waits surface through other hooks instead:
 		// ExitPlanMode's PermissionRequest and the Notification event whose
 		// notification_type marks an AskUserQuestion / permission prompt. (Claude
@@ -378,7 +378,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		// ExitPlanMode, so those tool calls can't be detected via PreToolUse.)
 		//
 		// But if sub-agents this head launched are still running, the turn ending
-		// doesn't mean the head is done — its background sub-agents are, and it
+		// doesn't mean the head is done - its background sub-agents are, and it
 		// will resume when they report back. Report running so the head isn't
 		// treated (or auto-merged) as finished. finished thus means "main turn
 		// ended AND no live sub-agents".
@@ -392,7 +392,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 	case "PreToolUse", "preToolUse", "BeforeTool":
 		// A tool is about to run. Most tools mean the agent is working, but a tool
 		// that asks the user something (e.g. AskUserQuestion) blocks until the user
-		// answers — that's an explicit "needs you" wait, not working. (Defensive:
+		// answers - that's an explicit "needs you" wait, not working. (Defensive:
 		// current Claude fires no PreToolUse for AskUserQuestion/ExitPlanMode.)
 		if isUserInputTool(stringField(input, "tool_name")) {
 			status = api.NeedsInput
@@ -404,20 +404,20 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 			status = api.Running
 		}
 	case "PostToolUse", "PostToolUseFailure", "AfterTool", "postToolUse":
-		// A tool finished (including the user answering a question) — the agent is
+		// A tool finished (including the user answering a question) - the agent is
 		// working again. Rewriting status.json also refreshes the timestamp, so the
 		// frontend knows it may need to refresh (e.g. after a git commit).
 		status = api.Running
 	case "PermissionRequest", "permissionRequest":
-		// A tool is asking the user to approve it — the agent is blocked on the
+		// A tool is asking the user to approve it - the agent is blocked on the
 		// user. Under our bypass-permissions mode most tools never reach here, but
 		// plan approval (ExitPlanMode) and any genuinely non-bypassable prompt do.
 		// This is the reliable signal for ExitPlanMode, which fires no PreToolUse.
 		tool := stringField(input, "tool_name")
 		if tool == "ExitPlanMode" {
 			// ExitPlanMode is the gate Claude shows when it finishes presenting a
-			// plan and asks "can I proceed?". The user never opted into plan mode —
-			// the agent entered it on its own — and a Hydra head already runs fully
+			// plan and asks "can I proceed?". The user never opted into plan mode -
+			// the agent entered it on its own - and a Hydra head already runs fully
 			// autonomously (--dangerously-skip-permissions) in a throwaway sandbox +
 			// worktree, so there's nothing for this gate to guard. Auto-approve it by
 			// emitting the PermissionRequest "allow" decision on stdout, and report
@@ -444,7 +444,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		//   - elicitation_complete / elicitation_response: the user just answered
 		//     an AskUserQuestion, so the agent is working again.
 		//   - auth_success (and other informational types): no status change.
-		//   - permission_prompt / elicitation_dialog: an explicit prompt — a tool
+		//   - permission_prompt / elicitation_dialog: an explicit prompt - a tool
 		//     needs approval, or AskUserQuestion is asking. This is how an
 		//     AskUserQuestion surfaces (it fires no PreToolUse); it gets the
 		//     needs_input status so the UI flags it for the user at once.

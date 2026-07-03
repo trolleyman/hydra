@@ -58,8 +58,8 @@ type Server struct {
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
 	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
-	// handed to detached best-effort work started by a request — e.g. async title
-	// refinement — so that work outlives the request but still dies on shutdown.
+	// handed to detached best-effort work started by a request - e.g. async title
+	// refinement - so that work outlives the request but still dies on shutdown.
 	BackgroundCtx context.Context
 	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
 	// per registered project (resolved per request). nil disables the feature.
@@ -96,7 +96,7 @@ type Server struct {
 
 	// Memoise git history reads keyed by resolved commit SHAs. Commits are
 	// immutable, so the commit list and committed diff between a fixed pair of SHAs
-	// never change — repeated reads (e.g. a terminal-WS reconnect re-loading the
+	// never change - repeated reads (e.g. a terminal-WS reconnect re-loading the
 	// diff/commits panels) can be served without re-invoking git. Only committed
 	// state is cached; the uncommitted/working-tree diff is always recomputed live.
 	commitsCache immutableCache[[]git.CommitInfo]
@@ -364,7 +364,7 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 // arbitrary path, without registering the project. It backs the add-project trust
 // prompt: the UI shows the repo-controlled config for review *before* the project
 // is added (registering starts its [[services]], which can run code), so nothing
-// runs until the user has trusted it. Read-only — it never executes anything.
+// runs until the user has trusted it. Read-only - it never executes anything.
 func (s *Server) PreviewConfigToml(_ context.Context, request api.PreviewConfigTomlRequestObject) (api.PreviewConfigTomlResponseObject, error) {
 	path := strings.TrimSpace(request.Params.Path)
 	if path == "" {
@@ -417,7 +417,7 @@ func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectReque
 }
 
 // agentResponse converts a heads.Head into its API representation. Centralised
-// so every endpoint returns an identically-shaped agent (id, title, status, …).
+// so every endpoint returns an identically-shaped agent (id, title, status, ...).
 func agentResponse(h heads.Head) api.AgentResponse {
 	var createdAt *int64
 	if h.CreatedAt != 0 {
@@ -1086,7 +1086,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 
 	// The ID is optional: when omitted (the web UI's normal path) SpawnHead
 	// derives a unique slug from the prompt, so spawns can never collide with
-	// an existing head — same project, archived, or another project sharing
+	// an existing head - same project, archived, or another project sharing
 	// the DB.
 	var id string
 	if request.Body.Id != nil {
@@ -1110,7 +1110,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
-	// 80x24 — those narrow-wrapped bytes can't be re-flowed once a wider client
+	// 80x24 - those narrow-wrapped bytes can't be re-flowed once a wider client
 	// replays the scrollback. The browser sends the last width it measured and
 	// either its last height or the user's configured default height. For any
 	// value the client omits (a fresh browser, or a non-web spawn), fall back to
@@ -1382,7 +1382,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Test gate (PLAN #68): soft-block the merge when the head's configured tests
-	// are failing, errored, or still running — unless force=true (which covers both
+	// are failing, errored, or still running - unless force=true (which covers both
 	// "don't wait" and "override"). Checked after the CAS claim so a concurrent
 	// merge still 409s first, and before any worktree work so a blocked merge is
 	// cheap. force always bypasses it.
@@ -1415,14 +1415,14 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 // performClaimedMerge runs the actual branch merge for a head whose head_status
 // has ALREADY been CAS-claimed as "merging" (by the MergeAgent handler or the
 // auto-merge watcher). It validates the base ref, merges the head's branch into
-// it, and — when closeHead is true — reparents stacked children and tears the
+// it, and - when closeHead is true - reparents stacked children and tears the
 // head down as "merged". With closeHead false the head survives intact
 // (session, worktree, branch) and just returns to idle, so the agent can keep
 // working; its diff naturally resets to only-unmerged work because the base
 // branch now contains the merged commits. On a recoverable failure it resets
 // head_status and returns a non-nil *MergeConflictError (the caller maps it to
 // a 409 or logs it); a nil error + nil conflict means the merge succeeded. The
-// gate (PLAN #68) is the caller's responsibility — this assumes the decision to
+// gate (PLAN #68) is the caller's responsibility - this assumes the decision to
 // merge is already made.
 func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, head heads.Head, closeHead bool) (*api.MergeConflictError, error) {
 	if head.Branch == nil {
@@ -1463,7 +1463,7 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 		}
 		// Distinguish a real content conflict between the two branches from the
 		// destination merely having uncommitted local changes the merge would
-		// overwrite — the latter is fixed by committing/stashing, not by resolving
+		// overwrite - the latter is fixed by committing/stashing, not by resolving
 		// conflicts, so it gets its own error code and the offending file list.
 		var dirty *git.DirtyMergeError
 		if errors.As(err, &dirty) {
@@ -1475,8 +1475,8 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 
 	// Keep-alive merge: the branch and worktree survive, so stacked children
 	// still have a valid parent (no reparenting) and there is nothing to tear
-	// down. Consume any merge-when-green intent — otherwise the auto-merge
-	// watcher would later re-merge and KILL the head the user chose to keep —
+	// down. Consume any merge-when-green intent - otherwise the auto-merge
+	// watcher would later re-merge and KILL the head the user chose to keep -
 	// and release the "merging" claim back to idle.
 	if !closeHead {
 		if s.DB != nil {
@@ -1691,7 +1691,7 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 	log.Printf("api: purge agent request: id=%q, project=%q", request.Id, projectRoot)
 
 	// Resolve a live head first; fall back to the archived record (the common
-	// case — purging from the read-only archived-history view).
+	// case - purging from the read-only archived-history view).
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -1726,7 +1726,7 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 }
 
 // listCommitsCached returns the commits between baseBranch and headBranch, served
-// from cache when both refs resolve to commit SHAs — commits are immutable, so the
+// from cache when both refs resolve to commit SHAs - commits are immutable, so the
 // result is stable for a given (baseSHA, headSHA) pair. If either ref fails to
 // resolve it falls back to a direct, uncached read. The key is namespaced by
 // project root so the single shared daemon never crosses repos.
@@ -1854,7 +1854,7 @@ func (s *Server) getFullContextDiff(projectRoot, diffRoot, baseRef, headRef stri
 	for _, f := range full {
 		fullByPath[f.Path] = f
 	}
-	// base is the cached normal-context slice — copy it before swapping hunks in
+	// base is the cached normal-context slice - copy it before swapping hunks in
 	// so we don't mutate the cache entry shared with non-full-context callers.
 	merged := append([]git.DiffFile(nil), base...)
 	for i := range merged {
@@ -2351,7 +2351,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 
 	// Submit with a separate Enter keystroke once the paste has settled. Sent in
 	// the same write as the message it gets absorbed as paste content rather than
-	// registering as a submit, which is exactly the bug above — this mirrors a
+	// registering as a submit, which is exactly the bug above - this mirrors a
 	// real user pasting text and then pressing Enter.
 	select {
 	case <-time.After(100 * time.Millisecond):

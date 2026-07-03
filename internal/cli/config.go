@@ -35,7 +35,7 @@ preserving your own comments and any [[artifacts]] blocks.`,
 
 		// An empty config renders the fully-documented, all-commented template.
 		// The baked-in sandbox defaults already apply, so there is nothing to
-		// activate here — the file exists to document and to be customized.
+		// activate here - the file exists to document and to be customized.
 		path := config.GetProjectConfigPath(projectRoot)
 		if err := config.SaveToFile(path, config.Config{}); err != nil {
 			return errtrace.Wrap(err)

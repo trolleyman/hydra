@@ -231,7 +231,7 @@ type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
 
-	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
 	Archived   *bool   `json:"archived,omitempty"`
 	BaseBranch string  `json:"base_branch"`
 	BranchName *string `json:"branch_name"`
@@ -252,7 +252,7 @@ type AgentResponse struct {
 	// MergeWhenGreen True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
 	MergeWhenGreen *bool `json:"merge_when_green,omitempty"`
 
-	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "unrestricted" (network on, host filtering off → every host reachable), "filtered-hard" (allow-list enforced in a pasta netns + nft lock — an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (the head isn't live).
+	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "unrestricted" (network on, host filtering off → every host reachable), "filtered-hard" (allow-list enforced in a pasta netns + nft lock - an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (the head isn't live).
 	NetworkEnforcement *string `json:"network_enforcement,omitempty"`
 	PrePrompt          string  `json:"pre_prompt"`
 	ProjectPath        string  `json:"project_path"`
@@ -286,7 +286,7 @@ type AgentStatusInfo struct {
 	// LastMessage Last assistant message (present on turn-end and notification events)
 	LastMessage *string `json:"last_message,omitempty"`
 
-	// LastMessageIsSuggestedNextMessage True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
+	// LastMessageIsSuggestedNextMessage True when last_message reads as a suggested next message - a terse instruction you could send straight back to the agent (e.g. 'run it') - rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
 	LastMessageIsSuggestedNextMessage *bool `json:"last_message_is_suggested_next_message,omitempty"`
 
 	// NotificationType Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications.
@@ -333,10 +333,10 @@ type ApprovalRequest struct {
 	// Reqid Unique ID of the parked approval request
 	Reqid string `json:"reqid"`
 
-	// Rw Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic — a badge hint, not a guarantee.
+	// Rw Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic - a badge hint, not a guarantee.
 	Rw *string `json:"rw"`
 
-	// Summary Human-readable "wants to …" summary for the approval card
+	// Summary Human-readable "wants to ..." summary for the approval card
 	Summary string `json:"summary"`
 
 	// Target The MCP server name, '<server>__<tool>', host, or command the approval is about
@@ -358,7 +358,7 @@ type ArtifactFile struct {
 	ChangeRatio *float64               `json:"change_ratio"`
 	ChangeType  ArtifactFileChangeType `json:"change_type"`
 
-	// Dpi Pixel density (device-scale factor) the media was captured at, read from its sidecar (<file>.meta, {"dpi": 2}). The grid sizes a tile by the media's logical width (width / dpi) so a shot captured at 2x lays out the same as the same shot at 1x — only crisper. Null/absent → 1.
+	// Dpi Pixel density (device-scale factor) the media was captured at, read from its sidecar (<file>.meta, {"dpi": 2}). The grid sizes a tile by the media's logical width (width / dpi) so a shot captured at 2x lays out the same as the same shot at 1x - only crisper. Null/absent → 1.
 	Dpi *float64 `json:"dpi"`
 
 	// Fps Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
@@ -376,10 +376,10 @@ type ArtifactFile struct {
 	// RightUrl URL of the file for the right version (null if absent on the right)
 	RightUrl *string `json:"right_url"`
 
-	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
+	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label - only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
 	Tags *[]string `json:"tags"`
 
-	// Unverified True only for a video file reported as "modified" whose verdict is a raw byte-hash comparison because ffmpeg was unavailable to verify it frame-by-frame — so the change may be spurious (e.g. only container metadata differs). Absent/false for images and for frame-verified video. The UI shows a caveat badge when set.
+	// Unverified True only for a video file reported as "modified" whose verdict is a raw byte-hash comparison because ffmpeg was unavailable to verify it frame-by-frame - so the change may be spurious (e.g. only container metadata differs). Absent/false for images and for frame-verified video. The UI shows a caveat badge when set.
 	Unverified *bool `json:"unverified"`
 
 	// Width Natural pixel width of the media, measured server-side at generation time (image header, or ffprobe for video) and cached in the entry's meta.json. Lets the grid lay out tiles without downloading every file to measure it, and avoids upscaling a low-resolution shot. Best-effort: null/absent when it could not be determined.
@@ -403,7 +403,7 @@ type ArtifactLogLineStream string
 
 // ArtifactScript A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
-	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
 	// Command Shell command run via `bash -c` in the checkout directory
@@ -421,7 +421,7 @@ type ArtifactScript struct {
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
 
-	// UnsafeHost Run on the host with NO sandbox — full access to the machine and credentials (default false)
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
 
@@ -430,11 +430,11 @@ type ArtifactSet struct {
 	// Changed Whether any file differs between the two versions
 	Changed bool `json:"changed"`
 
-	// Error Set only when the whole set failed (status "error") — i.e. both sides failed, or a side could not be loaded at all. When just one side fails while the other renders, status stays "ready" and the failure is reported in left_error / right_error instead.
+	// Error Set only when the whole set failed (status "error") - i.e. both sides failed, or a side could not be loaded at all. When just one side fails while the other renders, status stays "ready" and the failure is reported in left_error / right_error instead.
 	Error *string        `json:"error"`
 	Files []ArtifactFile `json:"files"`
 
-	// LeftError Error message from the LEFT (before) generation when that side failed but the RIGHT side still rendered, so the panel can show the available images alongside a warning. Null when the left side succeeded (or when the whole set failed — see error).
+	// LeftError Error message from the LEFT (before) generation when that side failed but the RIGHT side still rendered, so the panel can show the available images alongside a warning. Null when the left side succeeded (or when the whole set failed - see error).
 	LeftError *string `json:"left_error"`
 
 	// LeftLog Captured stdout+stderr lines of the in-flight LEFT (before) generation, surfaced as a live log. Only populated while that side is generating; once settled, fetch left_log_url instead.
@@ -488,7 +488,7 @@ type ClaudeUsageResponse struct {
 	// CapturedAt When the snapshot was probed.
 	CapturedAt *time.Time `json:"captured_at,omitempty"`
 
-	// Error Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+	// Error Why usage is unavailable (CLI missing, not a subscription account, parse failure, ...).
 	Error *string `json:"error"`
 
 	// SessionPercentUsed Percent of the current session ("4 hour") limit used (0-100).
@@ -497,7 +497,7 @@ type ClaudeUsageResponse struct {
 	// SessionResetText Raw session reset text, e.g. "Resets in 2h 15m".
 	SessionResetText *string `json:"session_reset_text"`
 
-	// SessionResetsAt When the current session limit resets (derived from the relative "Resets in …" text).
+	// SessionResetsAt When the current session limit resets (derived from the relative "Resets in ..." text).
 	SessionResetsAt *time.Time `json:"session_resets_at"`
 
 	// WeeklyPercentUsed Percent of the weekly (all-models) limit used (0-100).
@@ -541,7 +541,7 @@ type CommitRepositoryRequest struct {
 type ConfigResponse struct {
 	Agents map[string]AgentConfig `json:"agents"`
 
-	// ArtifactConcurrency Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism — lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
+	// ArtifactConcurrency Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism - lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
 	ArtifactConcurrency *int `json:"artifact_concurrency"`
 
 	// ArtifactPrefetch Whether the daemon proactively pre-generates a head's artifacts in the background once its working tree settles, so a diff is ready before it is opened (artifact_prefetch in config.toml). When false, artifacts are generated only when a diff is viewed; foreground generation and artifact_concurrency still apply. null/absent uses the built-in default (enabled).
@@ -685,7 +685,7 @@ type McpServer struct {
 	// Name The server key as it appears under mcpServers.
 	Name string `json:"name"`
 
-	// Source Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
+	// Source Where it was found - "user" (~/.claude.json) or "project" (.mcp.json).
 	Source string `json:"source"`
 }
 
@@ -713,10 +713,10 @@ type NetworkConfig struct {
 	// AllowedHosts Extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list.
 	AllowedHosts *[]string `json:"allowed_hosts"`
 
-	// AllowedLoopbackPorts Host-loopback TCP ports reachable from the sandbox even under mode "hard", whose network namespace otherwise cuts off the host's 127.0.0.1 — for host-local daemons that hardcode loopback, e.g. adb's server on 5037. No effect in other modes (they share the host loopback already).
+	// AllowedLoopbackPorts Host-loopback TCP ports reachable from the sandbox even under mode "hard", whose network namespace otherwise cuts off the host's 127.0.0.1 - for host-local daemons that hardcode loopback, e.g. adb's server on 5037. No effect in other modes (they share the host loopback already).
 	AllowedLoopbackPorts *[]int `json:"allowed_loopback_ports"`
 
-	// BlockedHosts Outbound hosts (exact host or *.suffix) denied even when otherwise allowed — overrides both allowed_hosts and the built-in defaults.
+	// BlockedHosts Outbound hosts (exact host or *.suffix) denied even when otherwise allowed - overrides both allowed_hosts and the built-in defaults.
 	BlockedHosts *[]string `json:"blocked_hosts"`
 
 	// Enabled LEGACY (use mode). Honoured only when mode is unset.
@@ -725,14 +725,14 @@ type NetworkConfig struct {
 	// FilterEnabled LEGACY (use mode). Honoured only when mode is unset.
 	FilterEnabled *bool `json:"filter_enabled"`
 
-	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 	Mode *NetworkConfigMode `json:"mode"`
 
 	// Strict With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default true).
 	Strict *bool `json:"strict"`
 }
 
-// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 type NetworkConfigMode string
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
@@ -948,7 +948,7 @@ type SandboxConfig struct {
 	// PreExitScript Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
 	PreExitScript *string `json:"pre_exit_script"`
 
-	// PreSpawnScript Bash script run inside the sandbox before every agent launch — both spawn and resume — so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
+	// PreSpawnScript Bash script run inside the sandbox before every agent launch - both spawn and resume - so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`
@@ -962,7 +962,7 @@ type ServiceScript struct {
 	// Enabled Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
-	// Host Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+	// Host Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
 	Host *bool `json:"host,omitempty"`
 
 	// MaxRestarts Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
@@ -1020,7 +1020,7 @@ type SpawnAgentRequest struct {
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`
 
-	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3… suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
+	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3... suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
 	Id *string `json:"id,omitempty"`
 
 	// Model Model the agent CLI should use for this session (e.g. "opus", "sonnet", "haiku" for Claude). Passed as the CLI's --model flag at spawn only; on resume it is omitted so the agent restores the model its transcript was saved with (and honours any in-session /model change). Empty/omitted inherits the CLI's own default.
@@ -1117,16 +1117,16 @@ type TestCase struct {
 	// Name Leaf test name only when path/scope are set; older reports carry a pre-joined display name here with no path/scope.
 	Name string `json:"name"`
 
-	// Path Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+	// Path Repo-relative filesystem location - a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
 	Path *string `json:"path"`
 
-	// PathMissing True when `path` names a file that was not found in the checkout the report was parsed against — a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+	// PathMissing True when `path` names a file that was not found in the checkout the report was parsed against - a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
 	PathMissing *bool `json:"path_missing"`
 
-	// Scope Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+	// Scope Logical nesting chain between path and name - a class chain (com › example › FooTest), describe chain, or Go subtest parent.
 	Scope *[]string `json:"scope"`
 
-	// ScopeKinds Per-level kind for `scope`, parallel to it — "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
+	// ScopeKinds Per-level kind for `scope`, parallel to it - "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
 	ScopeKinds *[]string      `json:"scope_kinds"`
 	Status     TestCaseStatus `json:"status"`
 }
@@ -1140,7 +1140,7 @@ type TestRunResult struct {
 	Cases      *[]TestCase `json:"cases,omitempty"`
 	DurationMs *int64      `json:"duration_ms"`
 
-	// Error Set when status is "errored" — the command couldn't produce a verdict.
+	// Error Set when status is "errored" - the command couldn't produce a verdict.
 	Error  *string `json:"error"`
 	Failed *int    `json:"failed,omitempty"`
 
@@ -1174,7 +1174,7 @@ type TestRunResult struct {
 	// TotalEstimated True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
 	TotalEstimated *bool `json:"total_estimated"`
 
-	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
+	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate.
 	Warnings *int `json:"warnings,omitempty"`
 }
 
@@ -1198,10 +1198,10 @@ type TestScript struct {
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
 
-	// Type How results are read — "junit" (default; parse *.xml/*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+	// Type How results are read - "junit" (default; parse *.xml/*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
 	Type *string `json:"type"`
 
-	// UnsafeHost Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
+	// UnsafeHost Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
 
@@ -1227,7 +1227,7 @@ type TestSummary struct {
 	Status TestStatus `json:"status"`
 	Total  *int       `json:"total,omitempty"`
 
-	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
+	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
 	Warnings *int `json:"warnings,omitempty"`
 }
 
@@ -1282,7 +1282,7 @@ type GetAgentArtifactsParams struct {
 	// Refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated before responding. By default both sides of the comparison are regenerated; pass refresh_side to regenerate just one.
 	Refresh *string `form:"refresh,omitempty" json:"refresh,omitempty"`
 
-	// RefreshSide Limits a refresh to a single side — "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
+	// RefreshSide Limits a refresh to a single side - "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
 	RefreshSide *GetAgentArtifactsParamsRefreshSide `form:"refresh_side,omitempty" json:"refresh_side,omitempty"`
 }
 
@@ -1333,10 +1333,10 @@ type GetAgentDiffFilesParams struct {
 
 // MergeAgentParams defines parameters for MergeAgent.
 type MergeAgentParams struct {
-	// Force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
+	// Force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway - covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 
-	// Close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head — session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
+	// Close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head - session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
 	Close *bool `form:"close,omitempty" json:"close,omitempty"`
 }
 
@@ -1519,7 +1519,7 @@ type ServerInterface interface {
 	// Disarm auto-merge for a head
 	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
 	DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// Arm auto-merge — merge this head when its tests settle passing
+	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
@@ -5178,7 +5178,7 @@ type StrictServerInterface interface {
 	// Disarm auto-merge for a head
 	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
 	DisarmMergeWhenGreen(ctx context.Context, request DisarmMergeWhenGreenRequestObject) (DisarmMergeWhenGreenResponseObject, error)
-	// Arm auto-merge — merge this head when its tests settle passing
+	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)

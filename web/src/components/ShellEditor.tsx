@@ -96,7 +96,7 @@ export function ShellEditor({
         // to the textarea's, or the two accumulate a vertical drift when
         // scrolled. So this <pre> mirrors the textarea exactly: same padding-left
         // (the gutter reservation), same padding-right, same scrollbar-gutter, and
-        // plain block-flowed lines — no flex row whose column widths could round
+        // plain block-flowed lines - no flex row whose column widths could round
         // a sub-pixel differently from the textarea's padding. Line numbers are
         // absolutely positioned into the reserved gutter (out of flow) so they
         // can't perturb the wrap width. `scrollbar-gutter: stable` keeps both

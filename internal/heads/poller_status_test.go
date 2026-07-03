@@ -15,7 +15,7 @@ func TestStatusTimeAfter(t *testing.T) {
 		{"invalid a never wins", "", "2026-06-15T10:00:00Z", false},
 		{"strictly later", "2026-06-15T10:00:01Z", "2026-06-15T10:00:00Z", true},
 		{"equal is not after", "2026-06-15T10:00:00Z", "2026-06-15T10:00:00Z", false},
-		// Same wall-clock second, distinguished only by nanoseconds — the case
+		// Same wall-clock second, distinguished only by nanoseconds - the case
 		// that left agents stuck in "starting".
 		{"nano breaks same-second tie", "2026-06-15T10:00:00.200Z", "2026-06-15T10:00:00.100Z", true},
 		// Trailing-zero trimming would make ".5" sort after ".50001" lexically;
@@ -58,7 +58,7 @@ func TestUnreadDebouncerCancelledByResumedActivity(t *testing.T) {
 	t0 := time.Unix(2000, 0)
 	d.arm("a", "finished", t0)
 
-	// Activity resumed within the window — the poller forgets it.
+	// Activity resumed within the window - the poller forgets it.
 	d.forget("a")
 
 	if d.ready("a", "finished", t0.Add(2*graceUnread)) {
@@ -86,7 +86,7 @@ func TestUnreadDebouncerTakeRaisesOnSessionExit(t *testing.T) {
 	// An agent that finishes and then exits before the grace window elapses: the
 	// poller calls take() when it sees the session gone. A pending entry means a
 	// real finish the window had not yet confirmed, so take reports it (and the
-	// caller raises the flag) — the session ending is itself the confirmation.
+	// caller raises the flag) - the session ending is itself the confirmation.
 	d := newUnreadDebouncer()
 	t0 := time.Unix(5000, 0)
 	d.arm("a", "finished", t0)
@@ -105,7 +105,7 @@ func TestUnreadDebouncerTakeRaisesOnSessionExit(t *testing.T) {
 
 func TestUnreadDebouncerTakeNoPending(t *testing.T) {
 	// No transition was pending (e.g. the agent was killed from running, or its
-	// flag already matured) — a session exit must not raise a spurious dot.
+	// flag already matured) - a session exit must not raise a spurious dot.
 	d := newUnreadDebouncer()
 	if d.take("a") {
 		t.Fatal("take reported a pending entry that was never armed")

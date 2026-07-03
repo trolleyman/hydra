@@ -14,21 +14,21 @@ export interface LightboxImage {
    *  image referenced only by path), in which case the size is left out. */
   size: number
   /** When set, the lightbox renders a fullscreen before/after comparator (with mode
-   *  controls — toggle, slider, onion) for this entry instead of a single image. The
+   *  controls - toggle, slider, onion) for this entry instead of a single image. The
    *  diff viewer supplies this; `url` is still used for the edge previews and caption. */
   diff?: { left?: string | null; right?: string | null; mode: ImageDiffMode }
   /** Pixel density (device-scale factor) the media was captured at, surfaced in the
    *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
   dpi?: number
   /** How this artifact changed vs its counterpart (added/removed/modified), when
-   *  known — shown as a small +/−/• glyph right after the filename in the caption,
+   *  known - shown as a small +/−/• glyph right after the filename in the caption,
    *  mirroring the diff grid's per-file badge. Omit for plain images with no diff
    *  context (e.g. the repository browser). */
   changeType?: 'added' | 'removed' | 'modified'
 }
 
 // A small +/−/• glyph marking whether the artifact was added, removed, or modified
-// relative to its counterpart — mirrors the diff grid's ArtifactChangeIcon, but tuned
+// relative to its counterpart - mirrors the diff grid's ArtifactChangeIcon, but tuned
 // for the lightbox's always-dark backdrop (the brighter dark-theme colors).
 function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxImage['changeType']> }) {
   const cls = 'w-3.5 h-3.5 shrink-0'
@@ -67,14 +67,14 @@ export function ImageLightbox({
   onClose: () => void
 }) {
   const count = images.length
-  // Navigation has a hard start and end — it does NOT wrap around. At the first image
+  // Navigation has a hard start and end - it does NOT wrap around. At the first image
   // there's no previous, at the last there's no next (the arrows/previews for those
   // directions are hidden below), so a gallery reads as a finite strip rather than an
   // endless carousel.
   const hasPrev = index > 0
   const hasNext = index < count - 1
   // The direction of the last navigation (+1 next, -1 prev, 0 on open), so the new
-  // image can slide in from the matching side — see the keyed wrapper below.
+  // image can slide in from the matching side - see the keyed wrapper below.
   const [dir, setDir] = useState(0)
   const prev = useCallback(() => { if (index > 0) { setDir(-1); onIndexChange(index - 1) } }, [index, onIndexChange])
   const next = useCallback(() => { if (index < count - 1) { setDir(1); onIndexChange(index + 1) } }, [index, count, onIndexChange])
@@ -88,16 +88,16 @@ export function ImageLightbox({
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
-  // images — pick a side or a mode and the next entry keeps it rather than resetting.
+  // images - pick a side or a mode and the next entry keeps it rather than resetting.
   // The mode seeds from whichever entry the lightbox was opened on (the grid's current
-  // mode); view/highlight start fresh each opening. (Zoom still resets per image — its
+  // mode); view/highlight start fresh each opening. (Zoom still resets per image - its
   // state lives in the per-index ZoomPan remount.)
   const [diffMode, setDiffMode] = useState<ImageDiffMode>(() => images[index]?.diff?.mode ?? 'ab')
   const [abView, setAbView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
 
   // Steal focus while open, restore it on close. The opener can leave focus in a
-  // keyboard-hungry widget — the terminal's hidden xterm textarea is the prime case
+  // keyboard-hungry widget - the terminal's hidden xterm textarea is the prime case
   // (e.g. opening a prompt-attachment thumbnail right after typing in the terminal):
   // every keystroke would keep feeding the shell, and the shortcut handlers below
   // would swallow nothing/act on nothing (X/B/A/H skip fields, Esc/←/→ would both
@@ -111,7 +111,7 @@ export function ImageLightbox({
     return () => opener?.focus()
   }, [])
 
-  // X/B/A/H — the shared comparator shortcuts (see applyABShortcut) — drive a diff
+  // X/B/A/H - the shared comparator shortcuts (see applyABShortcut) - drive a diff
   // entry's before/after view + highlight. Held here (with the state above) so they
   // persist across navigation; non-diff (plain image) entries ignore them.
   useEffect(() => {
@@ -139,7 +139,7 @@ export function ImageLightbox({
   }, [prev, next, onClose])
 
   // Whether the current pointer press STARTED on the backdrop itself. Closing on
-  // backdrop click must ignore a drag that merely ENDS there — panning a zoomed
+  // backdrop click must ignore a drag that merely ENDS there - panning a zoomed
   // image (or dragging the diff slider) and releasing past the image's edge makes
   // the browser fire the trailing click on the press/release common ancestor, i.e.
   // the backdrop. Tracked in the capture phase so a child's stopPropagation (the
@@ -150,7 +150,7 @@ export function ImageLightbox({
   if (!current) return null
 
   // On large screens, when there's more than one image, the prev/next images sit
-  // mostly off-screen at the edges with only a sliver (~12%) peeking in — a
+  // mostly off-screen at the edges with only a sliver (~12%) peeking in - a
   // Lightroom-style filmstrip hint of what ←/→ will bring up. Hovering slides the
   // peeked image a little further in. The main image is narrowed slightly so the
   // arrows have gutter room beside the peek (both dropped below `lg`).
@@ -162,7 +162,7 @@ export function ImageLightbox({
     const i = dir === 'prev' ? index - 1 : index + 1
     const onClick = dir === 'prev' ? prev : next
     // Translate the whole button (not just the image) so its click area travels
-    // off-screen with it — only the visible sliver stays clickable, rather than a
+    // off-screen with it - only the visible sliver stays clickable, rather than a
     // full-width hit zone covering the gutter.
     const slide = dir === 'prev'
       ? '-translate-x-[88%] hover:-translate-x-[78%]'
@@ -188,7 +188,7 @@ export function ImageLightbox({
   }
 
   // Portal to <body> so the fixed overlay is positioned against the viewport, not
-  // a transformed ancestor — the sidebar's slide animation (translate-x) makes it
+  // a transformed ancestor - the sidebar's slide animation (translate-x) makes it
   // a containing block for fixed descendants, which would otherwise clip/shrink
   // the lightbox when it's opened from the compact (in-sidebar) spawn form.
   return createPortal(
@@ -198,13 +198,13 @@ export function ImageLightbox({
       // modal dialogs sit above the toasts instead (z-[120]).
       className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150 outline-none"
       onPointerDownCapture={(e) => { pressOnBackdrop.current = e.target === e.currentTarget }}
-      // Close only when the press and the click BOTH land on the backdrop — see
+      // Close only when the press and the click BOTH land on the backdrop - see
       // pressOnBackdrop above for why a click alone isn't enough.
       onClick={(e) => { if (pressOnBackdrop.current && e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
       // Click-focusable (not tabbable) so the focus-steal above can land here, and
-      // so a click inside keeps the dialog — not the page behind it — the key target.
+      // so a click inside keeps the dialog - not the page behind it - the key target.
       tabIndex={-1}
       ref={rootRef}
     >
@@ -218,10 +218,10 @@ export function ImageLightbox({
         <X className="w-5 h-5" />
       </button>
 
-      {/* Previous image preview (large screens only) — hidden at the start */}
+      {/* Previous image preview (large screens only) - hidden at the start */}
       {hasPrev && sidePreview('prev')}
 
-      {/* Previous arrow — hidden at the start (no wrap-around) */}
+      {/* Previous arrow - hidden at the start (no wrap-around) */}
       {hasPrev && (
         <button
           type="button"
@@ -242,7 +242,7 @@ export function ImageLightbox({
       >
         {/* Keyed by index so the media remounts on each navigation and replays the
             directional slide+fade (lightbox-slide; defined in index.css). The CSS var
-            sets which side it enters from — the side you're heading toward — so ←/→
+            sets which side it enters from - the side you're heading toward - so ←/→
             feel like moving through a strip rather than the picture blinking in place. */}
         <div
           key={index}
@@ -266,7 +266,7 @@ export function ImageLightbox({
             />
           ) : (
             // Wrapped in ZoomPan so the image can be magnified past fit (wheel),
-            // panned (drag once zoomed), and navigated with the corner minimap —
+            // panned (drag once zoomed), and navigated with the corner minimap -
             // useful when a shot is too small to read at fit. The wrapper keys off
             // the parent's index remount, so zoom resets on navigation.
             <ZoomPan minimapSrc={current.url} className="rounded-lg shadow-2xl">
@@ -311,7 +311,7 @@ export function ImageLightbox({
         </figcaption>
       </figure>
 
-      {/* Next arrow — hidden at the end (no wrap-around) */}
+      {/* Next arrow - hidden at the end (no wrap-around) */}
       {hasNext && (
         <button
           type="button"
@@ -323,7 +323,7 @@ export function ImageLightbox({
         </button>
       )}
 
-      {/* Next image preview (large screens only) — hidden at the end */}
+      {/* Next image preview (large screens only) - hidden at the end */}
       {hasNext && sidePreview('next')}
     </div>,
     document.body,

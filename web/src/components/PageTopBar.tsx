@@ -6,7 +6,7 @@ import { IconButton } from './IconButton'
 
 // A lightweight header bar for pages that already have their own internal header
 // (the repository browser, settings) but need somewhere to host the show-sidebar
-// toggle — and a bit of context — while the sidebar is collapsed. It renders
+// toggle - and a bit of context - while the sidebar is collapsed. It renders
 // nothing when the sidebar is open (the sidebar itself provides the context and
 // the toggle), so it only appears on small screens / when hidden.
 export function PageTopBar({ title, right, always, onBack }: { title: string; right?: ReactNode; always?: boolean; onBack?: () => void }) {
@@ -24,7 +24,7 @@ export function PageTopBar({ title, right, always, onBack }: { title: string; ri
           </IconButton>
         </Tooltip>
       )}
-      {/* Back arrow — only shown when there's somewhere to return to (we arrived
+      {/* Back arrow - only shown when there's somewhere to return to (we arrived
           here from another page rather than landing on it directly). */}
       {onBack && (
         <Tooltip content="Back">

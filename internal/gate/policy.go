@@ -37,7 +37,7 @@ const NotificationPolicyApproval = "policy_approval"
 
 // Policy is the trusted security-gate policy, resolved on the host from the
 // project-root config.toml and seeded into the sandbox read-only. The in-sandbox
-// hook only ever reads this file — it never parses the branch's TOML — so a
+// hook only ever reads this file - it never parses the branch's TOML - so a
 // malicious worktree cannot widen its own policy.
 type Policy struct {
 	// GateEnabled toggles the runtime decision gate. When false, Decide always
@@ -56,7 +56,7 @@ type Policy struct {
 	// AutoAllowReadMCP, when true, auto-allows an MCP tool the read/write classifier
 	// deems read-only, parking only writes/unknown for approval. The classifier is a
 	// best-effort heuristic (see ClassifyMCPTool), so this trades safety for fewer
-	// prompts — off by default.
+	// prompts - off by default.
 	AutoAllowReadMCP bool `json:"mcp_auto_allow_read"`
 	// MCPToolRW maps "<server>__<tool>" to a read/write classification ("read" or
 	// "write") captured from the server-declared readOnlyHint annotation at seed
@@ -64,14 +64,14 @@ type Policy struct {
 	MCPToolRW map[string]string `json:"mcp_tool_rw,omitempty"`
 	// WebFetchFilter reports whether WebFetch is host-gated at all. It mirrors the
 	// sandbox network policy's FilterHosts: with network filtering off
-	// (mode = "unrestricted" or "off") there is nothing to gate — every host is
-	// already reachable — so WebFetch is never parked. Only "hard"/"advisory"
+	// (mode = "unrestricted" or "off") there is nothing to gate - every host is
+	// already reachable - so WebFetch is never parked. Only "hard"/"advisory"
 	// (FilterHosts on) enforce the allow-list below.
 	WebFetchFilter bool `json:"webfetch_filter"`
 	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
 	// round-trip when WebFetchFilter is on; a fetch to any other host is parked for
-	// approval. It is DERIVED from the network policy — the built-in
-	// sandbox.DefaultAllowedHosts unioned with [sandbox.network] allowed_hosts — so
+	// approval. It is DERIVED from the network policy - the built-in
+	// sandbox.DefaultAllowedHosts unioned with [sandbox.network] allowed_hosts - so
 	// the WebFetch tool and the egress boundary share one allow-list rather than two.
 	WebFetchAllowHosts []string `json:"webfetch_allow_hosts"`
 	// WebFetchBlockedHosts is the network policy's blocked_hosts: a host matching it

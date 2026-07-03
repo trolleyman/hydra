@@ -51,7 +51,7 @@ type Manager struct {
 	// once by the Registry at creation; read-only thereafter.
 	onSettle func(projectRoot string)
 	// onProgress, if set, is called (with projectRoot) while a streamed
-	// (type=stdout) run is appending cases — throttled to testNudgeInterval per
+	// (type=stdout) run is appending cases - throttled to testNudgeInterval per
 	// run. Wired to Server.NotifyTestsProgress, which pushes per-head
 	// agent_tests_changed payload events so the sidebar chip's live ✓/⚠/✗
 	// counts tick during the run without clients refetching the agent list.
@@ -346,7 +346,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		m.mu.Lock()
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		// Emit the final coalesced counts increment (a fast run can settle before
-		// the flush timer ever fires) — it also stops any pending timer. The
+		// the flush timer ever fires) - it also stops any pending timer. The
 		// settled event below then delivers the authoritative report anyway.
 		m.flushCountsLocked(dir)
 		delete(m.live, dir)
@@ -436,7 +436,7 @@ func (m *Manager) setProgressLocked(dir, text string) {
 
 const (
 	// caseFlushInterval / caseFlushMax coalesce "counts" events: an event fires
-	// at most ~10×/s, or immediately once this many cases are pending — the
+	// at most ~10×/s, or immediately once this many cases are pending - the
 	// backpressure guard that keeps a 4,556-case run from emitting 4,556 frames.
 	caseFlushInterval = 100 * time.Millisecond
 	caseFlushMax      = 200
@@ -459,7 +459,7 @@ type liveRun struct {
 }
 
 // appendTestCase records one streamed case: it feeds the accumulated report,
-// the running tally, the live progress header ("123/4556" — which the agent
+// the running tally, the live progress header ("123/4556" - which the agent
 // list's summary also surfaces, so the sidebar chip ticks), and the coalesced
 // "counts" event stream.
 func (m *Manager) appendTestCase(dir string, tc TestCase) {
@@ -520,7 +520,7 @@ func (m *Manager) setTestTotal(dir string, total int) {
 
 // seedEstimatedTotal seeds an in-flight streaming run's denominator with an
 // estimate carried over from a prior run (see fallbackTotal), giving an
-// un-instrumented run a determinate progress bar until — and unless — the runner
+// un-instrumented run a determinate progress bar until - and unless - the runner
 // declares its own ::hydra:test:total::. It never sets markerSeen (this isn't a
 // real marker) and never overrides an already-set total, and marks the value
 // estimated so the UI can render it as approximate.
@@ -548,10 +548,10 @@ func (m *Manager) seedEstimatedTotal(dir string, total int) {
 
 // fallbackTotal estimates a streaming denominator for a run that declares no
 // ::hydra:test:total:: by reusing a prior run's case count. It consults refs in
-// priority order — typically the head's own branch, then its base branch:
+// priority order - typically the head's own branch, then its base branch:
 //
 //  1. The per-branch total (recordBranchTotal): the last case count run against
-//     that branch, keyed by branch name. This is the one that hits in practice —
+//     that branch, keyed by branch name. This is the one that hits in practice -
 //     a commit is usually tested only once, but every run of a branch refreshes
 //     its per-branch total, so the head's own branch almost always has one.
 //  2. Failing that, a cached commit report for the ref's current tip (a prior
@@ -589,11 +589,11 @@ func (m *Manager) fallbackTotal(runner string, refs []string) int {
 // recordBranchTotal saves a settled run's case count under its branch (v.Branch)
 // so the next run of that branch can estimate its denominator (see
 // fallbackTotal) even at a brand-new commit. Accuracy guard: a *commit* run is
-// only attributed to the branch when it IS the branch's current tip — an
+// only attributed to the branch when it IS the branch's current tip - an
 // explicitly-selected old commit must not overwrite the moving branch's total;
 // a *worktree* run is the branch's own working checkout, so it always counts.
 // Degenerate verdicts (the exit-code fallback, errored runs, empty reports) are
-// never recorded — only a real parsed report with cases.
+// never recorded - only a real parsed report with cases.
 func (m *Manager) recordBranchTotal(runner string, v Version, rep Report, runSHA string) {
 	if v.Branch == "" || rep.Total <= 0 {
 		return
@@ -609,7 +609,7 @@ func (m *Manager) recordBranchTotal(runner string, v Version, rep Report, runSHA
 		return
 	}
 	if v.WorktreeDir == "" && runSHA != tip {
-		return // an old/explicit commit — don't attribute it to the branch tip
+		return // an old/explicit commit - don't attribute it to the branch tip
 	}
 	_ = writeBranchTotal(m.branchTotalDir(runner, v.Branch), branchTotal{Total: rep.Total, Ref: tip, UpdatedAt: time.Now().Unix()})
 }
@@ -656,7 +656,7 @@ func (m *Manager) flushCountsLocked(dir string) {
 	lr.pending = nil
 	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
 	// Nudge the server (throttled) to push updated per-head summaries so the
-	// sidebar chip's live counts tick during the run — the settle nudge covers
+	// sidebar chip's live counts tick during the run - the settle nudge covers
 	// the final state. Fired async so the callback never runs under m.mu.
 	if m.onProgress != nil && time.Since(lr.lastNudge) >= testNudgeInterval {
 		lr.lastNudge = time.Now()
@@ -675,7 +675,7 @@ func (m *Manager) fillRunningLocked(dir string, rep *Report) {
 	rep.Cases = append([]TestCase(nil), lr.cases...)
 	rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = lr.passed, lr.failed, lr.skipped, lr.warnings
 	// Mirror the streamed "counts" event (flushCountsLocked): a running snapshot's
-	// Total is the *declared* denominator, or 0 when none was declared — NOT floored
+	// Total is the *declared* denominator, or 0 when none was declared - NOT floored
 	// to len(cases). Reporting len(cases) here made an undeclared run indistinguishable
 	// from a declared one whose cases had caught up (both total == cases), so the poll
 	// fallback couldn't tell "no denominator" from "denominator reached". 0 = unknown.
@@ -745,7 +745,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		// Couldn't even launch the command — an infrastructure failure, not a
+		// Couldn't even launch the command - an infrastructure failure, not a
 		// test result.
 		return errored(rep, err.Error())
 	}
@@ -863,7 +863,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		// It ran and exited non-zero with no report — treat the exit code as the
+		// It ran and exited non-zero with no report - treat the exit code as the
 		// test result (degenerate single failed case).
 		msg := "command exited non-zero"
 		if tail != "" {

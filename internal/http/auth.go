@@ -20,7 +20,7 @@ const authCookieName = "hydra_auth"
 // shared key. Loopback (and unix-socket / in-process) requests are always
 // trusted, so the local web UI and the CLI's daemon socket keep working with no
 // credentials. When the key is empty, auth is disabled entirely and every
-// request passes through — preserving the prior localhost-only behaviour.
+// request passes through - preserving the prior localhost-only behaviour.
 type Authenticator struct {
 	key   string // the configured shared secret ("" disables auth)
 	token string // hex(sha256(key)); the cookie value, so the raw key isn't stored client-side

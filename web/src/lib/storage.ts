@@ -59,22 +59,22 @@ export const StorageKeys = {
   // Repository branch-compare diff: show one file at a time (default) vs all
   // files stacked. Absent = the one-file default; 'false' = the multi-file view.
   repoDiffSingleFile: 'hydra-repo-diff-single-file',
-  // Repository branch-compare diff: how the changed-files sidebar is laid out —
+  // Repository branch-compare diff: how the changed-files sidebar is laid out -
   // 'tree' (default, folders), 'flat', or 'grouped'. Mirrors the agent diff
   // viewer's own file-view setting, but kept under a separate key so the two
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
 
   // '1' when a test/screenshot harness wants to drive the toast store from page
-  // context (see lib/toastHarness). Dormant unless explicitly set — only the
-  // screenshot script seeds it (via addInitScript), never the app itself — so it
+  // context (see lib/toastHarness). Dormant unless explicitly set - only the
+  // screenshot script seeds it (via addInitScript), never the app itself - so it
   // has no effect in real builds.
   toastHarness: 'hydra-toast-harness',
 } as const
 
 // ── Dynamic keys (prefix + builder pair) ─────────────────────────────────────
 
-// Which view is last open within a project — an agent, the repository browser,
+// Which view is last open within a project - an agent, the repository browser,
 // or the bare project page. One entry per project. See lib/projectView.ts.
 export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
 export const projectViewKey = (projectId: string): string =>
@@ -87,7 +87,7 @@ export const artifactPrefsKey = (projectId: string | null, agentId: string, name
   `${ARTIFACT_PREFS_PREFIX}${projectId ?? '_'}-${agentId}-${name}`
 
 // Artifact tag filter, keyed by project + agent (one selection shared across all
-// of an agent's artifact cards — see artifactPrefs.ts loadTagFilter/saveTagFilter).
+// of an agent's artifact cards - see artifactPrefs.ts loadTagFilter/saveTagFilter).
 // projectId may be null → '_' keeps the key shape stable. The `-v2-` version: the
 // stored arrays used to list the *selected* (shown) values; they now list the
 // values turned *off* (hidden), so the bump discards the old, now-inverted data.
@@ -95,14 +95,14 @@ export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-v2-'
 export const artifactTagFilterKey = (projectId: string | null, agentId: string): string =>
   `${ARTIFACT_TAG_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
 
-// Artifact "chrome" cache — the script names + available tags of a comparison,
+// Artifact "chrome" cache - the script names + available tags of a comparison,
 // remembered client-side so the artifacts panel can render its header, tag filter
 // and collapsed card headers instantly (no network) while the real comparison
 // loads (see artifactPrefs.ts load/saveArtifactChrome). Two levels, both
 // zero-network: per agent (the branch), and a per-project last-resort fallback
 // (artifact config is project-wide, so a brand-new agent can borrow a sibling's
-// chrome). Entries carry a `t` stamp, so the artifact-prefs prune below — which
-// sweeps this same `hydra-artifact-` prefix — drops stale ones too. projectId may
+// chrome). Entries carry a `t` stamp, so the artifact-prefs prune below - which
+// sweeps this same `hydra-artifact-` prefix - drops stale ones too. projectId may
 // be null → '_' keeps the key shape stable.
 export const ARTIFACT_CHROME_PREFIX = 'hydra-artifact-chrome-'
 export const artifactChromeKey = (projectId: string | null, agentId: string): string =>
@@ -111,7 +111,7 @@ export const artifactChromeProjectKey = (projectId: string | null): string =>
   `${ARTIFACT_CHROME_PREFIX}p-${projectId ?? '_'}`
 
 // Test status filter, keyed by project + agent (one selection shared across all
-// of an agent's test-runner cards — see testFilterPrefs.ts). Mirrors the artifact
+// of an agent's test-runner cards - see testFilterPrefs.ts). Mirrors the artifact
 // tag-filter model: the stored array lists the statuses turned *off* (hidden).
 // projectId may be null → '_' keeps the key shape stable.
 export const TEST_FILTER_PREFIX = 'hydra-test-filter-'
@@ -126,7 +126,7 @@ export const agentViewPrefsKey = (projectId: string | null, agentId: string): st
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
-// collapsed (the default — archived history is rarely wanted, so it stays out of
+// collapsed (the default - archived history is rarely wanted, so it stays out of
 // the way); '0' = the user explicitly expanded it. (Legacy '1' values from when
 // collapsed was the non-default still read as collapsed.) Per-project so one
 // project's choice doesn't leak into another's.
@@ -139,13 +139,13 @@ export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
 
 // Scroll offset (textarea scrollTop) of the spawn-prompt box, per project and
-// per layout — mirrors promptDraftKey so a long draft restores to the same
+// per layout - mirrors promptDraftKey so a long draft restores to the same
 // scroll position when switching back to its project.
 export const promptScrollKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-scroll-${compact ? 'compact' : 'full'}-${projectId}`
 
-// Running count of generically-named pasted images (image1.png, image2.png, …)
-// for the spawn form, per project and per layout — mirrors promptDraftKey so the
+// Running count of generically-named pasted images (image1.png, image2.png, ...)
+// for the spawn form, per project and per layout - mirrors promptDraftKey so the
 // numbering stays separate across projects and survives a reload (the
 // attachments themselves are in-session only; see lib/spawnDrafts.ts).
 export const imageCounterKey = (projectId: string, compact: boolean): string =>
@@ -174,7 +174,7 @@ export function writeLocal(key: string, value: string | null): void {
 // Most stored values are JSON. readJSON/writeJSON fold the parse/try-catch and
 // the stringify/remove dance into one place so callers stop hand-rolling it.
 
-// Read and JSON-parse a stored value. `validate` refines the parsed value to T —
+// Read and JSON-parse a stored value. `validate` refines the parsed value to T -
 // return null to reject malformed or unexpected data. Returns null on a missing
 // key, a parse error, or a rejected value, so callers never need their own
 // try/catch around JSON.parse.
@@ -199,7 +199,7 @@ export function writeJSON(key: string, value: unknown): void {
 // agentViewPrefs and artifactPrefs each persist one entry per id under a shared
 // prefix, every entry stamped with a last-touched timestamp so a single boot-time
 // pass can prune everything stale. (A single combined blob is deliberately
-// avoided — it would grow unbounded and lose this per-id TTL/prune.) The
+// avoided - it would grow unbounded and lose this per-id TTL/prune.) The
 // load/save/patch/prune boilerplate is identical between them, so it lives here;
 // callers supply the value shape T and keep their own typed wrappers around it.
 
@@ -223,7 +223,7 @@ export function createShardedStore<T extends object>(
   prefix: string,
   ttlMs: number,
   // skipPrefix: a longer prefix that shares `prefix` but holds a different shape
-  // (no timestamp) and so must be left untouched by prune — e.g. the artifact
+  // (no timestamp) and so must be left untouched by prune - e.g. the artifact
   // tag filter, which sits under the artifact prefix.
   opts: { skipPrefix?: string } = {},
 ): ShardedStore<T> {
@@ -242,7 +242,7 @@ export function createShardedStore<T extends object>(
       writeJSON(key, { ...value, t: Date.now() })
     },
     patch(key, patch) {
-      // Merge onto whatever is stored (expired or not — the write refreshes `t`).
+      // Merge onto whatever is stored (expired or not - the write refreshes `t`).
       const current = parse(key)
       writeJSON(key, { ...current, ...patch, t: Date.now() })
     },
@@ -288,7 +288,7 @@ export function singleFieldStorage<K extends string, V>(
 ): PersistStorage<{ [P in K]: V }> {
   return {
     // Always returns a state (read() supplies the default), so persist rehydrates
-    // the field on boot. version is left unset — there's no envelope to migrate.
+    // the field on boot. version is left unset - there's no envelope to migrate.
     getItem: () => ({ state: { [field]: read() } as { [P in K]: V } }),
     setItem: (_name, value) => write(value.state[field]),
     // The singletons never call persist.clearStorage(); the key's lifecycle is

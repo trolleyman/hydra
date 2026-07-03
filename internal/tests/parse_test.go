@@ -158,7 +158,7 @@ func TestParseDirAggregatesAndIgnoresJunk(t *testing.T) {
 }
 
 // A case whose file location isn't present in the checkout is flagged
-// PathMissing (informational — it doesn't change the verdict). Existing files,
+// PathMissing (informational - it doesn't change the verdict). Existing files,
 // and non-file paths (a bare Go package dir), are left alone.
 func TestParseDirFlagsMissingFile(t *testing.T) {
 	outDir := t.TempDir()
@@ -195,7 +195,7 @@ func TestParseDirFlagsMissingFile(t *testing.T) {
 		t.Errorf("non-file path (Go package dir) should not be flagged: %+v", byName["c"])
 	}
 
-	// With no checkout dir there's nothing to check against — nothing is flagged.
+	// With no checkout dir there's nothing to check against - nothing is flagged.
 	cases, _, _, err = ParseDir(outDir, "")
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestParseDirFlagsMissingFile(t *testing.T) {
 	}
 }
 
-// gotestsum: the classname is a Go package import path — the module prefix is
+// gotestsum: the classname is a Go package import path - the module prefix is
 // stripped to a repo-relative dir, and subtest names split into scope.
 func TestParseJUnitGoPackage(t *testing.T) {
 	xml := `<testsuites>

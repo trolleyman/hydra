@@ -111,7 +111,7 @@ func TestParseTestMarkerResolvesGoFile(t *testing.T) {
 	}
 }
 
-// A type=stdout runner's accumulated markers become the report — no file read —
+// A type=stdout runner's accumulated markers become the report - no file read -
 // and coalesced "counts" events stream the increments.
 func TestGenerateStreamingMarkers(t *testing.T) {
 	script := `
@@ -136,7 +136,7 @@ echo "plain log line"
 	var counts *RunningCounts
 	for ev := range events {
 		if ev.Kind == "counts" && ev.Counts != nil {
-			// Keep the last one — totals are cumulative.
+			// Keep the last one - totals are cumulative.
 			counts = ev.Counts
 		}
 		if ev.Kind == "settled" {
@@ -196,13 +196,13 @@ func TestDeclaredTotalIsAFloor(t *testing.T) {
 // A streaming run that declares no ::hydra:test:total:: seeds its denominator
 // from a prior run's total (here via the Latest fallback) and marks it
 // estimated, so the progress bar is still determinate. The settled report's
-// Total stays the exact case count — the estimate never leaks into it.
+// Total stays the exact case count - the estimate never leaks into it.
 func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
 	workDir := t.TempDir()
 	initGitRepo(t, workDir)
 	m := NewManager(t.TempDir())
 
-	// A prior cached report for this runner — Latest() surfaces it as the estimate
+	// A prior cached report for this runner - Latest() surfaces it as the estimate
 	// (no TotalHintRefs are set on the Version, so the ref loop is skipped).
 	prior := Report{Runner: "t", Key: "commit/deadbeef", Status: StatusPassing, Total: 42, UpdatedAt: 100}
 	if err := writeReport(m.entryDir("t", "commit/deadbeef"), prior); err != nil {
@@ -234,7 +234,7 @@ func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
 	if counts.Total != 42 || !counts.TotalEstimated {
 		t.Errorf("running counts = total %d estimated %v, want 42 estimated=true (seeded from prior run)", counts.Total, counts.TotalEstimated)
 	}
-	// The settled report recomputes Total from the actual cases — never the estimate.
+	// The settled report recomputes Total from the actual cases - never the estimate.
 	rep, ok, err := m.Peek(spec.Name, v)
 	if err != nil || !ok {
 		t.Fatalf("Peek: ok=%v err=%v", ok, err)
@@ -245,7 +245,7 @@ func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
 }
 
 // A settled run's case count is recorded under its branch so the next run of
-// that branch can estimate its denominator — but only when the total is
+// that branch can estimate its denominator - but only when the total is
 // genuinely the branch's: a worktree run always counts, an old/explicit commit
 // (not the branch tip) never does, and the degenerate exit-code fallback never
 // does. fallbackTotal then prefers that per-branch total over anything else.

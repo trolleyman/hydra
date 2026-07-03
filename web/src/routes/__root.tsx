@@ -115,7 +115,7 @@ function RootLayout() {
   // When adding a project, the user first reviews its repo-controlled
   // .hydra/config.toml (which can run code) before it's registered. This holds
   // the pending review; its callbacks resolve the in-flight add (see
-  // handleAddProject). Trust is decided once, at add time — no client-side trust
+  // handleAddProject). Trust is decided once, at add time - no client-side trust
   // state is kept, so opening an already-added project never re-prompts.
   const [trustPrompt, setTrustPrompt] = useState<{
     name: string
@@ -158,7 +158,7 @@ function RootLayout() {
     }
   }, [navigate])
 
-  // Restore a project's remembered view when switching into it — but never
+  // Restore a project's remembered view when switching into it - but never
   // auto-open a remembered agent that currently has unread changes. Opening an
   // agent clears its unread dot (the auto-clear effect below), so silently
   // restoring an unread agent on a project switch would "read" a notification
@@ -166,7 +166,7 @@ function RootLayout() {
   // instead; the agent stays in the sidebar (dot lit) for the user to open
   // deliberately, and its remembered view is preserved (deflectedUnreadProject)
   // so a later switch back restores it once read. A remembered agent that's
-  // already read — or whose lookup fails (gone / offline) — is opened as before;
+  // already read - or whose lookup fails (gone / offline) - is opened as before;
   // the agent page self-corrects a truly-dead one.
   const restoreProjectView = useCallback(async (projectId: string, view: ProjectView) => {
     if (view.kind === 'agent') {
@@ -177,7 +177,7 @@ function RootLayout() {
           navigate({ to: '/project/$projectId', params: { projectId } })
           return
         }
-      } catch { /* lookup failed — fall through and open optimistically */ }
+      } catch { /* lookup failed - fall through and open optimistically */ }
     }
     navigateToProjectView(projectId, view)
   }, [navigate, navigateToProjectView])
@@ -219,7 +219,7 @@ function RootLayout() {
 
   // Toggle + persist the per-project collapse state. Collapsing hides the whole
   // archived list, so if the currently open agent is an archived one it would
-  // disappear from the sidebar while still showing — deselect it back to the
+  // disappear from the sidebar while still showing - deselect it back to the
   // project page so the selection never points at a hidden item.
   const toggleArchivedCollapsed = useCallback(() => {
     if (!currentProjectId) return
@@ -233,7 +233,7 @@ function RootLayout() {
     }
   }, [currentProjectId, archivedCollapsed, selectedAgentId, archived, navigate])
 
-  // Pointer events (not mouse) so the drag works with touch + pen too — e.g. a
+  // Pointer events (not mouse) so the drag works with touch + pen too - e.g. a
   // large phone in landscape where the sidebar is a persistent column rather
   // than the floating overlay. `touch-none` on the handle keeps the browser
   // from hijacking the gesture for scrolling.
@@ -267,8 +267,8 @@ function RootLayout() {
   // control itself now lives on the Settings page.
   useApplyTheme()
 
-  // The four server-data loops — agent list, push status, archived history and
-  // system status — are each owned by a dedicated hook built on useServerData
+  // The four server-data loops - agent list, push status, archived history and
+  // system status - are each owned by a dedicated hook built on useServerData
   // (PLAN #58). They land their data in the relevant store and expose stable
   // `refetch` handles + the bits of derived state RootLayout still renders; the
   // refetches are wired into the single events stream below so a push triggers a
@@ -284,14 +284,14 @@ function RootLayout() {
   // (the click) and an already-open agent transitioning to waiting/finished
   // while you watch it (the next poll marks it unread, this clears it again).
   // If the page isn't active (backgrounded tab / unfocused window), we leave the
-  // dot lit so the change isn't silently dismissed — `pageActive` is a dep, so
+  // dot lit so the change isn't silently dismissed - `pageActive` is a dep, so
   // returning to the page re-runs this and clears it then. Optimistic locally +
   // a fire-and-forget POST.
   useEffect(() => {
     if (!pageActive || !currentProjectId || !selectedAgentId) return
     // Respect an explicit "mark as unread": that command sets an unread override
     // and only then navigates away, but the store update lands before the route
-    // changes — so for one render the agent is still selected *and* freshly
+    // changes - so for one render the agent is still selected *and* freshly
     // unread, and without this guard we'd immediately clear it again (the POST
     // /unread → POST /read flip-flop). Skip auto-clear while the override holds.
     const unreadUntil = useAgentStore.getState().unreadUntil[selectedAgentId] ?? 0
@@ -306,10 +306,10 @@ function RootLayout() {
   // Reflect unread changes in the browser tab title with a leading dot, so a
   // backgrounded tab signals "something's waiting" without the page in focus.
   // We use a plain U+25CF glyph (not a color emoji like 🔵) so it renders as a
-  // small, consistent dot across platforms — Linux/Chrome draws emoji via Noto
+  // small, consistent dot across platforms - Linux/Chrome draws emoji via Noto
   // Color Emoji as an oversized glossy ball that looks out of place in a tab.
   // We count the live (optimistically-cleared) agents for the current project
-  // and trust the backend per-project counts for the others — so the dot tracks
+  // and trust the backend per-project counts for the others - so the dot tracks
   // the same state as the in-app indicators and clears the moment they do.
   const currentProjectUnread = agents.filter((a) => a.has_unread_changes).length
   const otherProjectsUnread = projects
@@ -344,12 +344,12 @@ function RootLayout() {
     // A background fetch found the branch's ahead/behind changed.
     onPushStatusChanged: () => refetchPushStatus(),
     // A streamed test run ticking: the event carries the new summary, so patch
-    // the one agent's chip in place — no agent-list refetch.
+    // the one agent's chip in place - no agent-list refetch.
     onAgentTestsChanged: (agentId, tests) => patchAgentTests(agentId, tests),
   })
 
   // When the app lands on the bare root path ("/") but a project is already
-  // selected — restored from localStorage, or auto-selected above — the index
+  // selected - restored from localStorage, or auto-selected above - the index
   // route just shows "Select a project to get started" even though the dropdown
   // shows a project. Redirect onto that project's page once, on initial load.
   // Gated by a ref so a deliberate deselect (which navigates back to "/") is not
@@ -364,8 +364,8 @@ function RootLayout() {
     if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
       didAutoNavigate.current = true
       // Restore the view (agent / repository / project) last open in this
-      // project. Read up front so the persist effect below — which momentarily
-      // sees the bare project route — can't overwrite it before we navigate.
+      // project. Read up front so the persist effect below - which momentarily
+      // sees the bare project route - can't overwrite it before we navigate.
       restoreProjectView(selectedProjectId, loadProjectView(selectedProjectId))
     }
   }, [selectedProjectId, projects, restoreProjectView])
@@ -381,14 +381,14 @@ function RootLayout() {
   // be bounced; and the only place that can distinguish a genuinely-gone agent
   // from an archived one whose record simply hasn't loaded into the sidebar list
   // yet (deep in the paginated history, or on a cold load) is the agent page
-  // itself — it does a one-shot getAgent and, only if truly missing, redirects
+  // itself - it does a one-shot getAgent and, only if truly missing, redirects
   // off the dead agent and resets this memory to the project page.
   useEffect(() => {
     const projectId = routeParams.projectId
-    if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
+    if (!projectId) return // not on a project route ("/", "/settings") - leave storage alone
     const agentId = routeParams.agentId
     // The deflection from restoreProjectView lands on the bare project page,
-    // but that isn't a deliberate navigation — skip it so the remembered agent
+    // but that isn't a deliberate navigation - skip it so the remembered agent
     // survives (one cycle only, then resume normal persistence). If the user
     // has already moved on to an agent, just drop the stale marker and persist
     // as usual.
@@ -397,7 +397,7 @@ function RootLayout() {
       if (agentId == null) return
     }
     if (agentId == null) {
-      // Repository browser or bare project page — persisted verbatim.
+      // Repository browser or bare project page - persisted verbatim.
       saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
       return
     }
@@ -408,7 +408,7 @@ function RootLayout() {
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
 
   // On small screens (overlay mode) close the sidebar on any navigation so it
-  // never lingers over the content. This is transient — it does NOT persist, so
+  // never lingers over the content. This is transient - it does NOT persist, so
   // it can't clobber the wide-screen collapse preference (only the explicit
   // toggle writes storage). On wide screens the sidebar stays as the user left it.
   useEffect(() => {
@@ -418,7 +418,7 @@ function RootLayout() {
   }, [location.pathname])
 
   // App-wide keyboard shortcuts (PLAN #58): Ctrl+. sidebar toggle, `?` help
-  // overlay, and the Ctrl+` alt-tab project switcher — all merged into one hook.
+  // overlay, and the Ctrl+` alt-tab project switcher - all merged into one hook.
   // The switcher feeds its highlight index back through `switcherIndex`, which is
   // passed to ProjectDropdown via `keyboardIndex` (forcing the dropdown open and
   // styling the active row, so the switcher reuses the real selector UI).
@@ -454,7 +454,7 @@ function RootLayout() {
   }
 
   // Adding a project reads its .hydra/config.toml from the repo and, once
-  // registered, starts its [[services]] — both of which can run code. So the
+  // registered, starts its [[services]] - both of which can run code. So the
   // user reviews and trusts the config *before* we register it. Trust is decided
   // here, once, at add time; there is no persisted trust state, so opening an
   // already-added project never re-prompts. Declining leaves nothing registered.
@@ -480,7 +480,7 @@ function RootLayout() {
 
   // registerProject performs the actual add once the user has trusted the
   // project. On a missing / non-git directory it offers to create+init it, then
-  // retries with those flags (no second trust prompt — the config was already
+  // retries with those flags (no second trust prompt - the config was already
   // reviewed).
   async function registerProject(
     path: string,
@@ -539,7 +539,7 @@ function RootLayout() {
     addAgent(agent)
     // Spawn in the background: only jump to the new agent if the user isn't
     // already focused on one. When an agent is open, leave it in front so a
-    // spawn from the sidebar doesn't yank them away from their current work —
+    // spawn from the sidebar doesn't yank them away from their current work -
     // the new agent just appears in the list. If nothing is selected (e.g. the
     // project home / repository view), select it so the spawn isn't a no-op.
     if (currentProjectId && !selectedAgentId) {
@@ -580,7 +580,7 @@ function RootLayout() {
           style={{ width: sidebarWidth }}
           className="flex flex-col h-full shrink-0 max-lg:!w-full border-r border-gray-200 dark:border-gray-700"
         >
-        {/* Sidebar header — app icon, project selector, and the collapse button
+        {/* Sidebar header - app icon, project selector, and the collapse button
             to its right. This is what replaced the global top bar. */}
         <div className="flex items-center gap-1 h-12 px-2 border-b border-gray-200 dark:border-gray-700 shrink-0">
           <Link
@@ -621,7 +621,7 @@ function RootLayout() {
 
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
-          {/* Repository view + Sync — sit between the spawn box and the agents list */}
+          {/* Repository view + Sync - sit between the spawn box and the agents list */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
               (() => {
@@ -635,13 +635,13 @@ function RootLayout() {
                   ahead > 0 ? `${ahead} ahead` : null,
                 ].filter(Boolean).join(', ') + ` ${remote}`
                 const syncTooltip = syncing
-                  ? 'Syncing…'
+                  ? 'Syncing...'
                   : !pushStatus
                     ? 'Sync with remote'
                     : !pushStatus.has_remote
                       ? 'No remote to sync with'
                       : !pushStatus.branch
-                        ? 'Detached HEAD — cannot sync'
+                        ? 'Detached HEAD - cannot sync'
                         : behind > 0 && ahead > 0
                           ? `Sync: pull ${behind}, push ${ahead}`
                           : behind > 0
@@ -759,7 +759,7 @@ function RootLayout() {
               ))
             )}
 
-            {/* Archived (killed/merged) history — read-only, paginated and loaded
+            {/* Archived (killed/merged) history - read-only, paginated and loaded
                 lazily as it scrolls into view (infinite scroll). */}
             {currentProjectId && archived.length > 0 && (
               <>
@@ -800,12 +800,12 @@ function RootLayout() {
             )}
           </div>
 
-          {/* Sidebar footer — a single row: restart (icon) + uptime on the left,
+          {/* Sidebar footer - a single row: restart (icon) + uptime on the left,
               Claude usage + Settings (icon) on the right. The theme switcher now
               lives inside Settings, not here. */}
           <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
             {development && (
-              <Tooltip content={restarting ? 'Restarting…' : 'Rebuild and restart the server'}>
+              <Tooltip content={restarting ? 'Restarting...' : 'Rebuild and restart the server'}>
                 <button
                   onClick={handleRestart}
                   disabled={restarting}
@@ -866,7 +866,7 @@ function RootLayout() {
           </div>
         </div>
 
-          {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}
+          {/* Resize handle (lg+ only - the overlay sidebar has a fixed width) */}
           <div
             onPointerDown={handleSidebarResizeStart}
             className="hidden lg:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
@@ -876,7 +876,7 @@ function RootLayout() {
         </aside>
 
         {/* Main content. When the sidebar is collapsed a floating button at the
-            top-left brings it back — except on pages that host the toggle in
+            top-left brings it back - except on pages that host the toggle in
             their own header bar (the agent page, the repository browser, and
             settings). */}
         {sidebarCollapsed && !selectedAgentId && !/\/(repository|settings)(\/|$)/.test(location.pathname) && (
@@ -892,7 +892,7 @@ function RootLayout() {
           </Tooltip>
         )}
         {/* The floating reveal button (when collapsed) just overlays the top-left
-            corner — no reserved strip, so the content keeps the full width. */}
+            corner - no reserved strip, so the content keeps the full width. */}
         <div className="flex-1 flex min-w-0 overflow-hidden">
           <Outlet />
         </div>

@@ -10,7 +10,7 @@ import "sync"
 //
 // Keys must therefore be derived from resolved commit SHAs (never branch names,
 // which move) plus any options that change the output. Callers must NOT cache
-// anything that depends on the working tree (uncommitted/untracked changes) — that
+// anything that depends on the working tree (uncommitted/untracked changes) - that
 // is mutable and has no stable key.
 //
 // Eviction is FIFO (insertion order, not true LRU) bounded by BOTH a fixed entry
@@ -21,7 +21,7 @@ import "sync"
 // Capping only the entry count would let a few hundred large diffs pile up into
 // many gigabytes; the byte budget caps the actual memory instead. Each caller
 // supplies the per-entry cost (estimated bytes) at put time, so the cache stays
-// generic over V. An entry larger than the whole budget is simply not cached —
+// generic over V. An entry larger than the whole budget is simply not cached -
 // correctness never depends on a hit, so it just recomputes live next time.
 //
 // The zero value is usable: the map is allocated lazily on first put and a
@@ -45,7 +45,7 @@ type cacheEntry[V any] struct {
 const (
 	defaultGitCacheMax = 256
 	// defaultGitCacheMaxBytes bounds the total estimated memory of a single cache
-	// across every key (so across every project — the daemon shares one Server).
+	// across every key (so across every project - the daemon shares one Server).
 	// 64 MiB comfortably holds many ordinary diffs/commit lists while keeping a
 	// pathological case (huge generated-file diffs cached once per moving head SHA)
 	// from growing without bound.

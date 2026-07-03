@@ -11,7 +11,7 @@ import { BranchPill } from './BranchPill'
 import { agentStatusBadge } from '../lib/agentDisplay'
 
 // withBranchPills renders toast copy with `backtick` spans as inline mono pills
-// (branch names — "Synced with `origin/main`", "merged into `main`"), matching
+// (branch names - "Synced with `origin/main`", "merged into `main`"), matching
 // how the dialogs embed branch names mid-sentence. Unpaired backticks stay
 // literal; text without backticks passes through untouched.
 function withBranchPills(text: string): React.ReactNode {
@@ -29,7 +29,7 @@ const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: s
   info: { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', bar: 'bg-blue-500' },
 }
 
-// Per-variant button styling for a toast action — matched to the approval card's
+// Per-variant button styling for a toast action - matched to the approval card's
 // action buttons (rounded-lg, solid accent primary), with the hand cursor.
 const actionClass = (variant?: 'primary' | 'danger') => {
   const base = 'inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer'
@@ -72,13 +72,13 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     const badge = t.status ? agentStatusBadge(t.status) : undefined
     const before = t.before ?? 'transitioned to'
     // The queued-merge toast swaps the bot tile for the app's "merge queued"
-    // identity — the emerald Clock of the armed pill / queue-merge button.
+    // identity - the emerald Clock of the armed pill / queue-merge button.
     const tile = t.icon === 'merge-queued'
       ? { Icon: Clock, wrap: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300', bar: 'bg-emerald-500' }
       : { Icon: Bot, wrap, bar }
     const openAgent = () => {
       // Match a cross-project View: select the project (a no-op for the current
-      // one) before the link routes, then tear the toast down. Left-click only —
+      // one) before the link routes, then tear the toast down. Left-click only -
       // middle/Ctrl-click open the agent in a new tab and leave the toast up.
       useProjectStore.getState().setSelectedProjectId(t.projectId)
       onDismiss()
@@ -180,7 +180,7 @@ export const Toaster: React.FC = () => {
     <div className="fixed bottom-4 right-4 z-[110] flex flex-col gap-2 items-end">
       {toasts.map((toast) => (
         // A transparent wrapper carries the hover handlers so every toast variant
-        // (plain / transition / approval card) pauses uniformly — hovering freezes
+        // (plain / transition / approval card) pauses uniformly - hovering freezes
         // the auto-dismiss timer and countdown bar until the pointer leaves.
         <div
           key={toast.id}

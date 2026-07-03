@@ -105,7 +105,7 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
 // ArchivedAgentDetail is the read-only view for a finished (killed/merged) agent
 // retained in the history. There is no live session, so there is no terminal
 // (just a grayed placeholder) and no diff/kill/merge/restart actions. The
-// "Resume" affordance is shown but not yet wired — see PLAN #49.
+// "Resume" affordance is shown but not yet wired - see PLAN #49.
 function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentResponse; projectId: string | null; onPurged: (id: string) => void }) {
   const [purging, setPurging] = useState(false)
   const endBadge = archivedEndStateBadge(agent.end_state)
@@ -225,7 +225,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // (mode absent).
 // mergeQueueWaitingOn describes what an armed (merge-when-green) head's queued
 // merge is currently blocked on, for the pill's tooltip. Reaching a finished
-// state is the dominant gate — the head can't merge mid-work — so any not-yet-
+// state is the dominant gate - the head can't merge mid-work - so any not-yet-
 // finished agent (still running, or blocked asking you something) reads simply as
 // "the agent to finish"; once it's finished, the test verdict is the remaining gate.
 function mergeQueueWaitingOn(agent: AgentResponse): string {
@@ -252,7 +252,7 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
         side="bottom"
         offset={8}
         delay={0}
-        content={`Merges into ${toBranch} on its own — but only once the agent is finished (not mid-task) and its tests pass. Waiting on ${waitingOn}.`}
+        content={`Merges into ${toBranch} on its own - but only once the agent is finished (not mid-task) and its tests pass. Waiting on ${waitingOn}.`}
       >
         <span className="inline-flex items-center gap-2 cursor-help">
           <Clock className="w-4 h-4 shrink-0" />
@@ -279,19 +279,19 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
       label: 'egress locked',
       className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
       Icon: ShieldCheck,
-      tip: 'Outbound network is confined to the allow-list inside a network namespace (pasta + nft) — a determined process cannot bypass it.',
+      tip: 'Outbound network is confined to the allow-list inside a network namespace (pasta + nft) - a determined process cannot bypass it.',
     },
     'filtered-advisory': {
       label: 'egress filtered (advisory)',
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
-      tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list — but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
+      tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list - but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
     },
     unrestricted: {
       label: 'unrestricted network access',
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
-      tip: 'Host filtering is off, so this head can reach any host on the network — a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] filter_enabled = true with an allowed_hosts list to restrict it, or network.enabled = false to block egress entirely.',
+      tip: 'Host filtering is off, so this head can reach any host on the network - a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] filter_enabled = true with an allowed_hosts list to restrict it, or network.enabled = false to block egress entirely.',
     },
     off: {
       label: 'no network',
@@ -339,7 +339,7 @@ export function AgentDetail({
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
   // Bumped only when the refresh was a new commit (HEAD moved), so the diff
-  // viewer re-snapshots the per-commit artifacts (screenshots) on commit — not
+  // viewer re-snapshots the per-commit artifacts (screenshots) on commit - not
   // on every uncommitted working-tree edit, which would rebuild them needlessly.
   const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -455,20 +455,20 @@ export function AgentDetail({
 
     // Background: count the unmerged files the worktree deletion will discard,
     // folded into the open dialog when the query returns (kill destroys the whole
-    // branch + worktree, so every changed file — committed or not — is "lost").
+    // branch + worktree, so every changed file - committed or not - is "lost").
     void (async () => {
       let lostFiles: number | undefined
       try {
         const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
         lostFiles = d.files?.length ?? 0
-      } catch { /* ignore — show the dialog without a count */ }
+      } catch { /* ignore - show the dialog without a count */ }
       const dialog = useDialogStore.getState()
       if (dialog.isOpen && dialog.variant === 'kill') dialog.update({ details: { lostFiles, loading: false } })
     })()
   }
 
   // executeMerge runs the actual merge POST (optionally force, bypassing the test
-  // gate — PLAN #68). On a tests_failing/tests_errored 409 from a non-force merge
+  // gate - PLAN #68). On a tests_failing/tests_errored 409 from a non-force merge
   // (e.g. a stale verdict that re-ran red), it offers a force-merge follow-up.
   // keepOpen merges with close=false: the agent survives the merge (session,
   // worktree, branch) and keeps working, so instead of navigating away we stay
@@ -479,19 +479,19 @@ export function AgentDetail({
     // name + status pill), matching the status-update notifications.
     const name = agent.title || agent.id
     const toastId = useToastStore.getState().show({
-      message: `Merging agent "${name}" into ${agent.base_branch}…`,
+      message: `Merging agent "${name}" into ${agent.base_branch}...`,
       type: 'info',
       duration: 0,
-      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`…` },
+      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`...` },
     })
     try {
       await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined, !keepOpen)
       useToastStore.getState().dismiss(toastId)
       if (keepOpen) {
         useToastStore.getState().show({
-          message: `Agent "${name}" merged into ${agent.base_branch} — still running`,
+          message: `Agent "${name}" merged into ${agent.base_branch} - still running`,
           type: 'success',
-          agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` — agent kept running` },
+          agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` - agent kept running` },
         })
         // Stay on the page: the base branch just absorbed the head's commits, so
         // the diff (base...head) and any artifact comparison need a refetch.
@@ -516,7 +516,7 @@ export function AgentDetail({
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
         // The soft gate blocked it (the verdict moved since the button rendered).
         // Surface the same Force / Queue choice dialog the button opens proactively
-        // — except for a keep-open merge, where "Queue" (merge-when-green) would
+        // - except for a keep-open merge, where "Queue" (merge-when-green) would
         // merge AND close; offer a force merge-and-continue confirm instead.
         const n = (body as { failing_tests?: number }).failing_tests ?? 0
         if (keepOpen) confirmMergeKeepOpen(true)
@@ -579,7 +579,7 @@ export function AgentDetail({
       confirmLabel: 'Force merge',
       caution: kind === 'failing'
         ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
-        : `No passing test verdict for this commit — merging anyway.`,
+        : `No passing test verdict for this commit - merging anyway.`,
     })
   }
 
@@ -588,7 +588,7 @@ export function AgentDetail({
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
       // Same agent-transition card as the status-update toasts, but text-only
-      // (no status pill — "queued" isn't a status the agent is in yet) and with
+      // (no status pill - "queued" isn't a status the agent is in yet) and with
       // the emerald "merge queued" Clock in place of the bot tile.
       const name = agent.title || agent.id
       const toBranch = agent.base_branch || 'base'
@@ -612,7 +612,7 @@ export function AgentDetail({
 
   // handleMerge is the primary merge button + Ctrl+M action. The button always
   // reads "Merge" now (PLAN #68): a click runs the normal, gated merge regardless
-  // of verdict — the soft test gate is enforced server-side (a failing verdict
+  // of verdict - the soft test gate is enforced server-side (a failing verdict
   // 409s and the catch offers a force-merge follow-up), and the explicit Force
   // merge / Queue merge overrides live in the button's dropdown. While armed
   // ("merge when green"), the button toggles the queue off instead.
@@ -625,7 +625,7 @@ export function AgentDetail({
     if (verdict === 'failing') return confirmMergeGate('failing', n)
     if (verdict === 'errored') return confirmMergeGate('errored', n)
     if (verdict === 'running') return confirmMergeGate('running', n)
-    // Verdict is green (or there are no runners) — nothing else gates the merge,
+    // Verdict is green (or there are no runners) - nothing else gates the merge,
     // so this is where an accidental merge of a still-working agent would slip
     // through. Warn first if it hasn't finished: still working (running/starting)
     // or blocked asking you a question (needs_input). A non-green verdict already
@@ -641,7 +641,7 @@ export function AgentDetail({
   // confirmMergeWhileActive gates a merge whose branch is green but whose AGENT
   // hasn't finished: still working (running/starting) or blocked asking you a
   // question (needs_input). It reuses the merge-gate dialog's Force / Queue /
-  // Cancel choice — Queue is the natural action here, arming merge-when-green so
+  // Cancel choice - Queue is the natural action here, arming merge-when-green so
   // it lands once the agent is actually done. `blocked` selects the wording.
   function confirmMergeWhileActive(blocked: boolean) {
     const toBranch = agent.base_branch || 'base'
@@ -649,8 +649,8 @@ export function AgentDetail({
     useDialogStore.getState().show({
       title: blocked ? 'Agent is waiting on you' : 'Agent is still running',
       message: blocked
-        ? `"${agent.id}" is asking you a question — merging now abandons it and may land incomplete work.`
-        : `"${agent.id}" hasn't finished this turn — merging now may capture an incomplete state.`,
+        ? `"${agent.id}" is asking you a question - merging now abandons it and may land incomplete work.`
+        : `"${agent.id}" hasn't finished this turn - merging now may capture an incomplete state.`,
       type: 'warning',
       variant: 'mergeGate',
       details: { fromBranch, toBranch, agentGate: blocked ? 'needs_input' : 'running' },
@@ -668,7 +668,7 @@ export function AgentDetail({
   // confirmMergeKeepOpen is the "Merge and continue" dropdown action: merge the
   // branch with close=false so the agent keeps running afterwards. The test gate
   // still applies server-side, but the merge-gate dialog's Queue option doesn't
-  // fit here (merge-when-green merges AND closes) — so when the verdict is known
+  // fit here (merge-when-green merges AND closes) - so when the verdict is known
   // un-green (or the server just 409'd, forceGate) this offers a single force
   // merge-and-continue confirm with a caution naming what's being overridden.
   // Merging while the agent is still working is the point of this action, so the
@@ -682,8 +682,8 @@ export function AgentDetail({
       const caution = verdict === 'failing'
         ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
         : verdict === 'running'
-          ? `Tests haven't finished on this commit — merging anyway.`
-          : `No passing test verdict for this commit — merging anyway.`
+          ? `Tests haven't finished on this commit - merging anyway.`
+          : `No passing test verdict for this commit - merging anyway.`
       showMergeConfirm({
         force: true,
         keepOpen: true,
@@ -697,7 +697,7 @@ export function AgentDetail({
   }
 
   // showMergeConfirm renders the rich merge dialog (branch chip + diff stats + an
-  // optional caution line) — shared by the normal merge, the force-merge override
+  // optional caution line) - shared by the normal merge, the force-merge override
   // and merge-and-continue so they look identical bar the title/label/caution.
   // `force` bypasses the soft test gate server-side; `keepOpen` merges with
   // close=false (the agent keeps running afterwards).
@@ -705,14 +705,14 @@ export function AgentDetail({
     const force = opts.force ?? false
     const keepOpen = opts.keepOpen ?? false
     // If this agent is stacked on another agent (its base branch is another
-    // agent's branch), the merge advances that parent agent's branch — name it,
+    // agent's branch), the merge advances that parent agent's branch - name it,
     // and warn when the parent is still running since its working files will
     // shift underneath it.
     const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const toBranch = agent.base_branch || 'base'
     const parentWarning = parent && parent.session_status === 'running'
-      ? `Parent agent "${parent.id}" is running — merging will change its working files.`
+      ? `Parent agent "${parent.id}" is running - merging will change its working files.`
       : undefined
     const lead = parent
       ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
@@ -744,14 +744,14 @@ export function AgentDetail({
         // Only add the uncommitted-changes note when the caller didn't supply its
         // own caution (which takes priority). A closing merge destroys the
         // worktree, so uncommitted work is lost; a keep-open merge preserves the
-        // worktree — the note just clarifies the merge won't include that work.
+        // worktree - the note just clarifies the merge won't include that work.
         if (!caution && d.uncommitted_changes) {
           const total = (d.uncommitted_summary?.tracked_count ?? 0) + (d.uncommitted_summary?.untracked_count ?? 0)
           patch.note = keepOpen
             ? `${total} uncommitted file change${total !== 1 ? 's' : ''} won't be included in the merge.`
             : `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
         }
-      } catch { /* ignore — show the dialog without stats */ }
+      } catch { /* ignore - show the dialog without stats */ }
       const dialog = useDialogStore.getState()
       if (dialog.isOpen && dialog.variant === 'merge') {
         dialog.update({ details: { ...dialog.details, ...patch }, type: (patch.note || caution) ? 'warning' : 'confirm' })
@@ -763,7 +763,7 @@ export function AgentDetail({
   // navigates back to the project page (viewing an agent is what "reads" it, so
   // staying open would be contradictory). The unread override set by markUnread
   // is what stops the auto-clear-on-open effect (__root.tsx) from immediately
-  // re-reading it — navigation alone can't, since the store update lands a render
+  // re-reading it - navigation alone can't, since the store update lands a render
   // before the route changes. Optimistic locally + a fire-and-forget POST.
   function handleMarkUnread() {
     useAgentStore.getState().markUnread(agent.id)
@@ -820,14 +820,14 @@ export function AgentDetail({
       // and to open modals.
       if (isTypingTarget(e.target)) return
       if (dialogOpen) return
-      // Rename — F2, no modifier (Windows convention).
+      // Rename - F2, no modifier (Windows convention).
       if (e.key === 'F2' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (ctx.archived) return
         e.preventDefault()
         ctx.rename()
         return
       }
-      // Switch agent — Alt+↑/↓ steps through the live agents list (wrapping).
+      // Switch agent - Alt+↑/↓ steps through the live agents list (wrapping).
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
         const list = useAgentStore.getState().agents
         if (list.length < 2 || !ctx.projectId) return
@@ -843,7 +843,7 @@ export function AgentDetail({
         }
         return
       }
-      // Kill — Ctrl+K (Ctrl is hasMod on every platform). Merge/mark-unread are
+      // Kill - Ctrl+K (Ctrl is hasMod on every platform). Merge/mark-unread are
       // handled above so they also work with the terminal focused; kill stays
       // gated by the typing guard since Ctrl+K is kill-to-end-of-line in a shell.
       if (!hasMod(e) || e.altKey || e.shiftKey) return
@@ -911,9 +911,9 @@ export function AgentDetail({
   }
 
   // The merge button (PLAN #68) has three states:
-  //  • merging  — a quiet, inert "Merging…" button (in-flight, spinner).
-  //  • armed    — the green "Merges when tests pass" pill with its own Cancel button.
-  //  • resting  — the emerald "Merge" split button; the verdict-specific overrides
+  //  • merging  - a quiet, inert "Merging..." button (in-flight, spinner).
+  //  • armed    - the green "Merges when tests pass" pill with its own Cancel button.
+  //  • resting  - the emerald "Merge" split button; the verdict-specific overrides
   //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
@@ -925,7 +925,7 @@ export function AgentDetail({
 
   const mergeAction: AgentTopBarAction = merging
     ? {
-        label: 'Merging…',
+        label: 'Merging...',
         icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
         onClick: () => {},
         variant: 'muted',
@@ -959,7 +959,7 @@ export function AgentDetail({
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* The agent header is a single header bar (no separate H1): the name with
-          an actions dropdown (Rename / Merge / Kill — clicking the name also
+          an actions dropdown (Rename / Merge / Kill - clicking the name also
           renames it inline) and a status dot. While the sidebar is collapsed it
           also hosts the show-sidebar toggle. It sits above the scroll area so it
           never collides with the diff's own sticky "Changes" header. */}
@@ -1030,12 +1030,12 @@ export function AgentDetail({
                   isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
                   onSelect={(name) => void saveBase(name)}
                   onOpen={() => void refreshBranches()}
-                  title="Change base branch (metadata only — does not rebase commits)"
+                  title="Change base branch (metadata only - does not rebase commits)"
                 />
               ) : (
                 <span className="flex items-center gap-1.5 px-2.5 py-1.5">
                   {savingBase && <LoaderCircle className="w-3 h-3 animate-spin" />}
-                  {agent.base_branch || '—'}
+                  {agent.base_branch || '-'}
                 </span>
               )}
             </span>

@@ -2,7 +2,7 @@
 // Registers @testing-library/jest-dom matchers for future component tests, and
 // provides an in-memory localStorage: jsdom (as wired under vitest here) doesn't
 // expose one, but the storage-backed modules (storage.ts, projectView,
-// agentViewPrefs, …) read the bare global. Cleared between tests so cases don't
+// agentViewPrefs, ...) read the bare global. Cleared between tests so cases don't
 // leak persisted state into each other.
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
@@ -45,7 +45,7 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 
 // jsdom doesn't implement HTMLCanvasElement.getContext and logs a noisy "Not
 // implemented" error the first time any imported module touches a canvas (the
-// artifact diff viewers' pixel-diff overlays — DiffCanvas / VideoDiffView). No
+// artifact diff viewers' pixel-diff overlays - DiffCanvas / VideoDiffView). No
 // test renders those overlays, and the real code already treats a null context
 // as "can't diff", so stub getContext to return null: same effective behaviour,
 // without the warning. Override the prototype (not a jsdom internal) so it sticks

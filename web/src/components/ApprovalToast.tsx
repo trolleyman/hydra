@@ -6,9 +6,9 @@ import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
-// tool calls). It names exactly what's being requested — a whole MCP server, a
+// tool calls). It names exactly what's being requested - a whole MCP server, a
 // specific tool call (with a read/write badge and its JSON arguments), or an
-// outbound fetch (with the host and URL) — plus the requesting agent, which is
+// outbound fetch (with the host and URL) - plus the requesting agent, which is
 // clickable to jump to it, including when it runs in another project.
 
 // A small pill: a tinted, uppercase kind/verb label.
@@ -64,7 +64,7 @@ function kindVisual(data: ApprovalToastData): {
         Icon: SquareTerminal,
         iconWrap: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
         title: 'Run MCP tool',
-        // WRITE is the risky one — flag it in the amber/warning tone; READ stays a
+        // WRITE is the risky one - flag it in the amber/warning tone; READ stays a
         // calm teal.
         badge: data.rw ? { text: read ? 'READ' : 'WRITE', tone: read ? 'teal' : 'amber' } : null,
       }
@@ -190,7 +190,7 @@ export const ApprovalCard: React.FC<{
 }> = ({ data, actions, toastId, onDismiss }) => {
   const { Icon, iconWrap, title, badge } = kindVisual(data)
   // The subtitle links through to the requesting agent (when we know where it
-  // lives). Navigating leaves the approval pending — it does NOT dismiss the card
+  // lives). Navigating leaves the approval pending - it does NOT dismiss the card
   // (a non-silent dismiss would deny the call). A real <Link> also lets
   // middle/Ctrl-click open the agent in a new tab.
   const agentTarget = data.agentId && data.projectId
@@ -225,7 +225,7 @@ export const ApprovalCard: React.FC<{
                   <span className="truncate">{data.agentName}</span>
                 </Link>
               ) : (
-                // No known location for the agent — render the name as plain,
+                // No known location for the agent - render the name as plain,
                 // non-interactive text (no link, no hover affordance).
                 <span className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
                   <Bot className="w-3 h-3 shrink-0" />
@@ -250,7 +250,7 @@ export const ApprovalCard: React.FC<{
           )}
           {data.kind === 'webfetch' && (
             <Caption icon={<Globe className="w-3 h-3" />}>
-              Allowing trusts the whole host — every request to <span className="font-mono">{data.target}</span>, including POSTs — not just this URL.
+              Allowing trusts the whole host - every request to <span className="font-mono">{data.target}</span>, including POSTs - not just this URL.
             </Caption>
           )}
           {data.kind === 'egress' && (

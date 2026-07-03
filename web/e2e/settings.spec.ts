@@ -1,16 +1,16 @@
 import { test, expect } from '@playwright/test'
 
 // End-to-end coverage for the project settings page, which composes the sections
-// split out of SettingsComponents.tsx (#63a) — ThemeSection, TerminalSection,
-// ConfigForm (sandbox policy), ArtifactsEditor and ServicesEditor — via the
+// split out of SettingsComponents.tsx (#63a) - ThemeSection, TerminalSection,
+// ConfigForm (sandbox policy), ArtifactsEditor and ServicesEditor - via the
 // SettingsContent barrel. Exercised against the simulation server, whose
 // GetConfig (internal/http/simulation.go) seeds a default pre-prompt, a network
-// allow-list (api.anthropic.com, …), one artifact script ("screenshots") and one
+// allow-list (api.anthropic.com, ...), one artifact script ("screenshots") and one
 // service ("emu-pool"). Asserting each section renders its seeded data proves the
 // re-homed components still mount and wire up through the barrel.
 
 // Pre-trust the simulated project so the first-open "Trust this project?" overlay
-// (TrustProjectModal) can't intercept clicks — mirrors flows.spec.ts.
+// (TrustProjectModal) can't intercept clicks - mirrors flows.spec.ts.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     try {

@@ -14,7 +14,7 @@ import {
 } from './artifactFilter'
 import { ARTIFACT_CHANGE_CATEGORY, type ArtifactTagFilter } from './artifactPrefs'
 
-// Build an ArtifactTagFilter from a partial — the "empty" filter (nothing hidden)
+// Build an ArtifactTagFilter from a partial - the "empty" filter (nothing hidden)
 // is the inactive baseline. Note the real default filter hides 'unchanged', but
 // these tests construct explicit filters so the scoped/free semantics are isolated.
 function mkFilter(overrides: Partial<ArtifactTagFilter> = {}): ArtifactTagFilter {
@@ -116,7 +116,7 @@ describe('filterIsActive', () => {
   })
 })
 
-describe('fileMatchesFilter — scoped tags', () => {
+describe('fileMatchesFilter - scoped tags', () => {
   // The filter records the values turned OFF for a category. "Selecting" theme=dark
   // in the UI means turning the other values off; here we exercise that OFF-list.
   const dark = file('dark.png', ['theme::dark'])
@@ -134,14 +134,14 @@ describe('fileMatchesFilter — scoped tags', () => {
   it('replaces (does not union) within a category when the hidden value changes', () => {
     const hideLight = mkFilter({ scoped: { theme: ['light'] } })
     const hideDark = mkFilter({ scoped: { theme: ['dark'] } })
-    // hiding light keeps dark; switching to hide dark keeps light — the surviving
+    // hiding light keeps dark; switching to hide dark keeps light - the surviving
     // set flips entirely, it does not accumulate.
     expect([fileMatchesFilter(dark, hideLight), fileMatchesFilter(light, hideLight)]).toEqual([true, false])
     expect([fileMatchesFilter(dark, hideDark), fileMatchesFilter(light, hideDark)]).toEqual([false, true])
   })
 })
 
-describe('fileMatchesFilter — free tags', () => {
+describe('fileMatchesFilter - free tags', () => {
   it('drops a file only when every free tag it carries is hidden', () => {
     const onlyHidden = file('a.png', ['flagged'])
     const mixed = file('b.png', ['flagged', 'keep'])
@@ -153,7 +153,7 @@ describe('fileMatchesFilter — free tags', () => {
   })
 })
 
-describe('fileMatchesFilter — built-in type and change scopes', () => {
+describe('fileMatchesFilter - built-in type and change scopes', () => {
   it('drops by intrinsic media type for the reserved type scope', () => {
     const f = mkFilter({ scoped: { [TYPE_CATEGORY]: ['video'] } })
     expect(fileMatchesFilter(file('clip.webm'), f)).toBe(false)

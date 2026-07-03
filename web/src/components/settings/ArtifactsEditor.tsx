@@ -49,11 +49,11 @@ export function ArtifactsEditor({
           <p>Per-project commands that render visual artifacts (e.g. screenshots or screen recordings) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
           <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
-            <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> — directory to write images into</li>
-            <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
-            <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> — the resolved git ref</li>
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> - directory to write images into</li>
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> - the checkout directory</li>
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> - the resolved git ref</li>
           </ul>
-          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical — a lossy encode changes pixels and reads as changed.</p>
+          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical - a lossy encode changes pixels and reads as changed.</p>
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
@@ -66,7 +66,7 @@ export function ArtifactsEditor({
             Max parallel generations
             <InfoTooltip title="Artifact generation concurrency">
               <p>How many artifact generations may run at once, across both foreground (a diff you're viewing) and background (proactive pre-generation) work.</p>
-              <p className="mt-1.5">Generations can be heavy — a full build per ref, and RAM-hungry tooling (e.g. emulators) — so lower this for memory-hungry generators. Foreground views are always served before queued background work, and a running generation is never interrupted.</p>
+              <p className="mt-1.5">Generations can be heavy - a full build per ref, and RAM-hungry tooling (e.g. emulators) - so lower this for memory-hungry generators. Foreground views are always served before queued background work, and a running generation is never interrupted.</p>
               <p className="mt-1.5">Leave empty for the built-in default (2), or set <code className="text-blue-300">0</code> for unlimited (no cap).</p>
             </InfoTooltip>
           </label>
@@ -80,7 +80,7 @@ export function ArtifactsEditor({
           />
         </div>
         {concurrency === 0 && (
-          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited — no cap on parallel generations</span>
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited - no cap on parallel generations</span>
         )}
       </div>
 
@@ -96,7 +96,7 @@ export function ArtifactsEditor({
             Pre-generate artifacts in the background
             <InfoTooltip title="Background pre-generation">
               <p>When on, the daemon renders a head's diff artifacts in the background once its working tree stops changing, so they're ready the instant you open the diff instead of starting the work on click.</p>
-              <p className="mt-1.5">Turn it off for a project whose generators are too heavy to run speculatively — artifacts are then generated only when you view a diff. Foreground generation and the max-parallel cap above still apply either way.</p>
+              <p className="mt-1.5">Turn it off for a project whose generators are too heavy to run speculatively - artifacts are then generated only when you view a diff. Foreground generation and the max-parallel cap above still apply either way.</p>
               <p className="mt-1.5">Default: on.</p>
             </InfoTooltip>
           </span>
@@ -119,7 +119,7 @@ export function ArtifactsEditor({
                   <div className="flex items-center gap-2">
                     <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
                     {!enabled && (
-                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">— skipped in the diff viewer</span>
+                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">- skipped in the diff viewer</span>
                     )}
                   </div>
                   <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
@@ -161,7 +161,7 @@ export function ArtifactsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Run on host (no sandbox)
                         <InfoTooltip title="Unsafe Host Execution">
-                          <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network, and credentials.</p>
+                          <p>Runs the command directly on the host with <strong>no sandbox</strong> - full access to your machine, network, and credentials.</p>
                           <p className="mt-1.5">The command executes the <em>diffed ref's</em> code, so only enable this for a self-contained, audited command you trust against every ref you compare.</p>
                         </InfoTooltip>
                       </span>
@@ -176,8 +176,8 @@ export function ArtifactsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Pristine checkout
                         <InfoTooltip title="Pristine Checkout">
-                          <p>Artifact runs reuse a small pool of checkouts, switching commits with <code className="font-mono">git checkout</code> — this resets tracked files but keeps git-ignored caches (e.g. <code className="font-mono">node_modules</code>) warm between runs.</p>
-                          <p className="mt-1.5">Enable this to also wipe ignored files before each run (<code className="font-mono">git clean -fdx</code> instead of <code className="font-mono">-fd</code>) for a fully clean tree. Slower — only needed if stale ignored output can leak between commits.</p>
+                          <p>Artifact runs reuse a small pool of checkouts, switching commits with <code className="font-mono">git checkout</code> - this resets tracked files but keeps git-ignored caches (e.g. <code className="font-mono">node_modules</code>) warm between runs.</p>
+                          <p className="mt-1.5">Enable this to also wipe ignored files before each run (<code className="font-mono">git clean -fdx</code> instead of <code className="font-mono">-fd</code>) for a fully clean tree. Slower - only needed if stale ignored output can leak between commits.</p>
                         </InfoTooltip>
                       </span>
                     </label>
@@ -191,7 +191,7 @@ export function ArtifactsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Strict mode
                         <InfoTooltip title="Strict Mode">
-                          <p>Runs the command under <code className="font-mono">set -eo pipefail</code> so a failing step — or a failure mid-pipeline — aborts and propagates a non-zero exit.</p>
+                          <p>Runs the command under <code className="font-mono">set -eo pipefail</code> so a failing step - or a failure mid-pipeline - aborts and propagates a non-zero exit.</p>
                           <p className="mt-1.5">Without it, a broken render whose last command happens to succeed is cached as a success. <code className="font-mono">nounset</code> (<code className="font-mono">-u</code>) is not applied. Uncheck to run the command exactly as written.</p>
                         </InfoTooltip>
                       </span>

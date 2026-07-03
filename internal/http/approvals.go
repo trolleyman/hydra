@@ -73,7 +73,7 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 
 // DecideAgentApproval records the user's verdict for a parked tool call. It
 // writes the decision file the in-sandbox `hydra gate` hook is polling (which
-// unblocks the agent), and — when the user chose "always allow" — persists the
+// unblocks the agent), and - when the user chose "always allow" - persists the
 // server/host to the trusted project config so future launches don't ask again.
 func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgentApprovalRequestObject) (api.DecideAgentApprovalResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
@@ -140,7 +140,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	}
 
 	// An "always allow" for a host now covers every OTHER parked WebFetch/egress
-	// request for the same host, so allow those too — their toasts close on the next
+	// request for the same host, so allow those too - their toasts close on the next
 	// poll instead of forcing the user to clear each one by hand. Also record the
 	// grant live for the running session so later fetches to it don't re-park: the
 	// seeded gate policy is read-only, so a persisted host only binds on the next
@@ -176,7 +176,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 // resolveSiblingHostApprovals allows every still-parked WebFetch/egress request in
 // dir whose host matches the just-granted host (except the one already decided).
 // It runs after an "always allow": the host is now trusted, so the sibling requests
-// no longer need a separate click — writing their decisions unblocks the gate/proxy
+// no longer need a separate click - writing their decisions unblocks the gate/proxy
 // and the UI drops their toasts on the next poll. Best-effort; a write failure just
 // leaves that sibling to be resolved normally.
 func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
@@ -198,7 +198,7 @@ func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
 // PROJECT config (never the merged user/default config), so it takes effect on the
 // head's next launch. MCP grants are agent-specific and go to the per-agent
 // [<agent>.policy]. A WebFetch or egress host both go to the DEFAULTS-level
-// [sandbox.network] allowed_hosts — one shared list applied to every agent, since
+// [sandbox.network] allowed_hosts - one shared list applied to every agent, since
 // the egress allow-list is a project-wide posture, not a per-agent capability. An
 // egress host also goes live for the current session in the running proxy's
 // allow-list (handled where the proxy reads the Allow decision), and a WebFetch host

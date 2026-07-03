@@ -22,7 +22,7 @@ export function NotFound({
 
   // "Return Home" lands on the bare root ("/"), whose index view shows
   // "Select a project to get started". Clear the selected project too so the
-  // sidebar dropdown matches that empty state — otherwise it keeps showing the
+  // sidebar dropdown matches that empty state - otherwise it keeps showing the
   // project from the not-found URL as selected. Mirrors the deliberate-deselect
   // pattern in __root.tsx (setSelectedProjectId(null) + navigate to "/").
   const goHome = () => {

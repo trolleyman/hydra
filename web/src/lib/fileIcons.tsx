@@ -23,7 +23,7 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i
 
 // getFileIcon maps a filename (not a full path) to a lucide icon + tailwind
 // colour class, picking type-specific icons for common languages and special
-// files (README, LICENSE, .gitignore, …).
+// files (README, LICENSE, .gitignore, ...).
 export function getFileIcon(name: string): IconSpec {
   const lower = name.toLowerCase()
   if (lower === 'readme.md' || lower === 'readme') return { Icon: Info, className: 'text-blue-500' }

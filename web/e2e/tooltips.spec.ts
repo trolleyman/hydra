@@ -46,7 +46,7 @@ test('card tooltip shows its info card and stays open while hovered', async ({ p
   await page.goto('/project/sim-project/settings')
 
   // The "Sandbox Policy" section header carries an InfoTooltip (title "OS
-  // Sandbox"). Its trigger is the lucide Info icon — the only svg in the row
+  // Sandbox"). Its trigger is the lucide Info icon - the only svg in the row
   // tagged cursor-help.
   const header = page.locator('h3', { hasText: 'Sandbox Policy' })
   await expect(header).toBeVisible()

@@ -10,15 +10,15 @@ export type TestCase = {
     name: string;
     status: TestCaseStatus;
     /**
-     * Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+     * Repo-relative filesystem location - a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
      */
     path?: string | null;
     /**
-     * Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+     * Logical nesting chain between path and name - a class chain (com › example › FooTest), describe chain, or Go subtest parent.
      */
     scope?: Array<string> | null;
     /**
-     * Per-level kind for `scope`, parallel to it — "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
+     * Per-level kind for `scope`, parallel to it - "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
      */
     scope_kinds?: Array<string> | null;
     /**
@@ -34,7 +34,7 @@ export type TestCase = {
      */
     message?: string | null;
     /**
-     * True when `path` names a file that was not found in the checkout the report was parsed against — a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+     * True when `path` names a file that was not found in the checkout the report was parsed against - a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
      */
     path_missing?: boolean | null;
 };

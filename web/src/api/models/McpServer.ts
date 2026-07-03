@@ -11,7 +11,7 @@ export type McpServer = {
      */
     name: string;
     /**
-     * Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
+     * Where it was found - "user" (~/.claude.json) or "project" (.mcp.json).
      */
     source: string;
 };

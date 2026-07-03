@@ -146,8 +146,8 @@ func (s *Server) GetRepositoryTree(_ context.Context, request api.GetRepositoryT
 
 // GetRepositoryDiff returns the diff between two arbitrary refs in the project's
 // repository, so the repository browser can compare the branch being viewed
-// against another branch. It uses a two-dot diff (base..head) — the literal
-// difference between the two trees — and reuses the same DiffFile shape and
+// against another branch. It uses a two-dot diff (base..head) - the literal
+// difference between the two trees - and reuses the same DiffFile shape and
 // expansion machinery as the agent diff.
 func (s *Server) GetRepositoryDiff(_ context.Context, request api.GetRepositoryDiffRequestObject) (api.GetRepositoryDiffResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
@@ -449,7 +449,7 @@ func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryReq
 }
 
 // SyncRepository fetches, integrates the remote's commits into the local branch
-// (a pull), then pushes any local commits — the one-click sync the sidebar
+// (a pull), then pushes any local commits - the one-click sync the sidebar
 // button performs. A pull that can't merge cleanly returns 409 without touching
 // the working tree.
 func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryRequestObject) (api.SyncRepositoryResponseObject, error) {
@@ -508,7 +508,7 @@ func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryReq
 }
 
 // CommitRepository commits the requested uncommitted paths in the project root
-// — the sidebar warning's one-click way to commit config edits the web UI
+// - the sidebar warning's one-click way to commit config edits the web UI
 // itself wrote to .hydra/config.toml (or any other local changes). Only paths
 // the client names (i.e. the ones its popover showed) are committed; anything
 // else dirty is left alone.
@@ -602,7 +602,7 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 		Path: filePath,
 		Ref:  ref,
 	}
-	// contentPath is the path whose blob we actually render — the file itself,
+	// contentPath is the path whose blob we actually render - the file itself,
 	// or, for a symlink, the entry it ultimately resolves to.
 	contentPath := filePath
 	if mode == gitSymlinkMode {
@@ -694,7 +694,7 @@ func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
 // the same way the artifacts panel does. It is registered outside the OpenAPI
 // mux (like HandleRepositoryBlob) because it returns raw bytes.
 //
-// With a `ref` it reads the committed blob from the project root — the agent's
+// With a `ref` it reads the committed blob from the project root - the agent's
 // branch commits live there, so base_ref/head_ref SHAs resolve. With
 // `worktree=true` it instead reads the file straight from the agent's worktree
 // directory, which is how the diff's uncommitted (head_ref == "") and untracked
@@ -776,7 +776,7 @@ func (s *Server) serveWorktreeBlob(w http.ResponseWriter, r *http.Request, workt
 // repositoryArtifactNames lists the enabled [[artifacts]] script names defined at
 // a ref, sorted. It reads the ref's own .hydra/config.toml (via artifactSpecsByName,
 // shared with the diff viewer) and drops scripts the live config disables. Returns
-// an empty list — never an error — when there is no artifacts manager or no
+// an empty list - never an error - when there is no artifacts manager or no
 // readable config, so the repository browser simply shows no artifacts folder.
 func (s *Server) repositoryArtifactNames(projectRoot, ref string) ([]string, error) {
 	if s.Artifacts == nil {
@@ -803,7 +803,7 @@ func (s *Server) repositoryArtifactNames(projectRoot, ref string) ([]string, err
 
 // GetRepositoryArtifacts lists the artifact scripts configured at a ref so the
 // repository browser can show its dynamic ".hydra/artifacts" folder. It only reads
-// config — nothing is generated here (generation is lazy, on GetRepositoryArtifact).
+// config - nothing is generated here (generation is lazy, on GetRepositoryArtifact).
 func (s *Server) GetRepositoryArtifacts(_ context.Context, request api.GetRepositoryArtifactsRequestObject) (api.GetRepositoryArtifactsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -822,7 +822,7 @@ func (s *Server) GetRepositoryArtifacts(_ context.Context, request api.GetReposi
 }
 
 // GetRepositoryArtifact runs (or returns the cached result of) one artifact script
-// for a single ref and reports its outputs single-sided — the repository browser
+// for a single ref and reports its outputs single-sided - the repository browser
 // shows one ref at a time, so there is no before/after comparison. Generation is
 // lazy: this is only called when the user opens the script in the browser.
 func (s *Server) GetRepositoryArtifact(_ context.Context, request api.GetRepositoryArtifactRequestObject) (api.GetRepositoryArtifactResponseObject, error) {

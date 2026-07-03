@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 // usePageActive reports whether the user actually has this page in front of
 // them: the tab is the foreground tab (not hidden behind another tab or
 // minimised) AND the browser window holds OS focus. We treat "active" strictly
-// — a visible-but-unfocused tab (another app on top) is NOT active — so that
+// - a visible-but-unfocused tab (another app on top) is NOT active - so that
 // background activity (like an agent finishing) is not silently dismissed just
 // because its page happens to be the last one that was open.
 function computeActive(): boolean {

@@ -454,7 +454,7 @@ func (Tools) Ensure() error {
 }
 
 // Update re-checks upstream and re-downloads pasta when its build changed (by
-// Last-Modified/size) and rebuilds bwrap against the pinned source release —
+// Last-Modified/size) and rebuilds bwrap against the pinned source release -
 // unlike Ensure, which only fetches/builds what's missing.
 //
 //	mage tools:update
@@ -474,7 +474,7 @@ func (Tools) Update() error {
 // reportTools prints a Provision result.
 func reportTools(projectRoot string, res tools.Result) {
 	if !res.Available {
-		fmt.Printf("%stools: bundling not available on %s/%s — hydra will use a system pasta%s\n",
+		fmt.Printf("%stools: bundling not available on %s/%s - hydra will use a system pasta%s\n",
 			colorYellow, runtime.GOOS, runtime.GOARCH, colorReset)
 		return
 	}
@@ -486,7 +486,7 @@ func reportTools(projectRoot string, res tools.Result) {
 
 // ensureToolsEnv provisions the bundled sandbox helpers if missing and points the
 // HYDRA_* env overrides at them for the hydra server this target is about to
-// launch — but only when the user hasn't already set those vars, so an explicit
+// launch - but only when the user hasn't already set those vars, so an explicit
 // override always wins. It provisions only pasta (a fast download); bwrap is a
 // source build reserved for the explicit `mage tools:ensure`, and any already-
 // built bwrap is still picked up via tools.Env. Provisioning failures are
@@ -599,7 +599,7 @@ func (Deploy) Setup() error {
 }
 
 // Ngrok scaffolds an ngrok tunnel that exposes the Hydra web UI to the public
-// internet, gated by Google sign-in restricted to a single account — mirroring
+// internet, gated by Google sign-in restricted to a single account - mirroring
 // the reference deployment. It stores the settings in .hydra/deploy.toml and
 // renders .hydra/ngrok.yml (both uncommitted; they embed secrets), then prints
 // how to run the tunnel. The tunnel fronts the local Hydra port (HYDRA_PORT,
@@ -690,7 +690,7 @@ func (Deploy) Ngrok() error {
 // ~/.local/bin/hydra, (2) provisions the bundled sandbox tools so hard egress
 // works headless, and (3) writes ~/.config/systemd/user/hydra.service pinned to
 // this project, the exposed port, and the resolved HYDRA_* + PATH environment. It
-// does NOT enable or start the unit — it prints the one-liners — so nothing comes
+// does NOT enable or start the unit - it prints the one-liners - so nothing comes
 // up behind your back. Re-run it to refresh the binary, tools, and unit.
 //
 //	mage deploy:service
@@ -708,7 +708,7 @@ func (Deploy) Service() error {
 	}
 
 	// Bundle pasta (and build bwrap) so hard egress works under the headless
-	// service too — a service can't fall back to a nice shell env.
+	// service too - a service can't fall back to a nice shell env.
 	if res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Bwrap: true}); err != nil {
 		fmt.Printf("%stools: provisioning failed (%v); the service will fall back to a system pasta%s\n", colorYellow, err, colorReset)
 	} else {
@@ -825,7 +825,7 @@ func requireAuthKey() error {
 	}
 	if deploy.AuthKey == "" {
 		return errtrace.Wrap(fmt.Errorf(
-			"no auth key configured — run `mage deploy:setup` first so the exposed port requires a password"))
+			"no auth key configured - run `mage deploy:setup` first so the exposed port requires a password"))
 	}
 	return nil
 }
@@ -842,7 +842,7 @@ func Prod() error {
 	addGoBuildDeps()
 	addr := exposedAPIAddr()
 	os.Setenv("HYDRA_API_ADDR", addr)
-	fmt.Printf("%sServing on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	fmt.Printf("%sServing on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
@@ -1070,14 +1070,14 @@ func DevExpose() error {
 	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	addr := exposedAPIAddr()
-	fmt.Printf("%sDev server exposed on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	fmt.Printf("%sDev server exposed on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=" + addr}))
 }
 
 // devServerLoop builds the frontend + backend and runs the dev server with the
 // UI restart endpoint enabled, rebuilding and restarting whenever the UI asks
 // for it (exit code devRestartExitCode). extraEnv is appended to the server's
-// environment — DevExpose uses it to set HYDRA_API_ADDR for a 0.0.0.0 bind.
+// environment - DevExpose uses it to set HYDRA_API_ADDR for a 0.0.0.0 bind.
 func devServerLoop(extraEnv []string) error {
 	for {
 		if err := GenerateGo(); err != nil {

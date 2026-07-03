@@ -76,7 +76,7 @@ export function ClaudeUsageIndicator() {
   const rawReset = !Number.isNaN(resetsAt)
     ? fmtCountdown(resetsAt - now)
     : (data.session_reset_text ?? null)
-  // Strip a leading "Resets in …" so only the duration sits under the "reset"
+  // Strip a leading "Resets in ..." so only the duration sits under the "reset"
   // label (the live countdown path is already bare; this normalizes the text
   // fallback, e.g. the simulation's "Resets in 2h 15m").
   const countdown = rawReset ? rawReset.replace(/^resets?\s+in\s+/i, '') : null

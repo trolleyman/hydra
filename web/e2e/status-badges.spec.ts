@@ -50,7 +50,7 @@ test('the agent detail header renders the brand-colored type pill', async ({ pag
 
   // The rounded-full pill is detail-only (the sidebar uses bare colored text for
   // the type), so this uniquely targets the <Badge variant="pill"> with its
-  // gemini brand palette — proving the pill + custom className path renders.
+  // gemini brand palette - proving the pill + custom className path renders.
   const pill = page.locator('span.rounded-full', { hasText: 'gemini' })
   await expect(pill).toBeVisible()
   await expect(pill).toHaveClass(/bg-violet-100/)

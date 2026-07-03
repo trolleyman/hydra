@@ -13,10 +13,10 @@ import { getFileIcon } from '../lib/fileIcons'
 //     dim secondary affordance on the leaf.
 // The tree is built from ALL of a runner's cases but renders only the
 // `visible` ones (post status-filter/search): node badges therefore always
-// tally everything under a node, while hidden rows — and subtrees with
-// nothing visible — stay out of the way.
+// tally everything under a node, while hidden rows - and subtrees with
+// nothing visible - stay out of the way.
 // Two densification rules keep it shallow: a chain of single-child folders
-// merges into one row (internal/artifacts — like VS Code compact folders), and
+// merges into one row (internal/artifacts - like VS Code compact folders), and
 // a subtree holding exactly ONE case collapses the whole chain into that
 // case's row, prefixed with the chain (so a lone warning isn't five expanders
 // deep). Each row carries per-segment icons (folder / file for path levels,
@@ -29,14 +29,14 @@ import { getFileIcon } from '../lib/fileIcons'
 type SegKind = 'path' | 'scope'
 // A scope level is a container (describe block / package / suite), a class/type
 // in a dotted class chain (a JUnit/Java class, a pytest TestClass), or a Go test
-// function that owns subtests — the backend tags this per level
+// function that owns subtests - the backend tags this per level
 // (TestCase.scope_kinds), since the strings alone can't tell TestClass (a
 // pytest class) from TestFoo (a Go func).
 type ScopeKind = 'module' | 'function' | 'class'
 type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 
 // OpenInRepo builds the <Link> target that deep-links a row to the repository
-// browser (the file/dir — and, for a case, its line — at the tested ref). It
+// browser (the file/dir - and, for a case, its line - at the tested ref). It
 // returns props rather than navigating so the affordance renders as a real
 // anchor with an href: that's what lets middle-click / Ctrl-click open it in a
 // new tab (a plain onClick button has no href for the browser to act on).
@@ -68,7 +68,7 @@ type TreeNode = {
   // the scope level with its own glyph.
   segs: Seg[]
   // Real path segments accumulated from the root through this node (path-kind
-  // segments only) — the copyable repo-relative path.
+  // segments only) - the copyable repo-relative path.
   pathParts: string[]
   key: string // stable identity for the collapse set
   children: Map<string, TreeNode>
@@ -184,7 +184,7 @@ function statusRank(s: string): number {
 
 // Tree geometry. Each nesting level indents by INDENT_STEP. A node row (with a
 // chevron) pads NODE_PAD, then spends CHEVRON_SLOT on the chevron+gap before its
-// icon — so a row's leading glyph sits at depth*INDENT_STEP + ICON_X. A case row
+// icon - so a row's leading glyph sits at depth*INDENT_STEP + ICON_X. A case row
 // has no chevron, so it pads straight to ICON_X, lining its status glyph up with
 // sibling nodes' icons (NOT with the parent's icon one level up, which is what
 // made child rows look like they shared the parent's column). GUIDE_X drops the
@@ -210,7 +210,7 @@ export function TreeGuide({ depth }: { depth: number }) {
 }
 
 // NodeBadges shows a node's mixed per-status tallies (✓142 ⚠4 ✗2), omitting
-// zero buckets. In the tests tree these count EVERYTHING under the node —
+// zero buckets. In the tests tree these count EVERYTHING under the node -
 // the status filter and search hide rows, never the tallies.
 export function NodeBadges({ counts }: { counts: Record<string, number> }) {
   return (
@@ -284,10 +284,10 @@ function FileGlyph({ name }: { name: string }) {
 }
 
 // MissingFileMarker flags a file location that isn't present in the checkout the
-// report was parsed against (a stale/wrong path in the runner's output) — an
+// report was parsed against (a stale/wrong path in the runner's output) - an
 // amber warning that never affects the verdict, just tells you the deep-link is
 // broken. Rides on the file piece where the ":line" suffix normally sits.
-const MISSING_FILE_TITLE = 'File not found in the checkout this report ran against — the location in the test output may be stale or wrong.'
+const MISSING_FILE_TITLE = 'File not found in the checkout this report ran against - the location in the test output may be stale or wrong.'
 function MissingFileMarker() {
   return (
     <span
@@ -303,7 +303,7 @@ function MissingFileMarker() {
 // ScopeGlyph draws a scope level: a function glyph (ƒ, violet) for a Go test
 // function that owns subtests, a box glyph (indigo) for a class/type in a
 // dotted class chain (a JUnit/Java class, a pytest TestClass), or a braces glyph
-// ({ }, teal) for a container — a describe block, package or suite (the default
+// ({ }, teal) for a container - a describe block, package or suite (the default
 // when the kind is unknown).
 function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
   switch (scopeKind) {
@@ -321,7 +321,7 @@ function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
 // piece (the folder open when expanded), then each scope level is its own
 // module/function piece. So "auth/rotation.test.ts › key rotation" reads as a
 // file icon + "auth/rotation.test.ts" then a module glyph + "key rotation".
-// fileLine, when set, hangs a dim ":42" off the file piece — used on hoisted
+// fileLine, when set, hangs a dim ":42" off the file piece - used on hoisted
 // one-case rows so the line rides with the file it belongs to rather than
 // dangling at the end of the whole chain.
 function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null; pathMissing?: boolean }) {
@@ -333,7 +333,7 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
       ? (expanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />)
       : <FileGlyph name={filenameOf(pathSegs[pathSegs.length - 1].label)} />
     // A file whose location isn't in the checkout gets an amber warning marker
-    // (and no line suffix — it wouldn't deep-link). Directories are never flagged.
+    // (and no line suffix - it wouldn't deep-link). Directories are never flagged.
     const missing = pathMissing && !isDir
     const suffix = missing
       ? <MissingFileMarker />
@@ -363,7 +363,7 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
 // the file icon + the (non-lowlit) location chain, then the status glyph
 // immediately before the leaf name; a plain leaf row leads with the status
 // glyph. Both carry the message box for failing/warning cases, duration, a copy
-// affordance, an open-in-repo affordance, and — in scope mode — the file:line
+// affordance, an open-in-repo affordance, and - in scope mode - the file:line
 // secondary so the diff deep-link survives the axis switch.
 export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   c: TestCase
@@ -376,7 +376,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   onOpenInRepo?: OpenInRepo
 }) {
   const failedish = c.status === 'failed' || c.status === 'warning'
-  // Skipped cases show their message too (the skip reason, dimmed) — skipped is
+  // Skipped cases show their message too (the skip reason, dimmed) - skipped is
   // treated like every other status, not a mute roll-up.
   const showMessage = !!c.message && (failedish || c.status === 'skipped')
   const loc = caseLocation(c)
@@ -420,7 +420,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
           </span>
         ) : !hasPathSeg && c.line != null && c.line > 0 ? (
           // No file piece on this row (plain leaf under a file node), so show the
-          // line here — a dim ":42", also the row's open-in-repo #L target. When a
+          // line here - a dim ":42", also the row's open-in-repo #L target. When a
           // file piece IS present the line already rides on it (see hasPathSeg).
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
@@ -517,7 +517,7 @@ function NodeChildren({ node, depth, collapsed, onToggle, useScope, onOpenInRepo
 }
 
 export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
-  // ALL of the runner's cases — badges tally these regardless of filters.
+  // ALL of the runner's cases - badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
   visible: TestCase[]
@@ -534,7 +534,7 @@ export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, co
   const visibleSet = useMemo(() => new Set(visible), [visible])
   const root = useMemo(() => buildTree(cases, visibleSet, useScope), [cases, visibleSet, useScope])
   // Repo-relative paths of files the report referenced but that aren't in the
-  // checkout — the backend flags each such case (path_missing). A file node
+  // checkout - the backend flags each such case (path_missing). A file node
   // whose path is in this set gets the amber missing-file marker.
   const missingPaths = useMemo(
     () => new Set(cases.filter((c) => c.path_missing && c.path).map((c) => c.path as string)),

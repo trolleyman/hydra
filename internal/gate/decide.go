@@ -18,7 +18,7 @@ const HydraControlServer = "hydra"
 type Decision string
 
 const (
-	// Allow lets the tool proceed (the hook emits nothing — silence = proceed).
+	// Allow lets the tool proceed (the hook emits nothing - silence = proceed).
 	Allow Decision = "allow"
 	// Deny blocks the tool; the hook emits a permissionDecision: "deny".
 	Deny Decision = "deny"
@@ -50,7 +50,7 @@ type Result struct {
 
 // globalInstallRe matches Bash commands that install system- or user-global
 // software, which the pre-prompt forbids. It is a deliberate tripwire, not an
-// airtight boundary (a determined agent can re-encode a command) — the real
+// airtight boundary (a determined agent can re-encode a command) - the real
 // network boundary is the egress proxy; this just enforces the stated rule on
 // the common, honest spelling.
 var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
@@ -67,7 +67,7 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // gitPushRe matches an actual `git push` INVOCATION: `git` at a command boundary
 // (start of the line, or right after a `;`, `&`, `|`, `(`, or newline) followed
 // by `push`, tolerating global flags (`git -c x=y push`) in between. Anchoring to
-// the command position is deliberate — the bare substring "git push" also shows
+// the command position is deliberate - the bare substring "git push" also shows
 // up inside an argument, a quoted grep pattern, or a commit message, and matching
 // those would hard-deny a perfectly legitimate command. `--dry-run` is excluded
 // by the caller.
@@ -88,7 +88,7 @@ var settingsPathRe = regexp.MustCompile(`(?i)(managed-settings\.json|\.claude/se
 
 // settingsRedirectRe matches a redirect/tee whose *target* is a settings file.
 // Tying it to the path (rather than any `>`) means a stderr redirect while
-// reading — `cat settings.json 2>/dev/null` — does not trip the wire.
+// reading - `cat settings.json 2>/dev/null` - does not trip the wire.
 var settingsRedirectRe = regexp.MustCompile(`(?i)(>>?\s*|\btee\s+(-a\s+)?)['"]?(~|\$HOME|\$\{HOME\})?/?[^\s'"|;&]*?(managed-settings\.json|\.claude/settings(\.local)?\.json|claude-code/managed)`)
 
 // settingsInPlaceRe matches commands that modify their file argument in place or
@@ -155,8 +155,8 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 
 	switch toolName {
 	case "WebFetch":
-		// With network filtering off (unrestricted/off) there is nothing to gate —
-		// every host is already reachable — so don't park the head. The allow-list
+		// With network filtering off (unrestricted/off) there is nothing to gate -
+		// every host is already reachable - so don't park the head. The allow-list
 		// and mode are derived from [sandbox.network], not a separate policy field.
 		if !p.WebFetchFilter {
 			return Result{Decision: Allow}
@@ -222,10 +222,10 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			// outright rather than parking it for approval: the user pushes
 			// deliberately from the host, and an in-sandbox agent has no business
 			// requesting to leave the box. (The old "ask" flow is intentionally
-			// disabled — see the removed bash approval kind.)
+			// disabled - see the removed bash approval kind.)
 			return Result{
 				Decision: Deny,
-				Reason:   "git push is not allowed — it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
+				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
 			}
 		}
 		return Result{Decision: Allow}
@@ -250,7 +250,7 @@ func mcpServerTool(name string) (server, tool string, ok bool) {
 
 // readVerbs / writeVerbs classify an MCP tool by the leading verb in its name.
 // This is a best-effort heuristic used for the approval-card read/write badge and
-// the optional auto-allow-read policy — NOT a security guarantee (a server can
+// the optional auto-allow-read policy - NOT a security guarantee (a server can
 // name a destructive tool "get_*"). A future enhancement can replace/augment this
 // with the server-declared readOnlyHint annotation captured from tools/list.
 var (
@@ -385,7 +385,7 @@ func previewArgs(input map[string]any) string {
 	s := string(data)
 	const max = 2000
 	if len(s) > max {
-		s = s[:max-1] + "…"
+		s = s[:max-1] + "..."
 	}
 	return s
 }

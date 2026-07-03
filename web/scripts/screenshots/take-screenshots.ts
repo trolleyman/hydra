@@ -25,7 +25,7 @@
 //
 // Progress: each major step emits a one-line "::hydra:progress::" marker (build
 // phases and, during capture, "<name>.png <n>/<total>"). Hydra strips the prefix
-// and surfaces the rest as the live progress header — and, once it sees a marker,
+// and surfaces the rest as the live progress header - and, once it sees a marker,
 // stops treating ordinary stdout as progress, so the noisy subprocess output
 // (bun install, vite build) below can't hijack the header. Keep markers short and
 // human-readable; everything still lands in the full build log.
@@ -49,8 +49,8 @@ const SIM_PROJECT = 'sim-project'
 const SIM_AGENT = 'agent-1'
 
 // A fixed instant the browser clock is pinned to for every capture, so any
-// duration the UI derives from "now" — an agent's "spawned X ago", the artifacts
-// panel's elapsed timer — renders deterministically and doesn't make two
+// duration the UI derives from "now" - an agent's "spawned X ago", the artifacts
+// panel's elapsed timer - renders deterministically and doesn't make two
 // otherwise-identical renders diff (see the nondeterminism note below). It MUST
 // match the simulation server's fixed clock (internal/http/simulation.go simNow),
 // which dates its mock timestamps relative to this same instant, so e.g. an
@@ -60,18 +60,18 @@ const SIM_NOW = new Date('2025-01-01T12:00:00Z')
 
 // A markdown-rich spawn-prompt draft seeded into the spawn box for the
 // inline-markdown demo. Long enough to wrap in the box (so the wrapped inline-
-// code chip is captured), and includes a literal "$ …" run that must stay
+// code chip is captured), and includes a literal "$ ..." run that must stay
 // ordinary code in a prompt (the $-command override is activity-only).
 const MARKDOWN_DEMO_PROMPT =
   "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
   'Highlight `inline code`, *italic* and **bold** as you type. A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` wraps across lines, each fragment keeping its own rounded background, and a line that contains `code` stays exactly as tall as a plain one.\n\n' +
-  'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command — that override is activity-only.\n\n' +
+  'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command - that override is activity-only.\n\n' +
   'A fenced block renders as its own code chip:\n```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```'
 
 // A short instruction typed into the spawn box, paired with PASTED_LOG_DEMO
 // below: the demo shows the user describing a task and then pasting a big log,
 // which lands as an attachment chip rather than swamping the instruction.
-const PASTED_TEXT_INSTRUCTION = 'The CI build started failing on main — here is the full log, figure out which step broke and why:'
+const PASTED_TEXT_INSTRUCTION = 'The CI build started failing on main - here is the full log, figure out which step broke and why:'
 
 // A long plain-text block (a CI log) pasted into the spawn box to demo the
 // "large paste becomes an attachment" behavior. Well over the 8-line threshold,
@@ -93,15 +93,15 @@ const PASTED_LOG_DEMO = [
 
 // A multi-line HTML snippet "copied from an editor" (the clipboard carries a
 // `html` language via vscode-editor-data). Pasting it once attaches it; pasting
-// it a second time inlines it for real, wrapped in a ```html fence — the
+// it a second time inlines it for real, wrapped in a ```html fence - the
 // code-paste path. Over the 8-line threshold so the first paste attaches.
 const PASTED_HTML_DEMO = [
   '<section class="hero">',
   '  <h1>Spawn an Agent</h1>',
-  '  <p>Describe what you need — and consider it done.</p>',
+  '  <p>Describe what you need - and consider it done.</p>',
   '  <form class="spawn">',
   '    <label for="task">Task</label>',
-  '    <textarea id="task" placeholder="Describe a task…"></textarea>',
+  '    <textarea id="task" placeholder="Describe a task..."></textarea>',
   '    <div class="actions">',
   '      <button type="submit">Spawn</button>',
   '    </div>',
@@ -132,7 +132,7 @@ function progress(msg: string) {
 
 // sectionFor maps a page name to its UI area, emitted as a scoped "section::"
 // tag so the diff viewer can filter shots by the part of the app they cover
-// (repository browser, artifacts panel, …). Grouping by name prefix keeps the
+// (repository browser, artifacts panel, ...). Grouping by name prefix keeps the
 // page list (the source of truth) the only place a new shot must be declared.
 function sectionFor(name: string): string {
   if (name.startsWith('repository-diff')) return 'repository-diff'
@@ -205,7 +205,7 @@ async function settle(page: import('playwright').Page) {
 // transient Chromium protocol errors that surface under load. With up to ~32
 // headless contexts capturing in parallel (see the worker pool), a fullPage
 // grab can intermittently fail with "Unable to capture screenshot" when several
-// large captures coincide and momentarily exhaust the renderer — even though the
+// large captures coincide and momentarily exhaust the renderer - even though the
 // page itself is fine. Without a retry, one such blip rejects the whole run, so
 // the diffed side renders nothing (the symptom: "after side failed to render").
 // Backing off lets sibling captures finish and free memory; the pixels are
@@ -228,7 +228,7 @@ async function captureWithRetry(page: import('playwright').Page, opts: Parameter
   }
 }
 
-// Fixed seek time (seconds) for the simulated loader clips — shared by the
+// Fixed seek time (seconds) for the simulated loader clips - shared by the
 // dedicated videoDiff shots and the showArtifacts grid so every webm tile across
 // every shot decodes the identical, reproducible frame. Must be an absolute
 // timestamp, not duration-relative (see ensureVideosPainted).
@@ -239,19 +239,19 @@ const VIDEO_SEEK = 1.2
 // showing through to the transparent checkerboard backdrop (checkerStyle). This
 // is the flaky "loader-animation.webm renders transparent" symptom: play() is
 // no-op'd by the init script, so nothing advances the video on its own, and a
-// bare 'seeked' event can fire BEFORE the frame is really decodable — so the
+// bare 'seeked' event can fire BEFORE the frame is really decodable - so the
 // capture races the first-frame decode and intermittently grabs an empty tile.
 //
 // Robustness comes from verifying an actual decoded frame exists (a 16×16 canvas
 // read-back: drawImage of an undecoded video yields all-transparent pixels) and
 // retrying the seek until it does. Timing is driven by requestVideoFrameCallback
 // (fires exactly when a frame is composited) with a requestAnimationFrame fallback
-// — both deliberately, because the init script collapses every setTimeout under
+// - both deliberately, because the init script collapses every setTimeout under
 // 4000ms to 0, so a short setTimeout-based wait would resolve before any decode.
 //
 // `seek` pins an explicit absolute time. ALWAYS pass one for the simulated
 // loader clips: they're MediaRecorder-produced webm with no duration in the
-// header, so v.duration is *estimated from buffering* and drifts run-to-run —
+// header, so v.duration is *estimated from buffering* and drifts run-to-run -
 // deriving the target from it (e.g. duration * 0.6) lands on a different frame
 // each run (the bottom-of-frame webm sliver was exactly this flap). A fixed
 // timestamp decodes the same frame every time. The duration-based fallback below
@@ -262,7 +262,7 @@ async function ensureVideosPainted(page: import('playwright').Page, seek?: numbe
     const probe = document.createElement('canvas')
     probe.width = probe.height = 16
     const pctx = probe.getContext('2d', { willReadFrequently: true })
-    // True once the video holds a decoded, non-transparent current frame — i.e.
+    // True once the video holds a decoded, non-transparent current frame - i.e.
     // the tile (and any Highlight DiffCanvas drawn from it) will paint real pixels
     // rather than the checkerboard. drawImage works on hidden videos too, so this
     // also covers the Highlight modes that keep the <video>s off-screen.
@@ -280,11 +280,11 @@ async function ensureVideosPainted(page: import('playwright').Page, seek?: numbe
       v.pause()
       // Fully buffer the clip before seeking. This is the crux of the fix: a webm
       // below the fold loads under preload="auto" but stays PARTIALLY buffered, and
-      // VP9 decode off a partial buffer is nondeterministic — the seeked frame
+      // VP9 decode off a partial buffer is nondeterministic - the seeked frame
       // lands a frame off (light theme's moving progress bar) or simply decodes
       // with slight pixel noise (dark theme), so the tile flapped run to run while
       // the fully-buffered dedicated shots stayed stable. Kick one load() (NOT one
-      // per tick — repeated load() restarts buffering and never converges) then
+      // per tick - repeated load() restarts buffering and never converges) then
       // wait for HAVE_ENOUGH_DATA. These clips are tiny (~9KB / 2s) so it's quick.
       try { v.load() } catch { /* ignore */ }
       for (let frame = 0; frame < 600 && v.readyState < 4 /* HAVE_ENOUGH_DATA */; frame++) await raf()
@@ -297,7 +297,7 @@ async function ensureVideosPainted(page: import('playwright').Page, seek?: numbe
       // !v.seeking so we wait for the seek to complete; once it has, currentTime
       // holds the deterministic snapped-to-nearest frame and a paused clip (play()
       // is no-op'd) stays there. Re-issue the seek only if it clearly never took
-      // (idle but > 0.5s off target — a frame-boundary snap is far smaller).
+      // (idle but > 0.5s off target - a frame-boundary snap is far smaller).
       for (let frame = 0; frame < 360; frame++) {
         if (!v.seeking) {
           if (Math.abs(v.currentTime - target) > 0.5) {
@@ -355,12 +355,12 @@ try {
   //    the main content pane. The "nested-folders" page opens a simulated
   //    agent (agent-3) whose diff spans deeply nested paths, so the captured
   //    diff tree shows VS Code-style compacted folders (one/two/three on a
-  //    single row) — see internal/http/simulation.go GetAgentDiff(agent-3).
+  //    single row) - see internal/http/simulation.go GetAgentDiff(agent-3).
   //
   //    The diff viewer surfaces files that differ between the two versions. It
   //    starts from a byte hash but refines that with a pixel-level decode (see
   //    internal/artifacts Manager.Compare), so renders need only be PIXEL-stable,
-  //    not byte-identical — cosmetic encoder/metadata jitter is ignored. We still
+  //    not byte-identical - cosmetic encoder/metadata jitter is ignored. We still
   //    pin the obvious sources of *visible* nondeterminism so unchanged UI never
   //    reads as "modified":
   //      * Chromium font anti-aliasing: pinned with the flags below
@@ -387,7 +387,7 @@ try {
   const browser = await chromium.launch({ headless: true, args: flags })
   try {
     // `scrollTo` names a section <h2> to pin to the top of its scroll container
-    // before a non-fullPage capture — used when the interesting content sits
+    // before a non-fullPage capture - used when the interesting content sits
     // below the fold. agent-3's diff tree is below the terminal, so we scroll
     // the "Changes" section to the top and capture just the viewport there
     // instead of the whole (mostly-terminal) page.
@@ -401,11 +401,11 @@ try {
       // (wide but short) from a tablet, so landscape/tablet shots set it directly.
       // One of mobile | mobile-landscape | tablet | tablet-landscape | desktop.
       viewportTag?: 'mobile' | 'mobile-landscape' | 'tablet' | 'tablet-landscape' | 'desktop'
-      // CSS selector clicked once (after load, before capture) — used to open a
+      // CSS selector clicked once (after load, before capture) - used to open a
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
-      // CSS selector hovered (after load, before capture) — opens a hover-only
+      // CSS selector hovered (after load, before capture) - opens a hover-only
       // card tooltip (e.g. the "Merge queued" pill's explanation) so it's captured.
       hover?: string
       // CSS selectors clicked in sequence (each followed by a settle), then a
@@ -417,10 +417,10 @@ try {
       // A Playwright key chord pressed after load (e.g. 'Shift+Slash' for "?"),
       // with the focused element blurred first so it reaches the window-level
       // shortcut handler rather than being typed into a field. Used to open the
-      // keyboard-shortcuts overlay the way a user does — by pressing `?`.
+      // keyboard-shortcuts overlay the way a user does - by pressing `?`.
       pressKey?: string
       // Glob of a request to hold open (never fulfilled) so the page is captured
-      // in its in-flight loading state — e.g. holding the repo file-contents
+      // in its in-flight loading state - e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
       // never fires, so the goto waits for the DOM instead and then for the
       // spinner to appear.
@@ -434,17 +434,17 @@ try {
       // ('hydra-repo-diff-single-file') before boot. Omit for the default
       // (one file at a time); set false to capture the all-files-stacked view.
       repoDiffSingleFile?: boolean
-      // Expands the named artifact card (clicks its header) after load — used to
+      // Expands the named artifact card (clicks its header) after load - used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
-      // Types a query into the artifacts panel's search box after load — used to
+      // Types a query into the artifacts panel's search box after load - used to
       // document that search narrows like the tag filter (cards stay put, their
       // header counts reflect the narrowing) rather than removing non-matching
       // cards or auto-expanding them. Only meaningful on the artifacts (agent-1)
       // page; pair with imageDiffMode.
       searchArtifacts?: string
       // Expands the ready "screenshots" card and pins it to the top, then eager-loads
-      // every tile image and waits for the masonry to settle — so the capture shows
+      // every tile image and waits for the masonry to settle - so the capture shows
       // the actual before/after artifacts (the card defaults to collapsed, which
       // otherwise leaves these shots showing only the header row). Only meaningful on
       // the artifacts (agent-1) page; pair with imageDiffMode.
@@ -452,7 +452,7 @@ try {
       // Ticks the "Highlight" checkbox on every before/after image tile (after
       // showArtifacts has expanded the card), so the magenta pixel-diff overlay
       // (DiffCanvas) is captured painted over each changed image. Only meaningful
-      // with imageDiffMode 'ab' + showArtifacts — the AB switch and its Highlight
+      // with imageDiffMode 'ab' + showArtifacts - the AB switch and its Highlight
       // toggle only render in that mode, once the masonry tiles exist.
       highlightArtifacts?: boolean
       // Clicks the first before/after artifact image (after showArtifacts has
@@ -464,35 +464,35 @@ try {
       // left-click).
       openArtifactImage?: boolean
       // After openArtifactImage, click the lightbox's mode selector to switch the
-      // fullscreen comparator to this mode (by the selector's button label) — shows
+      // fullscreen comparator to this mode (by the selector's button label) - shows
       // before/after, onion, etc. working inside the lightbox. Only meaningful with
       // openArtifactImage.
       lightboxMode?: string
       // After openArtifactImage (+ any lightboxMode), magnify the lightbox comparator
-      // with the scroll-wheel so the zoom/pan chrome — the bottom-right minimap and
-      // "Reset view (N×)" button — is on screen, documenting the lightbox zoom feature.
+      // with the scroll-wheel so the zoom/pan chrome - the bottom-right minimap and
+      // "Reset view (N×)" button - is on screen, documenting the lightbox zoom feature.
       // The zoom is a pure function of the (fixed) wheel amount, so the shot stays
       // reproducible. Only meaningful with openArtifactImage.
       lightboxZoom?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
-      // before capturing — for the repository artifacts view, whose masonry is shown
+      // before capturing - for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
       // (lazy/off-screen tiles would otherwise load inconsistently). No-op when the
       // page has no masonry tiles.
       settleMasonry?: boolean
       // Attaches the given checkout-relative images to the spawn form's hidden
       // file input (each fed in named "image.png", so the form renumbers them
-      // image1.png, image2.png …) and then opens the lightbox by clicking the
-      // first attachment chip — documents the fullscreen image viewer and the
+      // image1.png, image2.png ...) and then opens the lightbox by clicking the
+      // first attachment chip - documents the fullscreen image viewer and the
       // numbered-paste naming. Captures the viewport (the lightbox is a fixed
       // overlay), and the upload request is stubbed so the chips settle instantly.
       attachImages?: string[]
       // Captures only the viewport (not the full page), unscrolled, so the shot
-      // focuses on a page's header region — e.g. the agent detail title bar —
+      // focuses on a page's header region - e.g. the agent detail title bar -
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
       // Scrolls the matched element into the middle of the viewport (after any
-      // click/settleMasonry steps), then captures the viewport — for content that
+      // click/settleMasonry steps), then captures the viewport - for content that
       // lives at the bottom of an inner scroll container the full-page capture
       // can't reach (the document body doesn't scroll). Used to reveal the
       // repository artifacts "Show build log" terminal.
@@ -500,24 +500,24 @@ try {
       // Forces a coarse (touch) pointer: makes the `(hover: hover) and (pointer:
       // fine)` media query report false, so keyboard-only affordances (shortcut
       // hints) hide exactly as they do on a real phone. The harness otherwise only
-      // sets a small viewport — Chromium still reports a fine mouse pointer — so a
+      // sets a small viewport - Chromium still reports a fine mouse pointer - so a
       // mobile shot of a menu would wrongly show desktop shortcut hints. Set this on
       // the small-screen shots whose chrome is keyboard-gated.
       coarsePointer?: boolean
       // Stubs the upload-serving endpoint (GET /uploads/.../blob) with this
       // checkout-relative PNG, so a prompt block that references upload images
       // renders its attachment-chip thumbnails (and lightbox) from a fixed,
-      // deterministic image — no real uploads dir needed. After load, waits for
+      // deterministic image - no real uploads dir needed. After load, waits for
       // the chips to render. Used by the agent-prompt-attachments shot.
       stubUpload?: string
       // Seeds an unsent spawn-prompt draft (both the compact + full layout keys)
-      // before the app boots, so the spawn box renders pre-filled — used to
+      // before the app boots, so the spawn box renders pre-filled - used to
       // document the live inline-markdown highlighting (and its line-wrapping)
       // in the textarea overlay without driving keystrokes.
       seedPrompt?: string
       // Seeds the remembered agent→model map (StorageKeys.defaultModel) before
       // boot, so the spawn form's agent+model picker renders with a model already
-      // selected (the trigger shows its label; the row is checked) — used to
+      // selected (the trigger shows its label; the row is checked) - used to
       // document the model selector without driving clicks through the menu.
       seedModel?: Record<string, string>
       // Dispatches a real paste of `text` into the full-page spawn textarea
@@ -526,7 +526,7 @@ try {
       // is attached as a pasted-text-N.txt chip rather than dumped into the box.
       // `vscodeMode` adds the VS Code clipboard language tag so the paste reads
       // as code; `again` fires the paste twice so the second one inlines the
-      // block for real — fenced as ```<vscodeMode> when it's code. Pairs with
+      // block for real - fenced as ```<vscodeMode> when it's code. Pairs with
       // tallSpawn (to show a tall inlined block) and seedPrompt (a typed task
       // above the chip).
       pasteText?: { text: string; vscodeMode?: string; again?: boolean }
@@ -540,21 +540,21 @@ try {
       tallSpawn?: boolean
       // Screenshot-only: seed a narrow sidebar width before boot so a menu opened
       // from the sidebar header (the project switcher) is wider than the sidebar
-      // itself — documenting that the portal-rendered menu overlays the content
+      // itself - documenting that the portal-rendered menu overlays the content
       // instead of being clipped by the sidebar's `overflow-hidden`. Capture-time
       // override only; the app's default width is unchanged.
       narrowSidebar?: boolean
       // Focuses the full-page spawn textarea and selects ALL of its text after the
       // page settles, so the capture overlays the browser's selection band (which
       // marks the REAL, selectable text positions) on top of the highlight backdrop
-      // — making any drift between the two layers obvious. Used to prove the fenced
+      // - making any drift between the two layers obvious. Used to prove the fenced
       // code block highlighting stays glyph-aligned with the textarea. Pairs with
       // seedPrompt + tallSpawn.
       selectSpawnText?: boolean
       // Seeds the artifact tag filter (localStorage key built from project+agent)
       // before the app boots, so the artifacts panel renders with a filter applied.
       // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
-      // the dark shots) — documents the header tag filter actively in use plus the
+      // the dark shots) - documents the header tag filter actively in use plus the
       // per-file tag badges. Only meaningful on the artifacts (agent-1) page.
       tagFilter?: { scoped?: Record<string, string[]>; free?: string[]; changeThreshold?: number }
       // Opens a tag-filter dropdown by its button label (e.g. 'theme'), so the
@@ -568,30 +568,30 @@ try {
       artifactInfo?: boolean
       // Hovers the tests panel's info (i) icon with the "Tests" heading pinned
       // near the TOP of the viewport, so there's no room for the card above it
-      // and it has to flip downward instead of being clipped off-screen — the
+      // and it has to flip downward instead of being clipped off-screen - the
       // regression shot for the tooltip flip fix. Captures the viewport (the
       // card is a fixed portal). Only meaningful on a tests-panel agent page.
       testsInfo?: boolean
       // Expands the "screenshots" card, seeks its loader-animation.webm pair to
-      // the given time (paused), and pins that row to the top — so the capture
+      // the given time (paused), and pins that row to the top - so the capture
       // shows the video diff viewer (VideoDiffView) directly rather than buried
       // in a collapsed "N changed" card. Captures the viewport. The seek lands a
       // mid-clip frame so the before/after progress bars differ; the page's
       // play() no-op keeps the pair paused so the frame is byte-stable. Only
       // meaningful on the artifacts (agent-1) page, paired with imageDiffMode.
       // `highlight` clicks the video's "Highlight" tab (the magenta per-frame
-      // pixel-diff, which now lives inside Before/After) — pair with imageDiffMode 'ab'.
+      // pixel-diff, which now lives inside Before/After) - pair with imageDiffMode 'ab'.
       videoDiff?: { seek: number; highlight?: boolean }
       // Settings only: turn OFF the "Enabled" switch on the seeded [[artifacts]]
       // and [[services]] entries (the EnabledToggle in web/.../SettingsComponents).
       // Flipping each to disabled both mutes/labels its card "Disabled" AND marks
-      // the config dirty, so the bottom-pinned FloatingSaveBar appears — one shot
+      // the config dirty, so the bottom-pinned FloatingSaveBar appears - one shot
       // documenting the disabled-entry styling and the floating save affordance.
       // Pair with scrollTo: 'Diff Artifacts' so the two editors fill the viewport.
       disableSettingsEntries?: boolean
       // Scrolls the diff so the named file's header (a path substring) is pinned
       // beneath the sticky "Changes" toolbar, with part of that file's body
-      // scrolled under the now-stuck header — documents the sticky file header
+      // scrolled under the now-stuck header - documents the sticky file header
       // (and the file-list sidebar, which pins at the same Y). Waits for the
       // artifacts panel (WS-populated, untracked by networkidle) first so the
       // file's measured offset is stable. Only meaningful on an agent diff page.
@@ -641,19 +641,19 @@ try {
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
       // right of agents that went running→waiting/finished while you were away
-      // (agent-2 in the simulation), and the project dropdown — opened here —
+      // (agent-2 in the simulation), and the project dropdown - opened here -
       // shows a per-project unread count badge, with a dot on the folder button
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
       // The uncommitted-changes warning next to the Repository button (the
-      // simulation reports a dirty .hydra/config.toml — see simulation.go
+      // simulation reports a dirty .hydra/config.toml - see simulation.go
       // GetRepositoryPushStatus), opened to its commit popover: the dirty path
       // list plus the prefilled message input and "Commit all" button.
       { name: 'uncommitted-changes-popover', path: '/project/sim-project/', click: '[data-testid="uncommitted-chip"]' },
       // The project switcher opened over a deliberately narrow sidebar. The menu
       // (fixed w-72) is far wider than the sidebar, so it must overlay the content
-      // area rather than be clipped by the sidebar's `overflow-hidden` — verifies
+      // area rather than be clipped by the sidebar's `overflow-hidden` - verifies
       // the portal-rendered menu (mirrors the Ctrl+` switcher's forced-open state).
       { name: 'project-switcher-narrow', path: '/', click: 'button[aria-label="Select project"]', narrowSidebar: true },
       // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
@@ -661,7 +661,7 @@ try {
       // never produces, so they're rendered deterministically via the toast
       // harness over the settings page (a route that loads no project agents, so
       // nothing else pops a toast). Messages mirror the real ones the hook emits.
-      // 1. An agent crossed into needs_input — "<bot> <agent> transitioned to
+      // 1. An agent crossed into needs_input - "<bot> <agent> transitioned to
       // <status pill>", the agent label linking to it; lingers 12s.
       {
         name: 'toast-needs-input',
@@ -672,7 +672,7 @@ try {
           agentTransition: { agentName: 'Migrate auth providers to OAuth', agentId: 'agent-2', projectId: 'sim-project', status: 'needs_input' },
         },
       },
-      // 2. An agent finished — same row, green "finished" pill; auto-dismisses at 8s.
+      // 2. An agent finished - same row, green "finished" pill; auto-dismisses at 8s.
       {
         name: 'toast-finished',
         path: '/settings',
@@ -684,7 +684,7 @@ try {
       },
       // 2a. A transition in ANOTHER project (the background count diff in
       // useAgentNotifications): the same card topped with the neutral gray
-      // folder+project banner — the calm sibling of the approval card's
+      // folder+project banner - the calm sibling of the approval card's
       // amber one (agent-approvals-another-project).
       {
         name: 'toast-finished-another-project',
@@ -698,7 +698,7 @@ try {
       // 2b. Merge-lifecycle toasts (AgentDetail armMerge/executeMerge + the
       // background auto-merge detector in agentStore): the same agent card, with
       // the pill/copy describing the merge instead of a status transition.
-      // Queued (auto-merge armed) — text-only row (no pill), with the emerald
+      // Queued (auto-merge armed) - text-only row (no pill), with the emerald
       // "merge queued" Clock tile instead of the bot.
       {
         name: 'toast-merge-queued',
@@ -709,18 +709,18 @@ try {
           agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', icon: 'merge-queued', before: 'will merge into `main` when it finishes and tests pass' },
         },
       },
-      // In-flight merge — persistent (dismissed when the POST settles), green
+      // In-flight merge - persistent (dismissed when the POST settles), green
       // "merging" pill leading the row.
       {
         name: 'toast-merging',
         path: '/settings',
         toast: {
-          message: 'Merging agent "Add renameable agent titles" into main…',
+          message: 'Merging agent "Add renameable agent titles" into main...',
           type: 'info',
-          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merging', before: '', after: 'into `main`…' },
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merging', before: '', after: 'into `main`...' },
         },
       },
-      // Merge landed — green "merged" pill (also what a background auto-merge pops).
+      // Merge landed - green "merged" pill (also what a background auto-merge pops).
       {
         name: 'toast-merged',
         path: '/settings',
@@ -730,7 +730,7 @@ try {
           agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merged', before: '', after: 'into `main`' },
         },
       },
-      // 2c. A plain message toast with a `backtick` branch pill — the sidebar
+      // 2c. A plain message toast with a `backtick` branch pill - the sidebar
       // Sync button's success toast (usePushStatus).
       {
         name: 'toast-synced',
@@ -739,7 +739,7 @@ try {
       },
       // 3. Security-gate approval cards (the rich ApprovalCard): persistent, with
       // Allow once / Always allow / Deny; dismissing denies. These are the ONLY
-      // shots that render an approval card — the simulated agents never park a
+      // shots that render an approval card - the simulated agents never park a
       // live approval (see simulation.go), so the global toasts don't leak onto
       // every screen. One `agent-approvals-*` shot per gated kind documents each
       // design, over /settings (a route that loads no project agents). agentId +
@@ -759,7 +759,7 @@ try {
           approval: { kind: 'mcp', target: 'linear', agentName: 'Wire up the GitHub MCP server', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
-      // 3b. A specific write tool on an already-trusted server — amber WRITE badge,
+      // 3b. A specific write tool on an already-trusted server - amber WRITE badge,
       // arguments shown as highlighted JSON in the code box.
       {
         name: 'agent-approvals-tool-write',
@@ -775,7 +775,7 @@ try {
           approval: { kind: 'mcp_tool', target: 'linear__create_issue', rw: 'write', agentName: 'Triage inbound bugs', agentId: 'agent-approval', projectId: 'sim-project', argsPreview: '{"team":"Core","title":"Login 500s on staging","priority":2,"labels":["bug","regression"]}' },
         },
       },
-      // 3c. A read-only tool call — quieter, teal READ badge.
+      // 3c. A read-only tool call - quieter, teal READ badge.
       {
         name: 'agent-approvals-tool-read',
         path: '/settings',
@@ -790,7 +790,7 @@ try {
           approval: { kind: 'mcp_tool', target: 'linear__search_issues', rw: 'read', agentName: 'Summarise this sprint', agentId: 'agent-approval', projectId: 'sim-project', argsPreview: '{"state":"Done","cycle":42}' },
         },
       },
-      // 3d. An outbound WebFetch — NETWORK badge + URL, and the caption spelling
+      // 3d. An outbound WebFetch - NETWORK badge + URL, and the caption spelling
       // out that allowing trusts the whole host (every request, including POSTs).
       {
         name: 'agent-approvals-webfetch',
@@ -840,7 +840,7 @@ try {
           approval: { kind: 'mcp', target: 'github', agentName: 'Reconcile Stripe events', crossProject: 'payments-api' },
         },
       },
-      // The keyboard-shortcuts help overlay, opened the way a user does — by
+      // The keyboard-shortcuts help overlay, opened the way a user does - by
       // pressing `?` (no on-screen button; the overlay is the discovery surface).
       // It lists every shortcut (General + Agent) from the central registry
       // (web/src/lib/shortcuts.ts). Captured over the project home; viewportOnly
@@ -855,7 +855,7 @@ try {
       // documents the dropdown: the current branch (HEAD), agent branches, and
       // other branches. Verifies the menu renders below the "from" trigger and
       // escapes the spawn card's `overflow-hidden` clipping (the BranchSelector
-      // portal fix) — the bug where the dropdown didn't show when selected. The
+      // portal fix) - the bug where the dropdown didn't show when selected. The
       // branch list comes from the simulation server. Scoped to .max-w-4xl so it
       // opens the full-page form's selector, not the compact sidebar box's (both
       // carry the same title).
@@ -868,31 +868,31 @@ try {
       { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[title^="Base branch"]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
-      // highlighting — `code`, *italic*, **bold**, and a long inline-code
-      // reference wrapping across lines — and the sidebar shows the rendered
+      // highlighting - `code`, *italic*, **bold**, and a long inline-code
+      // reference wrapping across lines - and the sidebar shows the rendered
       // live-activity lines: agent-md's markdown activity and agent-3's
-      // "$ …"-command activity (rendered wholly as code, overriding markdown).
+      // "$ ..."-command activity (rendered wholly as code, overriding markdown).
       // Full-page so both the box and the sidebar activity land in one shot.
       // tallSpawn enlarges both spawn boxes (capture-only) so the whole seeded
       // draft, fenced code block included, is visible without scrolling.
       { name: 'spawn-markdown', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true },
       // The same seeded markdown draft with the whole spawn box selected. The
       // browser's selection band marks where the REAL (selectable) textarea text
-      // sits, painted over the highlight backdrop — so the two layers can be
+      // sits, painted over the highlight backdrop - so the two layers can be
       // checked for drift at a glance. The acid test is the fenced ```code``` block
       // (and the blank line that hugs it): the selection rows must land exactly on
       // the highlighted rows, proving the inline-block code block stays glyph-aligned
       // with the textarea. tallSpawn shows the whole draft (block included) unscrolled.
       { name: 'spawn-markdown-selected', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true, selectSpawnText: true },
       // A large text paste turned into an attachment. Pasting a block over the
-      // line threshold (a CI log here) doesn't fill the textarea — it lands as a
+      // line threshold (a CI log here) doesn't fill the textarea - it lands as a
       // pasted-text-1.txt chip below it, the same chip the file uploads use, so
       // the typed task above stays readable. Documents the
       // attach-pasted-text-instead-of-inlining behavior on the full-page form.
       { name: 'spawn-pasted-text', path: '/project/sim-project/', seedPrompt: PASTED_TEXT_INSTRUCTION, pasteText: { text: PASTED_LOG_DEMO } },
       // The code-paste path: pasting an HTML snippet copied from an editor
       // attaches it on the first paste, and pasting it AGAIN inlines it for real
-      // — wrapped in a ```html fence (the clipboard's language tag) so it renders
+      // - wrapped in a ```html fence (the clipboard's language tag) so it renders
       // as a fenced code block in the highlight overlay. `again` fires both
       // pastes; tallSpawn enlarges the box so the whole fenced block shows.
       { name: 'spawn-pasted-code', path: '/project/sim-project/', pasteText: { text: PASTED_HTML_DEMO, vscodeMode: 'html', again: true }, tallSpawn: true },
@@ -904,7 +904,7 @@ try {
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The tests panel (PLAN #68), now styled like the artifacts panel and living
       // in the diff viewer just below the "Changes" header. Pin Changes to the top,
-      // then expand agent-2's single (failing) runner card by clicking its header —
+      // then expand agent-2's single (failing) runner card by clicking its header -
       // its fixtures (simTestRunners) are a regression with two failing cases, so
       // the card shows the assertion messages failing-first.
       { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
@@ -920,13 +920,13 @@ try {
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
       // The indeterminate progress bar: agent-md's second runner ("eslint") is a
       // streamed run with no declared ::hydra:test:total::, so it has no fill
-      // percentage — the bar is a full-width sliding "barber pole" of diagonal
+      // percentage - the bar is a full-width sliding "barber pole" of diagonal
       // stripes ("working, length unknown") rather than a partial fill. Expand
       // that card by its name so the striped bar sits under the live counts.
       { name: 'tests-panel-running-indeterminate', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has-text("eslint")'] },
       // The tests panel's info (i) card hovered with its heading pinned near the
       // top of the viewport: the tall card has no room above, so it opens DOWNWARD
-      // with its arrow pointing up — the regression shot for the tooltip flip fix
+      // with its arrow pointing up - the regression shot for the tooltip flip fix
       // (it used to be hard-coded to open upward and clipped off the top here). The
       // short viewport scrolls the terminal away so the Tests icon sits high on
       // screen, the condition that triggered the clip; testsInfo does the pin+hover.
@@ -935,12 +935,12 @@ try {
       // "Merge" now; opening its split-button dropdown on agent-2's failing verdict
       // reveals the soft-gate warning plus the Force merge / Queue merge overrides.
       { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge options"]' },
-      // The force-merge confirm that names exactly what's being overridden — reached
+      // The force-merge confirm that names exactly what's being overridden - reached
       // by opening the merge dropdown and choosing Force merge.
       { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
       // The merge-and-continue confirm (merge with close=false): reached from the
       // merge dropdown's "Merge and continue" on agent-1 (finished, no test
-      // verdict, so the un-gated variant) — the copy promises the agent keeps
+      // verdict, so the un-gated variant) - the copy promises the agent keeps
       // running instead of "closes the session".
       { name: 'merge-and-continue-confirm', path: '/project/sim-project/agent/agent-1', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Merge and continue")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
@@ -969,22 +969,22 @@ try {
       // (vs agent-2's {} module describe blocks), amid a real dir/file tree.
       { name: 'tests-card-functions', path: '/project/sim-project/agent/agent-1', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("status")', 'button:text-is("all")', 'h3:has-text("Tests")'] },
       // The merge-gate dialog while tests are still running: agent-3 (running, not
-      // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
+      // armed) - clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.
       { name: 'tests-merge-gate-dialog-running', path: '/project/sim-project/agent/agent-3', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The merge gate when the AGENT (not the tests) isn't ready: agent-approval is
       // blocked asking you a question (needs_input), so clicking Merge warns "Agent
-      // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice —
+      // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice -
       // Queue arms merge-when-green so it lands once the agent finishes and is green.
       { name: 'merge-agent-active-dialog', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The agent + model picker dropdown, opened on the compact ("mini") spawn
       // box in the sidebar. The picker is a compact trigger (the active agent's
       // brand mark + the chosen model's short label) that opens a menu grouping
-      // every agent type with its curated models nested underneath — so agent AND
+      // every agent type with its curated models nested underneath - so agent AND
       // model are chosen in one gesture (web/src/components/SpawnForm.tsx). This
       // shot documents the brand icons/accents and the nested model rows.
       // Captured on an agent page (not the project landing) so the sidebar's
-      // compact box is the only spawn form on screen — the full-page box would
+      // compact box is the only spawn form on screen - the full-page box would
       // otherwise add a second, identical picker and make the click ambiguous.
       // viewportOnly: the menu is a fixed overlay anchored to the trigger at the
       // top-left, so the default viewport already frames both the box and menu.
@@ -1004,7 +1004,7 @@ try {
       // The repository view's loading state: while a file's contents are being
       // fetched the main pane shows a centered spinner (not the previously shown
       // file), so switching files never flashes stale content. We hold the
-      // file-contents request open so the capture lands mid-load — the tree
+      // file-contents request open so the capture lands mid-load - the tree
       // populated on the left, the spinner on the right. (The file request only
       // fires once branches + tree have loaded, so holding it implies both are
       // already rendered.)
@@ -1017,7 +1017,7 @@ try {
       // The "raw" file view: the file header's Raw button (and the image
       // preview's copy/raw controls) open the unrendered blob in a new tab,
       // served by the /repository/.../blob endpoint and rendered by the browser
-      // as plain text — GitHub's "raw" page. We navigate straight to that blob
+      // as plain text - GitHub's "raw" page. We navigate straight to that blob
       // URL to document where the Raw button lands. Theme doesn't affect the
       // browser's plain-text rendering, so the light/dark shots match.
       { name: 'repository-raw', path: '/repository/projects/sim-project/blob?path=internal/server/server.go&ref=main' },
@@ -1035,7 +1035,7 @@ try {
       // per-file line counts and added/removed/renamed change-type tags.
       // Simulation serves a small mock diff with one of each change type (see
       // GetRepositoryDiff in internal/http/simulation.go). The default is one file
-      // at a time — the main pane shows only the file selected in the left list.
+      // at a time - the main pane shows only the file selected in the left list.
       {
         name: 'repository-diff',
         path: '/project/sim-project/repository',
@@ -1053,7 +1053,7 @@ try {
       // One file at a time, selecting each change type from the left list (the
       // third click). heads.go is a full-context ("expanded") file, so its diff
       // shows surrounding context collapsed behind ⌄/⌃ "··· N lines ···"
-      // expanders — documenting how context is handled.
+      // expanders - documenting how context is handled.
       {
         name: 'repository-diff-context',
         path: '/project/sim-project/repository',
@@ -1135,7 +1135,7 @@ try {
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
       { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', settleMasonry: true },
       // The same view with its "Show build log" toggle opened: the settled script's
-      // persisted log (log_url) loads into an xterm terminal below the images —
+      // persisted log (log_url) loads into an xterm terminal below the images -
       // documents the build-log pane (ANSI colour, button-less overlay scrollbar,
       // Ctrl+C-to-copy). clicks waits out the log fetch the toggle fires; the log
       // sits at the bottom of an inner scroll container, so reveal it for capture.
@@ -1151,8 +1151,8 @@ try {
       { name: 'repository-mobile-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true },
       { name: 'repository-mobile', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true },
       // The phone file view's overflow ("hamburger") menu opened: copy contents,
-      // view raw, and the view settings — the controls shown inline in the
-      // desktop header — collapsed into one top-right menu.
+      // view raw, and the view settings - the controls shown inline in the
+      // desktop header - collapsed into one top-right menu.
       { name: 'repository-mobile-menu', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true, click: 'button[aria-label="File actions"]' },
       // A branch diff drilled into on a phone: enter diff mode from the header
       // (compare → pick branch), then tap a changed file to open its diff
@@ -1160,7 +1160,7 @@ try {
       // the phone drill-down for the compare view.
       { name: 'repository-mobile-diff', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'] },
       // Diff mode on a phone *before* picking a file: the changed-files list with
-      // the base → head selectors in the header — documenting that the compact
+      // the base → head selectors in the header - documenting that the compact
       // selectors fit the narrow header without overflowing.
       { name: 'repository-mobile-diff-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'] },
       { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
@@ -1175,13 +1175,13 @@ try {
       // whole page: the pre-spawn + pre-exit editors sit near the bottom, the
       // "Diff Artifacts" editor (the [[artifacts]] scripts) below that, and the
       // "Services" editor (the [[services]], with a live "Running" status badge)
-      // below that — so the viewport must be tall enough to reach the very bottom
+      // below that - so the viewport must be tall enough to reach the very bottom
       // (simulation seeds one of each there).
       { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 2900 } },
       // The per-agent Claude settings tab, opened by clicking the "Claude" pill in
       // the AgentSelector. Documents the agent-specific ConfigForm and, in
       // particular, the Claude-only "Fullscreen Rendering" toggle that sits between
-      // the system pre-prompt and the sandbox policy (off by default — see
+      // the system pre-prompt and the sandbox policy (off by default - see
       // ResolveFullscreen / claudeRenderingEnv). :text-is matches the pill's exact
       // label, so it can't collide with the "All agents" tab.
       { name: 'settings-claude', path: '/project/sim-project/settings', click: 'button:text-is("Claude")', viewport: { width: 1280, height: 2900 } },
@@ -1214,7 +1214,7 @@ try {
       // turned OFF, scrolled so those two sections fill the viewport. Toggling
       // each entry's "Enabled" switch off documents the disabled-card styling
       // (dashed border, dimmed body, "Disabled" label/badge) and, because that
-      // edits the config, brings up the bottom-pinned FloatingSaveBar — so the
+      // edits the config, brings up the bottom-pinned FloatingSaveBar - so the
       // floating "Unsaved changes" save affordance is captured too, exactly as it
       // looks from the bottom of a long settings page. scrollTo forces a viewport
       // capture, which includes the fixed save bar.
@@ -1227,14 +1227,14 @@ try {
       },
       // The agent detail header bar showing the user-facing title (e.g. "Add
       // renameable agent titles") in place of the stable ID, the adaptive action
-      // toolbar (Merge / Mark as unread / Rename / Kill — shown with labels at this
+      // toolbar (Merge / Mark as unread / Rename / Kill - shown with labels at this
       // width), and a status dot. Viewport-only so the shot focuses on the bar
       // rather than the terminal/diff below.
       { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
       // The inline rename in progress: clicking the title (it carries an I-beam to
       // signal it's editable) swaps it for an input seeded with the current title
       // (Enter saves via PATCH, Esc cancels). Target the Rename action by its
-      // aria-label, which is the bare label "Rename" — the `title` attribute now
+      // aria-label, which is the bare label "Rename" - the `title` attribute now
       // carries the keyboard hint ("Rename (F2)") on fine-pointer devices
       // (AgentTopBar actionTitle/useFinePointer), so a title="Rename" match no
       // longer works.
@@ -1245,12 +1245,12 @@ try {
       // so a viewport capture frames it.
       { name: 'agent-merge-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The redesigned kill confirmation: clicking Kill opens the destructive
-      // variant — red icon tile + a warning chip naming how many unmerged files
+      // variant - red icon tile + a warning chip naming how many unmerged files
       // the worktree deletion will discard (count fetched in the background).
       { name: 'agent-kill-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Kill"]' },
       // The redesigned merge-conflict panel: agent-3's diff carries the
       // merge_conflict flag (simulation.go GetAgentDiff), so the Changes toolbar
-      // shows a red "N conflict" button; clicking it opens the rich panel — red
+      // shows a red "N conflict" button; clicking it opens the rich panel - red
       // icon tile + title/subtitle, an uppercase "Conflicting files" chip and the
       // dark "Resolving locally" command block, with Dismiss / Fix-with-agent in
       // the shared dialog-button styling. scrollTo brings the toolbar into view for
@@ -1258,7 +1258,7 @@ try {
       { name: 'merge-conflict-dialog', path: '/project/sim-project/agent/agent-3', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("conflict")' },
       // The redesigned update-from-base confirmation: agent-2's diff trails its
       // base (behind_count) so the Changes toolbar shows an amber "N behind"
-      // button; clicking it opens the rich panel — amber icon tile, a base→branch
+      // button; clicking it opens the rich panel - amber icon tile, a base→branch
       // chip with the behind count, and (because agent-2 also has uncommitted
       // changes) the amber caution note. scrollTo reveals the toolbar for the click.
       { name: 'agent-update-base-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("behind")' },
@@ -1273,7 +1273,7 @@ try {
       // never resolves in simulation); stubUpload serves the thumbnails.
       { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
       // (The security-gate approval cards are documented as the harness-driven
-      // agent-approvals-* shots above — the simulated agent no longer parks a live
+      // agent-approvals-* shots above - the simulated agent no longer parks a live
       // approval, so the cards don't leak onto every simulated page.)
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
@@ -1291,7 +1291,7 @@ try {
         click: 'button:has(svg.lucide-settings)',
       },
       // The sticky file header: each file's header now pins beneath the sticky
-      // "Changes" toolbar while that file's diff scrolls under it — the same
+      // "Changes" toolbar while that file's diff scrolls under it - the same
       // stacked-sticky treatment the artifacts/tests headers use. We scroll
       // agent-1's diff so the web/src/components/AgentDetail.tsx file's header is
       // stuck under the toolbar (its body scrolled partway under it), with the
@@ -1309,19 +1309,19 @@ try {
       // "Archived" sidebar section itself is already visible in the `home` shot.
       { name: 'archived-agent', path: '/project/sim-project/agent/archived-1' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
-      // desktop shapes). Scroll to the "Changes" header — the artifacts panel
-      // renders directly below it — and use a taller viewport so the wrapped
+      // desktop shapes). Scroll to the "Changes" header - the artifacts panel
+      // renders directly below it - and use a taller viewport so the wrapped
       // before/after cards fit in one capture. Meta: a screenshot of the diff
       // page showing artifact before/after screenshots.
       //
       // The diff viewer offers four image-diff comparison modes (a setting in the
       // diff viewer; see web/src/components/ArtifactsPanel.tsx ImageDiffView). We
       // capture the artifacts panel once per mode so each option is documented:
-      //   side-by-side — before and after shown next to each other ('artifacts')
-      //   ab           — before/after stacked, click to flip; a "Highlight" tab
+      //   side-by-side - before and after shown next to each other ('artifacts')
+      //   ab           - before/after stacked, click to flip; a "Highlight" tab
       //                  paints the changed pixels magenta (the app's default mode)
-      //   slider       — draggable divider with a hard cut between before/after
-      //   onion        — before/after blended via an opacity slider
+      //   slider       - draggable divider with a hard cut between before/after
+      //   onion        - before/after blended via an opacity slider
       // Each sets showArtifacts so the "screenshots" card is expanded and its
       // before/after masonry is actually visible (the card defaults to collapsed).
       // The collapsed panel itself is documented by 'artifacts-collapsed' below.
@@ -1352,7 +1352,7 @@ try {
       // The lightbox is diff-aware: opened from a tile, it shows the before/after
       // comparator fullscreen with a mode selector. These two switch it to the AB
       // (Before · After toggle) and onion-skin modes inside the lightbox, documenting
-      // that every diff mode works there — not just a static image.
+      // that every diff mode works there - not just a static image.
       {
         name: 'artifact-lightbox-ab',
         path: '/project/sim-project/agent/agent-1',
@@ -1388,7 +1388,7 @@ try {
         lightboxZoom: true,
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
-      // a spinner while generating, etc.) until clicked open — the default, opt-in
+      // a spinner while generating, etc.) until clicked open - the default, opt-in
       // state. Documents the at-a-glance overview before any card is expanded.
       {
         name: 'artifacts-collapsed',
@@ -1409,7 +1409,7 @@ try {
       // tile: each tile's pixel-diff (DiffCanvas) paints the differing pixels
       // magenta on top of the shown side, so the exact changed regions are
       // marked while flipping Before↔After. Like artifacts-ab but with Highlight
-      // enabled — documents the overlay (and its pixel-for-pixel alignment with
+      // enabled - documents the overlay (and its pixel-for-pixel alignment with
       // the base image).
       {
         name: 'artifacts-highlight',
@@ -1468,7 +1468,7 @@ try {
       // slider at its foot: it sets how much of an image's pixels (or a video's
       // frames) must differ before a "modified" file counts as changed; below it,
       // a file is treated as identical. Seeded to 10% (so the trigger reads its
-      // active style and the slider sits mid-track) — at that gate the near-
+      // active style and the slider sits mid-track) - at that gate the near-
       // identical home shots (3% changed, see simReadyChangedSet ChangeRatio) fold
       // into the "unchanged" count while the larger login/profile/webm diffs stay
       // "modified", which the per-value counts in the menu document.
@@ -1482,7 +1482,7 @@ try {
         openFilter: 'changes',
         showArtifacts: true,
       },
-      // The artifacts panel's info (i) tooltip, opened — documents what artifacts
+      // The artifacts panel's info (i) tooltip, opened - documents what artifacts
       // are, the script contract, the progress marker, and the tags/filter rules
       // (the tooltip's last paragraph). Hovered open and captured against the
       // diff page so it reads in context.
@@ -1494,9 +1494,9 @@ try {
         artifactInfo: true,
       },
       // Every render state of the artifacts panel in one shot. agent-1's
-      // simulated response (internal/http/simulation.go) carries four sets —
+      // simulated response (internal/http/simulation.go) carries four sets -
       // changed, generating (with a live progress line), error, and no-visual-
-      // changes — each in the same card. A taller viewport fits all four so the
+      // changes - each in the same card. A taller viewport fits all four so the
       // states document side by side. Documents that switching states never
       // changes the card shell and refresh stays reachable in every state.
       {
@@ -1545,7 +1545,7 @@ try {
         expandArtifact: 'storybook',
       },
       // A partially-failed card expanded: the before (left) side died but the after
-      // side rendered, so the card stays "ready" — the before terminal is
+      // side rendered, so the card stays "ready" - the before terminal is
       // red-bordered while the after terminal and the surviving side's images still
       // show below. agent-1's "dashboard" set is the partial-failure one.
       {
@@ -1574,8 +1574,8 @@ try {
       // expand it and pin the .webm row to the top. The before/after pair is
       // seeked to a mid-clip frame (paused) so the progress bars differ. Two
       // shots document the two most distinct video modes:
-      //   side-by-side   — the Before / After clips next to each other + transport
-      //   ab + Highlight — the per-frame pixel diff (changed pixels painted magenta),
+      //   side-by-side   - the Before / After clips next to each other + transport
+      //   ab + Highlight - the per-frame pixel diff (changed pixels painted magenta),
       //                    now a "Highlight" tab inside the Before/After mode
       {
         name: 'artifact-video',
@@ -1600,11 +1600,11 @@ try {
       // so a reviewer can filter the panel down to just the small-screen shots.
       //
       // The project home at phone width: the full-page spawn form fills the
-      // screen, the top bar is gone, and the sidebar is collapsed by default —
+      // screen, the top bar is gone, and the sidebar is collapsed by default -
       // so only the small floating "show sidebar" button sits top-left.
       { name: 'mobile-home', path: '/project/sim-project/', viewport: { width: 390, height: 844 } },
       // The sidebar opened: clicking the floating reveal button slides the
-      // sidebar in over a dimmed backdrop. It now carries the whole app chrome —
+      // sidebar in over a dimmed backdrop. It now carries the whole app chrome -
       // its header has the project selector + collapse button, and its footer the
       // Settings link + usage. Viewport capture since the drawer is a fixed overlay.
       {
@@ -1625,7 +1625,7 @@ try {
       // The agent page's top bar (shown while the sidebar is collapsed): the
       // show-sidebar toggle, the agent name, and the adaptive action toolbar. At
       // phone width the title takes priority, so the actions fold into the overflow
-      // "⋯" menu rather than truncating the name — opened here to show the remaining
+      // "⋯" menu rather than truncating the name - opened here to show the remaining
       // actions (Mark as unread / Rename / Kill). Shortcut hints are hidden on the
       // touch viewport (no keyboard).
       {
@@ -1643,7 +1643,7 @@ try {
       // the whole height; the floating reveal button is the only chrome.
       { name: 'mobile-landscape-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
       // The sidebar opened as an overlay (still below the lg breakpoint) so it
-      // doesn't squeeze the short content underneath — header, list, and footer
+      // doesn't squeeze the short content underneath - header, list, and footer
       // all visible at once.
       {
         name: 'mobile-landscape-menu',
@@ -1656,7 +1656,7 @@ try {
 
       // ── Tablet portrait (834×1112) ──────────────────────────────────────────
       // A tablet upright: below the lg breakpoint, so the sidebar is an overlay
-      // (collapsed by default) and the content spans the full width — no more
+      // (collapsed by default) and the content spans the full width - no more
       // cramped permanent two-column split.
       { name: 'tablet-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
       // The sidebar opened over the content (overlay + backdrop).
@@ -1671,7 +1671,7 @@ try {
 
       // ── Tablet landscape (1112×834) ─────────────────────────────────────────
       // A tablet on its side: at/above the lg breakpoint, so the sidebar is the
-      // usual persistent in-flow column — this is the clearest look at the new
+      // usual persistent in-flow column - this is the clearest look at the new
       // chrome (selector + collapse button in the sidebar header, Settings +
       // usage in its footer, no top bar).
       { name: 'tablet-landscape-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
@@ -1696,7 +1696,7 @@ try {
       { name: 'desktop-collapsed', path: '/project/sim-project/agent/agent-1', click: 'button[aria-label="Hide sidebar"]', viewportOnly: true },
       // The artifacts panel at phone width: the masonry clamps to a single column
       // (no column is allowed below BASE_MIN_COL_PX), so every tile's aspect-ratio
-      // span collapses and the width-driven before/after tiles stack full-width —
+      // span collapses and the width-driven before/after tiles stack full-width -
       // the panel stays usable on a narrow screen. showArtifacts expands the card so
       // the images (not just the collapsed header) are captured.
       { name: 'mobile-artifacts', path: '/project/sim-project/agent/agent-1', viewport: { width: 390, height: 844 }, scrollTo: 'Changes', imageDiffMode: 'ab', showArtifacts: true },
@@ -1710,20 +1710,20 @@ try {
     // `prefers-color-scheme`). Each render is tagged by theme in its filename:
     // light renders get a `-light` suffix, dark renders a `-dark` suffix.
     const themes = ['light', 'dark'] as const
-    // Each (page, theme) capture is fully independent — its own browser context
+    // Each (page, theme) capture is fully independent - its own browser context
     // (isolated localStorage/cookies) hitting the shared read-only simulation
-    // server — so we run several at once rather than serially. Wall-clock is
+    // server - so we run several at once rather than serially. Wall-clock is
     // dominated by per-shot navigation + networkidle + settle waits, so a larger
     // pool cuts it roughly N-fold. The default scales with the host's CPU count
     // but stays a modest fraction of it (roughly a quarter of the cores, clamped
-    // to a small range) so capturing the set doesn't saturate the machine — each
+    // to a small range) so capturing the set doesn't saturate the machine - each
     // headless context is a full Chromium render and a context-per-core pool
     // pegs every CPU. Override with HYDRA_SHOT_CONCURRENCY to trade CPU for speed.
     // The clamp bounds peak memory and avoids starving renders of CPU; the
     // captured pixels are per-context deterministic regardless of how many run in
     // parallel, so this doesn't affect the diff-hash reproducibility.
     // HYDRA_SHOT_ONLY (comma-separated page names) narrows the run to a few shots
-    // while iterating locally — the full set is slow to capture. Unset ⇒ all pages.
+    // while iterating locally - the full set is slow to capture. Unset ⇒ all pages.
     const only = process.env.HYDRA_SHOT_ONLY?.split(',').map((s) => s.trim()).filter(Boolean)
     const tasks = pages
       .filter((pg) => !only || only.includes(pg.name))
@@ -1740,7 +1740,7 @@ try {
         // Capture phone shots at 2x so they stay crisp when the diff grid gives them a
         // generous (logical) width; desktop shots stay at 1x (they're already wide
         // enough). The dpi is written into the .meta sidecar (below) so the grid sizes
-        // a tile by its LOGICAL width (physical px ÷ dpi) — a 2x phone shot lays out the
+        // a tile by its LOGICAL width (physical px ÷ dpi) - a 2x phone shot lays out the
         // same as a 1x one, just sharper. "Mobile" matches the viewport tag derived
         // below: an explicit mobile* viewportTag, else a narrow capture width.
         const isMobile = pg.viewportTag ? pg.viewportTag.startsWith('mobile') : (pg.viewport?.width ?? 1280) < 700
@@ -1752,7 +1752,7 @@ try {
         })
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
         // UI's "elapsed"/"X ago" labels are byte-stable across the two renders.
-        // setFixedTime only freezes the wall clock — timers and requestAnimationFrame
+        // setFixedTime only freezes the wall clock - timers and requestAnimationFrame
         // keep running, so the settle() rAF wait and the setTimeout freeze below are
         // unaffected.
         await ctx.clock.setFixedTime(SIM_NOW)
@@ -1860,7 +1860,7 @@ try {
         }
         await ctx.addInitScript((opts) => {
           // The "Trust this project?" modal (web/src/components/TrustProjectModal.tsx)
-          // only appears while *adding* a project — never on open — so the
+          // only appears while *adding* a project - never on open - so the
           // simulated projects (already registered) never trigger it during the
           // capture flow. No pre-trust seeding is needed.
           // Enable the toast harness (window.__hydraToast) so the `toast` page
@@ -1869,7 +1869,7 @@ try {
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs
-          // on 30–2500ms timeouts) while leaving long timers/polling intact.
+          // on 30-2500ms timeouts) while leaving long timers/polling intact.
           const orig = window.setTimeout
           ;(window as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
             fn: TimerHandler,
@@ -1900,7 +1900,7 @@ try {
           )
         }
         // A held request keeps the network busy forever, so networkidle would
-        // never resolve — wait only for the DOM for those pages.
+        // never resolve - wait only for the DOM for those pages.
         await page.goto(base + pg.path, { waitUntil: pg.holdRequest ? 'domcontentloaded' : 'networkidle' })
         await page.addStyleTag({
           content:
@@ -1908,7 +1908,7 @@ try {
         })
         if (pg.holdRequest) {
           // Wait for the main pane's loading spinner (the h-5 LoaderCircle, unique
-          // to the loading state — the tree spinner is h-4, the header one h-3.5).
+          // to the loading state - the tree spinner is h-4, the header one h-3.5).
           // It only appears once branches + tree have loaded and the held file
           // request is in flight, so this confirms the full loading layout.
           await page.waitForSelector('svg.lucide-loader-circle.h-5')
@@ -1918,7 +1918,7 @@ try {
         // The simulated agent terminal streams a fixed boot transcript over its
         // WebSocket (SimulationServer.HandleTerminalWS), ending in a shell prompt.
         // The WS isn't tracked by networkidle, and xterm renders on its own frame,
-        // so wait until that final prompt has painted — otherwise a capture could
+        // so wait until that final prompt has painted - otherwise a capture could
         // race the stream and show a partially-rendered terminal (a spurious diff).
         // Guarded on the terminal's presence so pages without one just skip it.
         if (await page.locator('.xterm-rows').count()) {
@@ -1943,7 +1943,7 @@ try {
           // carries title="Drag to resize" and is a direct child of each spawn
           // card (cardRef), so its parent IS the card; the compact sidebar box is
           // told apart by its rounded-[10px] shell (the full box is rounded-[14px]).
-          // We set height directly — the textarea wrapper is flex-1 min-h-0, so it
+          // We set height directly - the textarea wrapper is flex-1 min-h-0, so it
           // fills the taller card. This never touches the app's real default sizes.
           await page.evaluate(({ compactH, fullH }) => {
             document.querySelectorAll('[title="Drag to resize"]').forEach((handle) => {
@@ -1974,7 +1974,7 @@ try {
         if (pg.pasteText) {
           // Stub the upload endpoint so the pasted-text chip leaves its
           // "uploading" state at a fixed point (the response path/filename are
-          // unused for the chip label — the form names it pasted-text-N.txt).
+          // unused for the chip label - the form names it pasted-text-N.txt).
           await page.route('**/uploads/**', (route) =>
             route.fulfill({
               status: 200,
@@ -2001,12 +2001,12 @@ try {
           }, pg.pasteText)
           if (pg.pasteText.again) {
             // The second paste inlines the block into the textarea (fenced when
-            // it's code) — wait until the fence has landed in the box.
+            // it's code) - wait until the fence has landed in the box.
             await page.waitForFunction(() =>
               ((document.querySelector('.max-w-4xl textarea') as HTMLTextAreaElement | null)?.value ?? '').includes('```'),
             )
           } else {
-            // The first paste attaches it — wait until the chip has rendered and
+            // The first paste attaches it - wait until the chip has rendered and
             // its upload spinner has cleared (scoped to the full-page form so a
             // stray spinner elsewhere can't satisfy it early).
             await page.waitForFunction(() => {
@@ -2020,7 +2020,7 @@ try {
         }
         if (pg.attachImages) {
           // Stub the upload endpoint so it resolves instantly and deterministically
-          // (no disk writes, no timing jitter) — the chips then leave their
+          // (no disk writes, no timing jitter) - the chips then leave their
           // "uploading" state at a fixed point.
           await page.route('**/uploads/**', (route) =>
             route.fulfill({
@@ -2043,8 +2043,8 @@ try {
           // none is still uploading. The "still uploading" marker is an
           // AttachmentChips LoaderCircle; check only within the chips' shared
           // container (the View buttons' grandparent) so an unrelated spinner
-          // elsewhere on the page — e.g. a running test-verdict chip in the
-          // sidebar — can't keep it from settling. (The chips render outside the
+          // elsewhere on the page - e.g. a running test-verdict chip in the
+          // sidebar - can't keep it from settling. (The chips render outside the
           // .max-w-4xl form wrapper, so a form-scoped check would never see them.)
           await page.waitForFunction(
             (n) => {
@@ -2058,7 +2058,7 @@ try {
           // Open the lightbox on the first image.
           await page.click('[aria-label^="View "]')
           // Wait for the figure's caption to show the pixel dimensions ("W × H"),
-          // which only render after the image's onLoad fires — so the capture
+          // which only render after the image's onLoad fires - so the capture
           // always includes them.
           await page.waitForFunction(() =>
             !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
@@ -2070,7 +2070,7 @@ try {
           // the HTTP fetches the goto's networkidle waits for) isn't tracked by
           // networkidle. Wait for the always-present "screenshots" card so the
           // panel is rendered before we capture it. Only the agent diff page has an
-          // artifacts panel — the repository branch-compare diff also reads
+          // artifacts panel - the repository branch-compare diff also reads
           // imageDiffMode (for in-tree image diffs) but has no such card to wait on.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
@@ -2107,7 +2107,7 @@ try {
         }
         if (pg.hover) {
           // Hover an element to open its hover-only tooltip so the capture documents
-          // it — e.g. the "Merge queued" pill's explanation. The tooltip must show
+          // it - e.g. the "Merge queued" pill's explanation. The tooltip must show
           // synchronously on hover (delay 0): a post-hover wait would let the layout
           // settle and drift the element out from under Playwright's fixed cursor,
           // firing mouseleave and dismissing the (grace-less) dark hint.
@@ -2117,7 +2117,7 @@ try {
         if (pg.pressKey) {
           // Blur the autofocused field (e.g. the spawn textarea) so the chord hits
           // the window-level shortcut handler instead of being typed into it, then
-          // press it — used to open the keyboard-shortcuts overlay via `?`.
+          // press it - used to open the keyboard-shortcuts overlay via `?`.
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
           await page.keyboard.press(pg.pressKey)
           await settle(page)
@@ -2135,7 +2135,7 @@ try {
         }
         if (pg.disableSettingsEntries) {
           // Flip the seeded artifact + service entries to disabled. Each section's
-          // single entry carries exactly one EnabledToggle — its sr-only "peer"
+          // single entry carries exactly one EnabledToggle - its sr-only "peer"
           // checkbox is the only such input inside that section card (the network
           // toggle lives in the separate agent-config card), so scoping to the
           // card's heading targets it unambiguously. Clicking an already-checked
@@ -2175,7 +2175,7 @@ try {
           // Pin the named file's header beneath the sticky "Changes" toolbar, with
           // part of its body scrolled under it, to document the sticky file header.
           // The artifacts panel populates over a WebSocket (not tracked by
-          // networkidle) and sits above the diff, so wait for it first — otherwise
+          // networkidle) and sits above the diff, so wait for it first - otherwise
           // a late layout shift would move the file and the scroll would miss.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
@@ -2279,7 +2279,7 @@ try {
           await settle(page)
           // Eager-load every tile image: the masonry sizes each column from the
           // images' natural dimensions, so they must be fully decoded before it
-          // lays out — and lazy images below the fold would otherwise never load
+          // lays out - and lazy images below the fold would otherwise never load
           // (and a half-loaded layout wouldn't be byte-reproducible). The tiles
           // carry data-mkey (the masonry's per-tile key); scope to their <img>s.
           await page.evaluate(() => {
@@ -2295,8 +2295,8 @@ try {
           await page.waitForTimeout(500)
           await settle(page)
           // Force every .webm tile to decode + paint a stable frame (else the tile
-          // shows through to its transparent checkerboard backdrop, or — the bug
-          // that named this branch — lands a frame off run to run). Same fixed
+          // shows through to its transparent checkerboard backdrop, or - the bug
+          // that named this branch - lands a frame off run to run). Same fixed
           // VIDEO_SEEK as the dedicated shots so every webm tile across the suite
           // shows the identical frame; ensureVideosPainted fully buffers first,
           // which is what makes this below-the-fold row's seek reproducible. A
@@ -2326,7 +2326,7 @@ try {
           // render a placeholder div), so the first match is always openable.
           await page.click('[data-mkey] img')
           // Wait for the lightbox caption to show the pixel dimensions ("W × H"),
-          // which only render after the lightbox image's onLoad fires — so the
+          // which only render after the lightbox image's onLoad fires - so the
           // capture always includes them (same guard as the spawn-box lightbox).
           await page.waitForFunction(() =>
             !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
@@ -2357,7 +2357,7 @@ try {
           // Turn on the artifacts panel's global "Highlight" toggle (in the header,
           // shown in A/B mode) so the magenta pixel-diff overlay (DiffCanvas) is
           // painted over every changed image tile. Highlight is a single panel-wide
-          // control now — driving all tiles via context — not a per-tile checkbox, so
+          // control now - driving all tiles via context - not a per-tile checkbox, so
           // there's one labelled "Highlight" checkbox to tick rather than one per tile.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('label')).some((l) => l.textContent?.trim() === 'Highlight'),
@@ -2370,7 +2370,7 @@ try {
           // Each ticked tile mounts a DiffCanvas that loads both images and paints
           // its overlay asynchronously, clearing the canvas's opacity-0 once ready.
           // Wait for every overlay canvas to finish so the magenta diff is fully
-          // drawn before the capture — otherwise a half-painted (or still-blank)
+          // drawn before the capture - otherwise a half-painted (or still-blank)
           // overlay would itself read as a visual change. Once painted, the overlay
           // is a deterministic pixel compare of the two images, so it renders the
           // same every time.
@@ -2381,8 +2381,8 @@ try {
           await settle(page)
         }
         if (pg.artifactInfo) {
-          // Place the "Artifacts" heading at mid-viewport so the tooltip — which
-          // opens upward from the (i) icon into a fixed portal — has room above it,
+          // Place the "Artifacts" heading at mid-viewport so the tooltip - which
+          // opens upward from the (i) icon into a fixed portal - has room above it,
           // then hover the icon to open it. (Same sticky-aware offset technique as
           // scrollTo, but centering rather than pinning to the top.)
           await page.waitForFunction(() =>
@@ -2437,8 +2437,8 @@ try {
         if (pg.openFilter) {
           // Open the named tag-filter dropdown so the capture documents the menu.
           // Its trigger is a button whose lowercase <span> holds the scope label
-          // (the category name, e.g. "theme"). Done after scrollTo so the header —
-          // and the dropdown that opens just below it — sits in the viewport.
+          // (the category name, e.g. "theme"). Done after scrollTo so the header -
+          // and the dropdown that opens just below it - sits in the viewport.
           await page.waitForFunction(
             (label) => Array.from(document.querySelectorAll('button')).some(
               (b) => b.querySelector('span.lowercase')?.textContent?.trim() === label),
@@ -2454,7 +2454,7 @@ try {
         if (pg.settleMasonry) {
           // Eager-load every masonry tile image (the layout sizes columns from the
           // images' natural dimensions) and wait for them to decode, then let the
-          // ResizeObserver-driven layout settle — so the width-driven grid is
+          // ResizeObserver-driven layout settle - so the width-driven grid is
           // byte-reproducible. No-op when the page has no masonry tiles.
           const hasTiles = await page.evaluate(() => document.querySelectorAll('[data-mkey] img').length > 0)
           if (hasTiles) {
@@ -2473,7 +2473,7 @@ try {
           // Bring an element inside an inner scroll container into the viewport's
           // middle so a viewport capture shows it (the page body itself doesn't
           // scroll, so fullPage can't reach it). The element isn't sticky, so
-          // scrollIntoView behaves — unlike the sticky section headings scrollTo
+          // scrollIntoView behaves - unlike the sticky section headings scrollTo
           // handles by hand.
           await page.evaluate((sel) => {
             document.querySelector(sel)?.scrollIntoView({ block: 'center' })
@@ -2500,8 +2500,8 @@ try {
         await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector && !pg.toast })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
-        // section are scoped "category::value" labels — the viewer keeps one
-        // value per category and offers each as a single-select filter — so a
+        // section are scoped "category::value" labels - the viewer keeps one
+        // value per category and offers each as a single-select filter - so a
         // reviewer can, e.g., show only the dark-mode repository shots. The
         // viewport axis is the page's explicit viewportTag when set (needed for
         // landscape/tablet sizes, which width alone can't classify), otherwise
@@ -2509,7 +2509,7 @@ try {
         // desktop.
         const viewport = pg.viewportTag ?? ((pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop')
         const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
-        // Record dpi only when non-default (the 2x phone shots) — Hydra treats an
+        // Record dpi only when non-default (the 2x phone shots) - Hydra treats an
         // absent dpi as 1, so desktop sidecars stay byte-identical to before.
         writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
@@ -2526,7 +2526,7 @@ try {
     //
     // A single failing shot must NOT abort the whole run: this command is a
     // diff-viewer artifact, and a thrown error exits non-zero, which Hydra caches
-    // as a failed generation — so ONE flaky page would blank the entire artifacts
+    // as a failed generation - so ONE flaky page would blank the entire artifacts
     // panel for the head. Instead we catch per-page, record the failure, and keep
     // going so every other shot still renders; the run only fails hard (rethrows)
     // if EVERY shot failed (a real, total breakage). Failures are logged loudly
@@ -2550,11 +2550,11 @@ try {
 
     // Record a real animated UI element to a lossless .webm so the screenshots
     // artifact also exercises the video diff viewer (web/src/components/
-    // VideoDiffView.tsx) — the moving-picture twin of the PNG shots.
+    // VideoDiffView.tsx) - the moving-picture twin of the PNG shots.
     //
     // The diff viewer compares video by per-frame decoded-pixel hashes (ffmpeg
     // `-f framemd5`; see internal/artifacts videoFrameHashes), so what must be
-    // stable is the decoded FRAMES — container metadata/timestamps are ignored,
+    // stable is the decoded FRAMES - container metadata/timestamps are ignored,
     // and the .webm need not be byte-identical. We still make the frames
     // deterministic so a re-render never reads "modified": we DON'T let the CSS
     // animation free-run on the wall clock (we kill all CSS animation and drive
@@ -2564,7 +2564,7 @@ try {
     const ffmpegBin = ffmpegStatic as unknown as string
     // Record the sidebar's status dot gently pulsing while an agent is "running",
     // together with its small detail row (type pill, status badge, live-activity
-    // line) — the moving twin of the static sidebar shot. We clip tightly to just
+    // line) - the moving twin of the static sidebar shot. We clip tightly to just
     // the one agent row.
     //
     // The pulse is a CSS keyframe (animate-status-pulse: a scale + opacity
@@ -2585,7 +2585,7 @@ try {
         await page.goto(base + '/project/sim-project/', { waitUntil: 'domcontentloaded' })
         // The first sidebar agent (agent-md) is "running" (see simulation.go
         // ListAgents), so its status dot pulses green and its detail row carries a
-        // live-activity line — exactly the "status icon + small agent detail" we want.
+        // live-activity line - exactly the "status icon + small agent detail" we want.
         const row = page.locator('aside button:has-text("Add inline markdown rendering")').first()
         await row.waitFor()
         await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
@@ -2645,7 +2645,7 @@ try {
       console.error(`\n${failures.length} screenshot(s) failed:`)
       for (const f of failures) console.error(`  ✗ ${f}`)
       if (done === 0) throw new Error('every screenshot failed to render')
-      console.error(`(continuing — ${done} shot(s) rendered; the artifacts panel shows those)`)
+      console.error(`(continuing - ${done} shot(s) rendered; the artifacts panel shows those)`)
     }
   } finally {
     await browser.close()
@@ -2653,7 +2653,7 @@ try {
 } finally {
   server.kill('SIGTERM')
   // Remove the throwaway binary dir (hydra-shot-*). Without this every artifact
-  // run leaks a ~30MB dir into the host's /tmp — they pile up fast since this
+  // run leaks a ~30MB dir into the host's /tmp - they pile up fast since this
   // runs on both sides of every screenshot comparison. Safe to unlink even
   // though the server still holds the binary open (Linux/macOS unlink-on-use).
   rmSync(binDir, { recursive: true, force: true })

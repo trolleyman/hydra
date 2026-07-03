@@ -71,7 +71,7 @@ func Available() (bool, string) {
 func trimOutput(b []byte) string {
 	s := string(b)
 	if len(s) > 300 {
-		s = s[:300] + "…"
+		s = s[:300] + "..."
 	}
 	return s
 }
@@ -105,7 +105,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"--unshare-uts",
 		"--die-with-parent",
 		// Pin the sandboxed process to the real host user. Without this bwrap keeps
-		// whatever uid it was launched with — which is fine directly, but in hard
+		// whatever uid it was launched with - which is fine directly, but in hard
 		// network mode pasta wraps bwrap in its own user namespace that maps the host
 		// user to uid 0 (it needs CAP_NET_ADMIN to configure the netns). bwrap would
 		// then inherit uid 0, the agent would run as root, and Claude refuses
@@ -124,7 +124,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// NOTE: we deliberately do NOT pass bwrap's --new-session. It calls setsid(),
 	// which drops the PTY as the controlling terminal. creack/pty already starts
 	// the sandbox with the slave as its controlling terminal (Setsid+Setctty), so
-	// a second setsid detaches it — and a process with no controlling terminal
+	// a second setsid detaches it - and a process with no controlling terminal
 	// has no foreground process group for the kernel to signal. That breaks two
 	// things that depend on the ctty:
 	//   - job control in interactive shells ("no job control in this shell");
@@ -190,7 +190,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// to mkdir a mountpoint beneath the read-only `/` bind. Each overlay unions the
 	// real Dir (lower) with the per-head Upper layer (also a lower, so the result is
 	// read-only) and mounts it back over the already-existing Dir. Needs overlay
-	// support; without it the injected files are skipped (the caller degrades — e.g.
+	// support; without it the injected files are skipped (the caller degrades - e.g.
 	// Claude's managed gate hooks won't load), logged so the cause is diagnosable.
 	for _, o := range opts.ROOverlays {
 		if o.Dir == "" || o.Upper == "" {
@@ -200,7 +200,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 			continue
 		}
 		if !overlayOK {
-			log.Printf("sandbox: bwrap %s lacks overlay support; skipping read-only overlay on %s — per-head files under it will be absent. "+
+			log.Printf("sandbox: bwrap %s lacks overlay support; skipping read-only overlay on %s - per-head files under it will be absent. "+
 				"Point HYDRA_BWRAP at an overlay-capable bwrap to restore them.", bwrap, o.Dir)
 			continue
 		}
@@ -311,7 +311,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 				seccompPreExec = fmt.Sprintf("exec %d<%q\nrm -f %q\n", childFD, path, path)
 				cleanup = func() { _ = os.Remove(path) }
 			} else {
-				// No wrapper: inherit the fd directly and unlink now — the open fd
+				// No wrapper: inherit the fd directly and unlink now - the open fd
 				// keeps the inode alive.
 				_ = os.Remove(path)
 				extraFiles = append(extraFiles, f)
@@ -327,7 +327,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 
 	// Hard egress boundary: wrap the bwrap argv in a pasta netns + nft lock. The
 	// wrapper returns a new argv (argv[0] = pasta) that ultimately execs this
-	// bwrap, which must therefore NOT --unshare-net (it inherits pasta's netns —
+	// bwrap, which must therefore NOT --unshare-net (it inherits pasta's netns -
 	// satisfied because hard egress only applies with Network.Enabled).
 	path, finalArgs := bwrap, args
 	if opts.EgressWrap != nil {

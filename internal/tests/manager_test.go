@@ -59,7 +59,7 @@ func runWorktree(t *testing.T, spec config.TestScript, workDir string) Report {
 		t.Fatalf("Get: %v", err)
 	}
 	if first.Status != StatusRunning {
-		// Already cached/settled synchronously — return it.
+		// Already cached/settled synchronously - return it.
 		return first
 	}
 	for ev := range events {
@@ -100,7 +100,7 @@ func TestGenerateFailingFromJUnit(t *testing.T) {
 	spec := config.TestScript{
 		Name:       "go",
 		UnsafeHost: true,
-		// The runner writes a failing report AND exits non-zero — the report must
+		// The runner writes a failing report AND exits non-zero - the report must
 		// win (failing verdict, not errored).
 		Command: `cat > "$HYDRA_TEST_OUTPUT/r.xml" <<'EOF'
 <testsuite name="s"><testcase name="bad"><failure message="nope">trace</failure></testcase></testsuite>

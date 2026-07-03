@@ -25,6 +25,17 @@ Use `mage` for development tasks.
 2.  **Frontend**: React + TypeScript + Vite. Uses `bun` for package management.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
+## Conventions
+
+### ASCII punctuation only
+
+Do **not** use fancy Unicode punctuation in source, UI strings, or comments. Use
+plain ASCII: a hyphen `-` instead of an em dash `—` or en dash `–`, and three dots
+`...` instead of the ellipsis character `…`. This applies everywhere: rendered
+user-facing text (JSX / string literals) *and* code comments. Decorative status
+glyphs already in use (`✓ ⚠ ✗ ▸ │`) are fine; this rule is specifically about dashes
+and ellipses.
+
 ## Testing
 
 Run tests using standard Go tools:

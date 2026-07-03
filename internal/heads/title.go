@@ -45,10 +45,10 @@ func truncateTitle(s string) string {
 	if i := strings.LastIndex(cut, " "); i > maxTitleLen/2 {
 		cut = cut[:i]
 	}
-	return strings.TrimSpace(cut) + "…"
+	return strings.TrimSpace(cut) + "..."
 }
 
-// titleModel is the cheapest Claude tier — title generation is a throwaway
+// titleModel is the cheapest Claude tier - title generation is a throwaway
 // one-liner where quality barely matters but cost and latency do.
 const titleModel = "haiku"
 
@@ -61,8 +61,8 @@ const titleGenTimeout = 25 * time.Second
 // the prompt, then writing it to the DB for the next poll to pick up. It is
 // strictly best-effort: any failure (no credits, offline, CLI missing) leaves
 // the prompt-derived title in place. Runs detached from the request lifecycle,
-// but bound to ctx (the server-lifetime context) so it — and its `claude` child
-// — are cancelled on shutdown rather than left orphaned.
+// but bound to ctx (the server-lifetime context) so it - and its `claude` child
+// - are cancelled on shutdown rather than left orphaned.
 func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string, onChange func()) {
 	if store == nil || strings.TrimSpace(prompt) == "" {
 		return
@@ -71,7 +71,7 @@ func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string,
 		title, err := generateTitle(ctx, prompt)
 		if err != nil {
 			// A cancelled context means the server is shutting down, not a real
-			// failure — don't cry wolf in the log.
+			// failure - don't cry wolf in the log.
 			if ctx.Err() == nil {
 				log.Printf("heads: title generation for %s failed (keeping derived title): %v", id, err)
 			}

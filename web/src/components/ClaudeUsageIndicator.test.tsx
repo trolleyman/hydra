@@ -8,7 +8,7 @@ import type { ClaudeUsageResponse } from '../api'
 // driven end-to-end through the real hook, with only the API call mocked. Mirrors
 // the simulation server's snapshot (internal/http/simulation.go GetClaudeUsage):
 // 38% session, 65% weekly, "Resets in 2h 15m" (and no session_resets_at, so the
-// text path — not the live countdown — supplies the "reset" value).
+// text path - not the live countdown - supplies the "reset" value).
 const SNAPSHOT: ClaudeUsageResponse = {
   available: true,
   account_tier: 'Claude Max',

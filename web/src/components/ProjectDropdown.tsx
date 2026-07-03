@@ -10,7 +10,7 @@ import { ServiceHealthWarning } from './ServiceHealthWarning'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
 // including macOS: macOS reserves Cmd+` for its own "cycle windows within an
-// app", so it never reaches the page — Ctrl+` is free there and keeps one
+// app", so it never reaches the page - Ctrl+` is free there and keeps one
 // binding everywhere.
 const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
@@ -58,7 +58,7 @@ export function ProjectDropdown({
   // swallow the menu whenever the sidebar is narrower than the menu). We
   // position it manually from the trigger's rect.
   const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
-  // The Ctrl+` switch hint is keyboard-only — hide it on touch devices.
+  // The Ctrl+` switch hint is keyboard-only - hide it on touch devices.
   const finePointer = useFinePointer()
 
   // The Ctrl+` switcher forces the dropdown open and highlights a row; otherwise
@@ -108,12 +108,12 @@ export function ProjectDropdown({
   }, [keyboardIndex, keyboardActive])
 
   const selected = projects.find((p) => p.id === selectedId)
-  // Unread agents sitting in projects other than the one you're looking at —
+  // Unread agents sitting in projects other than the one you're looking at -
   // drives the dot on the folder button ("updates waiting elsewhere").
   const otherProjectsUnread = projects
     .filter((p) => p.id !== selectedId)
     .reduce((n, p) => n + (p.unread_count ?? 0), 0)
-  // Agents in other projects that are blocked on you (needs_input) — turns the
+  // Agents in other projects that are blocked on you (needs_input) - turns the
   // folder-button dot red (the stronger "needs your input" signal) instead of
   // the blue "updates waiting" dot.
   const otherProjectsNeedsInput = projects
@@ -125,7 +125,7 @@ export function ProjectDropdown({
     function handleClick(e: MouseEvent) {
       const target = e.target as Node
       // The menu lives in a portal, so a click inside it isn't contained by the
-      // trigger — check both before treating it as an outside click.
+      // trigger - check both before treating it as an outside click.
       if (triggerRef.current?.contains(target)) return
       if (menuRef.current?.contains(target)) return
       setOpen(false)
@@ -315,7 +315,7 @@ export function ProjectDropdown({
                   className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-default"
                 >
                   <FolderOpen className="w-3 h-3" />
-                  {browsing ? 'Waiting for folder…' : 'Browse…'}
+                  {browsing ? 'Waiting for folder...' : 'Browse...'}
                 </button>
                 {addError && (
                   <p className="text-[10px] text-red-500 px-3 pb-1 leading-snug">{addError}</p>
@@ -328,7 +328,7 @@ export function ProjectDropdown({
                 className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <Plus className="w-3 h-3" />
-                {pickerAvailable ? 'Enter path manually…' : 'Open folder…'}
+                {pickerAvailable ? 'Enter path manually...' : 'Open folder...'}
               </button>
             ) : (
               <form onSubmit={handleAdd} className="px-3 py-2">
@@ -351,7 +351,7 @@ export function ProjectDropdown({
                     disabled={!newPath.trim() || adding}
                     className="flex-1 text-xs py-1 px-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
                   >
-                    {adding ? 'Opening…' : 'Open'}
+                    {adding ? 'Opening...' : 'Open'}
                   </button>
                   <button
                     type="button"

@@ -11,7 +11,7 @@ import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialo
 // and weaken the sandbox, so the user should recognize the project before it is
 // registered. It reads the config read-only by path (the project isn't registered
 // yet), so nothing runs until the user clicks "Trust project". Trust is decided
-// once, at add time — there is no client-side trust state; a registered project is
+// once, at add time - there is no client-side trust state; a registered project is
 // a trusted one, and later config edits don't re-prompt.
 //
 // The component is memoized and its highlight is cached so the once-per-second
@@ -33,7 +33,7 @@ export const TrustProjectModal = memo(function TrustProjectModal({
   const [error, setError] = useState<string | null>(null)
 
   // Escape backs out (same as "Don't trust"). Route the key through a ref so the
-  // listener is registered exactly once for the modal's lifetime — re-subscribing
+  // listener is registered exactly once for the modal's lifetime - re-subscribing
   // on every parent render (onCancel's identity can change) is needless churn.
   const onCancelRef = useRef(onCancel)
   useEffect(() => {
@@ -48,7 +48,7 @@ export const TrustProjectModal = memo(function TrustProjectModal({
   }, [])
 
   // Show the loading state (and clear any prior error) as soon as the path
-  // changes — during render, before the fetch effect below runs.
+  // changes - during render, before the fetch effect below runs.
   const [prevPath, setPrevPath] = useState(path)
   if (prevPath !== path) { setPrevPath(path); setLoading(true); setError(null) }
 
@@ -123,10 +123,10 @@ export const TrustProjectModal = memo(function TrustProjectModal({
               .hydra/config.toml
             </div>
             {loading ? (
-              <div className="text-xs text-gray-400 dark:text-gray-500 py-6 text-center">Loading config…</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 py-6 text-center">Loading config...</div>
             ) : !exists ? (
               <div className="text-xs text-gray-400 dark:text-gray-500 italic border border-dashed border-gray-200 dark:border-gray-700 rounded-lg px-3 py-4 text-center">
-                No <span className="font-mono not-italic">.hydra/config.toml</span> in this project — nothing
+                No <span className="font-mono not-italic">.hydra/config.toml</span> in this project - nothing
                 repo-controlled to run.
               </div>
             ) : highlighted != null ? (

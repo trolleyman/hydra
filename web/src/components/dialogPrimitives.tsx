@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 // Shared building blocks for the app's rich confirmation dialogs (the merge /
 // kill confirmations in Dialog.tsx and the merge-conflict panel in DiffViewer).
 // Centralising the icon tile, toned action button, neutral button and section
-// label keeps every dialog visually consistent — change the look here and it
+// label keeps every dialog visually consistent - change the look here and it
 // lands everywhere. Colours come paired with `dark:` variants so they read in
 // both themes.
 
