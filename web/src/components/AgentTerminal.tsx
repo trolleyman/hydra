@@ -286,11 +286,14 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         allowNonHttpProtocols: true,
         activate: (_event, uri) => {
           const { branchName, worktreePath, projectId, navigate } = linkCtxRef.current
-          const rel = fileUrlToWorktreeRelative(uri, worktreePath)
-          if (rel && branchName && projectId) {
+          const target = fileUrlToWorktreeRelative(uri, worktreePath)
+          if (target && branchName && projectId) {
             navigate({
               to: '/project/$projectId/repository/$',
-              params: { projectId, _splat: `${branchName}/${rel}` },
+              params: { projectId, _splat: `${branchName}/${target.path}` },
+              // Carry a line reference as an #L<n> hash the repository view
+              // scrolls to and highlights.
+              hash: target.line != null ? `L${target.line}` : undefined,
             })
             return
           }

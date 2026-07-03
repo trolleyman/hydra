@@ -49,35 +49,67 @@ export function isTrustedLinkUrl(url: string, selfOrigin?: string): boolean {
   return TRUSTED_LINK_HOSTS.some((t) => hostMatches(u.hostname, t))
 }
 
+// WorktreeFileTarget is a resolved worktree file link: its repo-relative path
+// plus an optional 1-based line the terminal carries into the repository view
+// as an #L<line> hash.
+export type WorktreeFileTarget = { path: string; line: number | null }
+
+// parseLineFromHash reads a 1-based line out of a URL fragment: "#L115", "#115",
+// or the leading number of a "#L115-L120" range. Returns null otherwise.
+function parseLineFromHash(hash: string): number | null {
+  const m = /^#?L?(\d+)/.exec(hash)
+  return m ? parseInt(m[1], 10) : null
+}
+
+// stripTrailingLine peels an editor-style ":line[:col]" suffix off a path
+// ("main.go:42" / "main.go:42:5"). The digits must end the string, so a normal
+// filename (which never ends in ":<digits>") is untouched.
+function stripTrailingLine(p: string): { path: string; line: number | null } {
+  const m = /:(\d+)(?::\d+)?$/.exec(p)
+  if (m) return { path: p.slice(0, m.index), line: parseInt(m[1], 10) }
+  return { path: p, line: null }
+}
+
 // fileUrlToWorktreeRelative maps an OSC 8 link target to a repo-relative path
-// when it is a file:// URL (or a bare absolute path) that lives inside the
-// agent's worktree. Returns null when it isn't a local file link, there is no
-// worktree, it points outside the worktree, or it is the worktree root itself.
+// (plus optional line) when it is a file:// URL (or a bare absolute path) that
+// lives inside the agent's worktree. Returns null when it isn't a local file
+// link, there is no worktree, it points outside the worktree, or it is the
+// worktree root itself.
 //
 // The worktree lives at its real absolute path inside the sandbox (the agent's
-// cwd), so the paths an agent prints match `worktreePath` verbatim. A file://
-// URL's #fragment / ?query are dropped by URL parsing; for a bare path we also
-// strip a trailing editor-style ":line[:col]" suffix, since the repository view
-// addresses whole files.
+// cwd), so the paths an agent prints match `worktreePath` verbatim. A line is
+// read from an #L<n> fragment or a trailing ":line[:col]" suffix; any ?query is
+// dropped.
 export function fileUrlToWorktreeRelative(
   url: string,
   worktreePath: string | null | undefined,
-): string | null {
+): WorktreeFileTarget | null {
   if (!worktreePath) return null
   let abs: string | null = null
+  let line: number | null = null
   if (url.startsWith('file:')) {
     try {
       const u = new URL(url)
       // Only same-machine file URLs (empty host, or the conventional localhost).
       if (u.host && u.host !== 'localhost') return null
       abs = decodeURIComponent(u.pathname)
+      line = parseLineFromHash(u.hash)
     } catch {
       return null
     }
   } else if (url.startsWith('/')) {
-    abs = url.split('#')[0].split('?')[0].replace(/:\d+(?::\d+)?$/, '')
+    const hashIdx = url.indexOf('#')
+    line = hashIdx >= 0 ? parseLineFromHash(url.slice(hashIdx)) : null
+    abs = (hashIdx >= 0 ? url.slice(0, hashIdx) : url).split('?')[0]
   }
   if (!abs) return null
+  // A trailing ":line" suffix (common on bare paths, and legal in a file://
+  // pathname) supplies the line when no fragment did.
+  if (line == null) {
+    const stripped = stripTrailingLine(abs)
+    abs = stripped.path
+    line = stripped.line
+  }
 
   const root = worktreePath.replace(/\/+$/, '')
   if (abs === root) return null
@@ -86,5 +118,5 @@ export function fileUrlToWorktreeRelative(
   const rel = abs.slice(prefix.length).replace(/^\/+/, '')
   // Guard against a traversal segment sneaking back out of the worktree.
   if (!rel || rel.split('/').includes('..')) return null
-  return rel
+  return { path: rel, line }
 }

@@ -6,11 +6,11 @@ const WT = '/home/callum/code/hydra/.hydra/local/worktrees/my-task'
 describe('fileUrlToWorktreeRelative', () => {
   it('maps a file:// URL inside the worktree to a repo-relative path', () => {
     expect(fileUrlToWorktreeRelative(`file://${WT}/internal/sandbox/sandbox.go`, WT))
-      .toBe('internal/sandbox/sandbox.go')
+      .toEqual({ path: 'internal/sandbox/sandbox.go', line: null })
   })
 
   it('accepts a localhost-hosted file URL', () => {
-    expect(fileUrlToWorktreeRelative(`file://localhost${WT}/main.go`, WT)).toBe('main.go')
+    expect(fileUrlToWorktreeRelative(`file://localhost${WT}/main.go`, WT)).toEqual({ path: 'main.go', line: null })
   })
 
   it('rejects a file URL for another machine host', () => {
@@ -18,25 +18,32 @@ describe('fileUrlToWorktreeRelative', () => {
   })
 
   it('maps a bare absolute path inside the worktree', () => {
-    expect(fileUrlToWorktreeRelative(`${WT}/web/src/index.tsx`, WT)).toBe('web/src/index.tsx')
+    expect(fileUrlToWorktreeRelative(`${WT}/web/src/index.tsx`, WT)).toEqual({ path: 'web/src/index.tsx', line: null })
   })
 
   it('decodes percent-encoded path segments', () => {
-    expect(fileUrlToWorktreeRelative(`file://${WT}/a%20b/c.txt`, WT)).toBe('a b/c.txt')
+    expect(fileUrlToWorktreeRelative(`file://${WT}/a%20b/c.txt`, WT)).toEqual({ path: 'a b/c.txt', line: null })
   })
 
-  it('drops a #fragment and ?query', () => {
-    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go#L12`, WT)).toBe('main.go')
-    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go?x=1`, WT)).toBe('main.go')
+  it('reads a line from an #L<n> / #<n> fragment', () => {
+    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go#L115`, WT)).toEqual({ path: 'main.go', line: 115 })
+    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go#42`, WT)).toEqual({ path: 'main.go', line: 42 })
+    // A range fragment takes the first line.
+    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go#L10-L20`, WT)).toEqual({ path: 'main.go', line: 10 })
   })
 
-  it('strips a trailing :line[:col] suffix on a bare path', () => {
-    expect(fileUrlToWorktreeRelative(`${WT}/main.go:42`, WT)).toBe('main.go')
-    expect(fileUrlToWorktreeRelative(`${WT}/main.go:42:5`, WT)).toBe('main.go')
+  it('reads a line from a trailing :line[:col] suffix (file URL and bare path)', () => {
+    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go:42`, WT)).toEqual({ path: 'main.go', line: 42 })
+    expect(fileUrlToWorktreeRelative(`${WT}/main.go:42:5`, WT)).toEqual({ path: 'main.go', line: 42 })
+  })
+
+  it('drops a ?query and prefers a fragment line over a colon suffix', () => {
+    expect(fileUrlToWorktreeRelative(`file://${WT}/main.go?x=1`, WT)).toEqual({ path: 'main.go', line: null })
+    expect(fileUrlToWorktreeRelative(`${WT}/main.go#L7`, WT)).toEqual({ path: 'main.go', line: 7 })
   })
 
   it('tolerates a trailing slash on the worktree path', () => {
-    expect(fileUrlToWorktreeRelative(`file://${WT}/x.go`, WT + '/')).toBe('x.go')
+    expect(fileUrlToWorktreeRelative(`file://${WT}/x.go`, WT + '/')).toEqual({ path: 'x.go', line: null })
   })
 
   it('returns null for a path outside the worktree', () => {

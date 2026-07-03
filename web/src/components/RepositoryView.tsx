@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useLocation } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
 import { ensureLanguage } from '../lib/hljsLazy'
 import { getLanguage } from '../lib/language'
@@ -627,7 +627,7 @@ function TreeRow({
 
 // ── File content pane ───────────────────────────────────────────────────────────
 
-function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap: boolean }) {
+function CodeView({ content, lang, wrap, highlightLine }: { content: string; lang: string; wrap: boolean; highlightLine?: number | null }) {
   // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
   // its worker), then re-highlight: hasGrammar flips false→true once it lands.
   const [, bumpLoaded] = useState(0)
@@ -659,31 +659,41 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
 
   return (
     <div className={`text-xs font-mono leading-snug pt-2 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
-      {lines.map((html, i) => (
-        <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/40">
-          <span
-            style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
-            className="sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800"
-          >
-            {i + 1}
-          </span>
-          <code
-            className={`hljs hljs-line bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
-            dangerouslySetInnerHTML={{ __html: html || ' ' }}
-          />
-        </div>
-      ))}
+      {lines.map((html, i) => {
+        // The 1-based line number doubles as the scroll/highlight anchor: the
+        // page scrolls the row carrying data-line into view (see contentRef
+        // effect) when the URL hash is #L<n>, and we tint it like GitHub.
+        const ln = i + 1
+        const isHi = ln === highlightLine
+        return (
+          <div key={i} data-line={ln} className={`flex ${isHi ? 'bg-amber-100/70 dark:bg-amber-400/10' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'}`}>
+            <span
+              style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
+              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${isHi
+                ? 'text-amber-700 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-400/10 border-amber-200 dark:border-amber-500/20'
+                : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800'}`}
+            >
+              {ln}
+            </span>
+            <code
+              className={`hljs hljs-line bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+              dangerouslySetInnerHTML={{ __html: html || ' ' }}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }
 
 function FileContent({
-  file, wrap, projectId, refStr,
+  file, wrap, projectId, refStr, highlightLine,
 }: {
   file: RepositoryFileResponse
   wrap: boolean
   projectId: string
   refStr: string
+  highlightLine?: number | null
 }) {
   // For symlinks, render the file we resolved to (target_path) — its extension
   // decides syntax highlighting / markdown / image handling, and the raw blob is
@@ -738,7 +748,7 @@ function FileContent({
 
   return (
     <>
-      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} />
+      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} highlightLine={highlightLine} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
           File truncated — showing the first part only.
@@ -858,6 +868,7 @@ function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: 
 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
+  const location = useLocation()
 
   // The app's nav sidebar collapse state — the repository header hosts the
   // "show sidebar" toggle while it's hidden (small screens), matching the agent
@@ -1111,12 +1122,28 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     return () => { cancelled = true }
   }, [projectId, queryRef, viewPath, ready])
 
-  // Reset the content scroll position whenever the displayed file changes
-  // (PLAN.md #41g).
+  // A file deep-link can carry an #L<n> hash (e.g. a file:// hyperlink clicked
+  // in the agent terminal) — the target line to scroll to and highlight.
+  const hashLine = useMemo(() => {
+    const m = /^#?L(\d+)/.exec(location.hash || '')
+    return m ? parseInt(m[1], 10) : null
+  }, [location.hash])
+
+  // Position the content when the displayed file (or target line) changes: jump
+  // to the #L<n> row if there is one and it's present, otherwise reset to the
+  // top (PLAN.md #41g). This runs after FileContent renders, so the data-line
+  // row exists; markdown/binary/image files have no such row and fall back to
+  // the top.
   const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (contentRef.current) contentRef.current.scrollTop = 0
-  }, [viewPath, file])
+    const el = contentRef.current
+    if (!el) return
+    if (hashLine != null) {
+      const target = el.querySelector(`[data-line="${hashLine}"]`)
+      if (target) { target.scrollIntoView({ block: 'center' }); return }
+    }
+    el.scrollTop = 0
+  }, [viewPath, file, hashLine])
 
   // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
   // full_context so context can be revealed client-side without round-trips.
@@ -1571,7 +1598,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <LoaderCircle className="w-5 h-5 animate-spin" />
             </div>
           ) : file ? (
-            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} />
+            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightLine={hashLine} />
           ) : null}
         </div>
       </div>
