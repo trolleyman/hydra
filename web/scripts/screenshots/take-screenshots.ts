@@ -684,7 +684,7 @@ try {
       },
       // 2a. A transition in ANOTHER project (the background count diff in
       // useAgentNotifications): the same card topped with the neutral gray
-      // "in another project" banner — the calm sibling of the approval card's
+      // folder+project banner — the calm sibling of the approval card's
       // amber one (agent-approvals-another-project).
       {
         name: 'toast-finished-another-project',
@@ -823,8 +823,8 @@ try {
           approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
-      // 3f. An agent running in ANOTHER project: an amber "running in another
-      // project" banner. Always allow is still offered (a remembered grant is
+      // 3f. An agent running in ANOTHER project: an amber folder+project
+      // banner. Always allow is still offered (a remembered grant is
       // scoped to the project the approval resolves in).
       {
         name: 'agent-approvals-another-project',

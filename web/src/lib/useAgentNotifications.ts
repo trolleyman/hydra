@@ -29,7 +29,7 @@ const FINISHED_TOAST_MS = 8_000
 //      counts change we fetch that project's agents on demand, and pop one toast
 //      per agent that newly blocked on input, finished, or went idle ("Agent X
 //      in project Y transitioned to …") whose agent label switches to it. The
-//      toast carries the neutral "in another project" banner.
+//      toast carries the neutral project banner naming where it happened.
 //
 // Transitions are detected by diffing each agent's status against the previous
 // poll; a first-seen agent never toasts (so a page load / project switch where
@@ -262,7 +262,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
             // Cross-project: the label still links through (its onClick selects the
-            // project first), and projectName draws the "in another project" banner.
+            // project first), and projectName draws the cross-project banner.
             agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName },
           })
         }
