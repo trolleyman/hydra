@@ -2434,6 +2434,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
         <TestsPanel
           projectId={projectId}
           agentId={agent.id}
+          repoRef={agent.branch_name ?? undefined}
           headRef={artifactParams.headRef}
           includeUncommitted={artifactParams.includeUncommitted}
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}

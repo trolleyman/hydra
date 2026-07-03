@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, SkipForward, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
+import { getFileIcon } from '../lib/fileIcons'
 
 // CaseTree renders test cases as a collapsible location tree (TESTS_PLAN.md
 // Feature 1), built from each case's structured location:
@@ -18,11 +19,18 @@ import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 // a subtree holding exactly ONE case collapses the whole chain into that
 // case's row, prefixed with the chain (so a lone warning isn't five expanders
 // deep). Dir/file rows carry a hover copy button (repo-relative path); case
-// rows copy path:line. Cases with no location (old cached reports, exit-code
-// fallbacks) land at the root as flat rows.
+// rows copy path:line. Each row also carries a hover "open in repository"
+// affordance that deep-links to the file/dir in the repo browser. Cases with no
+// location (old cached reports, exit-code fallbacks) land at the root as flat
+// rows.
 
 type SegKind = 'path' | 'scope'
 type Seg = { label: string; kind: SegKind }
+
+// OpenInRepo deep-links a row to the repository browser (the file/dir at the
+// tested ref). Undefined when there's no ref to browse (see TestsPanel), which
+// hides the affordance entirely.
+export type OpenInRepo = (path: string, line?: number | null) => void
 
 function caseSegs(c: TestCase, useScope: boolean): Seg[] {
   const path: Seg[] = splitPath(c.path).map((label) => ({ label, kind: 'path' as const }))
@@ -94,22 +102,41 @@ function compact(node: TreeNode): void {
   }
 }
 
+// nodeIsDir distinguishes a directory (holds further path segments) from a file
+// (its children are scope levels, or it holds cases directly). Drives the
+// folder-vs-file icon on path rows.
+function nodeIsDir(node: TreeNode): boolean {
+  for (const c of node.children.values()) if (c.kind === 'path') return true
+  return false
+}
+
 // hoistedCase returns the single case of a one-case subtree along with the
-// chain prefix leading to it, or null when the subtree holds more than one.
-// Only a subtree whose FULL total is one hoists: with hidden siblings the
+// chain of segments leading to it, or null when the subtree holds more than
+// one. Only a subtree whose FULL total is one hoists: with hidden siblings the
 // node keeps its expandable row so the everything-counted badges have a home.
-function hoistedCase(node: TreeNode): { c: TestCase; prefix: string } | null {
+function hoistedCase(node: TreeNode): { c: TestCase; segs: Seg[] } | null {
   if (node.total !== 1 || node.visTotal !== 1) return null
-  let prefix = node.label
+  const segs: Seg[] = [{ label: node.label, kind: node.kind }]
   let cur = node
   while (cur.cases.length === 0) {
     const next: TreeNode | undefined = [...cur.children.values()][0]
     if (!next) return null
-    // Path segments chain with "/", a scope level after the path with "›".
-    prefix += (next.kind === 'path' ? '/' : ' › ') + next.label
+    segs.push({ label: next.label, kind: next.kind })
     cur = next
   }
-  return { c: cur.cases[0], prefix }
+  return { c: cur.cases[0], segs }
+}
+
+// segText joins a segment chain the way the tree merges labels: path→path with
+// "/", anything into a scope level with " › ".
+function segText(segs: Seg[]): string {
+  return segs.map((s, i) => (i === 0 ? s.label : `${s.kind === 'path' ? '/' : ' › '}${s.label}`)).join('')
+}
+
+// filenameOf returns the trailing file name of a (possibly merged) path label
+// like "internal/git/commit_test.go" → "commit_test.go".
+function filenameOf(label: string): string {
+  return label.split('/').pop() ?? label
 }
 
 function copyText(text: string): void {
@@ -173,6 +200,21 @@ function CopyButton({ text, title }: { text: string; title: string }) {
   )
 }
 
+// RepoLinkButton is the hover-revealed "open in the repository browser"
+// affordance, deep-linking a row to its file/dir at the tested ref.
+function RepoLinkButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      title={title}
+      aria-label={title}
+      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400 transition-opacity cursor-pointer"
+    >
+      <SquareArrowOutUpRight className="w-3 h-3" />
+    </button>
+  )
+}
+
 function StatusGlyph({ status }: { status: string }) {
   switch (status) {
     case 'failed':
@@ -186,24 +228,58 @@ function StatusGlyph({ status }: { status: string }) {
   }
 }
 
-// CaseRow renders one test case: glyph + name (optionally chain-prefixed for a
-// hoisted case), the message box for failing/warning cases, duration, a copy
-// affordance, and — in scope mode — the file:line secondary so the diff
-// deep-link survives the axis switch.
-export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
+// NodeTypeIcon renders the folder / file / function icon that precedes a node's
+// label: a folder (open when expanded) for directories, the shared file icon
+// for files, and a function glyph for scope levels (describe/class blocks that
+// hold sub-cases).
+function NodeTypeIcon({ node, isDir, expanded }: { node: TreeNode; isDir: boolean; expanded: boolean }) {
+  if (node.kind === 'scope') {
+    return <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
+  }
+  if (isDir) {
+    return expanded
+      ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+      : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+  }
+  const { Icon, className } = getFileIcon(filenameOf(node.label))
+  return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} />
+}
+
+// FileLeadIcon is the leading icon of a hoisted case row: the file icon of the
+// deepest path segment in the chain, or a function glyph when the chain is
+// scope-only (scope mode).
+function FileLeadIcon({ segs }: { segs: Seg[] }) {
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (segs[i].kind === 'path') {
+      const { Icon, className } = getFileIcon(filenameOf(segs[i].label))
+      return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} />
+    }
+  }
+  return <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
+}
+
+// CaseRow renders one test case: for a hoisted one-case subtree it leads with
+// the file icon and the (non-lowlit) location chain, then the status glyph
+// immediately before the leaf name; a plain leaf row leads with the status
+// glyph. Both carry the message box for failing/warning cases, duration, a copy
+// affordance, an open-in-repo affordance, and — in scope mode — the file:line
+// secondary so the diff deep-link survives the axis switch.
+export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   c: TestCase
-  // The compacted chain leading here when this row was hoisted out of a
-  // one-case subtree (rendered dim before the leaf name).
-  prefix?: string
+  // The compacted segment chain leading here when this row was hoisted out of a
+  // one-case subtree (rendered before the leaf name, file icon and all).
+  segs?: Seg[]
   // Show the case's path:line inline (scope-mode leaves, flat lists).
   showLocation?: boolean
   indent?: number
+  onOpenInRepo?: OpenInRepo
 }) {
   const failedish = c.status === 'failed' || c.status === 'warning'
   // Skipped cases show their message too (the skip reason, dimmed) — skipped is
   // treated like every other status, not a mute roll-up.
   const showMessage = !!c.message && (failedish || c.status === 'skipped')
   const loc = caseLocation(c)
+  const prefix = segs ? segText(segs) : ''
   const copyable = loc || (prefix ? `${prefix} › ${c.name}` : c.name)
   const boxTone = c.status === 'failed'
     ? 'bg-red-50/40 dark:bg-red-900/10'
@@ -217,15 +293,26 @@ export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
   return (
     <div className={`group flex flex-col gap-1.5 py-1.5 pr-3 ${boxTone}`} style={{ paddingLeft: `${indent * 14 + 12}px` }}>
       <div className="flex items-center gap-2 min-w-0">
+        {segs ? (
+          <>
+            <FileLeadIcon segs={segs} />
+            {/* The location chain (folders/file/scope), NOT lowlit — it reads as
+                a real path — with the status glyph then sitting right before the
+                leaf test name. */}
+            <span className="font-mono text-xs text-gray-600 dark:text-gray-400 shrink-0 max-w-[45%] truncate">{prefix} ›</span>
+          </>
+        ) : null}
         <StatusGlyph status={c.status} />
         <span className={`font-mono text-xs min-w-0 truncate ${failedish ? 'font-medium' : 'text-gray-600 dark:text-gray-400'}`}>
-          {prefix ? <span className="text-gray-400 dark:text-gray-500">{prefix} › </span> : null}
           {c.name}
         </span>
         {showLocation && loc ? (
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate shrink-1">{loc}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
+        {onOpenInRepo && c.path ? (
+          <RepoLinkButton onClick={() => onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
+        ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
           <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
         ) : null}
@@ -237,19 +324,21 @@ export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
   )
 }
 
-function NodeView({ node, depth, collapsed, onToggle, useScope }: {
+function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: {
   node: TreeNode
   depth: number
   collapsed: Set<string>
   onToggle: (key: string) => void
   useScope: boolean
+  onOpenInRepo?: OpenInRepo
 }) {
   // One-case subtree → hoist the whole chain into a single case row.
   const hoisted = hoistedCase(node)
   if (hoisted) {
-    return <CaseRow c={hoisted.c} prefix={hoisted.prefix} showLocation={useScope} indent={depth} />
+    return <CaseRow c={hoisted.c} segs={hoisted.segs} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />
   }
   const isCollapsed = collapsed.has(node.key)
+  const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
   return (
     <div>
@@ -258,29 +347,38 @@ function NodeView({ node, depth, collapsed, onToggle, useScope }: {
         className="group flex w-full items-center gap-1.5 py-1 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
         style={{ paddingLeft: `${depth * 14 + 8}px` }}
       >
-        {isCollapsed ? <ChevronRight className="w-3 h-3 text-gray-400 shrink-0" /> : <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />}
+        {/* One chevron, rotated 90° when expanded, so the twist animates. */}
+        <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
+        <NodeTypeIcon node={node} isDir={isDir} expanded={!isCollapsed} />
         <span className={`text-xs font-mono truncate min-w-0 ${node.kind === 'path' ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400 italic'}`}>
           {node.label}
         </span>
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
+        {onOpenInRepo && copyPath ? <RepoLinkButton onClick={() => onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
       </button>
-      {!isCollapsed && (
-        <div className="relative">
-          <TreeGuide depth={depth} />
-          <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
+      {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
+          children open/closed (they stay mounted so the height can tween and the
+          collapse state persists). */}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
+        <div className="overflow-hidden min-h-0">
+          <div className="relative">
+            <TreeGuide depth={depth} />
+            <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
 
-function NodeChildren({ node, depth, collapsed, onToggle, useScope }: {
+function NodeChildren({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: {
   node: TreeNode
   depth: number
   collapsed: Set<string>
   onToggle: (key: string) => void
   useScope: boolean
+  onOpenInRepo?: OpenInRepo
 }) {
   // Directories first (alphabetical), then this node's own cases, worst
   // status first so failures surface above passing siblings. Subtrees and
@@ -291,16 +389,16 @@ function NodeChildren({ node, depth, collapsed, onToggle, useScope }: {
   return (
     <div>
       {children.map((child) => (
-        <NodeView key={child.key} node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
+        <NodeView key={child.key} node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
       ))}
       {cases.map((c, i) => (
-        <CaseRow key={`${caseKey(c)}-${i}`} c={c} showLocation={useScope} indent={depth} />
+        <CaseRow key={`${caseKey(c)}-${i}`} c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />
       ))}
     </div>
   )
 }
 
-export function CaseTree({ cases, visible, useScope, depth = 0 }: {
+export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
   // ALL of the runner's cases — badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
@@ -308,24 +406,31 @@ export function CaseTree({ cases, visible, useScope, depth = 0 }: {
   useScope: boolean
   // Base indent level, for embedding under a parent row (result sections).
   depth?: number
+  // Deep-link rows to the repository browser (omitted → no link affordance).
+  onOpenInRepo?: OpenInRepo
+  // Collapse state can be lifted out (persisted per agent). When omitted the
+  // tree keeps its own ephemeral state.
+  collapsed?: Set<string>
+  onToggle?: (key: string) => void
 }) {
   const visibleSet = useMemo(() => new Set(visible), [visible])
   const root = useMemo(() => buildTree(cases, visibleSet, useScope), [cases, visibleSet, useScope])
   // Everything starts expanded (the filter already narrows the set); the set
   // records what the user closed. Keyed by node identity so it survives both
   // re-renders and axis switches (keys differ per axis, which is fine).
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const onToggle = (key: string) =>
-    setCollapsed((prev) => {
+  const [internalCollapsed, setInternalCollapsed] = useState<Set<string>>(new Set())
+  const collapsed = collapsedProp ?? internalCollapsed
+  const onToggle = onToggleProp ?? ((key: string) =>
+    setInternalCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
-    })
+    }))
   if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
+      <NodeChildren node={root} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
     </div>
   )
 }

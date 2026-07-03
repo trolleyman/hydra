@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, ChevronDown, Search, SkipForward, FlaskConical } from 'lucide-react'
+import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
@@ -11,7 +12,8 @@ import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 import { TagScopeFilter } from './ArtifactFilterBar'
-import { CaseTree, NodeBadges, TreeGuide } from './CaseTree'
+import { CaseTree, NodeBadges, TreeGuide, type OpenInRepo } from './CaseTree'
+import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -53,9 +55,13 @@ function testsWsUrl(projectId: string, agentId: string, headRef?: string, includ
 // commit, or the uncommitted working tree), defaulting to the branch tip. Streams
 // updates over a WebSocket so progress / the live log / the settled verdict land
 // instantly, falling back to polling if the socket can't connect or drops.
-export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
+export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
   projectId: string
   agentId: string
+  // The ref (the agent's branch) to browse when a case/file/dir row's
+  // open-in-repository affordance is used. Undefined → no repo to link into, so
+  // the affordance is hidden.
+  repoRef?: string
   // The "after" commit/ref to test, mirrored from the diff viewer's right-hand
   // selector. Undefined → the agent's branch tip. includeUncommitted tests the
   // working tree instead of a commit.
@@ -228,6 +234,17 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   // and the scope-axis availability the cog needs.
   const allCases = useMemo(() => (runners ?? []).flatMap((r) => r.cases ?? []), [runners])
   const statusCounts = useMemo(() => computeStatusCounts(allCases), [allCases])
+
+  // Deep-link a case/file/dir row to the repository browser at the agent's
+  // branch. Omitted when there's no ref to browse, which hides the affordance.
+  // (The repo browser has no line anchor yet, so `line` is accepted but unused.)
+  const navigate = useNavigate()
+  const onOpenInRepo = useMemo<OpenInRepo | undefined>(() => {
+    if (!repoRef) return undefined
+    return (path: string) => {
+      void navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: `${repoRef}/${path}` } })
+    }
+  }, [navigate, projectId, repoRef])
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
   useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
 
@@ -315,13 +332,18 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
       <div className="flex flex-col gap-2">
         {runners.map((r) => (
           <TestRunnerCard
-            key={r.name}
+            // Keyed by agent too, so switching agents remounts the cards and they
+            // re-read their persisted expansion state for the new agent.
+            key={`${agentId}::${r.name}`}
+            projectId={projectId}
+            agentId={agentId}
             runner={r}
             filter={filter}
             search={search}
             groupResult={!!groupResult}
             useScope={!!useScope}
             onRefresh={() => requestRefresh(r.name)}
+            onOpenInRepo={onOpenInRepo}
           />
         ))}
       </div>
@@ -346,13 +368,16 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
 // out identically to an artifact set card: the runner name + verdict chip +
 // summary on the left, the build-log toggle and Re-run melt buttons on the right,
 // and the filtered case tree / live log behind the collapse toggle.
-function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefresh }: {
+function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResult, useScope, onRefresh, onOpenInRepo }: {
+  projectId: string
+  agentId: string
   runner: TestRunResult
   filter: TestFilter
   search: string
   groupResult: boolean
   useScope: boolean
   onRefresh: () => void
+  onOpenInRepo?: OpenInRepo
 }) {
   const cases = useMemo(() => runner.cases ?? [], [runner.cases])
   const running = runner.status === 'running'
@@ -361,8 +386,36 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
   const failed = runner.status === 'failing' || errored
   const tone = verdictTone(runner.status)
 
+  // Card + tree expansion persist per agent (keyed by runner name) so a card the
+  // user opened — and the tree nodes they collapsed inside it — restore on
+  // return to the agent page. Seeded once on mount; the card is remounted on
+  // agent switch (via its key) so the seed re-reads the new agent's prefs.
   // Default collapsed (per design choice): every card opens via its chevron.
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsedState] = useState<boolean>(
+    () => loadAgentViewPrefs(projectId, agentId).testCardCollapsed?.[runner.name] ?? true,
+  )
+  const setCollapsed = useCallback((update: boolean | ((c: boolean) => boolean)) => {
+    setCollapsedState((prev) => {
+      const next = typeof update === 'function' ? update(prev) : update
+      const cur = loadAgentViewPrefs(projectId, agentId).testCardCollapsed ?? {}
+      patchAgentViewPrefs(projectId, agentId, { testCardCollapsed: { ...cur, [runner.name]: next } })
+      return next
+    })
+  }, [projectId, agentId, runner.name])
+  // Which tree nodes the user has collapsed within this card's case tree.
+  const [treeCollapsed, setTreeCollapsed] = useState<Set<string>>(
+    () => new Set(loadAgentViewPrefs(projectId, agentId).testTreeCollapsed?.[runner.name] ?? []),
+  )
+  const onToggleNode = useCallback((key: string) => {
+    setTreeCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      const cur = loadAgentViewPrefs(projectId, agentId).testTreeCollapsed ?? {}
+      patchAgentViewPrefs(projectId, agentId, { testTreeCollapsed: { ...cur, [runner.name]: [...next] } })
+      return next
+    })
+  }, [projectId, agentId, runner.name])
   // A log exists while running (live `log`) or once settled (`log_url`).
   const hasLog = running || !!runner.log_url
   // A *build*/infra failure has no failing test cases to explain it: an exit-code-only
@@ -497,7 +550,9 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
         <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
-          {groupResult ? <ResultSections cases={cases} visible={visible} useScope={useScope} /> : <CaseTree cases={cases} visible={visible} useScope={useScope} />}
+          {groupResult
+            ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
+            : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
         </div>
       )}
 
@@ -525,7 +580,7 @@ const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boo
   { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
 ]
 
-function ResultSections({ cases, visible, useScope }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean }) {
+function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean; onOpenInRepo?: OpenInRepo }) {
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
   return (
     <>
@@ -544,18 +599,22 @@ function ResultSections({ cases, visible, useScope }: { cases: TestCase[]; visib
               onClick={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
               className="flex w-full items-center gap-1.5 py-1 pl-2 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
             >
-              {open ? <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" /> : <ChevronRight className="w-3 h-3 text-gray-400 shrink-0" />}
+              {/* One chevron, rotated 90° when open, so the twist animates. */}
+              <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
               {icon}
               <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">{label}</span>
               {/* Badge counts the status's FULL tally, like every tree node. */}
               <NodeBadges counts={{ [status]: all.length }} />
             </button>
-            {open && (
-              <div className="relative">
-                <TreeGuide depth={0} />
-                <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} />
+            {/* Animated open/close, matching the tree's grid-row slide. */}
+            <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+              <div className="overflow-hidden min-h-0">
+                <div className="relative">
+                  <TreeGuide depth={0} />
+                  <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} onOpenInRepo={onOpenInRepo} />
+                </div>
               </div>
-            )}
+            </div>
           </div>
         )
       })}

@@ -933,10 +933,12 @@ try {
       // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
       // explanation of the soft gate, instead of bouncing off a server 409.
       { name: 'tests-merge-gate-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge"]' },
-      // A fully-expanded tests runner card: agent-2's card opened with its "passing"
-      // roll-up also expanded, so the failing cases, the passing case and the
-      // skipped row are all visible together below the Changes header.
-      { name: 'tests-card-expanded', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("1 passing")'] },
+      // A fully-expanded tests runner card: agent-2's vitest card opened, then the
+      // status filter switched to "all" so the failing cases, the passing case and
+      // the skipped row are all visible together as a folder/file/function tree
+      // below the Changes header (the dropdown is dismissed by clicking the Tests
+      // heading before the capture).
+      { name: 'tests-card-expanded', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("status")', 'button:text-is("all")', 'h3:has-text("Tests")'] },
       // The merge-gate dialog while tests are still running: agent-3 (running, not
       // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.
