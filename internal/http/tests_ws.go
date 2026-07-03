@@ -38,12 +38,13 @@ type testsWSMessage struct {
 // testsWSCounts is the "counts" payload: authoritative running totals (not
 // deltas) and the newly-appended cases the client merges into its case list.
 type testsWSCounts struct {
-	Passed   int            `json:"passed"`
-	Failed   int            `json:"failed"`
-	Skipped  int            `json:"skipped"`
-	Warnings int            `json:"warnings"`
-	Total    int            `json:"total"` // declared denominator, 0 = unknown
-	Cases    []api.TestCase `json:"cases,omitempty"`
+	Passed         int            `json:"passed"`
+	Failed         int            `json:"failed"`
+	Skipped        int            `json:"skipped"`
+	Warnings       int            `json:"warnings"`
+	Total          int            `json:"total"`                     // denominator, 0 = unknown
+	TotalEstimated bool           `json:"total_estimated,omitempty"` // Total is an estimate from a prior run (no ::hydra:test:total::)
+	Cases          []api.TestCase `json:"cases,omitempty"`
 }
 
 // testsClientMessage is a client→server message. Only "refresh" (re-run one
@@ -225,8 +226,9 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 				counts := &testsWSCounts{
 					Passed: ev.Counts.Passed, Failed: ev.Counts.Failed,
 					Skipped: ev.Counts.Skipped, Warnings: ev.Counts.Warnings,
-					Total: ev.Counts.Total,
-					Cases: toAPITestCases(ev.Counts.Cases),
+					Total:          ev.Counts.Total,
+					TotalEstimated: ev.Counts.TotalEstimated,
+					Cases:          toAPITestCases(ev.Counts.Cases),
 				}
 				if err := writeMsg(testsWSMessage{Type: "counts", Name: rspec.Name, Counts: counts}); err != nil {
 					return

@@ -28,7 +28,8 @@ type TestWSCounts = {
   failed: number
   skipped: number
   warnings: number
-  total: number // declared denominator, 0 = unknown
+  total: number // denominator, 0 = unknown
+  total_estimated?: boolean // total is a carried-over estimate (no ::hydra:test:total::)
   cases?: TestCase[]
 }
 type TestWSMessage =
@@ -112,6 +113,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
           skipped: msg.counts.skipped,
           warnings: msg.counts.warnings,
           total: msg.counts.total > 0 ? msg.counts.total : r.total,
+          total_estimated: msg.counts.total > 0 ? msg.counts.total_estimated : r.total_estimated,
           cases: msg.counts.cases?.length ? [...(r.cases ?? []), ...msg.counts.cases] : r.cases,
         }
         : r)) ?? prev)
@@ -654,7 +656,16 @@ function Summary({ runner }: { runner: TestRunResult }) {
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>
           {runner.passed ?? 0}
-          {denom > 0 ? <span className="text-gray-400 dark:text-gray-500">/{denom}</span> : null}
+          {denom > 0 ? (
+            // A "~" marks an estimated denominator carried over from a prior run
+            // (the runner declared no ::hydra:test:total::).
+            <span
+              className="text-gray-400 dark:text-gray-500"
+              title={runner.total_estimated ? 'Estimated total from a previous run — this run declared no test total' : undefined}
+            >
+              /{runner.total_estimated ? '~' : ''}{denom}
+            </span>
+          ) : null}
         </span>
       </span>
       {(runner.failed ?? 0) > 0 ? (

@@ -192,6 +192,57 @@ func TestDeclaredTotalIsAFloor(t *testing.T) {
 	}
 }
 
+// A streaming run that declares no ::hydra:test:total:: seeds its denominator
+// from a prior run's total (here via the Latest fallback) and marks it
+// estimated, so the progress bar is still determinate. The settled report's
+// Total stays the exact case count — the estimate never leaks into it.
+func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
+	workDir := t.TempDir()
+	initGitRepo(t, workDir)
+	m := NewManager(t.TempDir())
+
+	// A prior cached report for this runner — Latest() surfaces it as the estimate
+	// (no TotalHintRefs are set on the Version, so the ref loop is skipped).
+	prior := Report{Runner: "t", Key: "commit/deadbeef", Status: StatusPassing, Total: 42, UpdatedAt: 100}
+	if err := writeReport(m.entryDir("t", "commit/deadbeef"), prior); err != nil {
+		t.Fatal(err)
+	}
+
+	events, unsub := m.Subscribe()
+	defer unsub()
+
+	// Two cases, but no ::hydra:test:total:: marker.
+	script := "echo \"::hydra:test:pass:: pkg › A\"\necho \"::hydra:test:pass:: pkg › B\"\n"
+	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Command: script}
+	v := Version{WorktreeDir: workDir}
+	if _, err := m.Get(spec, v); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	var counts *RunningCounts
+	for ev := range events {
+		if ev.Kind == "counts" && ev.Counts != nil {
+			counts = ev.Counts
+		}
+		if ev.Kind == "settled" {
+			break
+		}
+	}
+	if counts == nil {
+		t.Fatal("no counts event observed")
+	}
+	if counts.Total != 42 || !counts.TotalEstimated {
+		t.Errorf("running counts = total %d estimated %v, want 42 estimated=true (seeded from prior run)", counts.Total, counts.TotalEstimated)
+	}
+	// The settled report recomputes Total from the actual cases — never the estimate.
+	rep, ok, err := m.Peek(spec.Name, v)
+	if err != nil || !ok {
+		t.Fatalf("Peek: ok=%v err=%v", ok, err)
+	}
+	if rep.Total != 2 {
+		t.Errorf("settled total = %d, want exact 2 (estimate must not leak into the settled report)", rep.Total)
+	}
+}
+
 // A type=stdout runner that emits no markers falls back to the exit-code
 // verdict, exactly like a junit runner that wrote no report.
 func TestGenerateStreamingNoMarkersFallsBack(t *testing.T) {

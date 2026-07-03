@@ -610,10 +610,13 @@ func simTestRunners(id string) []api.TestRunResult {
 		}}
 	}
 	if id == "agent-md" {
-		// Two runs in flight, for the running-state screenshots. "go" declared a
+		// Three runs in flight, for the running-state screenshots. "go" declared a
 		// ::hydra:test:total:: (142) so its bar is determinate (84/142); "eslint"
-		// is a streamed run with NO declared total — tallies tick but there's no
-		// denominator — so its bar is the indeterminate sliding barber pole.
+		// is a streamed run with NO declared total AND no prior run to estimate
+		// from — tallies tick but there's no denominator — so its bar is the
+		// indeterminate sliding barber pole. "playwright" also declared no total
+		// but a prior run seeded an ESTIMATED denominator (shown as "~48"), so its
+		// bar is determinate and the count reads 31/~48.
 		return []api.TestRunResult{
 			{
 				Name: "go", Status: api.TestStatusRunning,
@@ -635,6 +638,19 @@ func simTestRunners(id string) []api.TestRunResult {
 					{Text: "$ eslint -f junit .", Stream: "stdout"},
 					{Text: "web/src/DiffViewer.tsx", Stream: "stdout"},
 					{Text: "  1742:9  warning  'onionSkin' is assigned a value but never used", Stream: "stdout"},
+				},
+			},
+			{
+				Name: "playwright", Status: api.TestStatusRunning,
+				// No declared ::hydra:test:total::, but a prior run seeded an ESTIMATED
+				// denominator (48). TotalEstimated flags it approximate → the panel shows
+				// a determinate bar and the count reads "31/~48".
+				Total: ptr(48), TotalEstimated: ptr(true), Passed: ptr(31), Failed: ptr(0),
+				StartedAt: ptr(simNow().Add(-6 * time.Second).Unix()), Progress: ptr("31/~48"), Format: ptr("stdout"),
+				Log: &[]api.ArtifactLogLine{
+					{Text: "$ playwright test", Stream: "stdout"},
+					{Text: "Running 48 tests using 4 workers", Stream: "stdout"},
+					{Text: "  ✓ e2e/login.spec.ts:12:3 › signs in", Stream: "stdout"},
 				},
 			},
 		}

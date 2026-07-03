@@ -3067,6 +3067,10 @@ components:
           $ref: '#/components/schemas/TestStatus'
         total:
           type: integer
+        total_estimated:
+          type: boolean
+          nullable: true
+          description: True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
         passed:
           type: integer
         failed:

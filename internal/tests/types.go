@@ -129,6 +129,11 @@ type Report struct {
 	Progress  string    `json:"-"`
 	StartedAt int64     `json:"-"`
 	Log       []LogLine `json:"-"`
+	// TotalEstimated marks a running snapshot whose Total is a denominator
+	// *estimate* carried over from a prior run (the runner declared no
+	// ::hydra:test:total::), so the UI can render it as approximate. Only ever
+	// true while running: a settled report's Total is the exact case count.
+	TotalEstimated bool `json:"-"`
 }
 
 // Version selects which checkout a test runs against, mirroring artifacts.Version:
@@ -137,6 +142,12 @@ type Report struct {
 type Version struct {
 	Ref         string
 	WorktreeDir string
+	// TotalHintRefs are refs (branch names / revs) consulted, in order, for a
+	// denominator estimate when a streaming run declares no ::hydra:test:total::
+	// — typically the head's own branch then its base branch, so an
+	// un-instrumented run still shows a determinate progress bar. Never part of
+	// the cache key (versionKey ignores it).
+	TotalHintRefs []string
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.
@@ -160,5 +171,8 @@ type RunningCounts struct {
 	Skipped  int
 	Warnings int
 	Total    int // declared ::hydra:test:total:: denominator (0 = unknown)
-	Cases    []TestCase
+	// TotalEstimated: Total is an estimate carried over from a prior run (no
+	// ::hydra:test:total:: was declared), so the UI shows it as approximate.
+	TotalEstimated bool
+	Cases          []TestCase
 }

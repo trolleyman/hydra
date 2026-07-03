@@ -123,16 +123,31 @@ func trustedHostTestCommands(cfg config.Config) map[string]bool {
 // testVersion resolves which checkout a head's tests run against: its uncommitted
 // working tree (when requested and available), an explicit ref, or its branch tip.
 func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hydratests.Version {
+	hints := headTotalHintRefs(head)
 	switch {
 	case includeUncommitted && head.Worktree != nil:
-		return hydratests.Version{WorktreeDir: *head.Worktree}
+		return hydratests.Version{WorktreeDir: *head.Worktree, TotalHintRefs: hints}
 	case headRef != nil && *headRef != "":
-		return hydratests.Version{Ref: *headRef}
+		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints}
 	case head.Branch != nil:
-		return hydratests.Version{Ref: *head.Branch}
+		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints}
 	default:
 		return hydratests.Version{}
 	}
+}
+
+// headTotalHintRefs lists the refs consulted, in priority order, to estimate a
+// streaming run's denominator when it declares no ::hydra:test:total:: — the
+// head's own branch first, then its base branch (see tests.Manager.fallbackTotal).
+func headTotalHintRefs(head *heads.Head) []string {
+	var refs []string
+	if head.Branch != nil && *head.Branch != "" {
+		refs = append(refs, *head.Branch)
+	}
+	if head.BaseBranch != "" {
+		refs = append(refs, head.BaseBranch)
+	}
+	return refs
 }
 
 // GetAgentTests runs (or returns cached) the head's test runners for one ref and
@@ -198,6 +213,9 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 	if rep.Status == hydratests.StatusRunning {
 		if rep.StartedAt > 0 {
 			res.StartedAt = ptr(rep.StartedAt)
+		}
+		if rep.TotalEstimated {
+			res.TotalEstimated = ptr(true)
 		}
 		res.Progress = nonEmptyPtr(rep.Progress)
 		if len(rep.Log) > 0 {
@@ -612,7 +630,7 @@ func (s *Server) ArmMergeWhenGreen(ctx context.Context, request api.ArmMergeWhen
 	// Kick a run so a verdict exists for the watcher to act on.
 	if s.Tests != nil {
 		mgr := s.Tests.Manager(projectRoot)
-		v := hydratests.Version{Ref: *head.Branch}
+		v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head)}
 		if liveCfg, err := config.Load(projectRoot); err == nil {
 			for _, r := range s.testRunnersFor(projectRoot, v, liveCfg) {
 				_, _ = mgr.Get(r, v)

@@ -106,7 +106,7 @@ func (s *Server) testPrefetchOnce(ctx context.Context, roots []string, lastSHA m
 			}
 			lastSHA[head.ID] = sha
 
-			v := hydratests.Version{Ref: *head.Branch}
+			v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head)}
 			runners := s.testRunnersFor(root, v, cfg)
 			if len(runners) == 0 {
 				continue // no tests apply to this head's branch

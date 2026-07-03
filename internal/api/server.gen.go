@@ -1171,6 +1171,9 @@ type TestRunResult struct {
 	Status TestStatus `json:"status"`
 	Total  *int       `json:"total,omitempty"`
 
+	// TotalEstimated True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
+	TotalEstimated *bool `json:"total_estimated"`
+
 	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
 	Warnings *int `json:"warnings,omitempty"`
 }

@@ -433,7 +433,8 @@ const (
 // Guarded by Manager.mu.
 type liveRun struct {
 	cases                             []TestCase
-	total                             int // declared denominator (0 = unknown)
+	total                             int  // denominator (0 = unknown)
+	totalEstimated                    bool // total is a carried-over estimate, not a declared ::hydra:test:total::
 	passed, failed, skipped, warnings int
 	pending                           []TestCase // appended since the last coalesced flush
 	timer                             *time.Timer
@@ -495,8 +496,62 @@ func (m *Manager) setTestTotal(dir string, total int) {
 		m.live[dir] = lr
 	}
 	lr.total = total
+	lr.totalEstimated = false // a real declared total supersedes any seeded estimate
 	m.markerSeen[dir] = true
 	m.setProgressLocked(dir, lr.progressText())
+}
+
+// seedEstimatedTotal seeds an in-flight streaming run's denominator with an
+// estimate carried over from a prior run (see fallbackTotal), giving an
+// un-instrumented run a determinate progress bar until — and unless — the runner
+// declares its own ::hydra:test:total::. It never sets markerSeen (this isn't a
+// real marker) and never overrides an already-set total, and marks the value
+// estimated so the UI can render it as approximate.
+func (m *Manager) seedEstimatedTotal(dir string, total int) {
+	if total <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, inFlight := m.gens[dir]; !inFlight {
+		return
+	}
+	lr := m.live[dir]
+	if lr == nil {
+		lr = &liveRun{}
+		m.live[dir] = lr
+	}
+	if lr.total > 0 {
+		return // a declared (or already-seeded) total wins
+	}
+	lr.total = total
+	lr.totalEstimated = true
+	m.setProgressLocked(dir, lr.progressText())
+}
+
+// fallbackTotal estimates a streaming denominator for a run that declares no
+// ::hydra:test:total:: by reusing a prior run's case count. It consults refs in
+// order — typically the head's own branch, then its base branch — reading each
+// ref's cached commit report, and returns the first positive Total. Failing
+// that it falls back to the most-recently-updated cached report for the runner
+// (Latest), mirroring the stale-verdict fallback. 0 = nothing usable is cached.
+func (m *Manager) fallbackTotal(runner string, refs []string) int {
+	for _, ref := range refs {
+		if ref == "" {
+			continue
+		}
+		sha, err := git.ResolveRef(m.projectRoot, ref)
+		if err != nil {
+			continue
+		}
+		if rep, ok := readReport(m.entryDir(runner, keyKindCommit+"/"+sha)); ok && rep.Total > 0 {
+			return rep.Total
+		}
+	}
+	if rep, ok := m.Latest(runner); ok && rep.Total > 0 {
+		return rep.Total
+	}
+	return 0
 }
 
 // declaredTotal is the ::hydra:test:total:: denominator, floored at the cases
@@ -534,8 +589,9 @@ func (m *Manager) flushCountsLocked(dir string) {
 	}
 	counts := &RunningCounts{
 		Passed: lr.passed, Failed: lr.failed, Skipped: lr.skipped, Warnings: lr.warnings,
-		Total: lr.declaredTotal(),
-		Cases: lr.pending,
+		Total:          lr.declaredTotal(),
+		TotalEstimated: lr.totalEstimated,
+		Cases:          lr.pending,
 	}
 	lr.pending = nil
 	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
@@ -564,6 +620,7 @@ func (m *Manager) fillRunningLocked(dir string, rep *Report) {
 	// from a declared one whose cases had caught up (both total == cases), so the poll
 	// fallback couldn't tell "no denominator" from "denominator reached". 0 = unknown.
 	rep.Total = lr.declaredTotal()
+	rep.TotalEstimated = lr.totalEstimated
 }
 
 // liveCases returns a copy of the streamed cases accumulated so far.
@@ -635,6 +692,15 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	var stderrBuf bytes.Buffer
 	var stderrMu sync.Mutex
 	lc := newLocContext(runDir)
+	// A streaming run that never declares ::hydra:test:total:: still gets a
+	// determinate progress bar: seed the denominator from a prior run's total
+	// (this branch, else the base branch, else the latest anywhere). A real
+	// marker later supersedes it (setTestTotal clears the estimate).
+	if spec.IsStreaming() {
+		if est := m.fallbackTotal(spec.Name, v.TotalHintRefs); est > 0 {
+			m.seedEstimatedTotal(dir, est)
+		}
+	}
 	scan := func(r io.Reader, stream string) {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
