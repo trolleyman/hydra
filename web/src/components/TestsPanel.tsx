@@ -466,7 +466,7 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
     >
       {/* Running: a thin progress bar above the live log tail — determinate
           (completed cases over the declared total) when the run streams a
-          denominator, an indeterminate pulse otherwise. */}
+          denominator, an indeterminate sliding barber pole otherwise. */}
       {running && (
         <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
           {liveDenominator(runner) > 0 ? (
@@ -475,7 +475,7 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
               style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
             />
           ) : (
-            <div className="h-full bg-blue-500 animate-pulse w-1/2" />
+            <div className="h-full w-full bg-blue-500 animate-barber-pole" />
           )}
         </div>
       )}

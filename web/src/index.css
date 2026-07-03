@@ -131,6 +131,37 @@ body {
   .toast-progress-bar { animation: none; }
 }
 
+/* Indeterminate test-progress bar: a running test runner that hasn't declared a
+   ::hydra:test:total:: denominator has no meaningful fill percentage, so instead
+   of a static half-bar we fill the whole track with diagonal "barber pole"
+   stripes that slide continuously — reads as "working, length unknown". The
+   stripes are a translucent overlay on top of the element's bg-* base colour, and
+   the 0.5rem background-position shift equals one tile so the loop is seamless. */
+@keyframes barber-pole {
+  from { background-position-x: 0; }
+  to   { background-position-x: 0.5rem; }
+}
+
+.animate-barber-pole {
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.28) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.28) 50%,
+    rgba(255, 255, 255, 0.28) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 0.5rem 0.5rem;
+  animation: barber-pole 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the stripes (still reads as "indeterminate") but stop them moving. */
+  .animate-barber-pole { animation: none; }
+}
+
 /* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
    repository file view renders one `<code class="hljs">` per line, so that
    vertical padding pushed each line below its line-number gutter (numbers looked
