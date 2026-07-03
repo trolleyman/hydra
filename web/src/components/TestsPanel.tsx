@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
-import { useNavigate } from '@tanstack/react-router'
+import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
@@ -239,18 +239,17 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   // Deep-link a case/file/dir row to the repository browser at the agent's
   // branch. Omitted when there's no ref to browse, which hides the affordance. A
   // case's line is carried as an #L<n> hash, which the repo view scrolls to and
-  // highlights (see RepositoryView's selRange).
-  const navigate = useNavigate()
+  // highlights (see RepositoryView's selRange). Returns <Link> props (not a
+  // navigate call) so the row renders a real anchor — that's what makes
+  // middle-click / Ctrl-click open the target in a new tab.
   const onOpenInRepo = useMemo<OpenInRepo | undefined>(() => {
     if (!repoRef) return undefined
-    return (path: string, line?: number | null) => {
-      void navigate({
-        to: '/project/$projectId/repository/$',
-        params: { projectId, _splat: `${repoRef}/${path}` },
-        hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
-      })
-    }
-  }, [navigate, projectId, repoRef])
+    return (path: string, line?: number | null) => linkOptions({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: `${repoRef}/${path}` },
+      hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
+    })
+  }, [projectId, repoRef])
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
   useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
 

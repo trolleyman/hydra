@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Link, type LinkProps } from '@tanstack/react-router'
 import { AlertTriangle, Box, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
@@ -34,10 +35,14 @@ type SegKind = 'path' | 'scope'
 type ScopeKind = 'module' | 'function' | 'class'
 type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 
-// OpenInRepo deep-links a row to the repository browser (the file/dir — and, for
-// a case, its line — at the tested ref). Undefined when there's no ref to browse
-// (see TestsPanel), which hides the affordance entirely.
-export type OpenInRepo = (path: string, line?: number | null) => void
+// OpenInRepo builds the <Link> target that deep-links a row to the repository
+// browser (the file/dir — and, for a case, its line — at the tested ref). It
+// returns props rather than navigating so the affordance renders as a real
+// anchor with an href: that's what lets middle-click / Ctrl-click open it in a
+// new tab (a plain onClick button has no href for the browser to act on).
+// Undefined when there's no ref to browse (see TestsPanel), which hides the
+// affordance entirely.
+export type OpenInRepo = (path: string, line?: number | null) => LinkProps
 
 function normScopeKind(k: string | null | undefined): ScopeKind {
   if (k === 'function') return 'function'
@@ -242,16 +247,21 @@ function CopyButton({ text, title }: { text: string; title: string }) {
 
 // RepoLinkButton is the hover-revealed "open in the repository browser"
 // affordance, deep-linking a row to its file/dir (and line) at the tested ref.
-function RepoLinkButton({ onClick, title }: { onClick: () => void; title: string }) {
+// It renders a real <Link> (an <a href>), so left-click navigates in-app while
+// middle-click / Ctrl-click open the target in a new tab natively. stopPropagation
+// keeps a left-click from also toggling the row it sits on; it doesn't touch
+// default navigation, so the SPA nav (and the browser's new-tab handling) survive.
+function RepoLinkButton({ target, title }: { target: LinkProps; title: string }) {
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick() }}
+    <Link
+      {...target}
+      onClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
-      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400 transition-opacity cursor-pointer"
+      className="opacity-0 group-hover:opacity-100 shrink-0 inline-flex p-0.5 rounded text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400 transition-opacity cursor-pointer"
     >
       <SquareArrowOutUpRight className="w-3 h-3" />
-    </button>
+    </Link>
   )
 }
 
@@ -389,7 +399,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
         {onOpenInRepo && c.path ? (
-          <RepoLinkButton onClick={() => onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
+          <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
         ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
           <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
@@ -429,7 +439,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
         <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} />
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
-        {onOpenInRepo && copyPath ? <RepoLinkButton onClick={() => onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
+        {onOpenInRepo && copyPath ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
       </button>
       {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
