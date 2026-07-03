@@ -346,6 +346,10 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
         </span>
         {showLocation && loc ? (
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate shrink-1">{loc}</span>
+        ) : c.line != null && c.line > 0 ? (
+          // Path mode already shows the file in the tree, so just the line — a dim
+          // ":42" — which is also the row's open-in-repo #L target.
+          <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
         {onOpenInRepo && c.path ? (

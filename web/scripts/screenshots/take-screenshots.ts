@@ -1088,6 +1088,11 @@ try {
         clicks: [
           'button:has(svg.lucide-git-compare)',
           'button:has-text("hydra/add-line-numbers")',
+          // Select the full-context heads.go file so the diff visibly fills the
+          // pane behind the dropdown (README's 4-line diff sat entirely under it,
+          // reading as an empty/loading pane); then reopen the branch selector to
+          // showcase the agent-vs-other branch grouping.
+          'button:has-text("heads.go")',
           'button[title="Change or exit branch diff"]',
         ],
       },
