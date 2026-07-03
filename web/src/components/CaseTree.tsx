@@ -183,32 +183,43 @@ function statusRank(s: string): number {
 // has no chevron, so it pads straight to ICON_X, lining its status glyph up with
 // sibling nodes' icons (NOT with the parent's icon one level up, which is what
 // made child rows look like they shared the parent's column). GUIDE_X drops the
-// vertical guide under the chevron's centre.
+// vertical connector under the parent chevron's centre.
 const INDENT_STEP = 18
 const NODE_PAD = 8
 const CHEVRON_SLOT = 18 // chevron (w-3 = 12) + gap-1.5 (6)
 const ICON_X = NODE_PAD + CHEVRON_SLOT
 const GUIDE_X = 13
+// Vertical distance from a child row's top to the centre of its leading glyph,
+// where the horizontal tick meets the row. Case rows pad a touch more (py-1.5 vs
+// the node row's py-1), so their glyph sits ~2px lower.
+const NODE_TICK_Y = 13
+const CASE_TICK_Y = 15
 
-// TreeGuide is the lowlit vertical line dropped from an expanded node's
-// chevron through its children, so every row shows which parent it belongs
-// to. Rendered inside a `relative` wrapper around the children block; `depth`
-// is the expanded PARENT's depth (the line lands under its chevron).
-//
-// `leaf` shifts the guide right by one chevron slot when the children are case
-// rows rather than sub-nodes. A case row has no chevron, so its glyph sits a
-// CHEVRON_SLOT further right than a sub-node's chevron would (it aligns with
-// sibling node ICONS — see CaseRow). Without the shift the guide would hug the
-// column where a chevron would be, leaving a whole slot of empty space between
-// the line and the case glyphs — it read as a detached, gappy line. Shifting it
-// keeps the same tight gap the guide has beside sub-node rows.
-export function TreeGuide({ depth, leaf = false }: { depth: number; leaf?: boolean }) {
+// ChildConnector draws a `tree`-style elbow linking one child row to its parent:
+// a vertical line dropped under the parent's chevron, turning right at the
+// child's glyph. Rendered inside a `relative` wrapper around each child row.
+//   - The vertical runs the child's full height (├) so it flows into the next
+//     sibling, EXCEPT for the last child, where it stops at the tick (└) — the
+//     line turns right at the final item and terminates rather than spilling on.
+//   - The horizontal tick stops at the child's CHEVRON when the child is itself
+//     an expandable node, or reaches its ICON when the child is a standalone leaf
+//     (a case, or a hoisted one-case row) that has no chevron.
+// `parentDepth` is the expanded parent's depth; the child sits at parentDepth+1.
+function ChildConnector({ parentDepth, hasChevron, isLast }: { parentDepth: number; hasChevron: boolean; isLast: boolean }) {
+  const gx = parentDepth * INDENT_STEP + GUIDE_X
+  const childBase = (parentDepth + 1) * INDENT_STEP
+  const tickEnd = childBase + (hasChevron ? NODE_PAD : ICON_X)
+  const tickY = hasChevron ? NODE_TICK_Y : CASE_TICK_Y
+  const line = 'pointer-events-none absolute bg-gray-200/80 dark:bg-gray-700/50'
   return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute top-0 bottom-0 w-px bg-gray-200/80 dark:bg-gray-700/50"
-      style={{ left: depth * INDENT_STEP + GUIDE_X + (leaf ? CHEVRON_SLOT : 0) }}
-    />
+    <>
+      <span
+        aria-hidden
+        className={line}
+        style={{ left: gx, top: 0, width: 1, height: isLast ? tickY + 1 : undefined, bottom: isLast ? undefined : 0 }}
+      />
+      <span aria-hidden className={line} style={{ left: gx, top: tickY, width: tickEnd - gx, height: 1 }} />
+    </>
   )
 }
 
@@ -426,15 +437,6 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
   const isCollapsed = collapsed.has(node.key)
   const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
-  // The guide hugs the case-glyph column when every child it groups renders as a
-  // chevron-less leaf row (see TreeGuide `leaf`): either a case attached here
-  // directly, or a single-case subtree that hoistedCase() collapses into one
-  // CaseRow — both lead with a glyph at the ICON column, no chevron. If any
-  // child keeps its chevron (a real expandable sub-node), the guide stays on the
-  // chevron column instead. Without counting hoisted subtrees, a folder of
-  // one-case files (each hoisted) looked like its guide sat a level too far out.
-  const renderedNodes = [...node.children.values()].filter((c) => c.visTotal > 0)
-  const leafChildren = renderedNodes.every((c) => hoistedCase(c) !== null)
   return (
     <div>
       <button
@@ -454,19 +456,20 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
           collapse state persists). */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
         <div className="overflow-hidden min-h-0">
-          <div className="relative">
-            <TreeGuide depth={depth} leaf={leafChildren} />
-            <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
-          </div>
+          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
         </div>
       </div>
     </div>
   )
 }
 
-function NodeChildren({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: {
+function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo }: {
   node: TreeNode
   depth: number
+  // Draw a `tree`-style connector left of each child, linking it to the parent
+  // (see ChildConnector). Off at the tree's flush-left root, on for nested
+  // levels; the parent sits at depth-1.
+  connect?: boolean
   collapsed: Set<string>
   onToggle: (key: string) => void
   useScope: boolean
@@ -478,19 +481,38 @@ function NodeChildren({ node, depth, collapsed, onToggle, useScope, onOpenInRepo
   // ancestors' badges).
   const children = [...node.children.values()].filter((c) => c.visTotal > 0).sort((a, b) => a.label.localeCompare(b.label))
   const cases = [...node.visCases].sort((a, b) => statusRank(a.status) - statusRank(b.status))
+  // One render list so the LAST row (whether a sub-node or a case) knows to end
+  // the vertical line. A child keeps its chevron unless it's a one-case subtree
+  // that hoistedCase() collapses into a leaf CaseRow; cases are always leaves.
+  const items = [
+    ...children.map((child) => ({
+      key: child.key,
+      hasChevron: hoistedCase(child) === null,
+      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />,
+    })),
+    ...cases.map((c, i) => ({
+      key: `${caseKey(c)}-${i}`,
+      hasChevron: false,
+      el: <CaseRow c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />,
+    })),
+  ]
   return (
     <div>
-      {children.map((child) => (
-        <NodeView key={child.key} node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
-      ))}
-      {cases.map((c, i) => (
-        <CaseRow key={`${caseKey(c)}-${i}`} c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />
-      ))}
+      {items.map((it, i) =>
+        connect ? (
+          <div key={it.key} className="relative">
+            <ChildConnector parentDepth={depth - 1} hasChevron={it.hasChevron} isLast={i === items.length - 1} />
+            {it.el}
+          </div>
+        ) : (
+          <Fragment key={it.key}>{it.el}</Fragment>
+        ),
+      )}
     </div>
   )
 }
 
-export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
+export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
   // ALL of the runner's cases — badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
@@ -498,6 +520,10 @@ export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, co
   useScope: boolean
   // Base indent level, for embedding under a parent row (result sections).
   depth?: number
+  // Draw tree connectors from the root rows back to an enclosing parent row
+  // (the result-section header) sitting at depth-1. Off for the flush-left main
+  // tree, on when embedded under a section.
+  rootConnect?: boolean
   // Deep-link rows to the repository browser (omitted → no link affordance).
   onOpenInRepo?: OpenInRepo
   // Collapse state can be lifted out (persisted per agent). When omitted the
@@ -522,7 +548,7 @@ export function CaseTree({ cases, visible, useScope, depth = 0, onOpenInRepo, co
   if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
+      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
     </div>
   )
 }

@@ -12,7 +12,7 @@ import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 import { TagScopeFilter } from './ArtifactFilterBar'
-import { CaseTree, NodeBadges, TreeGuide, type OpenInRepo } from './CaseTree'
+import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
 import {
@@ -615,10 +615,7 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: Tes
             {/* Animated open/close, matching the tree's grid-row slide. */}
             <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
               <div className="overflow-hidden min-h-0">
-                <div className="relative">
-                  <TreeGuide depth={0} />
-                  <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} onOpenInRepo={onOpenInRepo} />
-                </div>
+                <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} />
               </div>
             </div>
           </div>
