@@ -1191,15 +1191,41 @@ func SaveToFile(path string, cfg Config) error {
 }
 
 // tomlStringValue returns the TOML value representation of a string.
-// Multi-line strings are encoded using triple-quoted """ syntax.
+// Multi-line strings prefer the triple-apostrophe ”' literal syntax, which
+// needs no escaping, and fall back to triple-quoted """ basic strings only when
+// the content cannot be represented literally (see canUseTomlLiteral).
 func tomlStringValue(s string) string {
 	if strings.Contains(s, "\n") {
+		if canUseTomlLiteral(s) {
+			return "'''" + "\n" + s + "'''"
+		}
 		escaped := strings.ReplaceAll(s, `\`, `\\`)
 		escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 		return `"""` + "\n" + escaped + `"""`
 	}
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
 	return `"` + escaped + `"`
+}
+
+// canUseTomlLiteral reports whether s can be encoded as a multi-line literal
+// (”') TOML string. Literal strings interpret content verbatim with no escape
+// mechanism, so they cannot represent: a run of three apostrophes (that would be
+// read as the closing delimiter), a trailing apostrophe (adjacent to the closing
+// ”' it becomes an ambiguous four-apostrophe run), or control characters other
+// than tab and newline. Such strings fall back to the escaping """ form.
+func canUseTomlLiteral(s string) bool {
+	if strings.Contains(s, "'''") || strings.HasSuffix(s, "'") {
+		return false
+	}
+	for _, r := range s {
+		if r == '\t' || r == '\n' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // tomlStringArray renders a string slice as a TOML inline array.
