@@ -9,14 +9,14 @@
 //
 // Two tools, two very different provisioning stories:
 //
-//   - pasta — hard egress needs a modern pasta with --map-host-loopback, which
+//   - pasta - hard egress needs a modern pasta with --map-host-loopback, which
 //     predates Ubuntu 24.04's passt. passt.top publishes a ready-made static
 //     build, so we download it (+ its pasta.avx2 sibling). passt.top publishes no
 //     checksums for its rolling builds, so TLS + the origin are the trust anchor;
 //     we record the upstream Last-Modified + size in a sidecar so an update only
 //     re-downloads when the build changed.
 //
-//   - bwrap — bubblewrap ships NO official prebuilt binary, only a source tarball
+//   - bwrap - bubblewrap ships NO official prebuilt binary, only a source tarball
 //     plus a published sha256. So "bundling" bwrap means building it from source:
 //     we download a pinned release, verify the pinned sha256, and compile with
 //     meson/ninja. This is slow and needs a C toolchain, so it is opt-in
@@ -62,8 +62,8 @@ const downloadTimeout = 60 * time.Second
 const buildTimeout = 5 * time.Minute
 
 // Dir returns the bundled-tools directory (.hydra/tools/bin), created lazily by
-// Provision. It sits under .hydra/tools — separate from .hydra/local's runtime
-// state — and is gitignored via the repo's /.hydra/tools/ entry.
+// Provision. It sits under .hydra/tools - separate from .hydra/local's runtime
+// state - and is gitignored via the repo's /.hydra/tools/ entry.
 func Dir(projectRoot string) string {
 	return filepath.Join(paths.GetHydraDirFromProjectRoot(projectRoot), "tools", "bin")
 }
@@ -312,8 +312,8 @@ func fileExists(p string) bool {
 }
 
 // provisionBwrap builds bubblewrap from its pinned, checksum-verified source
-// release into dir/bwrap. It is a graceful no-op — an explanatory action string,
-// no error — when bwrap is already present (and !force) or the build toolchain is
+// release into dir/bwrap. It is a graceful no-op - an explanatory action string,
+// no error - when bwrap is already present (and !force) or the build toolchain is
 // missing, so the fast/dev paths never hard-fail on a host that can't compile it.
 func provisionBwrap(ctx context.Context, dir string, force bool) (string, error) {
 	dest := filepath.Join(dir, "bwrap")

@@ -20,7 +20,7 @@ import (
 
 // autoMergeFinishedDwell is how long a head must have sat in the finished state
 // before merge-when-green fires. Auto-merge waits for the agent to actually be
-// done — not merely for the branch tip to be green — so it never merges a head
+// done - not merely for the branch tip to be green - so it never merges a head
 // mid-work (e.g. one that committed a passing intermediate state and kept going)
 // or on a momentary finished blip between turns.
 const autoMergeFinishedDwell = 10 * time.Second
@@ -28,7 +28,7 @@ const autoMergeFinishedDwell = 10 * time.Second
 // headFinishedFor reports whether a's agent has held the finished state, with its
 // session still alive, for at least dwell. running/needs_input/waiting and a
 // stopped or dead session all return false: auto-merge only fires for a head that
-// genuinely completed its turn and has stayed settled — never a still-working
+// genuinely completed its turn and has stayed settled - never a still-working
 // head, one blocked asking the user, or one whose session ended.
 func headFinishedFor(a db.Agent, dwell time.Duration, now time.Time) bool {
 	if a.SessionStatus != "running" || a.AgentStatus == nil || *a.AgentStatus != "finished" {
@@ -36,14 +36,14 @@ func headFinishedFor(a db.Agent, dwell time.Duration, now time.Time) bool {
 	}
 	t, err := time.Parse(time.RFC3339Nano, a.AgentStatusTime)
 	if err != nil {
-		return false // no reliable timestamp — wait rather than merge early
+		return false // no reliable timestamp - wait rather than merge early
 	}
 	return now.Sub(t) >= dwell
 }
 
 // testRunnersFor resolves the enabled [[tests]] runners that apply to one version
-// of the project, read from that version's own .hydra/config.toml — the worktree's
-// file for an uncommitted working tree, else the committed file at the ref — so a
+// of the project, read from that version's own .hydra/config.toml - the worktree's
+// file for an uncommitted working tree, else the committed file at the ref - so a
 // branch's own [[tests]] edits (a changed command/timeout, or an added/removed
 // runner) take effect on that branch without merging, mirroring [[artifacts]].
 // Runners with an empty name/command, disabled (enabled = false), or a duplicate
@@ -51,8 +51,8 @@ func headFinishedFor(a db.Agent, dwell time.Duration, now time.Time) bool {
 //
 // Security: a version's config is attacker-controllable, so unsafe_host is honored
 // only when the trusted live/root config (config.Load of the project root, what a
-// human controls on the base branch) authorizes that exact name+command — else the
-// command is forced back into the sandbox — and a runner the live config disables
+// human controls on the base branch) authorizes that exact name+command - else the
+// command is forced back into the sandbox - and a runner the live config disables
 // by name is dropped regardless of what the branch says. Sandboxed commands need no
 // gate: the sandbox is the boundary and already runs the checkout's untrusted code.
 func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCfg config.Config) []config.TestScript {
@@ -96,7 +96,7 @@ func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCf
 	return out
 }
 
-// disabledTests returns the runner names the live config marks enabled = false — a
+// disabledTests returns the runner names the live config marks enabled = false - a
 // human kill-switch a branch's own config can't override. Mirrors disabledArtifacts.
 func disabledTests(cfg config.Config) map[string]bool {
 	disabled := map[string]bool{}
@@ -299,12 +299,12 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		return &api.TestSummary{Status: api.TestStatusNone}
 	}
 	// Detect whether the head has done no work of its own yet: if its branch tip
-	// is a reachable ancestor of the base branch — i.e. the head can fast-forward
-	// to base, with no commits the base doesn't already have — then any cached
+	// is a reachable ancestor of the base branch - i.e. the head can fast-forward
+	// to base, with no commits the base doesn't already have - then any cached
 	// verdict belongs to the base, not the agent. (Plain tip == base is the
 	// special case; this also covers the base moving on ahead of an idle head, so
 	// committing to base no longer un-hides the chip.) We still surface the real
-	// verdict — the agent detail view (header chip + Tests panel) shows it — but
+	// verdict - the agent detail view (header chip + Tests panel) shows it - but
 	// flag it so the ambient sidebar chip can hide it, where a green "passed"
 	// inherited from base would just be misleading noise. Best-effort: if either
 	// ref fails to resolve, or the ancestry check errors, we leave the flag unset
@@ -334,7 +334,7 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 			continue
 		}
 		if !ok {
-			// No verdict for the current commit — a cached older one means stale.
+			// No verdict for the current commit - a cached older one means stale.
 			if old, found := mgr.Latest(r.Name); found {
 				anyStale = true
 				total += old.Total
@@ -460,11 +460,11 @@ func (s *Server) checkArmedMerges(ctx context.Context) {
 		v := hydratests.Version{Ref: *head.Branch}
 		liveCfg, err := config.Load(projectRoot)
 		if err != nil {
-			continue // transient config read error — retry next tick
+			continue // transient config read error - retry next tick
 		}
 		runners := s.testRunnersFor(projectRoot, v, liveCfg)
 		if len(runners) == 0 {
-			// Nothing to gate on — disarm so it doesn't linger forever.
+			// Nothing to gate on - disarm so it doesn't linger forever.
 			_ = s.DB.SetMergeWhenGreen(a.ID, false, "")
 			s.notifyAgentsChanged(projectRoot, true)
 			continue
@@ -491,19 +491,19 @@ func (s *Server) checkArmedMerges(ctx context.Context) {
 
 		switch {
 		case anyBad:
-			// Tests went red — never auto-merge a failing commit. Disarm + nudge.
+			// Tests went red - never auto-merge a failing commit. Disarm + nudge.
 			_ = s.DB.SetMergeWhenGreen(a.ID, false, "")
 			s.notifyAgentsChanged(projectRoot, true)
 		case anyRunning:
-			// Still in flight — keep waiting.
+			// Still in flight - keep waiting.
 		case missing:
-			// No verdict yet for the current commit (e.g. a new commit landed) —
+			// No verdict yet for the current commit (e.g. a new commit landed) -
 			// kick a run so a verdict materialises for the next poll.
 			for _, r := range runners {
 				_, _ = mgr.Get(r, v)
 			}
 		case passing == len(runners):
-			// Tests are green — but only merge once the agent has actually settled
+			// Tests are green - but only merge once the agent has actually settled
 			// into finished (not merely a green intermediate commit while it keeps
 			// working). Waiting keeps the head armed; the next tick re-checks.
 			if !headFinishedFor(a, autoMergeFinishedDwell, time.Now()) {
@@ -537,7 +537,7 @@ func (s *Server) autoMerge(ctx context.Context, projectRoot string, head heads.H
 // gate has something to judge): blocked is true when any enabled runner is
 // failing, errored, or still running. code is tests_failing when a runner is
 // genuinely red (with the failing-case count), else tests_errored (couldn't run
-// / still running — "no verdict, not a pass"). Returns blocked=false when the
+// / still running - "no verdict, not a pass"). Returns blocked=false when the
 // feature is off, no runners are configured, or every runner is passing.
 func (s *Server) testGateVerdict(projectRoot string, h heads.Head) (code api.MergeConflictErrorError, failing int, blocked bool) {
 	if s.Tests == nil || h.Branch == nil {
@@ -546,7 +546,7 @@ func (s *Server) testGateVerdict(projectRoot string, h heads.Head) (code api.Mer
 	v := hydratests.Version{Ref: *h.Branch}
 	liveCfg, err := config.Load(projectRoot)
 	if err != nil {
-		// Can't resolve the trusted config — treat as "no verdict", which blocks
+		// Can't resolve the trusted config - treat as "no verdict", which blocks
 		// (errored) rather than waving the merge through.
 		return api.MergeConflictErrorErrorTestsErrored, 0, true
 	}
@@ -580,7 +580,7 @@ func (s *Server) testGateVerdict(projectRoot string, h heads.Head) (code api.Mer
 		return api.MergeConflictErrorErrorTestsFailing, failing, true
 	case anyErrored > 0 || anyRunning:
 		// Errored ("we don't know") and running ("not yet") both block as
-		// tests_errored — distinct from a confirmed red.
+		// tests_errored - distinct from a confirmed red.
 		return api.MergeConflictErrorErrorTestsErrored, 0, true
 	default:
 		return "", 0, false

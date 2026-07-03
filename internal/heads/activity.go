@@ -22,14 +22,14 @@ const maxStatusLogTail = 64 * 1024
 // enrichAgentStatus augments a computed status with richer progress detail read
 // from the per-head status_log.jsonl (issue #10): a short description of the
 // agent's current action while it's running, and its most recent message. It is
-// best-effort — any read/parse failure simply leaves the status unchanged.
+// best-effort - any read/parse failure simply leaves the status unchanged.
 func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 	if info == nil {
 		return
 	}
 	switch info.Status {
 	case api.Running, api.NeedsInput, api.Waiting, api.Finished:
-		// Worth enriching — the agent is live and may have recent activity.
+		// Worth enriching - the agent is live and may have recent activity.
 	default:
 		return
 	}
@@ -37,7 +37,7 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 	// The security gate writes notification_type=policy_approval into status.json
 	// when it parks a tool call (so the UI shows the approval card). The JSON
 	// status poller persists only the status string, not this side channel, so
-	// computeAgentStatus loses it — recover it straight from status.json here.
+	// computeAgentStatus loses it - recover it straight from status.json here.
 	if info.NotificationType == nil {
 		if s := ReadAgentStatus(projectRoot, id); s != nil && s.NotificationType != nil {
 			info.NotificationType = s.NotificationType
@@ -57,12 +57,12 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 }
 
 // IsSuggestedNextMessage decides whether an agent's last message reads as a
-// suggested next message — a single terse instruction you could send straight
-// back ("run it", "verify it works by running the app") — rather than a closing
+// suggested next message - a single terse instruction you could send straight
+// back ("run it", "verify it works by running the app") - rather than a closing
 // summary/report. There's no explicit signal from the agent for this, so it's a
 // heuristic on the message shape: a single short line with no mid-message
 // sentence break. A multi-sentence or long message (e.g. "The spike is built,
-// tested, and committed. Here's what landed…") is treated as a report, not a
+// tested, and committed. Here's what landed...") is treated as a report, not a
 // suggestion. Callers separately exclude questions the agent is asking the user
 // (from a user-input tool), which aren't suggestions even when terse.
 func IsSuggestedNextMessage(msg string) bool {
@@ -119,7 +119,7 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string, la
 				activityDone = true
 			} else if isTurnBoundary(event) {
 				// A turn started/ended after the last tool ran, so no tool is
-				// currently active — stop looking for activity.
+				// currently active - stop looking for activity.
 				activityDone = true
 			}
 		}
@@ -139,8 +139,8 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string, la
 }
 
 // messageFromPayload extracts the agent's most recent user-facing message from a
-// hook payload: its last assistant message, or — for a tool that asks the user
-// something (e.g. AskUserQuestion) — the question/plan text it's waiting on. The
+// hook payload: its last assistant message, or - for a tool that asks the user
+// something (e.g. AskUserQuestion) - the question/plan text it's waiting on. The
 // second return is true in that latter case, so callers can avoid treating the
 // question as a suggested next message.
 func messageFromPayload(p map[string]interface{}) (msg string, isQuestion bool) {

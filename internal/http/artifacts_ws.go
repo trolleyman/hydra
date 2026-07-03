@@ -116,8 +116,8 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 	}
 
 	// Map each side's on-disk entry dir back to its script name AND which side it
-	// is, so an incoming event (keyed by dir) tells us which set to rebuild and —
-	// for log/progress — which side's pane to update. Left and right have distinct
+	// is, so an incoming event (keyed by dir) tells us which set to rebuild and -
+	// for log/progress - which side's pane to update. Left and right have distinct
 	// entry dirs, so their logs stay separate (no interleaving into one stream).
 	type dirRef struct{ script, side string }
 	dirToRef := map[string]dirRef{}
@@ -169,7 +169,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			if err := json.Unmarshal(data, &msg); err != nil || msg.Type != "refresh" || msg.Script == "" {
 				continue
 			}
-			// Drop the cached result and rebuild — this restarts the generation,
+			// Drop the cached result and rebuild - this restarts the generation,
 			// and its progress streams back via the subscription. An optional side
 			// ("left"/"right") restarts just that side, keeping the other cached.
 			plan.invalidateSide(msg.Script, msg.Side)

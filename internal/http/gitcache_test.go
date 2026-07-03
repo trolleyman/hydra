@@ -10,7 +10,7 @@ import (
 // budget even though the entry-count cap is never reached.
 func TestImmutableCacheByteBudget(t *testing.T) {
 	c := &immutableCache[string]{maxItems: 1000, maxBytes: 1000}
-	// Insert 100 entries of cost 100 each (10_000 bytes total) — way over the 1000
+	// Insert 100 entries of cost 100 each (10_000 bytes total) - way over the 1000
 	// byte budget but well under the 1000 entry cap.
 	for i := 0; i < 100; i++ {
 		c.put("k"+strconv.Itoa(i), "v", 100)

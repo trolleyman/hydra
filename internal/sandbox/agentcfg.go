@@ -59,7 +59,7 @@ func shellQuote(s string) string {
 // ClaudeManagedSettingsDir / ClaudeManagedSettingsPath are the system managed-
 // settings location Claude Code reads on Linux. Managed settings are the highest-
 // precedence scope and cannot be overridden: hooks defined here keep running even
-// if a writable user/project settings.json sets "disableAllHooks": true — which is
+// if a writable user/project settings.json sets "disableAllHooks": true - which is
 // why Hydra's gate hook lives here, not in a (defeatable) read-only user
 // settings.json. The dir is overlaid with a tmpfs and the file bound read-only.
 const (
@@ -166,7 +166,7 @@ func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string
 }
 
 // stripMCPServers removes every MCP server not on allowed from the seeded
-// ~/.claude.json — both the top-level user-scope `mcpServers` map and any
+// ~/.claude.json - both the top-level user-scope `mcpServers` map and any
 // per-project `projects[*].mcpServers` map. Server names are matched
 // case-sensitively (MCP names are case-sensitive).
 func stripMCPServers(cfg map[string]interface{}, allowed []string) {
@@ -304,7 +304,7 @@ func MCPServerSpecs(claudeJSON, mcpJSON []byte, names []string) []MCPServerSpec 
 			}
 			command, _ := m["command"].(string)
 			if command == "" {
-				continue // non-stdio (http/sse) — can't spawn to introspect
+				continue // non-stdio (http/sse) - can't spawn to introspect
 			}
 			spec := MCPServerSpec{Name: name, Command: command}
 			if rawArgs, ok := m["args"].([]interface{}); ok {
@@ -414,7 +414,7 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // conversation, so no task prompt is passed); otherwise prompt (if non-empty)
 // is passed as the task. The permission-bypass mode flag
 // (--dangerously-skip-permissions / --approval-mode=yolo / --yolo) is applied in
-// BOTH cases — a resumed agent must stay non-interactive.
+// BOTH cases - a resumed agent must stay non-interactive.
 //
 // systemPrompt holds the standing Hydra instructions, delivered as a system
 // prompt, never as part of the user's task: Claude takes them via

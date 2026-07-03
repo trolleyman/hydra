@@ -17,12 +17,12 @@ import (
 // The web UI is served only on localhost, so the browser and the daemon run on
 // the same machine. That lets us pop a *real* OS folder dialog (zenity/kdialog
 // on Linux, `osascript` on macOS) on the user's screen and hand the chosen
-// absolute path back to the browser — something a browser-side picker can't do,
+// absolute path back to the browser - something a browser-side picker can't do,
 // since browsers deliberately hide absolute filesystem paths.
 //
 // Two non-OpenAPI routes back this (raw handlers, mirroring uploads/terminal):
-//   - GET  /folder-picker/available — whether to show the "Browse…" button.
-//   - POST /folder-picker/open      — blocks until the user picks or cancels.
+//   - GET  /folder-picker/available - whether to show the "Browse..." button.
+//   - POST /folder-picker/open      - blocks until the user picks or cancels.
 //
 // Both are gated on the request originating from loopback, because the dialog
 // appears on the *server's* display: offering it to a remote client would pop a
@@ -35,7 +35,7 @@ var folderPickerMu sync.Mutex
 
 // isLoopbackRequest reports whether the request originated from the local
 // machine over loopback TCP. Non-loopback (LAN IP, port-forward) and
-// unix-socket clients (empty RemoteAddr — the CLI, not a browser) return false.
+// unix-socket clients (empty RemoteAddr - the CLI, not a browser) return false.
 func isLoopbackRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -83,7 +83,7 @@ func homeDirOr(fallback string) string {
 }
 
 // HandleFolderPickerAvailable reports whether the UI should offer a native
-// "Browse…" button: only when the request is local and a dialog tool exists.
+// "Browse..." button: only when the request is local and a dialog tool exists.
 func (s *Server) HandleFolderPickerAvailable(w http.ResponseWriter, r *http.Request) {
 	available := false
 	if isLoopbackRequest(r) {
@@ -106,7 +106,7 @@ func (s *Server) HandleFolderPickerOpen(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// One dialog at a time — don't stack windows if the user clicks twice.
+	// One dialog at a time - don't stack windows if the user clicks twice.
 	if !folderPickerMu.TryLock() {
 		http.Error(w, "a folder picker is already open", http.StatusConflict)
 		return

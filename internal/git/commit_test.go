@@ -43,7 +43,7 @@ func TestListUncommittedFilesAndCommitAll(t *testing.T) {
 	}
 
 	// One modification, one untracked file (with a space in its name), and a
-	// staged rename — the rename's two NUL-separated paths must parse as one entry.
+	// staged rename - the rename's two NUL-separated paths must parse as one entry.
 	write("a.txt", "changed\n")
 	write(".hydra/config toml", "cfg\n")
 	run("mv", "old name.txt", "new name.txt")
@@ -72,8 +72,8 @@ func TestListUncommittedFilesAndCommitAll(t *testing.T) {
 		t.Errorf("expected rename OrigPath %q, got %q", "old name.txt", got["new name.txt"].OrigPath)
 	}
 
-	// A pathspec-limited commit takes only the requested files — the rename
-	// entry carries both its endpoints — and leaves the rest dirty.
+	// A pathspec-limited commit takes only the requested files - the rename
+	// entry carries both its endpoints - and leaves the rest dirty.
 	if err := CommitFiles(dir, "move file", []UncommittedFile{got["new name.txt"]}, "", ""); err != nil {
 		t.Fatalf("CommitFiles (rename): %v", err)
 	}

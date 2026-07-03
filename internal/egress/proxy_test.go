@@ -224,7 +224,7 @@ func TestProxyBlockListOverridesAllow(t *testing.T) {
 	defer upstream.Close()
 	host := mustHost(t, upstream.URL)
 
-	// Host is on the allow-list but also on the block-list — block wins.
+	// Host is on the allow-list but also on the block-list - block wins.
 	p, err := Start("h1", []string{host}, []string{host}, nil)
 	if err != nil {
 		t.Fatal(err)

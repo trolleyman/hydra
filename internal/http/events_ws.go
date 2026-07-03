@@ -11,7 +11,7 @@ import (
 )
 
 // eventMsg is the JSON frame sent to the client for one change signal. The client
-// switches on Type and refetches the matching resource (PLAN #50) — except
+// switches on Type and refetches the matching resource (PLAN #50) - except
 // agent_tests_changed, which carries the new summary inline (agent_id + tests)
 // so the client patches the chip in place instead of refetching the agent list.
 type eventMsg struct {
@@ -81,7 +81,7 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initial nudge: refetch everything once on (re)connect. (No initial
-	// agent_tests_changed — the agents refetch carries the summaries.)
+	// agent_tests_changed - the agents refetch carries the summaries.)
 	for _, t := range []events.Type{events.AgentsChanged, events.ProjectsChanged, events.ServicesChanged, events.PushStatusChanged} {
 		if err := writeEvent(events.Event{Type: t}); err != nil {
 			return

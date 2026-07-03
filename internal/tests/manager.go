@@ -50,7 +50,7 @@ type Manager struct {
 	// once by the Registry at creation; read-only thereafter.
 	onSettle func(projectRoot string)
 	// onProgress, if set, is called (with projectRoot) while a streamed
-	// (type=stdout) run is appending cases — throttled to testNudgeInterval per
+	// (type=stdout) run is appending cases - throttled to testNudgeInterval per
 	// run. Wired to Server.NotifyTestsProgress, which pushes per-head
 	// agent_tests_changed payload events so the sidebar chip's live ✓/⚠/✗
 	// counts tick during the run without clients refetching the agent list.
@@ -329,7 +329,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		m.mu.Lock()
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		// Emit the final coalesced counts increment (a fast run can settle before
-		// the flush timer ever fires) — it also stops any pending timer. The
+		// the flush timer ever fires) - it also stops any pending timer. The
 		// settled event below then delivers the authoritative report anyway.
 		m.flushCountsLocked(dir)
 		delete(m.live, dir)
@@ -419,7 +419,7 @@ func (m *Manager) setProgressLocked(dir, text string) {
 
 const (
 	// caseFlushInterval / caseFlushMax coalesce "counts" events: an event fires
-	// at most ~10×/s, or immediately once this many cases are pending — the
+	// at most ~10×/s, or immediately once this many cases are pending - the
 	// backpressure guard that keeps a 4,556-case run from emitting 4,556 frames.
 	caseFlushInterval = 100 * time.Millisecond
 	caseFlushMax      = 200
@@ -441,7 +441,7 @@ type liveRun struct {
 }
 
 // appendTestCase records one streamed case: it feeds the accumulated report,
-// the running tally, the live progress header ("123/4556" — which the agent
+// the running tally, the live progress header ("123/4556" - which the agent
 // list's summary also surfaces, so the sidebar chip ticks), and the coalesced
 // "counts" event stream.
 func (m *Manager) appendTestCase(dir string, tc TestCase) {
@@ -540,7 +540,7 @@ func (m *Manager) flushCountsLocked(dir string) {
 	lr.pending = nil
 	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
 	// Nudge the server (throttled) to push updated per-head summaries so the
-	// sidebar chip's live counts tick during the run — the settle nudge covers
+	// sidebar chip's live counts tick during the run - the settle nudge covers
 	// the final state. Fired async so the callback never runs under m.mu.
 	if m.onProgress != nil && time.Since(lr.lastNudge) >= testNudgeInterval {
 		lr.lastNudge = time.Now()
@@ -559,7 +559,7 @@ func (m *Manager) fillRunningLocked(dir string, rep *Report) {
 	rep.Cases = append([]TestCase(nil), lr.cases...)
 	rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = lr.passed, lr.failed, lr.skipped, lr.warnings
 	// Mirror the streamed "counts" event (flushCountsLocked): a running snapshot's
-	// Total is the *declared* denominator, or 0 when none was declared — NOT floored
+	// Total is the *declared* denominator, or 0 when none was declared - NOT floored
 	// to len(cases). Reporting len(cases) here made an undeclared run indistinguishable
 	// from a declared one whose cases had caught up (both total == cases), so the poll
 	// fallback couldn't tell "no denominator" from "denominator reached". 0 = unknown.
@@ -628,7 +628,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		// Couldn't even launch the command — an infrastructure failure, not a
+		// Couldn't even launch the command - an infrastructure failure, not a
 		// test result.
 		return errored(rep, err.Error())
 	}
@@ -737,7 +737,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		// It ran and exited non-zero with no report — treat the exit code as the
+		// It ran and exited non-zero with no report - treat the exit code as the
 		// test result (degenerate single failed case).
 		msg := "command exited non-zero"
 		if tail != "" {

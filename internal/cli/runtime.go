@@ -126,7 +126,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 
 	// Archived agents (killed/merged heads) are kept indefinitely so they stay
-	// browsable in the history list — we no longer prune soft-deleted rows on
+	// browsable in the history list - we no longer prune soft-deleted rows on
 	// boot. PruneDeletedAgents is retained for a future opt-in retention window
 	// if the table ever grows uncomfortably large.
 	_ = store.PruneDeletedAgents
@@ -412,7 +412,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		log.Printf("daemon: resuming head %s after restart", h.ID)
 		// No client is connected on boot, so seed the PTY from the last geometry a
 		// browser/TUI reported for this project rather than the narrow 80x24
-		// default — otherwise the agent repaints at 80 cols and that wrapped output
+		// default - otherwise the agent repaints at 80 cols and that wrapped output
 		// is baked into the scrollback before the first client ever attaches.
 		rows, cols := heads.LoadResumeSize(store, projectRoot, h.ID)
 		if err := heads.ResumeHead(reg, store, projectRoot, h, rows, cols); err != nil {

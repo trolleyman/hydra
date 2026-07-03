@@ -19,7 +19,7 @@ func runnersByName(rs []config.TestScript) map[string]config.TestScript {
 }
 
 // A branch's own [[tests]] edits (changed command, added/removed runner) are read
-// from the ref being compared, mirroring [[artifacts]] — the whole point of the
+// from the ref being compared, mirroring [[artifacts]] - the whole point of the
 // "agent can change its own tests" behavior.
 func TestTestRunnersFor_ReadsRefConfig(t *testing.T) {
 	base := `

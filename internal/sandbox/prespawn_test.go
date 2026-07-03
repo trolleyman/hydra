@@ -14,7 +14,7 @@ import (
 // process to verify the runtime behavior the manual resume check exercises:
 // the script runs, the real command execs after it, a non-zero exit gates the
 // launch, and re-running it re-creates a deleted marker (the "marker reappears
-// on resume" property — every launch, spawn or resume, re-runs the script). It
+// on resume" property - every launch, spawn or resume, re-runs the script). It
 // uses WrapPreSpawn directly, the same wrapper startAgentSession applies on both
 // the spawn and the resume path. (The bwrap confinement around it can't run
 // nested in CI, so this exercises the wrapper itself, not the full sandbox.)
@@ -49,7 +49,7 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 		t.Fatalf("real command did not exec after the script: %v", err)
 	}
 
-	// Resume analog: delete the marker and launch again — the script re-runs and
+	// Resume analog: delete the marker and launch again - the script re-runs and
 	// the marker reappears (so a script added/changed after a head exists reaches
 	// it on the next launch, and idempotent scripts converge).
 	if err := os.Remove(marker); err != nil {
@@ -64,7 +64,7 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 
 	// A non-zero exit gates the launch AND reports it: the real command must NOT
 	// exec, and the failure must surface as a diagnostic (not a silent early exit).
-	// This is the failure semantics the change extends to resume — a failing script
+	// This is the failure semantics the change extends to resume - a failing script
 	// aborts resume too, so it must be visible.
 	gate := filepath.Join(dir, "should-not-exist")
 	gateArgv := []string{"/bin/sh", "-c", "echo leaked > " + q(gate)}
@@ -107,7 +107,7 @@ func TestWithPreSpawn(t *testing.T) {
 	}
 
 	// A shebang selects the interpreter (here zsh); the script body, shebang line
-	// included, is passed verbatim to `-c` — and a non-bash interpreter gets NO
+	// included, is passed verbatim to `-c` - and a non-bash interpreter gets NO
 	// strict preamble (set -o pipefail is a bashism).
 	body := "#!/bin/zsh\nset -o pipefail\nmise trust"
 	got = withPreSpawn(body, argv)
@@ -116,7 +116,7 @@ func TestWithPreSpawn(t *testing.T) {
 		t.Errorf("zsh shebang:\n got %#v\nwant %#v", got, want)
 	}
 
-	// `#!/usr/bin/env bash` keeps both fields, so it runs as `env bash -c …`.
+	// `#!/usr/bin/env bash` keeps both fields, so it runs as `env bash -c ...`.
 	got = withPreSpawn("#!/usr/bin/env bash\necho hi", argv)
 	if len(got) < 3 || got[0] != "/usr/bin/env" || got[1] != "bash" || got[2] != "-c" {
 		t.Errorf("env shebang: got %#v", got)

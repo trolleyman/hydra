@@ -155,7 +155,7 @@ func TestSlotPoolCleanCrashRecovery(t *testing.T) {
 	repo := initRepo(t)
 	sha := commitFile(t, repo, "marker.txt", "A")
 
-	// First pool creates a slot, then we drop the pool WITHOUT cleaning — mimicking
+	// First pool creates a slot, then we drop the pool WITHOUT cleaning - mimicking
 	// a process that died mid-generation, leaving a registered worktree behind.
 	p1 := newTestPool(t, repo, maxSlots)
 	s, err := p1.acquire(sha, false)
@@ -183,11 +183,11 @@ func TestSlotPoolCleanCrashRecovery(t *testing.T) {
 
 // TestSlotPoolCleanIgnored verifies the clean policy: an ignored file left in a
 // slot by a prior run survives a default (warm-cache) reuse but is wiped when the
-// next acquire requests a pristine tree (cleanIgnored=true) — which also bypasses
+// next acquire requests a pristine tree (cleanIgnored=true) - which also bypasses
 // the affinity shortcut so the clean actually runs.
 func TestSlotPoolCleanIgnored(t *testing.T) {
 	repo := initRepo(t)
-	// Ignore *.cache so a generated cache file is an *ignored* untracked file —
+	// Ignore *.cache so a generated cache file is an *ignored* untracked file -
 	// the only kind `git clean -fd` keeps and `-fdx` removes.
 	gitRun(t, repo, "config", "core.excludesFile", "/dev/null") // be explicit: only .gitignore
 	sha := commitFile(t, repo, ".gitignore", "*.cache\n")
@@ -205,7 +205,7 @@ func TestSlotPoolCleanIgnored(t *testing.T) {
 	}
 	p.release(s)
 
-	// Default reuse (warm cache): affinity hit, no clean — the ignored file survives.
+	// Default reuse (warm cache): affinity hit, no clean - the ignored file survives.
 	s2, err := p.acquire(sha, false)
 	if err != nil {
 		t.Fatalf("warm acquire: %v", err)

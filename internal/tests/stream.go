@@ -7,7 +7,7 @@ import (
 )
 
 // TestMarkerPrefix prefixes a stdout line a streaming (type = "stdout") test
-// runner emits to report one case — or run metadata — live, extending the
+// runner emits to report one case - or run metadata - live, extending the
 // ::hydra:progress:: mechanism (same line scanner, same event fan-out):
 //
 //	::hydra:test:total:: 4556                          (optional denominator)
@@ -17,9 +17,9 @@ import (
 //	::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
 //	::hydra:test:done::                                (optional; process exit settles anyway)
 //
-// The token before the first › is the location — a file/dir path (optionally
+// The token before the first › is the location - a file/dir path (optionally
 // :line:col-suffixed) or a dotted class chain, routed through the same
-// classifier as JUnit classnames — middle › tokens are extra scope levels, the
+// classifier as JUnit classnames - middle › tokens are extra scope levels, the
 // last is the leaf name, and everything after | is the message.
 const TestMarkerPrefix = "::hydra:test:"
 
@@ -46,12 +46,12 @@ var lineColRe = regexp.MustCompile(`^(.+?):(\d+)(?::(\d+))?$`)
 // unescapeMessage decodes a small set of C-style escapes in a streamed case
 // message, so a runner can carry a multi-line failure (stack trace, diff) on the
 // single stdout line the marker protocol allows. Each ::hydra:test:*:: marker is
-// one line — a raw newline would end it — so a runner emits `\n` and Hydra turns
+// one line - a raw newline would end it - so a runner emits `\n` and Hydra turns
 // it back into a real newline here (the tests panel renders the message verbatim,
 // like a JUnit <failure> body). Recognised: `\n` → newline, `\t` → tab, `\r` →
 // carriage return, `\\` → a single backslash (so a literal backslash survives).
 // An unrecognised escape (`\x`) is left untouched, backslash and all, so ordinary
-// text — Windows paths, regexes — is never silently mangled.
+// text - Windows paths, regexes - is never silently mangled.
 func unescapeMessage(s string) string {
 	if !strings.ContainsRune(s, '\\') {
 		return s // fast path: nothing to decode
@@ -121,7 +121,7 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 		locTok := segs[0]
 		if m := lineColRe.FindStringSubmatch(locTok); m != nil {
 			// Only treat the suffix as line:col when the prefix looks like a
-			// file — `com.example.FooTest:2` is unlikely but a bare name with
+			// file - `com.example.FooTest:2` is unlikely but a bare name with
 			// a colon is; classify decides below either way.
 			if n, err := strconv.Atoi(m[2]); err == nil {
 				locTok = m[1]

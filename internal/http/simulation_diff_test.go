@@ -13,7 +13,7 @@ import (
 // non-binary file the sim returns must be marked Expanded and carry a single
 // contiguous whole-file hunk (old and new line numbers each increment by one).
 // If they don't, the client rejects the file and falls back to rendering the
-// reconstructed hunk uncollapsed — a wall of synthetic context lines. The
+// reconstructed hunk uncollapsed - a wall of synthetic context lines. The
 // hand-written fixtures don't keep a consistent old/new offset across hunks, so
 // simReconstructFull must renumber rather than trust their stated numbers.
 func TestSimFullContextDiffsAreContiguous(t *testing.T) {

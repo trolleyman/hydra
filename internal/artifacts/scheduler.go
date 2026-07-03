@@ -5,15 +5,15 @@ import "sync"
 // genScheduler bounds how many artifact generations run at once and orders the
 // queue by priority: foreground requests (a user actively viewing a diff) are
 // always granted a free slot before queued background ones (proactive
-// pre-generation). It does NOT preempt — a generation that already holds a slot
-// runs to completion regardless of priority — so background work is never
+// pre-generation). It does NOT preempt - a generation that already holds a slot
+// runs to completion regardless of priority - so background work is never
 // wasted; foreground simply jumps the *queue*. A foreground request that lands
 // on an already-queued background entry can promote it (see promote), so the
 // thing the user is now watching stops waiting behind other background work.
 //
 // The limit is mutable (setLimit) so a config change to artifact_concurrency
 // takes effect without recreating the manager. A limit of 0 means unlimited
-// (no cap) — every acquire is granted immediately.
+// (no cap) - every acquire is granted immediately.
 type genScheduler struct {
 	mu      sync.Mutex
 	limit   int // 0 = unlimited (no cap)
@@ -70,7 +70,7 @@ func (s *genScheduler) release() {
 	defer s.mu.Unlock()
 	if k, w := s.bestLocked(); w != nil {
 		delete(s.waiters, k)
-		close(w.ready) // running stays — the slot is transferred to this waiter
+		close(w.ready) // running stays - the slot is transferred to this waiter
 		return
 	}
 	s.running--

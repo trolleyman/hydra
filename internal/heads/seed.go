@@ -20,7 +20,7 @@ import (
 
 // SandboxHydraBinPath is the well-known path the hydra binary is bound to inside
 // every sandbox. /tmp is always a fresh, per-head writable mount in our bwrap
-// config (a private host-backed dir on Linux, else a tmpfs — see
+// config (a private host-backed dir on Linux, else a tmpfs - see
 // sandbox.Options.TmpDir), so it is a reliable mountpoint and these seeded binds
 // nest on top of it. Hooks and the namespace-host supervisor invoke it here.
 const SandboxHydraBinPath = "/tmp/hydra-internal"
@@ -46,7 +46,7 @@ type seedResult struct {
 	// Env are extra environment variables (HYDRA_STATUS_PATH etc.).
 	Env []string
 	// ROOverlays expose per-head files under otherwise read-only system dirs via a
-	// read-only overlay — e.g. /etc/claude-code/managed-settings.json under /etc.
+	// read-only overlay - e.g. /etc/claude-code/managed-settings.json under /etc.
 	// See sandbox.ROOverlay (a tmpfs mountpoint can't be created under the
 	// read-only root, so an overlay over the parent dir is used instead).
 	ROOverlays []sandbox.ROOverlay
@@ -131,7 +131,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// writes {"disableAllHooks": true} into a writable user/project settings.json
 		// (which a read-only ~/.claude/settings.json bind could NOT prevent, since the
 		// agent can still create a project-scope .claude/settings.json). We therefore
-		// do NOT seed ~/.claude/settings.json at all — the user's own settings apply
+		// do NOT seed ~/.claude/settings.json at all - the user's own settings apply
 		// normally and our policy layers on top authoritatively. (AUDIT.md F4.)
 		// The set of MCP servers KEPT in the seeded config: whole-server grants plus
 		// any server referenced by a per-tool grant (so a partially-allowed server
@@ -271,7 +271,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 	// WebFetch host-gating is derived from the sandbox network policy rather than a
 	// dedicated list: WebFetch content is fetched provider-side (it does not go
 	// through the egress proxy), so the gate is the only place to enforce which
-	// hosts it may reach — and it should honour the same allow-list as the network.
+	// hosts it may reach - and it should honour the same allow-list as the network.
 	// Filtering off (unrestricted/off) ⇒ no gating; filtering on (hard/advisory) ⇒
 	// allow the default hosts unioned with the user's allowed_hosts, minus blocked.
 	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(agentType)
@@ -354,7 +354,7 @@ func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, ho
 // seedGeminiPrePrompt delivers the pre-prompt to Gemini, which has no
 // --append-system-prompt flag. Preferred path: capture Gemini's built-in system
 // prompt (GEMINI_WRITE_SYSTEM_MD, cached per CLI version), append the pre-prompt,
-// and point GEMINI_SYSTEM_MD at the combined file — a true system prompt of
+// and point GEMINI_SYSTEM_MD at the combined file - a true system prompt of
 // "default + our rules". If the default can't be captured (e.g. gemini is not
 // authenticated, or offline), fall back to seeding the pre-prompt as a GEMINI.md
 // context file, which is loaded as instructional context instead.
@@ -475,7 +475,7 @@ var envKeysHydraOwns = map[string]bool{
 // headContextEnv returns the HYDRA_* environment variables describing the head
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
-// branch on the head's identity, agent type and git layout — e.g. seeding only
+// branch on the head's identity, agent type and git layout - e.g. seeding only
 // for a given agent, or copying files into the worktree.
 //
 // Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
@@ -501,7 +501,7 @@ func headContextEnv(id string, agentType sandbox.AgentType, projectRoot, worktre
 
 // claudeRenderingEnv pins Claude Code's renderer for an agent launch (spawn and
 // resume alike). Claude's fullscreen rendering draws on the terminal's alternate
-// screen buffer and captures the mouse — which, in Hydra's web (xterm.js)
+// screen buffer and captures the mouse - which, in Hydra's web (xterm.js)
 // terminal, breaks the native scrollbar and select-to-copy and pops a one-time
 // "try it?" opt-in prompt that the resume "Continue" nudge accidentally answers.
 // So by default (fullscreen=false) we force the classic renderer; when the user

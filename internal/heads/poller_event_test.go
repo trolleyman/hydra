@@ -57,7 +57,7 @@ func drainSet(sub *events.Subscription) map[events.Type]bool {
 // TestPollerEventsOnlyOnRenderedChange locks in the traffic fix: while an agent
 // stays "running" and merely rewrites status.json (advancing the timestamp on
 // every tool call), the poller must persist the timestamp but NOT emit
-// agents_changed — that identical AgentResponse would otherwise make every
+// agents_changed - that identical AgentResponse would otherwise make every
 // connected client refetch agents and push-status ~1×/s for no visible change.
 // A real status-string transition (and an immediate user-input wait) must still
 // emit.
@@ -90,7 +90,7 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 
 	// 2) Still running, later timestamp (the hot path: a running agent's next
 	// tool-call hook). The timestamp advances but the status string is unchanged,
-	// so no event should fire — this is the bug we fixed.
+	// so no event should fire - this is the bug we fixed.
 	for i := 1; i <= 3; i++ {
 		writeAgentStatusJSON(t, root, id, api.Running, "polling", base.Add(time.Duration(i)*time.Second).Format(time.RFC3339Nano))
 		pollJSONStatusOnce(store, root, deb, hub, nil)
@@ -120,8 +120,8 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 
 // TestPollerSettleHookFiresOnRestingTransition locks in the artifact-prefetch
 // trigger: onSettle must fire exactly on a genuine transition into a resting
-// status (finished / waiting / needs_input) — the "agent stopped editing" signal
-// the prefetcher uses to pre-generate artifacts at once — and must stay silent
+// status (finished / waiting / needs_input) - the "agent stopped editing" signal
+// the prefetcher uses to pre-generate artifacts at once - and must stay silent
 // for running, starting and timestamp-only rewrites (which would otherwise kick
 // heavy builds on every tool call).
 func TestPollerSettleHookFiresOnRestingTransition(t *testing.T) {
@@ -189,7 +189,7 @@ func TestPollerSettleHookFiresOnRestingTransition(t *testing.T) {
 // and then exits before the grace window elapses: the deferred unread flag, armed
 // on running→finished, would otherwise be dropped when the next poll sees the
 // session gone. The session ending is definitive proof of a real finish (a
-// subagent blip keeps the same session alive), so the flag must be raised — and
+// subagent blip keeps the same session alive), so the flag must be raised - and
 // because it moves the cross-project unread total, a broadcast projects_changed
 // must fire alongside the in-project agents_changed.
 func TestPollerRaisesUnreadOnSessionExit(t *testing.T) {
@@ -298,7 +298,7 @@ func TestPollerBroadcastsProjectsChangedOnlyOnUnread(t *testing.T) {
 // TestPollerNeedsInputUnreadImmediacy covers the AskUserQuestion fix: a
 // running→needs_input transition (the explicit "the agent needs you now" state)
 // raises has_unread_changes on the very next poll, whereas the idle "gone quiet"
-// nudge (running→waiting) is deferred — it flips the status but does NOT raise
+// nudge (running→waiting) is deferred - it flips the status but does NOT raise
 // the unread flag immediately (the debouncer holds it for graceUnread first).
 func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 	cases := []struct {

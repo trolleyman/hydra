@@ -19,8 +19,8 @@ import (
 // fall back to the gate's name heuristic).
 //
 // It is strictly best-effort and cached per server (keyed by a hash of its launch
-// command): a server that can't be introspected — times out, errors, is non-stdio,
-// or needs auth — is simply omitted. Successful results are cached under
+// command): a server that can't be introspected - times out, errors, is non-stdio,
+// or needs auth - is simply omitted. Successful results are cached under
 // cacheDir/mcp-rw so subsequent launches don't re-spawn every server.
 func captureMCPToolRW(names []string, claudeJSON, mcpJSON []byte, cacheDir string) map[string]string {
 	out := map[string]string{}

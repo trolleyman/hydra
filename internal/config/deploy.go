@@ -34,7 +34,7 @@ type DeployConfig struct {
 // NgrokConfig describes an ngrok tunnel that fronts the Hydra web UI, gated by
 // Google sign-in restricted to a single account (mirroring the reference
 // deployment). The tunnel dials the local Hydra port, so Hydra itself can stay
-// bound to localhost — ngrok is the only external door, and Google OAuth is the
+// bound to localhost - ngrok is the only external door, and Google OAuth is the
 // gate. It is a value (not pointer) type so DeployConfig stays comparable.
 type NgrokConfig struct {
 	// Authtoken authenticates the ngrok agent (from the ngrok dashboard).
@@ -62,7 +62,7 @@ func GenerateAuthKey() (string, error) {
 }
 
 // LoadDeploy reads .hydra/deploy.toml for the project. A missing file is not an
-// error — it returns the zero DeployConfig (auth disabled, default listen addr).
+// error - it returns the zero DeployConfig (auth disabled, default listen addr).
 func LoadDeploy(projectRoot string) (DeployConfig, error) {
 	var cfg DeployConfig
 	if projectRoot == "" {

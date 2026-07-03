@@ -3,7 +3,7 @@
 // registered with the daemon, relaunched with capped backoff if it exits
 // unexpectedly, and process-group-killed on daemon shutdown, project removal, or
 // a config save. The canonical use is a host-side resource pool (e.g. a pool of
-// Android emulators) shared by every head of the project — work the per-head
+// Android emulators) shared by every head of the project - work the per-head
 // sandbox cannot do because it lacks host devices like /dev/kvm.
 package services
 

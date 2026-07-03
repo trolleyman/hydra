@@ -78,7 +78,7 @@ func statusLabel(x, y byte) string {
 
 // CommitFiles stages exactly the given dirty files (tracked and untracked,
 // including deletions) in the repository at dir and commits them with the
-// given message. Other dirty or already-staged paths are left alone — the
+// given message. Other dirty or already-staged paths are left alone - the
 // commit itself is pathspec-limited, so unrelated staged content doesn't get
 // swept in. A staged rename's OrigPath goes into the commit pathspec only
 // (its deletion is already staged; the path no longer exists to `git add`).

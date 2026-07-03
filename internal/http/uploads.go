@@ -31,7 +31,7 @@ const DefaultUploadMaxAge = 30 * 24 * time.Hour
 // read-only at the same locations (see internal/sandbox/linux.go "--ro-bind / /"),
 // and the uploads dir lives under <projectRoot>/.hydra which is neither masked
 // (masks are $HOME-relative) nor overlaid with tmpfs. So inserting this path
-// into an agent's prompt/terminal lets it read the file directly — an
+// into an agent's prompt/terminal lets it read the file directly - an
 // agent-agnostic mechanism that works for Claude, Gemini and Copilot alike.
 type uploadResponse struct {
 	Path     string `json:"path"`

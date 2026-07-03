@@ -115,12 +115,12 @@ func TestReadStatusLogTailQuestion(t *testing.T) {
 		t.Fatalf("lastMessage = %v, want %q", info.LastMessage, "Which DB?")
 	}
 	// The message is a question the agent is asking the user, not a suggestion you
-	// could send back — so it must not be flagged as a suggested next message even
+	// could send back - so it must not be flagged as a suggested next message even
 	// though its shape (short, single line, no mid-message break) looks terse.
 	if info.LastMessageIsSuggestedNextMessage != nil {
 		t.Fatalf("lastMessageIsSuggestedNextMessage = %v, want nil for a question", *info.LastMessageIsSuggestedNextMessage)
 	}
-	// A question tool isn't "activity" — the agent is blocked, not working.
+	// A question tool isn't "activity" - the agent is blocked, not working.
 	if info.Activity != nil {
 		t.Fatalf("activity = %v, want nil while waiting", info.Activity)
 	}

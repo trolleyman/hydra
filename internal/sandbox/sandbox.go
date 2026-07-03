@@ -38,7 +38,7 @@ const (
 	NetOff NetworkMode = "off"
 	// NetUnrestricted allows network with no host filtering.
 	NetUnrestricted NetworkMode = "unrestricted"
-	// NetAdvisory filters via the HTTP(S)_PROXY allow-list only — every honest
+	// NetAdvisory filters via the HTTP(S)_PROXY allow-list only - every honest
 	// client is filtered, but a determined process can bypass it. Chosen when the
 	// user explicitly wants proxy-only filtering (no pasta/nft netns).
 	NetAdvisory NetworkMode = "advisory"
@@ -106,9 +106,9 @@ type NetworkPolicy struct {
 }
 
 // DefaultAllowedHosts is the built-in egress allow-list applied whenever host
-// filtering is on. It covers what an agent realistically needs to function — the
+// filtering is on. It covers what an agent realistically needs to function - the
 // common package registries and git hosts every agent shares, plus the
-// AI-provider API hosts specific to the given agent type — so that turning on
+// AI-provider API hosts specific to the given agent type - so that turning on
 // deny-by-default filtering does not immediately break every agent. Scoping the
 // provider hosts to the agent that uses them means a Claude agent's defaults
 // don't silently grant reach to OpenAI's API, and vice versa. User AllowedHosts
@@ -174,7 +174,7 @@ type Bind struct {
 //
 // The mechanism is platform-specific. Linux mounts an overlayfs (Lower as the
 // read-only lower layer, Upper as the writable upper, Work as overlayfs's
-// scratch dir) — this needs an overlay-capable bwrap, and falls back to a plain
+// scratch dir) - this needs an overlay-capable bwrap, and falls back to a plain
 // read-only bind when that is unavailable. macOS clones Lower into Dest with an
 // APFS copy-on-write clone (clonefile); Upper and Work are unused there.
 //
@@ -190,7 +190,7 @@ type CowMount struct {
 // ROOverlay mounts a read-only overlayfs at Dir, unioning the host's real Dir
 // (lower layer) with a per-head Upper layer (a host dir mirroring Dir's layout)
 // on top. It exists to expose files that belong under an otherwise read-only
-// system directory which does NOT exist on the host — e.g. Claude Code's
+// system directory which does NOT exist on the host - e.g. Claude Code's
 // tamper-proof managed settings at /etc/claude-code/managed-settings.json (the
 // path is fixed and not relocatable). A plain `--tmpfs /etc/claude-code` cannot
 // work there: bwrap must mkdir the mountpoint under the read-only `/` bind, which
@@ -221,8 +221,8 @@ type Options struct {
 	Home string
 
 	// TmpDir is a host-backed scratch directory bound over /tmp inside the
-	// sandbox (Linux only). When set, the agent's temp files — Claude's
-	// scratchpad, test-framework extractions, build junk — are isolated per
+	// sandbox (Linux only). When set, the agent's temp files - Claude's
+	// scratchpad, test-framework extractions, build junk - are isolated per
 	// head and reclaimed when the head is torn down, instead of accumulating on
 	// the host's shared /tmp. Empty leaves /tmp as the fresh tmpfs from the base
 	// args (used by tests and one-off sandboxes). Ignored on macOS, where /tmp
@@ -290,7 +290,7 @@ type Options struct {
 // failing command aborts the script) plus pipefail (so a failure anywhere in a
 // pipeline propagates rather than being hidden by the last stage's exit code).
 // Without it a mid-script failure whose final command happens to exit 0 is
-// silently swallowed — which would cache a half-broken artifact render as a
+// silently swallowed - which would cache a half-broken artifact render as a
 // success, or read a service that failed its setup as healthy. nounset (`-u`) is
 // deliberately NOT included: config scripts routinely read optional environment
 // variables, and aborting on the first unset one would break too many real
@@ -301,15 +301,15 @@ const StrictShellPreamble = "set -eo pipefail\n"
 // StrictScript prepends StrictShellPreamble to a user-supplied config.toml
 // command so its failures propagate. Used for the `bash -c <command>` config
 // commands ([[artifacts]], [[services]], pre_exit_script). pre_spawn applies the
-// same preamble inline (only when its interpreter is bash — see withPreSpawn).
+// same preamble inline (only when its interpreter is bash - see withPreSpawn).
 func StrictScript(command string) string {
 	return StrictShellPreamble + command
 }
 
 // interpIsBash reports whether an interpreter command line (as returned by
-// preSpawnInterp) runs bash — either a direct `#!/<...>/bash` or a
+// preSpawnInterp) runs bash - either a direct `#!/<...>/bash` or a
 // `#!/<...>/env bash`. Only then can a pre-spawn script safely take the
-// bash-only StrictShellPreamble; a non-bash interpreter (zsh, dash, …) is left
+// bash-only StrictShellPreamble; a non-bash interpreter (zsh, dash, ...) is left
 // untouched (`set -o pipefail` is a bashism dash rejects outright). The default
 // (no shebang) is ["/bin/bash"], so plain scripts get strict mode.
 func interpIsBash(interp []string) bool {
@@ -351,8 +351,8 @@ const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script 
 //
 // The interpreter honors the script's `#!` shebang line (so e.g. `#!/bin/zsh`
 // runs under zsh, `#!/usr/bin/env bash` under bash). With no shebang it defaults
-// to /bin/bash, so bashisms like `set -o pipefail` — which dash rejects with
-// "Illegal option" — work out of the box. The shebang line itself is a harmless
+// to /bin/bash, so bashisms like `set -o pipefail` - which dash rejects with
+// "Illegal option" - work out of the box. The shebang line itself is a harmless
 // comment to the interpreter that ends up running the wrapper.
 //
 // When that interpreter is bash (the default, or an explicit bash shebang) the

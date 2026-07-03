@@ -27,7 +27,7 @@ func (e *DirtyMergeError) Error() string {
 // Returns an error if there are conflicting files.
 //
 // Merge refuses to run only when the destination working tree has uncommitted
-// changes to tracked files that the merge would overwrite — i.e. files the merge
+// changes to tracked files that the merge would overwrite - i.e. files the merge
 // brings in. Uncommitted changes to files the merge does not touch are preserved
 // (the fast-forward path uses `merge --ff-only` rather than `reset --hard`, which
 // would discard them). A merge that would clobber such files returns a
@@ -46,7 +46,7 @@ func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
 
 	// Refuse only when an uncommitted tracked change overlaps a file the merge
 	// would write into the tree, so in-progress work the merge would clobber is
-	// never silently lost — but unrelated edits don't needlessly block the merge.
+	// never silently lost - but unrelated edits don't needlessly block the merge.
 	// Untracked files are left out: neither `merge --ff-only` nor `merge` removes
 	// them.
 	dirtyFiles, err := uncommittedTrackedFiles(projectRoot)
@@ -129,7 +129,7 @@ func uncommittedTrackedFiles(dir string) ([]string, error) {
 		if line[0] == '?' && line[1] == '?' {
 			continue // untracked
 		}
-		// Porcelain v1: "XY <path>"; a rename is "XY <old> -> <new>" — the new path
+		// Porcelain v1: "XY <path>"; a rename is "XY <old> -> <new>" - the new path
 		// is what exists in the tree and what the merge would touch.
 		path := line[3:]
 		if i := strings.Index(path, " -> "); i >= 0 {
@@ -141,7 +141,7 @@ func uncommittedTrackedFiles(dir string) ([]string, error) {
 }
 
 // mergeIncomingFiles returns the files changed between the merge base of baseRef
-// and srcRef and srcRef itself — i.e. the changes the merge would bring into the
+// and srcRef and srcRef itself - i.e. the changes the merge would bring into the
 // destination tree. The "..." range resolves to that merge base.
 func mergeIncomingFiles(dir, baseRef, srcRef string) ([]string, error) {
 	out, err := gitOutput(dir, "-c", "core.quotePath=false", "diff", "--name-only", baseRef+"..."+srcRef)
@@ -186,7 +186,7 @@ func intersectPaths(a, b []string) []string {
 // commit behind. Matches the message format produced by Merge above (and the
 // git default), tolerating a trailing "into <branch>".
 //
-// Fast-forward merges leave no merge commit, so they are NOT detected — callers
+// Fast-forward merges leave no merge commit, so they are NOT detected - callers
 // must treat a branch's absence as "not known to be merged", never as proof it
 // was killed.
 func MergedHydraBranches(projectRoot string) (map[string]struct{}, error) {

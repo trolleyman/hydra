@@ -157,7 +157,7 @@ func TestParseDirAggregatesAndIgnoresJunk(t *testing.T) {
 	}
 }
 
-// gotestsum: the classname is a Go package import path — the module prefix is
+// gotestsum: the classname is a Go package import path - the module prefix is
 // stripped to a repo-relative dir, and subtest names split into scope.
 func TestParseJUnitGoPackage(t *testing.T) {
 	xml := `<testsuites>

@@ -5,9 +5,9 @@
 //
 // By default it is read-only (errtrace -l) and emits Hydra streaming test
 // markers (::hydra:test:warn:: on stdout, see internal/tests/stream.go) so the
-// findings surface as amber ⚠ warnings on the head's test verdict —
+// findings surface as amber ⚠ warnings on the head's test verdict -
 // informational only, never gating the merge. It exits 0 once the scan
-// completes — the markers, not the exit code, carry the findings — so a non-zero
+// completes - the markers, not the exit code, carry the findings - so a non-zero
 // exit means errtrace itself could not run.
 //
 // With -w it instead rewrites the files in place (errtrace -w); `mage tidy`
@@ -58,7 +58,7 @@ func run(write bool) error {
 	}
 
 	warnings := 0
-	// stdout: one path per line — a file whose returned errors errtrace would rewrap.
+	// stdout: one path per line - a file whose returned errors errtrace would rewrap.
 	for _, f := range splitLines(stdout.String()) {
 		fmt.Printf("::hydra:test:warn:: %s › errtrace | returned errors are not errtrace-wrapped; run `mage tidy`\n", f)
 		warnings++
@@ -81,7 +81,7 @@ func run(write bool) error {
 
 // goSourceFiles collects every .go file errtrace should process: the whole tree
 // minus generated code (.gen.go) and non-source dirs, plus magefiles/ (excluded
-// from ./... by its build tag). Kept here — not in the magefile — so `mage tidy`
+// from ./... by its build tag). Kept here - not in the magefile - so `mage tidy`
 // and the test-gate report always scan the same set.
 func goSourceFiles() ([]string, error) {
 	skipDirs := map[string]struct{}{

@@ -7,7 +7,7 @@
 // bwrap. Two processes writing one overlay mount is fine; the corruption hazard
 // is only two *separate* overlay mounts sharing an upperdir. So routing both the
 // agent and its bash terminals through one supervisor lets them share a single
-// writable COW path — something the "one bwrap per session" model can't do
+// writable COW path - something the "one bwrap per session" model can't do
 // safely (see internal/heads/cow.go).
 //
 // The daemon side (Client) dials the supervisor's control socket; each spawn

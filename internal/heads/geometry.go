@@ -4,7 +4,7 @@ import (
 	"github.com/trolleyman/hydra/internal/db"
 )
 
-// Default PTY size used when no client has ever reported a terminal geometry —
+// Default PTY size used when no client has ever reported a terminal geometry -
 // the classic VT100 80x24. It's almost always wrong for a browser (usually far
 // wider), which is exactly why we persist and prefer the last real size a client
 // sent: an agent resumed at this default repaints its UI at 80 cols, and those
@@ -19,7 +19,7 @@ const (
 // live client to measure it (daemon boot resume, TUI resume, the HTTP seed
 // fallback). It prefers the size last reported for this specific head (stored on
 // the head's DB row), then the most recent size across the project's heads, then
-// the 80x24 default — so a head with no size of its own still resumes at a sane
+// the 80x24 default - so a head with no size of its own still resumes at a sane
 // width. Mirrors the browser's geometry seed but server-side, so it works even
 // when no client is connected. Best-effort: any DB error falls through.
 func LoadResumeSize(store *db.Store, projectRoot, headID string) (rows, cols uint16) {

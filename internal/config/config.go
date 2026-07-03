@@ -72,7 +72,7 @@ type NetworkConfig struct {
 	// Mode is the egress posture: "off" (no network), "unrestricted" (network, no
 	// filtering), "advisory" (proxy-only host filtering, escapable), or "hard"
 	// (inescapable pasta+nft netns, degrading to advisory with a warning when the
-	// tooling is unavailable — unless Strict). "on" is an accepted synonym for
+	// tooling is unavailable - unless Strict). "on" is an accepted synonym for
 	// "hard". nil/"" = default ("hard"). When set, Mode is authoritative and
 	// supersedes the legacy Enabled/FilterEnabled booleans.
 	Mode *string `toml:"mode"`
@@ -85,7 +85,7 @@ type NetworkConfig struct {
 	Enabled *bool `toml:"enabled"`
 	// FilterEnabled toggles the outbound host allow-list (deny-by-default vs
 	// allow-by-default). nil = inferred (filter on when AllowedHosts is non-empty,
-	// off otherwise — the historical behaviour). true = enforce AllowedHosts: only
+	// off otherwise - the historical behaviour). true = enforce AllowedHosts: only
 	// those hosts are reachable, and an empty list blocks all egress. false = allow
 	// every host regardless of AllowedHosts. Subordinate to Enabled: with network
 	// off, nothing is reachable either way. Legacy: honoured only when Mode is unset.
@@ -109,7 +109,7 @@ type NetworkConfig struct {
 	AllowedLoopbackPorts []int `toml:"allowed_loopback_ports"`
 }
 
-// PolicyConfig is the per-agent security-gate policy — the "trusted live config"
+// PolicyConfig is the per-agent security-gate policy - the "trusted live config"
 // the decision-capable PreToolUse gate (`hydra gate`) enforces. It is resolved on
 // the host from the project-root config.toml and seeded into the sandbox
 // read-only, so a malicious branch's worktree copy can never widen it (mirrors the
@@ -139,7 +139,7 @@ type PolicyConfig struct {
 }
 
 // IsGateEnabled reports whether the decision-capable gate runs. Absent (nil)
-// means enabled — the gate is opt-out, so a config written before this flag keeps
+// means enabled - the gate is opt-out, so a config written before this flag keeps
 // the protective default.
 func (p PolicyConfig) IsGateEnabled() bool {
 	return p.GateEnabled == nil || *p.GateEnabled
@@ -188,12 +188,12 @@ type SandboxConfig struct {
 	// script with `set +e` to opt out). nil/empty = no script.
 	PreSpawnScript *string `toml:"pre_spawn_script"`
 	// PreExitScript is an optional shell script run inside a sandbox when a head
-	// ends — after the agent's session is killed but BEFORE the worktree/branch
+	// ends - after the agent's session is killed but BEFORE the worktree/branch
 	// are torn down (kill/merge/restart/ephemeral-cleanup). It runs in a fresh
 	// sandbox with this agent's policy, in the worktree (which still exists), with
 	// the same HYDRA_* head-context variables plus HYDRA_END_STATE
 	// ("killed"|"merged"|""). Use it for per-head teardown the agent didn't do
-	// itself — e.g. releasing a claimed emulator slot from the worktree's
+	// itself - e.g. releasing a claimed emulator slot from the worktree's
 	// .hydra/emu.env. It is best-effort and bounded by a timeout. It runs via
 	// `bash -c` under `set -eo pipefail`, so a failing step aborts the rest of the
 	// teardown; lead the script with `set +e` (or use `cmd || true`) if cleanup
@@ -214,7 +214,7 @@ type ServiceScript struct {
 	Name string `toml:"name"`
 	// Command is the shell command run (via `bash -c`) from the project root.
 	Command string `toml:"command"`
-	// Host, when true, runs the command directly on the host with NO sandbox —
+	// Host, when true, runs the command directly on the host with NO sandbox -
 	// full access to the machine, network and credentials. Required for services
 	// that need host devices the sandbox hides (e.g. /dev/kvm for emulators).
 	// Default false (the command is confined like an agent, rooted at the project).
@@ -262,7 +262,7 @@ type AgentConfig struct {
 	// nil/false means disabled, in which case Hydra forces the classic renderer
 	// (see ResolveFullscreen / claudeRenderingEnv). It is a Claude-only setting:
 	// although it lives on the shared AgentConfig type, it is accepted, rendered
-	// and resolved ONLY under [claude] — a value at the defaults level or under any
+	// and resolved ONLY under [claude] - a value at the defaults level or under any
 	// other agent is ignored and dropped on save.
 	Fullscreen *bool `toml:"fullscreen"`
 }
@@ -285,17 +285,17 @@ type ArtifactScript struct {
 	// TimeoutSec bounds how long the command may run (0 = default, see artifacts).
 	TimeoutSec int `toml:"timeout_sec"`
 	// UnsafeHost, when true, runs the command directly on the host with NO
-	// sandbox — full access to the user's credentials, network, and machine.
+	// sandbox - full access to the user's credentials, network, and machine.
 	// Default false (the command is confined like an agent). Only enable for a
 	// self-contained, audited command when you trust every ref you will ever
 	// compare: the command executes the *diffed ref's* code (build tooling,
 	// package lifecycle scripts, the script file itself), and "trusted config"
-	// authorizes only which command runs — not the contents of the checkout it
+	// authorizes only which command runs - not the contents of the checkout it
 	// runs against. Heavy build scripts are the most tempted to set this and the
 	// ones running the most untrusted code; prefer leaving it off.
 	UnsafeHost bool `toml:"unsafe_host"`
 	// CleanIgnored, when true, also removes git-ignored files (dependency/build
-	// caches like node_modules) from the checkout before each run — `git clean
+	// caches like node_modules) from the checkout before each run - `git clean
 	// -fdx` instead of the default `git clean -fd`. Artifact generations reuse a
 	// small pool of worktrees (see internal/artifacts), switching commits with
 	// `git checkout --force`, which resets *tracked* files but leaves *ignored*
@@ -308,11 +308,11 @@ type ArtifactScript struct {
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
 	// written before this flag keep their artifacts running. Like unsafe_host,
-	// the live (human-controlled) config is authoritative — a disabled script is
+	// the live (human-controlled) config is authoritative - a disabled script is
 	// skipped regardless of what a diffed ref's own config claims.
 	Enabled *bool `toml:"enabled"`
 	// Strict runs the command under `set -eo pipefail` (errexit + pipefail) so a
-	// failing step — or a failure mid-pipeline — aborts and propagates a non-zero
+	// failing step - or a failure mid-pipeline - aborts and propagates a non-zero
 	// exit instead of being swallowed into a 0 that caches a half-broken render as
 	// a success. nounset (-u) is not applied, since generators commonly read
 	// optional env vars. nil or true = strict; false runs the command exactly as
@@ -334,8 +334,8 @@ func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
 // checkout of the repository and writes a machine-readable report. Hydra parses
 // the report into a pass/fail verdict surfaced as a merge gate on the head's
 // branch (see internal/tests and PLAN #68). It deliberately mirrors
-// ArtifactScript field-for-field — the generation/cache/sandbox machinery is
-// shared — differing only in the env contract and that the post-run step parses
+// ArtifactScript field-for-field - the generation/cache/sandbox machinery is
+// shared - differing only in the env contract and that the post-run step parses
 // a report instead of scanning images.
 //
 // Contract: the command runs with the checkout directory as its working
@@ -359,7 +359,7 @@ type TestScript struct {
 	// off unless every ref you will ever test is trusted. Default false.
 	UnsafeHost bool `toml:"unsafe_host"`
 	// CleanIgnored, when true, also removes git-ignored files (dependency/build
-	// caches) before each run — `git clean -fdx` instead of the default `-fd`.
+	// caches) before each run - `git clean -fdx` instead of the default `-fd`.
 	// Leave false to keep caches warm between runs. Default false.
 	CleanIgnored bool `toml:"clean_ignored"`
 	// Enabled gates whether the test gate runs this command. nil or true means
@@ -368,14 +368,14 @@ type TestScript struct {
 	// Strict runs the command under `set -eo pipefail`. nil or true = strict;
 	// false runs the command exactly as written. Note: a test runner exiting
 	// non-zero because tests FAILED is a valid (cacheable) result, not a strict
-	// abort — strict only governs the shell pipeline, the verdict comes from the
+	// abort - strict only governs the shell pipeline, the verdict comes from the
 	// parsed report. nil is the default.
 	Strict *bool `toml:"strict"`
 	// Type selects how the run's results are read (see internal/tests):
 	//   - "junit" (default, also for ""): parse the *.xml/*.json report files the
 	//     command wrote into $HYDRA_TEST_OUTPUT after it exits.
 	//   - "stdout": parse `::hydra:test:<pass|fail|warn|skip>:: location › name | msg`
-	//     markers live from the command's stdout — the accumulated cases ARE the
+	//     markers live from the command's stdout - the accumulated cases ARE the
 	//     report (no file needed), and counts stream into the UI as they happen.
 	//     One marker per line; a message may use `\n`/`\t`/`\r`/`\\` escapes to
 	//     carry a multi-line failure on that single line (see internal/tests).
@@ -413,8 +413,8 @@ type Config struct {
 	ResumePrompt *string `toml:"resume_prompt"`
 	// ArtifactConcurrency caps how many visual-artifact generations run at once,
 	// shared across foreground (a user viewing a diff) and background (proactive
-	// pre-generation) work. Generations can be heavy — a full build per ref, and
-	// some boot RAM-hungry tooling (e.g. emulators) — so this bounds how many run
+	// pre-generation) work. Generations can be heavy - a full build per ref, and
+	// some boot RAM-hungry tooling (e.g. emulators) - so this bounds how many run
 	// in parallel; lower it for memory-hungry generators. Foreground requests are
 	// always served before queued background ones, and a running generation is
 	// never preempted. It is a pointer so three states are distinct: nil/absent =
@@ -499,7 +499,7 @@ func (c Config) ResumeContinueMessage() string {
 // nested layout ([defaults], [defaults.sandbox], [agents.<name>]) and the new
 // flattened layout (top-level pre_prompt/[sandbox], and one top-level table per
 // agent, e.g. [claude]). decodeConfig folds it into a Config. The dynamic agent
-// tables of the new layout are not fields here — they are captured separately
+// tables of the new layout are not fields here - they are captured separately
 // via toml.Primitive (any top-level table whose name is not reserved).
 type rawConfig struct {
 	// Legacy layout.
@@ -523,7 +523,7 @@ type rawConfig struct {
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
 // other top-level table is treated as an agent override, so new agent types
 // need no code change. Consequently an agent literally named one of these is
-// unrepresentable in the flattened layout — fine for real agent types
+// unrepresentable in the flattened layout - fine for real agent types
 // (claude/gemini/bash/copilot/codex).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
@@ -548,7 +548,7 @@ func GetProjectConfigPath(projectRoot string) string {
 }
 
 // ReadProjectConfigTOML returns the raw bytes of the project's .hydra/config.toml
-// and whether the file exists. An absent file is (nil, false, nil) — not an error.
+// and whether the file exists. An absent file is (nil, false, nil) - not an error.
 // The raw bytes (rather than the parsed config) are what the UI shows the user
 // when they open a project, so they can review what they're about to run.
 func ReadProjectConfigTOML(projectRoot string) ([]byte, bool, error) {
@@ -566,7 +566,7 @@ func ReadProjectConfigTOML(projectRoot string) ([]byte, bool, error) {
 }
 
 // LoadInternalDefaults returns the hardcoded internal default configuration.
-// Note: DefaultPrePrompt is not stored here — it is always prepended by BuildFinalPrePrompt.
+// Note: DefaultPrePrompt is not stored here - it is always prepended by BuildFinalPrePrompt.
 func LoadInternalDefaults() Config {
 	return Config{}
 }
@@ -595,7 +595,7 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 // it reaches a non-allow-listed host. Substituted into the <network-info>
 // placeholder. Mirrors resolveNetworkPolicy's resolution (explicit mode, else
 // legacy booleans, else the hard default). Note: like <branch>, this is baked in
-// at spawn and stored on the head, so it reflects the mode at spawn time — a later
+// at spawn and stored on the head, so it reflects the mode at spawn time - a later
 // config change to network.mode is not re-resolved on resume.
 func networkInfoLine(cfg Config, agentType string) string {
 	var nc *NetworkConfig
@@ -704,10 +704,10 @@ func decodeConfig(data []byte) (Config, error) {
 
 // configCache memoises decoded config files keyed by (path, mtime, size), so the
 // many per-operation LoadFile calls (every head spawn/resume and HTTP request
-// re-reads config — there is no long-lived Config anywhere) don't re-parse an
+// re-reads config - there is no long-lived Config anywhere) don't re-parse an
 // unchanged file. It is a cache, not a source of truth: any change to the file's
 // mtime or size invalidates the entry, so an on-disk edit is always picked up on the
-// next read — which is how a saved config "auto-applies" to the next operation. It
+// next read - which is how a saved config "auto-applies" to the next operation. It
 // does NOT retroactively re-apply to already-running heads (their sandbox/egress/gate
 // are fixed at launch); that would need live re-injection, which the daemon only does
 // for [[services]] today.
@@ -760,7 +760,7 @@ func LoadFile(path string) (*Config, error) {
 
 // cloneConfig returns a deep copy of c. Config is plain data (primitives, pointers
 // to primitives, slices, maps and nested structs of the same), so a JSON round-trip
-// is a correct and maintenance-free deep copy — new fields are covered automatically.
+// is a correct and maintenance-free deep copy - new fields are covered automatically.
 // It is used at the cache boundary so a cached config is never shared (and thus never
 // mutated) across callers. A nil input clones to nil.
 func cloneConfig(c *Config) *Config {
@@ -1145,8 +1145,8 @@ func (c Config) ResolvePolicy(agentType string) PolicyConfig {
 // fullscreen off Hydra forces the classic renderer, which keeps the web
 // terminal's native scrollbar and select-to-copy working and avoids the one-time
 // opt-in prompt that collides with the resume "Continue" nudge. The setting is
-// accepted ONLY under [claude] — not at the defaults level or under any other
-// agent — so it is read straight from the claude table rather than the resolved
+// accepted ONLY under [claude] - not at the defaults level or under any other
+// agent - so it is read straight from the claude table rather than the resolved
 // (defaults-merged) config.
 func (c Config) ResolveFullscreen(agentType string) bool {
 	if agentType != string(sandbox.AgentTypeClaude) {
@@ -1247,9 +1247,9 @@ func tomlIntArray(vals []int) string {
 }
 
 // docPrefix marks Hydra-generated documentation comment lines. Using a distinct
-// prefix ("##" — a doubled comment marker, rendered above each setting) lets the
-// renderer recognise and replace its own docs on every save — so they update when
-// Hydra updates — while leaving the user's own single-"#" comments untouched.
+// prefix ("##" - a doubled comment marker, rendered above each setting) lets the
+// renderer recognise and replace its own docs on every save - so they update when
+// Hydra updates - while leaving the user's own single-"#" comments untouched.
 const docPrefix = "##"
 
 // legacyDocPrefixes are the earlier docPrefix spellings ("# :" then "#:"). They
@@ -1301,7 +1301,7 @@ func policySlice(pick func(*PolicyConfig) []string) func(AgentConfig) (string, b
 // defaultsSpec is the ordered, declarative description of the managed default
 // settings. Root scalars come first because TOML requires root keys to precede
 // any table header. Adding an entry here makes it appear (commented-out) on the
-// next render of any existing file — the "intelligent update" behaviour.
+// next render of any existing file - the "intelligent update" behaviour.
 func defaultsSpec() []specEntry {
 	return []specEntry{
 		{
@@ -1939,7 +1939,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 	}
 
 	// gap returns the comment/blank source lines between the previous item's end
-	// and the start of the next item — i.e. the lines preceding that item.
+	// and the start of the next item - i.e. the lines preceding that item.
 	gap := func(prevEnd, start int) []string {
 		from := max(prevEnd+1, 0)
 		if from >= start || start > len(lines) {
@@ -2071,7 +2071,7 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 var managedArraySections = []string{"artifacts", "services", "tests"}
 
 // isManagedCommentedArrayHeader reports whether a line is a commented-out header
-// for a managed array section (e.g. "# [[services]]") — the start of a regenerated
+// for a managed array section (e.g. "# [[services]]") - the start of a regenerated
 // example block.
 func isManagedCommentedArrayHeader(line string) bool {
 	t := strings.TrimSpace(line)
@@ -2088,7 +2088,7 @@ func isManagedCommentedArrayHeader(line string) bool {
 }
 
 // isCommentedSimpleAssign reports whether a line is a commented-out "key = value"
-// where key is a bare TOML key — i.e. an example field line like `# name = "x"`,
+// where key is a bare TOML key - i.e. an example field line like `# name = "x"`,
 // not prose that merely contains "=". Used to consume the body of a commented
 // example block regardless of the (regenerable) values it shows.
 func isCommentedSimpleAssign(line string) bool {
@@ -2120,7 +2120,7 @@ func isBareTOMLKey(s string) bool {
 // userComments keeps only the user's own comments, dropping Hydra-generated doc,
 // commented-default, commented-agent-header, and commented array-section example
 // lines (all regenerated) and any blank lines. The example blocks are recognised
-// structurally — a "# [[services]]" header followed by "# key = value" body lines —
+// structurally - a "# [[services]]" header followed by "# key = value" body lines -
 // so they are dropped rather than swallowed into the next section as pseudo-user
 // comments and re-emitted next to a fresh example, duplicating on every save.
 func userComments(comments []string, keys map[string]bool) []string {
@@ -2200,7 +2200,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	// artifact_concurrency is authoritative from cfg (unlike resume_prompt, the
 	// Settings editor DOES send it): a positive value is written, and 0 ("unset")
 	// renders the commented default instead of preserving the existing file's
-	// value — so clearing the field in the UI actually resets it to the default.
+	// value - so clearing the field in the UI actually resets it to the default.
 	artifactConcurrency := cfg.ArtifactConcurrency
 	// test_concurrency is authoritative from cfg like artifact_concurrency.
 	testConcurrency := cfg.TestConcurrency
@@ -2228,7 +2228,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	// Explanatory banner at the very top of the file.
 	out = append(out, configHeaderLines()...)
 
-	// Root defaults (pre_prompt) — must precede any table header.
+	// Root defaults (pre_prompt) - must precede any table header.
 	if tc := tableComments[""]; len(tc) > 0 {
 		out = append(out, tc...)
 	}
@@ -2504,7 +2504,7 @@ func isManagedCommentedAgentHeader(line string) bool {
 }
 
 // emitAgentDoc appends a blank separator, any preserved user comment, and the
-// Hydra doc line for the given agent — the shared prefix of a real or commented
+// Hydra doc line for the given agent - the shared prefix of a real or commented
 // agent table.
 func emitAgentDoc(out *[]string, name string, tableComments map[string][]string) {
 	*out = appendBlank(*out)
@@ -2535,7 +2535,7 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 
 // emitClaudeAgent renders the [claude] table. Claude is the only agent that reads
 // the `fullscreen` toggle (it is accepted nowhere else; see ResolveFullscreen), so
-// — unlike the other agents — this always documents that setting, even when no
+// - unlike the other agents - this always documents that setting, even when no
 // Claude overrides are configured. The table is active when any Claude override is
 // set; otherwise it stays a commented-out placeholder, with the fullscreen doc and
 // default commented alongside it (a key cannot live under a commented table).
@@ -2693,7 +2693,7 @@ func appendBlank(out []string) []string {
 }
 
 // appendSettingBlank separates one documented setting group (user comment + doc
-// line + value) from the previous one with a blank line — but not when out is
+// line + value) from the previous one with a blank line - but not when out is
 // empty, already ends in a blank, or ends with a table header (real or commented,
 // e.g. "[sandbox]" / "# [claude]"), so the first setting still hugs its header.
 // Blank lines are regenerated and ignored on re-parse, so this stays idempotent.

@@ -28,8 +28,8 @@ const askPollInterval = 500 * time.Millisecond
 
 // gateCmd is an internal command wired as a second PreToolUse hook (alongside
 // trigger-hook, which keeps reporting status). It reads the hook payload from
-// stdin, consults the seeded trusted policy, and can DENY a tool call — even
-// under --dangerously-skip-permissions — by emitting a permissionDecision on
+// stdin, consults the seeded trusted policy, and can DENY a tool call - even
+// under --dangerously-skip-permissions - by emitting a permissionDecision on
 // stdout. An "ask" verdict parks the head until the user decides in the UI.
 //
 // Like trigger-hook it always exits 0: a gate that errored should fail open
@@ -156,7 +156,7 @@ func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
 	}
 }
 
-// approvalSummary is the one-line "Head wants to …" shown in the UI card.
+// approvalSummary is the one-line "Head wants to ..." shown in the UI card.
 func approvalSummary(r gate.Result) string {
 	switch r.Kind {
 	case "mcp":

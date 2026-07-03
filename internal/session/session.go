@@ -68,8 +68,8 @@ type Session struct {
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before
 // terminating itself. Generous enough to survive a browser reload, navigating
-// away and back, or a transient disconnect — the shell (and its scrollback) is
-// still there when you return — while a tab you actually closed and abandoned is
+// away and back, or a transient disconnect - the shell (and its scrollback) is
+// still there when you return - while a tab you actually closed and abandoned is
 // eventually reaped. (Killing the head terminates its shells immediately,
 // independent of this grace; see Registry.KillMatching.)
 const shellReapGrace = 5 * time.Minute
@@ -270,7 +270,7 @@ func (s *Session) alive() bool {
 }
 
 // reapIfDead forces the session into the exited state when its process has
-// already died but the read loop never observed the PTY close — which would
+// already died but the read loop never observed the PTY close - which would
 // otherwise pin the session "live" forever (IsLive true), blocking resume and
 // keeping the head's status stuck at "running". Returns true if it reaped.
 //

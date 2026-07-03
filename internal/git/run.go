@@ -24,7 +24,7 @@ func gitOutput(dir string, args ...string) (string, error) {
 }
 
 // IsAncestor reports whether ancestor is a reachable ancestor of descendant (or
-// the same commit) in the repo at projectRoot — i.e. descendant can fast-forward
+// the same commit) in the repo at projectRoot - i.e. descendant can fast-forward
 // from ancestor. Exported wrapper around gitIsAncestor.
 func IsAncestor(projectRoot, ancestor, descendant string) (bool, error) {
 	return errtrace.Wrap2(gitIsAncestor(projectRoot, ancestor, descendant))

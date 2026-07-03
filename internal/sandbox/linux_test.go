@@ -110,7 +110,7 @@ func TestBuildSpecLinux(t *testing.T) {
 		t.Error("expected --unsetenv DISPLAY with HardenGUI")
 	}
 	// The sandbox is pinned to the host uid/gid so hard mode's pasta userns (which
-	// maps the host user to uid 0) can't make the agent appear as root — which
+	// maps the host user to uid 0) can't make the agent appear as root - which
 	// would trip Claude's "cannot be used with root/sudo privileges" refusal.
 	// --uid requires an explicit --unshare-user.
 	if argIndex(args, "--unshare-user") == -1 {

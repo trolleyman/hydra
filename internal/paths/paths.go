@@ -237,7 +237,7 @@ func MigrateHydraLayout(projectRoot string) error {
 			continue // nothing at the old location
 		}
 		if _, err := os.Stat(newPath); err == nil {
-			// Already migrated (or a partial state) — don't clobber the new copy.
+			// Already migrated (or a partial state) - don't clobber the new copy.
 			log.Printf("warn: hydra layout: both %s and %s exist; leaving the old one in place", oldPath, newPath)
 			continue
 		}
@@ -317,7 +317,7 @@ func repairMovedWorktrees(projectRoot, worktreesDir string) error {
 // Renaming the dir to the new slug restores resume for pre-move heads.
 //
 // Best-effort: per-head failures are logged and skipped. Other agent types key
-// their history differently (or not by cwd), so only Claude's dir is migrated —
+// their history differently (or not by cwd), so only Claude's dir is migrated -
 // mirroring removeClaudeSessionDir, which is likewise Claude-only.
 func migrateClaudeSessionDirs(projectRoot, newWorktreesDir string) error {
 	u, err := user.Current()

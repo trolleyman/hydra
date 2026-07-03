@@ -125,7 +125,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 		runners = s.testRunnersFor(projectRoot, v, liveCfg)
 	}
 	if len(runners) == 0 {
-		// No runners for this version — empty snapshot, socket stays open.
+		// No runners for this version - empty snapshot, socket stays open.
 		_ = writeMsg(testsWSMessage{Type: "snapshot", Runners: []api.TestRunResult{}})
 		drainUntilClose(conn)
 		return
@@ -242,7 +242,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 }
 
 // buildTestRunners runs (or returns the cached verdict for) each runner and maps
-// it into the API shape — the snapshot equivalent of GetAgentTests's loop.
+// it into the API shape - the snapshot equivalent of GetAgentTests's loop.
 func (s *Server) buildTestRunners(projectID string, mgr *hydratests.Manager, runners []config.TestScript, v hydratests.Version) []api.TestRunResult {
 	out := make([]api.TestRunResult, 0, len(runners))
 	for _, rspec := range runners {

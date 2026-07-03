@@ -17,7 +17,7 @@ import (
 const maxSlots = 4
 
 // slot is one reusable detached-HEAD worktree. sha is the commit it currently has
-// checked out ("" when unknown — freshly failed or never checked out), used to
+// checked out ("" when unknown - freshly failed or never checked out), used to
 // serve an affinity hit (reuse with no git work) when a later acquire wants the
 // same commit.
 type slot struct {
@@ -54,7 +54,7 @@ func newSlotPool(projectRoot, dir string, max int) *slotPool {
 // setMaxSlots adjusts the cap on live worktree slots, so the pool can grow with
 // a raised artifact-generation concurrency. Raising it wakes any acquire blocked
 // on the old cap (there is now room to grow a new slot); lowering it just stops
-// further growth — existing slots stay until clean(). Each commit-side
+// further growth - existing slots stay until clean(). Each commit-side
 // generation holds one slot for its duration, so the cap must stay at least as
 // large as the generation concurrency or acquires would deadlock waiting for a
 // free slot while every slot is held by a running generation.
@@ -83,7 +83,7 @@ func (p *slotPool) setMaxSlots(max int) {
 func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 	p.mu.Lock()
 	for {
-		// 1. Affinity: a free slot already on this commit — reuse with zero git work.
+		// 1. Affinity: a free slot already on this commit - reuse with zero git work.
 		//    Only when the caller doesn't need ignored files wiped (see above).
 		if !cleanIgnored {
 			for i, s := range p.free {
@@ -95,7 +95,7 @@ func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 			}
 		}
 
-		// 2. Any free slot — reuse it via an incremental checkout (off the lock).
+		// 2. Any free slot - reuse it via an incremental checkout (off the lock).
 		if len(p.free) > 0 {
 			s := p.free[len(p.free)-1]
 			p.free = p.free[:len(p.free)-1]
@@ -114,7 +114,7 @@ func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 			return s, nil
 		}
 
-		// 3. Room to grow — reserve a new slot under the lock, create it off the lock.
+		// 3. Room to grow - reserve a new slot under the lock, create it off the lock.
 		//    maxSlots == 0 means unlimited (concurrency is unlimited), so always grow.
 		if p.maxSlots == 0 || len(p.all) < p.maxSlots {
 			s := &slot{path: filepath.Join(p.dir, strconv.Itoa(p.nextN))}
@@ -133,7 +133,7 @@ func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 			return s, nil
 		}
 
-		// 4. All slots busy — wait for a release, then retry.
+		// 4. All slots busy - wait for a release, then retry.
 		p.cond.Wait()
 	}
 }
