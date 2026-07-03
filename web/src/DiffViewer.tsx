@@ -157,18 +157,20 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
 // backgrounds, and its tooltip sits directly above the icon's centre.
 function CommentButton({ onClick }: { onClick: () => void }) {
   return (
-    <Tooltip
-      content="Add comment"
-      side="top"
-      className="absolute inset-0 z-10 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-    >
-      <button
-        onClick={(e) => { e.stopPropagation(); onClick() }}
-        className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
-      >
-        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-      </button>
-    </Tooltip>
+    // The overlay spans the gutter to centre the button but is pointer-events-none
+    // so it doesn't swallow clicks meant for the (now clickable) line numbers
+    // underneath; only the button (via the Tooltip wrapper) re-enables pointer
+    // events, so both commenting and its hover hint still work.
+    <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+      <Tooltip content="Add comment" side="top" className="pointer-events-auto">
+        <button
+          onClick={(e) => { e.stopPropagation(); onClick() }}
+          className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
+        >
+          <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+        </button>
+      </Tooltip>
+    </div>
   )
 }
 
@@ -201,17 +203,62 @@ function trailingContext(hunk: DiffHunk): number {
   return count
 }
 
+// ── Line selection ────────────────────────────────────────────────────────────
+// Clicking a gutter number selects that line (shift+click extends the range);
+// the selection is a side (old/new) plus a 1-based [start,end]. Unlike the file
+// view it lives in local per-file state, not the URL — the diff isn't
+// URL-addressable here (the agent diff has no per-file route, and the repo
+// compare-diff keeps its diff state out of the URL by design).
+
+type DiffSide = 'old' | 'new'
+export type DiffLineSelection = { side: DiffSide; start: number; end: number }
+
+function selectionHas(sel: DiffLineSelection | null | undefined, side: DiffSide, num: number | null | undefined): boolean {
+  return !!sel && num != null && sel.side === side && num >= sel.start && num <= sel.end
+}
+
+// A left accent bar for a selected diff row/side. Inset box-shadow so it reads
+// clearly over the green/red change tints without shifting layout.
+const SELECTED_ROW_STYLE = { boxShadow: 'inset 2px 0 0 0 #f59e0b' }
+const SELECTED_NUM_CLASS = 'bg-amber-100 dark:bg-amber-400/15 !text-amber-700 dark:!text-amber-300'
+
+// LineNumCell renders one gutter line number that, when a line number is present
+// and onSelectLine is wired, is clickable to select the line (shift+click to
+// extend the range). It sits under the hover comment overlay, which is
+// pointer-events-none until hovered, so plain clicks reach this.
+function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
+  num: number | null | undefined
+  side: DiffSide
+  baseClass: string
+  selected: boolean
+  onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
+}) {
+  const clickable = !!onSelectLine && num != null
+  return (
+    <span
+      onMouseDown={clickable ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
+      onClick={clickable ? (e) => { e.stopPropagation(); onSelectLine!(side, num!, e.shiftKey) } : undefined}
+      title={clickable ? `Select line ${num}` : undefined}
+      className={`${baseClass} ${clickable ? 'cursor-pointer hover:!text-blue-500 dark:hover:!text-blue-400' : ''} ${selected ? SELECTED_NUM_CLASS : ''}`}
+    >
+      {num ?? ''}
+    </span>
+  )
+}
+
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
+  selection?: DiffLineSelection | null
+  onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   return (
@@ -224,12 +271,15 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
           ? (line.new_line_num != null ? highlightedNew.get(line.new_line_num) : undefined)
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
+        const selOld = selectionHas(selection, 'old', line.old_line_num)
+        const selNew = selectionHas(selection, 'new', line.new_line_num)
+        const rowSel = selOld || selNew
         return (
           <Fragment key={idx}>
-            <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
+            <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
               <div className="relative flex shrink-0 select-none">
-                <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
-                <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
+                <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
+                <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
                 {!isNoNewline && !readOnly && (
                   <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                 )}
@@ -268,12 +318,14 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
+  selection?: DiffLineSelection | null
+  onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const sbsLines = buildSideBySide(hunk.lines)
@@ -284,12 +336,14 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
+        const selOld = selectionHas(selection, 'old', line.oldLineNum)
+        const selNew = selectionHas(selection, 'new', line.newLineNum)
         return (
           <Fragment key={idx}>
             <div className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
-              <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
+              <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`} style={selOld ? SELECTED_ROW_STYLE : undefined}>
                 <div className="relative flex shrink-0 select-none">
-                  <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
+                  <LineNumCell num={line.oldLineNum} side="old" baseClass={SBS_LINE_NUM} selected={selOld} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
@@ -302,9 +356,9 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
-              <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
+              <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`} style={selNew ? SELECTED_ROW_STYLE : undefined}>
                 <div className="relative flex shrink-0 select-none">
-                  <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
+                  <LineNumCell num={line.newLineNum} side="new" baseClass={SBS_LINE_NUM} selected={selNew} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
@@ -745,12 +799,29 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   const synthHunk = (lines: DiffLine[]): DiffHunk => ({ header: '', old_start: 0, new_start: 0, lines })
 
+  // Per-file line selection driven by clicking gutter numbers. A plain click
+  // selects one line (and becomes the shift-anchor); shift+click extends the
+  // range from the anchor along the same side. Local state — see the note by
+  // DiffLineSelection on why this isn't URL-synced like the file view.
+  const [lineSel, setLineSel] = useState<DiffLineSelection | null>(null)
+  const selAnchorRef = useRef<{ side: DiffSide; line: number } | null>(null)
+  const selectLine = useCallback((side: DiffSide, line: number, extend: boolean) => {
+    setLineSel((prev) => {
+      if (extend && prev && prev.side === side) {
+        const anchor = selAnchorRef.current?.side === side ? selAnchorRef.current.line : prev.start
+        return { side, start: Math.min(anchor, line), end: Math.max(anchor, line) }
+      }
+      selAnchorRef.current = { side, line }
+      return { side, start: line, end: line }
+    })
+  }, [])
+
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
   return (
@@ -901,9 +972,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
