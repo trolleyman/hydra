@@ -177,6 +177,19 @@ function statusRank(s: string): number {
   return i === -1 ? STATUS_RENDER_ORDER.length : i
 }
 
+// Tree geometry. Each nesting level indents by INDENT_STEP. A node row (with a
+// chevron) pads NODE_PAD, then spends CHEVRON_SLOT on the chevron+gap before its
+// icon — so a row's leading glyph sits at depth*INDENT_STEP + ICON_X. A case row
+// has no chevron, so it pads straight to ICON_X, lining its status glyph up with
+// sibling nodes' icons (NOT with the parent's icon one level up, which is what
+// made child rows look like they shared the parent's column). GUIDE_X drops the
+// vertical guide under the chevron's centre.
+const INDENT_STEP = 18
+const NODE_PAD = 8
+const CHEVRON_SLOT = 18 // chevron (w-3 = 12) + gap-1.5 (6)
+const ICON_X = NODE_PAD + CHEVRON_SLOT
+const GUIDE_X = 13
+
 // TreeGuide is the lowlit vertical line dropped from an expanded node's
 // chevron through its children, so every row shows which parent it belongs
 // to. Rendered inside a `relative` wrapper around the children block; `depth`
@@ -186,7 +199,7 @@ export function TreeGuide({ depth }: { depth: number }) {
     <span
       aria-hidden
       className="pointer-events-none absolute top-0 bottom-0 w-px bg-gray-200/80 dark:bg-gray-700/50"
-      style={{ left: depth * 14 + 13 }}
+      style={{ left: depth * INDENT_STEP + GUIDE_X }}
     />
   )
 }
@@ -281,15 +294,21 @@ function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
 // piece (the folder open when expanded), then each scope level is its own
 // module/function piece. So "auth/rotation.test.ts › key rotation" reads as a
 // file icon + "auth/rotation.test.ts" then a module glyph + "key rotation".
-function RowSegments({ segs, isDir, expanded }: { segs: Seg[]; isDir: boolean; expanded: boolean }) {
+// fileLine, when set, hangs a dim ":42" off the file piece — used on hoisted
+// one-case rows so the line rides with the file it belongs to rather than
+// dangling at the end of the whole chain.
+function RowSegments({ segs, isDir, expanded, fileLine }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null }) {
   const pathSegs = segs.filter((s) => s.kind === 'path')
   const scopeSegs = segs.filter((s) => s.kind === 'scope')
-  const pieces: { icon: ReactNode; text: string; textClass: string }[] = []
+  const pieces: { icon: ReactNode; text: string; textClass: string; suffix?: ReactNode }[] = []
   if (pathSegs.length > 0) {
     const icon = isDir
       ? (expanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />)
       : <FileGlyph name={filenameOf(pathSegs[pathSegs.length - 1].label)} />
-    pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300' })
+    const suffix = fileLine != null && fileLine > 0
+      ? <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
+      : undefined
+    pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300', suffix })
   }
   for (const s of scopeSegs) {
     pieces.push({ icon: <ScopeGlyph scopeKind={s.scopeKind} />, text: s.label, textClass: 'italic text-gray-500 dark:text-gray-400' })
@@ -301,6 +320,7 @@ function RowSegments({ segs, isDir, expanded }: { segs: Seg[]; isDir: boolean; e
           {i > 0 ? <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span> : null}
           {p.icon}
           <span className={`font-mono text-xs truncate min-w-0 ${p.textClass}`}>{p.text}</span>
+          {p.suffix}
         </Fragment>
       ))}
     </span>
@@ -330,6 +350,11 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   const loc = caseLocation(c)
   const prefix = segs ? segText(segs) : ''
   const copyable = loc || (prefix ? `${prefix} › ${c.name}` : c.name)
+  // In path mode a hoisted row leads with the file, so the line rides on that
+  // file piece (commit_test.go:42) rather than dangling at the end. When there's
+  // no path piece (plain leaf under a file node, or a scope-only row) the line
+  // stays a trailing ":42" on the case's own row.
+  const hasPathSeg = !!segs?.some((s) => s.kind === 'path')
   const boxTone = c.status === 'failed'
     ? 'bg-red-50/40 dark:bg-red-900/10'
     : c.status === 'warning' ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''
@@ -340,11 +365,11 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
       : 'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/40 border-gray-200/60 dark:border-gray-700/60'
 
   return (
-    <div className={`group flex flex-col gap-1.5 py-1.5 pr-3 ${boxTone}`} style={{ paddingLeft: `${indent * 14 + 12}px` }}>
+    <div className={`group flex flex-col gap-1.5 py-1.5 pr-3 ${boxTone}`} style={{ paddingLeft: `${indent * INDENT_STEP + ICON_X}px` }}>
       <div className="flex items-center gap-1.5 min-w-0">
         {segs ? (
           <>
-            <RowSegments segs={segs} isDir={false} expanded={false} />
+            <RowSegments segs={segs} isDir={false} expanded={false} fileLine={showLocation ? undefined : c.line} />
             {/* The status glyph sits right before the leaf test name, after the
                 location chain. */}
             <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span>
@@ -356,9 +381,10 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
         </span>
         {showLocation && loc ? (
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate shrink-1">{loc}</span>
-        ) : c.line != null && c.line > 0 ? (
-          // Path mode already shows the file in the tree, so just the line — a dim
-          // ":42" — which is also the row's open-in-repo #L target.
+        ) : !hasPathSeg && c.line != null && c.line > 0 ? (
+          // No file piece on this row (plain leaf under a file node), so show the
+          // line here — a dim ":42", also the row's open-in-repo #L target. When a
+          // file piece IS present the line already rides on it (see hasPathSeg).
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
@@ -397,7 +423,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
       <button
         onClick={() => onToggle(node.key)}
         className="group flex w-full items-center gap-1.5 py-1 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
-        style={{ paddingLeft: `${depth * 14 + 8}px` }}
+        style={{ paddingLeft: `${depth * INDENT_STEP + NODE_PAD}px` }}
       >
         {/* One chevron, rotated 90° when expanded, so the twist animates. */}
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
