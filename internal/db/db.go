@@ -14,7 +14,7 @@ import (
 // connection pools over the same file: a single-connection writer (SQLite allows
 // only one writer at a time) and a multi-connection, query-only read pool. WAL
 // mode lets the read pool serve each reader a committed snapshot without blocking
-// — or being blocked by — the writer, so the daemon's read-heavy traffic
+// - or being blocked by - the writer, so the daemon's read-heavy traffic
 // (list/get/count from HTTP handlers, the liveness reconciler, the JSON status
 // poller, terminal-WS attach) no longer serialises behind every write.
 //
@@ -31,8 +31,8 @@ type Store struct {
 const maxReadConns = 4
 
 // pragmas builds the DSN suffix. The glebarez driver only applies SQLite pragmas
-// passed via the `_pragma=name(value)` form — the older `_journal_mode=…` /
-// `_foreign_keys=…` shorthands this DSN previously used were parsed but silently
+// passed via the `_pragma=name(value)` form - the older `_journal_mode=...` /
+// `_foreign_keys=...` shorthands this DSN previously used were parsed but silently
 // ignored, so the DB ran in rollback-journal mode (not WAL) with foreign keys
 // off. WAL is mandatory here: it's what lets the read pool run concurrently with
 // the writer at all.
@@ -66,8 +66,8 @@ func Open(projectRoot string) (*Store, error) {
 
 	// Writer: a single serialised connection. SQLite permits only one writer at a
 	// time, and the daemon shares one *Store across many concurrent goroutines. If
-	// the writer pool opened several connections, two of them racing to write — or
-	// a writer racing a WAL checkpoint — would block on the busy handler for the
+	// the writer pool opened several connections, two of them racing to write - or
+	// a writer racing a WAL checkpoint - would block on the busy handler for the
 	// full busy_timeout and then fail with "database is locked" (SQLITE_BUSY).
 	// Pinning the writer to one connection makes those writes queue cheaply in Go
 	// instead of contending for the file lock. Each write is sub-millisecond, so
@@ -94,7 +94,7 @@ func Open(projectRoot string) (*Store, error) {
 
 	// Readers: a small pool of query-only connections. In WAL mode each reader
 	// sees the last committed snapshot and runs concurrently with the writer (and
-	// with the other readers) without taking the write lock — so reads no longer
+	// with the other readers) without taking the write lock - so reads no longer
 	// serialise behind writes the way the old single shared connection forced.
 	readDB, err := gorm.Open(sqlite.Open(dbPath+pragmas(true)), gormCfg)
 	if err != nil {

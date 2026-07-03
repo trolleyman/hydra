@@ -37,7 +37,7 @@ type nsHost struct {
 
 // nsHostEntry is the registry slot for a head's supervisor. ready is closed once
 // host/err are populated, so concurrent callers for the same head wait for the
-// single in-flight launch instead of double-launching — and the global lock is
+// single in-flight launch instead of double-launching - and the global lock is
 // only ever held briefly (never across the launch + socket wait).
 type nsHostEntry struct {
 	ready chan struct{}
@@ -155,8 +155,8 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 }
 
 // watchNamespaceHost is the sole waiter on the supervisor process. It blocks until
-// the supervisor exits — whether on its own (crash) or because removeNamespaceHost
-// killed it — then evicts the registry slot, runs the spec cleanup, removes the
+// the supervisor exits - whether on its own (crash) or because removeNamespaceHost
+// killed it - then evicts the registry slot, runs the spec cleanup, removes the
 // socket dir, and signals done.
 func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
 	_ = h.proc.Wait()
@@ -194,8 +194,8 @@ func removeNamespaceHost(id string) {
 }
 
 // startAgentSession starts the agent as a child of the head's supervisor (the
-// "namespace host") so it shares one bwrap — and one writable copy-on-write
-// overlay — with the head's sandboxed bash terminals. sb carries the agent's
+// "namespace host") so it shares one bwrap - and one writable copy-on-write
+// overlay - with the head's sandboxed bash terminals. sb carries the agent's
 // argv, env and the pre-spawn script.
 func startAgentSession(reg *session.Registry, projectRoot, id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, sb sandbox.Options) (*session.Session, error) {
 	host, err := ensureNamespaceHost(projectRoot, id, sb)
@@ -204,7 +204,7 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	}
 	// Wrap the pre-spawn script around the agent's argv so it runs inside the
 	// supervisor's bwrap (the same one the agent and bash terminals share), exactly
-	// as withPreSpawn does for a standalone sandbox — its writes land in the shared
+	// as withPreSpawn does for a standalone sandbox - its writes land in the shared
 	// COW overlay and are visible to every sibling terminal.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sb.Argv)
 	sp, err := host.client.Spawn(nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols})
@@ -252,7 +252,7 @@ func runPreExitInNamespace(ctx context.Context, host *nsHost, worktree string, e
 }
 
 // capWriter is an io.Writer that retains only the last capWriterMax bytes written
-// to it — a tiny ring used to keep the supervisor's final stderr lines so a
+// to it - a tiny ring used to keep the supervisor's final stderr lines so a
 // launch failure can fold them into its error without buffering unbounded output.
 type capWriter struct {
 	mu  sync.Mutex

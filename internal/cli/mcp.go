@@ -19,8 +19,8 @@ func init() {
 }
 
 // mcpCmd is an internal command seeded into the agent's own MCP config as the
-// always-available "hydra" server. It exposes two tools — list_available_mcp_servers
-// and request_mcp_server — so the agent can discover host-configured MCP servers
+// always-available "hydra" server. It exposes two tools - list_available_mcp_servers
+// and request_mcp_server - so the agent can discover host-configured MCP servers
 // and request access to one at runtime, gated by the same approval round-trip the
 // security gate uses. It speaks MCP over stdio; stdout is the JSON-RPC channel, so
 // all diagnostics go to stderr.
@@ -63,7 +63,7 @@ func loadMCPCatalog() []mcpserver.Candidate {
 }
 
 // availableMCPServers is the catalog minus the servers already on the allow-list
-// (whole-server grants) — i.e. the servers the agent could still request.
+// (whole-server grants) - i.e. the servers the agent could still request.
 func availableMCPServers() []mcpserver.Candidate {
 	catalog := loadMCPCatalog()
 	allowed := map[string]bool{}
@@ -124,7 +124,7 @@ func requestMCPAccess(agentType, name string) (bool, string) {
 		writeApprovalStatus(agentType, summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision == gate.Allow {
-				return true, fmt.Sprintf("Access to MCP server %q was approved and added to your allow-list. MCP servers load at launch, so it becomes available after your session reloads — ask the user to resume/restart you to use it.", name)
+				return true, fmt.Sprintf("Access to MCP server %q was approved and added to your allow-list. MCP servers load at launch, so it becomes available after your session reloads - ask the user to resume/restart you to use it.", name)
 			}
 			return false, fmt.Sprintf("Access to MCP server %q was denied.", name)
 		}

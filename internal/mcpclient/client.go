@@ -6,7 +6,7 @@
 // falling back to a name heuristic only when a server doesn't declare one.
 //
 // It is deliberately small and defensive: an unresponsive or misbehaving server
-// yields an error (the caller falls back), never a hang — every read is bounded by
+// yields an error (the caller falls back), never a hang - every read is bounded by
 // the caller's context.
 package mcpclient
 

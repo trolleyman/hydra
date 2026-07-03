@@ -10,7 +10,7 @@ import { IconButton } from './IconButton'
 // Omitted → a neutral outlined button. `danger` (legacy) maps to 'danger'.
 // 'primary' is a filled accent button (the merge CTA); 'segment' members are
 // borderless inside a shared pill; 'danger' is the red-outlined destructive button;
-// 'muted' is a quiet, non-interactive solid-grey button (the in-flight "Merging…"
+// 'muted' is a quiet, non-interactive solid-grey button (the in-flight "Merging..."
 // state). Omitted → a neutral outlined button.
 export type AgentTopBarVariant = 'primary' | 'segment' | 'danger' | 'muted'
 
@@ -23,7 +23,7 @@ export interface AgentTopBarMenuItem {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
-  // A second, muted line under the label in the (rich) dropdown — what the option does.
+  // A second, muted line under the label in the (rich) dropdown - what the option does.
   description?: string
   // Colour of the option's icon tile in the rich dropdown. Defaults to red when
   // `danger`, else neutral.
@@ -38,15 +38,15 @@ export interface AgentTopBarAction {
   danger?: boolean
   disabled?: boolean
   // Lowlit keyboard-shortcut hint (e.g. "Ctrl+M"), shown right-aligned in the
-  // overflow menu and folded into a button's tooltip — only on devices with a
+  // overflow menu and folded into a button's tooltip - only on devices with a
   // physical keyboard (see useFinePointer).
   shortcut?: string
   // When set, the action renders as a split button: its main button plus a chevron
   // that opens this dropdown (e.g. the merge button's Force merge / Queue merge).
-  // `menuNote` is an optional banner above the items — a failing-tests warning.
+  // `menuNote` is an optional banner above the items - a failing-tests warning.
   menu?: AgentTopBarMenuItem[]
   menuNote?: ReactNode
-  // A fully custom node rendered in place of the standard button — for compound
+  // A fully custom node rendered in place of the standard button - for compound
   // controls that don't fit the button model (the armed "merges when tests pass"
   // pill, which carries its own Cancel button). `label` is still used as the key.
   render?: ReactNode
@@ -65,7 +65,7 @@ export interface AgentTopBarRename {
   onCancel: () => void
 }
 
-// gap between toolbar buttons / button groups, in px — used by the fit calc.
+// gap between toolbar buttons / button groups, in px - used by the fit calc.
 const GAP = 6
 // Extra width a segment pill adds over its bare members (container padding +
 // border). The off-screen measurer sizes members individually, so the budget
@@ -80,7 +80,7 @@ function actionVariant(a: AgentTopBarAction): AgentTopBarVariant | undefined {
 function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string {
   const v = actionVariant(a)
   const dis = 'disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
-  // Segment members are smaller (h-7) and borderless — the pill frames them.
+  // Segment members are smaller (h-7) and borderless - the pill frames them.
   if (v === 'segment') {
     const shape = mode === 'labels' ? 'gap-1.5 px-2.5' : 'w-7'
     return `shrink-0 h-7 inline-flex items-center justify-center rounded-md text-[12.5px] font-semibold transition-colors ${dis} ${shape} bg-transparent text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100`
@@ -90,7 +90,7 @@ function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string 
   if (v === 'primary') {
     return `${base} ${shape} bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-700/30 shadow-sm`
   }
-  // 'muted' is the in-flight "Merging…" state: a solid quiet grey, not dimmed (so it
+  // 'muted' is the in-flight "Merging..." state: a solid quiet grey, not dimmed (so it
   // reads as deliberately inert rather than a disabled CTA), and non-interactive.
   if (v === 'muted') {
     return `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-[13px] font-semibold ${shape} cursor-default bg-gray-100 dark:bg-[#1c2330] text-gray-400 dark:text-[#8b94a6] border border-gray-200 dark:border-[#2e3747]`
@@ -136,7 +136,7 @@ function chevBtnClass(v: AgentTopBarVariant | undefined): string {
   return `${base} bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`
 }
 
-// A rounded icon tile for a rich dropdown row — mirrors the dialog icon tiles, in
+// A rounded icon tile for a rich dropdown row - mirrors the dialog icon tiles, in
 // the same red / emerald / neutral tones.
 function MenuTile({ tone, children }: { tone: 'red' | 'emerald' | 'neutral'; children: ReactNode }) {
   const cls =
@@ -149,7 +149,7 @@ function MenuTile({ tone, children }: { tone: 'red' | 'emerald' | 'neutral'; chi
 }
 
 // A split action button: the main button (the action's onClick) butted against a
-// chevron that opens the action's `menu` dropdown — used for the merge button's
+// chevron that opens the action's `menu` dropdown - used for the merge button's
 // Force merge / Queue merge options, with an optional warning note on top.
 function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
   const [open, setOpen] = useState(false)
@@ -265,7 +265,7 @@ function actionTitle(a: AgentTopBarAction, showShortcut: boolean): string {
 // it doesn't, and once even the icons won't fit, fold the lowest-priority ones
 // (from the right) into an overflow "⋯" menu that sits after the buttons. The
 // title has priority over the buttons: we reserve its full (untruncated) width
-// first, so the buttons collapse into the menu before the title ever truncates —
+// first, so the buttons collapse into the menu before the title ever truncates -
 // only a title long enough to fill the bar (leaving just room for the "⋯" button)
 // starts to truncate. All widths are measured off-screen, so the fit is exact
 // rather than breakpoint-guessed and never leaves a half-clipped button.
@@ -310,11 +310,11 @@ function AdaptiveActions({
     const titleNatural = (titleMeasureRef.current?.offsetWidth ?? 0) + 1
     // Bail until the off-screen measurer has laid out (avoids a 0-width pass).
     if (labeled.length < n || labeled.some((w) => w === 0)) return
-    // Reserve the title's full width first — but never more than leaves room for
+    // Reserve the title's full width first - but never more than leaves room for
     // the "⋯" button, so a pathologically long title still yields the menu.
     const titleReserve = Math.min(titleNatural, Math.max(0, cont.clientWidth - more - GAP))
     // Reserve the pill chrome around each contiguous run of segment actions (count
-    // derived above) — the measurer sizes members bare, so this keeps a row honest.
+    // derived above) - the measurer sizes members bare, so this keeps a row honest.
     const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - segmentGroups * SEGMENT_CHROME)
     const span = (arr: number[], k: number) => arr.slice(0, k).reduce((a, b) => a + b, 0) + Math.max(0, k - 1) * GAP
     let next: { mode: 'labels' | 'icons'; count: number }
@@ -349,7 +349,7 @@ function AdaptiveActions({
     const ro = new ResizeObserver(() => recompute())
     ro.observe(cont)
     // Also refit when the title's measured width changes (a new title, or a font
-    // load) — that doesn't resize the container, so the container observer alone
+    // load) - that doesn't resize the container, so the container observer alone
     // would miss it; this replaces carrying `title` as a recompute dependency.
     if (titleMeasureRef.current) ro.observe(titleMeasureRef.current)
     return () => ro.disconnect()
@@ -479,7 +479,7 @@ function AdaptiveActions({
         <button ref={moreRef} className={moreBtnClass} tabIndex={-1}>
           <MoreHorizontal className="w-4 h-4" />
         </button>
-        {/* Natural (untruncated) title width — mirrors the real title button's font
+        {/* Natural (untruncated) title width - mirrors the real title button's font
             + padding but sizes to content, so recompute() can reserve its space. */}
         <button ref={titleMeasureRef} className="text-sm font-semibold px-1 py-1 whitespace-nowrap" tabIndex={-1}>
           {title}

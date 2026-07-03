@@ -20,7 +20,7 @@ let nextWorker = 0
 let nextId = 1
 const pending = new Map<number, Pending>()
 
-// syncFallback resolves a request on the main thread — used when no worker pool
+// syncFallback resolves a request on the main thread - used when no worker pool
 // exists and to drain in-flight requests if a worker errors out.
 function syncFallback(req: { lang: string; old: string | null; new: string | null }): HighlightSides {
   return {

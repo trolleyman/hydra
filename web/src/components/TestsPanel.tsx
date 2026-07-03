@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
-import { useNavigate } from '@tanstack/react-router'
+import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
@@ -51,7 +51,7 @@ function testsWsUrl(projectId: string, agentId: string, headRef?: string, includ
 
 // TestsPanel renders the head's test-runner verdicts (PLAN #68), styled to match
 // the artifacts panel: a "Tests (i)" header over one collapsible card per
-// [[tests]] runner. Single-sided — there is no before/after comparison; it reports
+// [[tests]] runner. Single-sided - there is no before/after comparison; it reports
 // the verdict for whatever the diff viewer has selected as the "after" side (a
 // commit, or the uncommitted working tree), defaulting to the branch tip. Streams
 // updates over a WebSocket so progress / the live log / the settled verdict land
@@ -102,7 +102,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, progress: msg.progress } : r)) ?? prev)
     } else if (msg.type === 'counts') {
       // A streamed (type=stdout) run ticking: totals are authoritative, cases
-      // are the newly-appended increment (coalesced server-side) — the tree
+      // are the newly-appended increment (coalesced server-side) - the tree
       // grows in place as they land.
       setRunners((prev) => prev?.map((r) => (r.name === msg.name
         ? {
@@ -132,7 +132,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
     try {
       ws = new WebSocket(testsWsUrl(projectId, agentId, headRef, includeUncommitted))
     } catch {
-      // The WebSocket constructor threw synchronously (e.g. a malformed URL) —
+      // The WebSocket constructor threw synchronously (e.g. a malformed URL) -
       // fall back to polling. This error-path setState can't be hoisted out.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode('poll')
@@ -202,14 +202,14 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   }, [mode])
 
   // Sticky "Tests" header height, published as the shared --sticky-section-h so the
-  // runner card headers dock flush beneath it — the same mechanism the artifacts
+  // runner card headers dock flush beneath it - the same mechanism the artifacts
   // panel uses (see useMeasuredHeight + CollapsibleCard's sticky option).
   const [testsHeaderRef, testsHeaderH] = useMeasuredHeight(41)
 
   // The status filter (the tests analog of the artifacts tag filter) and the
   // ephemeral search box. Only an explicit customization is held/persisted;
   // otherwise the mode-dependent default applies (unified tree: passed +
-  // skipped hidden; group-by-result: nothing hidden — its sections fold the
+  // skipped hidden; group-by-result: nothing hidden - its sections fold the
   // boring statuses away instead), and follows the cog as the mode changes.
   const [customFilter, setCustomFilter] = useState<TestFilter | null>(() => loadTestFilter(projectId, agentId))
   const [search, setSearch] = useState('')
@@ -239,18 +239,17 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   // Deep-link a case/file/dir row to the repository browser at the agent's
   // branch. Omitted when there's no ref to browse, which hides the affordance. A
   // case's line is carried as an #L<n> hash, which the repo view scrolls to and
-  // highlights (see RepositoryView's selRange).
-  const navigate = useNavigate()
+  // highlights (see RepositoryView's selRange). Returns <Link> props (not a
+  // navigate call) so the row renders a real anchor - that's what makes
+  // middle-click / Ctrl-click open the target in a new tab.
   const onOpenInRepo = useMemo<OpenInRepo | undefined>(() => {
     if (!repoRef) return undefined
-    return (path: string, line?: number | null) => {
-      void navigate({
-        to: '/project/$projectId/repository/$',
-        params: { projectId, _splat: `${repoRef}/${path}` },
-        hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
-      })
-    }
-  }, [navigate, projectId, repoRef])
+    return (path: string, line?: number | null) => linkOptions({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: `${repoRef}/${path}` },
+      hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
+    })
+  }, [projectId, repoRef])
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
   useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
 
@@ -264,7 +263,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   return (
     <div className="mb-4" style={{ '--sticky-section-h': `${testsHeaderH}px` } as CSSProperties}>
       {/* The "Tests" header docks flush below the Changes bar (sticky) while the
-          runner cards scroll under it — mirroring the artifacts filter bar. The `top`
+          runner cards scroll under it - mirroring the artifacts filter bar. The `top`
           is the measured Changes-bar height minus the scroll container's pt-4. z-20
           sits below the Changes bar but above the cards (whose headers stick at z-10);
           an opaque bg lets cards scroll cleanly underneath, and -mx-1/px-1 bleeds it
@@ -284,11 +283,11 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
           </span>
         )}
         <InfoTooltip title="Tests" width={520}>
-          <p>Per-runner pass/fail verdicts for the selected commit — the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
-          <p>Each runner is a project-defined <code className="text-blue-300">[[tests]]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> — a failing run needs a force-merge.</p>
-          <p>Expand a card for its cases as a location tree — <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
+          <p>Per-runner pass/fail verdicts for the selected commit - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
+          <p>Each runner is a project-defined <code className="text-blue-300">[[tests]]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
+          <p>Expand a card for its cases as a location tree - <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
         </InfoTooltip>
-        {/* Filter cluster, right-floated — the tests analog of ArtifactFilterBar:
+        {/* Filter cluster, right-floated - the tests analog of ArtifactFilterBar:
             search + reset + the status scope dropdown (passing hidden by default). */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <div className="relative">
@@ -393,7 +392,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
   const tone = verdictTone(runner.status)
 
   // Card + tree expansion persist per agent (keyed by runner name) so a card the
-  // user opened — and the tree nodes they collapsed inside it — restore on
+  // user opened - and the tree nodes they collapsed inside it - restore on
   // return to the agent page. Seeded once on mount; the card is remounted on
   // agent switch (via its key) so the seed re-reads the new agent's prefs.
   // Default collapsed (per design choice): every card opens via its chevron.
@@ -428,13 +427,13 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
   // runner (its "cases" are a synthetic exit-code line whose message is just the log
   // tail), a runner that errored before producing a report, or a non-zero exit with an
   // empty report. There the log is the only surface, so we open it by default. A
-  // "normal" test failure — one with actual failing cases — does NOT auto-open the log:
+  // "normal" test failure - one with actual failing cases - does NOT auto-open the log:
   // the failing-case rows explain it and the log stays tucked behind the toggle. This
   // is deliberately unlike artifact cards, which always force their log open on error;
   // here the toggle can always hide it (see the always-present button below).
   const buildFailure = failed && (runner.format === 'exit' || !cases.some((c) => c.status === 'failed'))
   // Seed the log open if the card mounts already in a build failure, and re-open it
-  // whenever a runner *settles into* one — a false→true transition adjusted during
+  // whenever a runner *settles into* one - a false→true transition adjusted during
   // render (React's sanctioned pattern, same as the connKey reset above) rather than
   // in an effect. Firing only on the edge lets the user hide the log again afterward
   // without it springing back open; a re-run (false→true again) re-arms it.
@@ -445,13 +444,13 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
     if (buildFailure) setBuildLogOpen(true)
   }
   // Show the log live while running (the tail is the surface), otherwise whenever the
-  // toggle — or the build-failure auto-open above — has opened it.
+  // toggle - or the build-failure auto-open above - has opened it.
   const logVisible = hasLog && (buildLogOpen || running)
   // An `exit`-format runner has no structured test report: its "cases" are a
   // single synthetic "(command exited 0/non-zero)" derived from the exit code,
   // whose message is just the tail of the build log. When that log is on screen
   // the case box is a pure duplicate of it, so suppress the case list and let the
-  // xterm log be the only surface — the header verdict already carries the
+  // xterm log be the only surface - the header verdict already carries the
   // pass/fail count. Keep the cases as a fallback only when there's no log to show.
   const syntheticOnly = runner.format === 'exit' && logVisible
   // The one place the status filter + search narrow this card's cases; the
@@ -480,7 +479,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 
   const actions = (
     <>
-      {/* Show/hide the build log. Available whenever there's a log to show — even
+      {/* Show/hide the build log. Available whenever there's a log to show - even
           on failure, so an auto-opened build-failure log can be hidden again. Only
           suppressed while running, where it streams live and there's nothing to
           toggle. Tinted blue while open. */}
@@ -497,7 +496,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         </button>
       )}
       {/* Re-run this runner: busts the cached verdict and runs it again. Styled
-          like the artifact regenerate button (single — tests are single-sided, so
+          like the artifact regenerate button (single - tests are single-sided, so
           there's no before/after side to re-run separately). */}
       <button
         onClick={onRefresh}
@@ -523,7 +522,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
     >
-      {/* Running: a thin progress bar above the live log tail — determinate
+      {/* Running: a thin progress bar above the live log tail - determinate
           (completed cases over the declared total) when the run streams a
           denominator, an indeterminate sliding barber pole otherwise. */}
       {running && (
@@ -539,7 +538,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         </div>
       )}
 
-      {/* Build log (xterm) — live `log` while running, the persisted `log_url`
+      {/* Build log (xterm) - live `log` while running, the persisted `log_url`
           once settled (red border on failure, green on a clean finish). */}
       {logVisible && <TestLog runner={runner} failed={failed} />}
 
@@ -550,7 +549,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         </div>
       ) : null}
 
-      {/* The filtered case tree — or its per-status sections when "Group by
+      {/* The filtered case tree - or its per-status sections when "Group by
           result" is on. Both take every case (badges tally everything) plus
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
@@ -563,7 +562,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       )}
 
       {/* What the status filter / search hid, so a quiet card never reads as
-          "no tests" — the counts remain in the header regardless. */}
+          "no tests" - the counts remain in the header regardless. */}
       {hiddenCount > 0 && (
         <div className="-mx-3 px-4 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800">
           {hiddenCount} case{hiddenCount === 1 ? '' : 's'} hidden by filters
@@ -574,9 +573,9 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 }
 
 // ResultSections renders the "Group by result" view: one section per status
-// (worst first), styled as a ROOT TREE NODE — chevron + status icon + label
+// (worst first), styled as a ROOT TREE NODE - chevron + status icon + label
 // with the everything-counted badge on the right, its CaseTree indented one
-// level beneath it under a guide line — so the view reads as one tree whose
+// level beneath it under a guide line - so the view reads as one tree whose
 // first level is the result. Failing/warning sections open by default;
 // skipped/passing start collapsed (folded away rather than filtered out).
 const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
@@ -632,7 +631,7 @@ function completedCases(runner: TestRunResult): number {
 }
 
 // liveDenominator is an in-flight runner's declared ::hydra:test:total::
-// denominator. The backend reports 0 (on every path — stream and poll) when no
+// denominator. The backend reports 0 (on every path - stream and poll) when no
 // total was declared, so a positive total is always a real, meaningful
 // denominator: we keep it even once the completed cases catch up to it, so the
 // determinate bar holds at 100% instead of snapping back to the indeterminate
@@ -688,8 +687,8 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const url = runner.log_url
   const [fetched, setFetched] = useState<ArtifactLogLine[] | null>(null)
 
-  // Drop the fetched log while the runner is running (or has no persisted url) —
-  // during render, so the next settle shows "Loading…" not the previous output.
+  // Drop the fetched log while the runner is running (or has no persisted url) -
+  // during render, so the next settle shows "Loading..." not the previous output.
   if ((running || !url) && fetched !== null) setFetched(null)
 
   useEffect(() => {
@@ -709,7 +708,7 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   }, [running, url])
 
   const log = running ? runner.log ?? [] : fetched ?? []
-  const emptyText = running ? 'starting…' : url ? 'Loading…' : 'No output'
+  const emptyText = running ? 'starting...' : url ? 'Loading...' : 'No output'
   return (
     <div className="pt-1.5 pb-1">
       <LogView log={log} emptyText={emptyText} failed={failed} succeeded={!running && !failed} />

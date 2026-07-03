@@ -47,7 +47,7 @@ func readGoModule(path string) string {
 
 // location is a classified case location: the filesystem axis (Path) and/or
 // the logical axis (Scope). goPkg marks a Path that came from a Go package
-// import path (matched against go.mod) — the one situation where the case
+// import path (matched against go.mod) - the one situation where the case
 // name is a Go test identifier whose "/" separators are subtests.
 type location struct {
 	Path  string
@@ -134,8 +134,8 @@ type goFuncPos struct {
 
 // goTestFuncs indexes the test-function declarations of a repo-relative Go
 // package dir, scanning its *_test.go files once (cached per dir). A missing
-// or unreadable dir — or one with no test files, i.e. not actually a Go
-// package — just yields an empty index.
+// or unreadable dir - or one with no test files, i.e. not actually a Go
+// package - just yields an empty index.
 func (lc *locContext) goTestFuncs(pkgDir string) map[string]goFuncPos {
 	if idx, ok := lc.goFuncs[pkgDir]; ok {
 		return idx
@@ -171,7 +171,7 @@ func (lc *locContext) goTestFuncs(pkgDir string) map[string]goFuncPos {
 }
 
 // resolveGoTestFile upgrades a case whose Path is a Go *package dir* (go test
-// reports only the import path — a package spans files) to the *_test.go file
+// reports only the import path - a package spans files) to the *_test.go file
 // and line declaring its root test function, so Go cases tree by file like
 // every other runner's. goPkg says the path definitely came from a Go package
 // import path (JUnit classname matched go.mod); otherwise the path must at

@@ -49,7 +49,7 @@ var promptResponses = []string{
 // HostEnv returns the daemon's environment with CLAUDE_CODE_OAUTH_TOKEN removed
 // and a sane TERM, so `claude /usage` falls back to the full-scope `claude
 // login` credentials (setup-tokens only carry user:inference scope and can't
-// read quota — see ClaudeBar's note).
+// read quota - see ClaudeBar's note).
 func HostEnv() []string {
 	out := make([]string, 0, len(os.Environ())+2)
 	var hasTerm bool
@@ -98,7 +98,7 @@ func Probe(ctx context.Context, bin, workDir string, env []string) (Snapshot, er
 		if cmd.Process != nil {
 			// Kill the whole process group, not just the direct child: `claude` is
 			// a Node app that spawns helper processes, and SIGKILL to only the
-			// leader would orphan them — repeated probes would then accumulate
+			// leader would orphan them - repeated probes would then accumulate
 			// stray `claude`/node processes. pty.Start puts the child in its own
 			// session (pgid == pid), so a negative-pid signal hits the group.
 			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
@@ -218,7 +218,7 @@ loop:
 	log.Printf("usage: probe done: reason=%s dur=%s bytes=%d renders=%d available=%t error=%q",
 		reason, time.Since(start).Round(time.Millisecond), totalBytes, renders, snap.Available, snap.Error)
 	if !snap.Available {
-		// The screen didn't parse into usable quota — log a compact preview so a
+		// The screen didn't parse into usable quota - log a compact preview so a
 		// future TUI restyle (or an auth/onboarding wall) is diagnosable from logs.
 		log.Printf("usage: probe screen preview (unparsed):\n%s", screenPreview(renderPlain(em)))
 	}
@@ -236,7 +236,7 @@ func screenPreview(screen string) string {
 		}
 		out = append(out, line)
 		if len(out) >= 20 {
-			out = append(out, "… (truncated)")
+			out = append(out, "... (truncated)")
 			break
 		}
 	}

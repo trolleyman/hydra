@@ -2,7 +2,7 @@
 //
 // The daemon runs on the same machine as the browser (localhost-only UI), so it
 // can pop a real OS folder dialog on the user's screen and return the chosen
-// absolute path — which the generated JSON client can't model (the POST blocks
+// absolute path - which the generated JSON client can't model (the POST blocks
 // for as long as the dialog is open). These hit the raw /folder-picker routes
 // directly, same as uploads. Both are localhost-gated server-side; availability
 // is false for remote clients or systems with no dialog tool.
@@ -14,7 +14,7 @@ export interface FolderPickResult {
   cancelled?: boolean
 }
 
-/** Whether the UI should show a native "Browse…" button. */
+/** Whether the UI should show a native "Browse..." button. */
 export async function folderPickerAvailable(): Promise<boolean> {
   try {
     const res = await fetch('/folder-picker/available')

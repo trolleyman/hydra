@@ -15,7 +15,7 @@ import (
 )
 
 // TestRunPreExitInNamespace proves a pre_exit_script runs as a child of the head's
-// supervisor — sharing its filesystem view — and that its output is captured.
+// supervisor - sharing its filesystem view - and that its output is captured.
 // Bwrap-free: the supervisor's children share the test process's filesystem, which
 // stands in for the shared bwrap overlay on a real host.
 func TestRunPreExitInNamespace(t *testing.T) {
@@ -88,7 +88,7 @@ func registerStubHost(t *testing.T, id string, proc *exec.Cmd) chan struct{} {
 }
 
 // TestRemoveNamespaceHostSynchronous verifies removeNamespaceHost kills the
-// supervisor, waits for the watcher to reclaim resources, and evicts the slot —
+// supervisor, waits for the watcher to reclaim resources, and evicts the slot -
 // all before it returns.
 func TestRemoveNamespaceHostSynchronous(t *testing.T) {
 	const id = "ns-remove-test"

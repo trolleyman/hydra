@@ -92,7 +92,7 @@ function AgentPage() {
   }, [archivedFetch, projectId, agentId, upsertArchived])
 
   // Once a live + archived + one-shot getAgent lookup have all settled and the
-  // agent is genuinely gone (hard-deleted / aborted spawn / pruned — a
+  // agent is genuinely gone (hard-deleted / aborted spawn / pruned - a
   // killed/merged head would resolve as archived), redirect off the dead URL and
   // reset the project's remembered view so a reload / project-switch doesn't land
   // back on it. This is the sole owner of dead-agent correction (see __root).
@@ -133,7 +133,7 @@ function AgentPage() {
     // starts empty, and on a project switch it briefly still holds the previous
     // project's agents until the poll re-fetches this one. Keep showing the
     // spinner until THIS project's agents have loaded and the archived fallback
-    // fetch has settled — otherwise we'd flash a redirect on every refresh/switch
+    // fetch has settled - otherwise we'd flash a redirect on every refresh/switch
     // while the fetch is in flight. Once it settles as 'missing' the redirect
     // effect above fires; we keep the spinner up for the brief moment until it
     // takes effect rather than flashing an "Agent Not Found" page.
@@ -148,7 +148,7 @@ function AgentPage() {
     // Key by project+agent so switching agents remounts the whole detail subtree
     // (AgentDetail, its terminal, diff viewer) with fresh state, rather than
     // reusing one instance and hand-resetting the bits that would otherwise bleed
-    // across agents (rename draft, terminal height/tabs, collapsed diff files, …).
+    // across agents (rename draft, terminal height/tabs, collapsed diff files, ...).
     // Agent IDs are globally unique so the key is collision-safe; the
     // `${projectId}-${agentId}` shape matches the storage.ts key builders.
     <AgentDetail

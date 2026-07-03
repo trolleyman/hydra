@@ -474,13 +474,13 @@ func parseDiff(rawDiff string) ([]DiffFile, error) {
 	return coalesceTypeChanges(files), nil
 }
 
-// coalesceTypeChanges merges the split entries git emits for a "type change" —
+// coalesceTypeChanges merges the split entries git emits for a "type change" -
 // when a path flips between a symlink and a regular file (e.g. CLAUDE.md being
 // converted from a `CLAUDE.md -> GEMINI.md` symlink into a real file). git can't
 // represent that as a single hunk, so it emits a deletion of the old object
 // followed by an addition of the new one: two `diff --git a/PATH b/PATH` stanzas
 // for the SAME path. Left as-is these parse into two DiffFiles sharing a path,
-// which surface as duplicate rows — and duplicate React keys — in the file tree.
+// which surface as duplicate rows - and duplicate React keys - in the file tree.
 // Collapse each run of consecutive same-path entries into a single "modified"
 // entry whose additions/deletions/hunks are the union of the parts.
 func coalesceTypeChanges(files []DiffFile) []DiffFile {

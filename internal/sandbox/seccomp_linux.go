@@ -30,7 +30,7 @@ func seccompBlob() []byte {
 
 // seccompFile materializes the architecture's seccomp blob onto a still-linked,
 // read-only file, returning the open fd (for direct inheritance via bwrap
-// --seccomp <fd>) and its path (so a wrapper shell can reopen it — see the
+// --seccomp <fd>) and its path (so a wrapper shell can reopen it - see the
 // EgressWrap preExec contract). It returns (nil, "", nil) when no blob is
 // available for this architecture. The caller owns cleanup: close the fd and, if
 // it does not otherwise unlink, os.Remove the path.

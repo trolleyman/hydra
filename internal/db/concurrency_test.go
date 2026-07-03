@@ -73,7 +73,7 @@ func TestConcurrentReadersWithWriter(t *testing.T) {
 		}
 	}()
 
-	// Many concurrent readers — more than maxReadConns so the pool is saturated.
+	// Many concurrent readers - more than maxReadConns so the pool is saturated.
 	for r := 0; r < 16; r++ {
 		wg.Add(1)
 		go func() {

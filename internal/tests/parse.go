@@ -81,7 +81,7 @@ func ParseDir(outputDir, checkoutDir string) (cases []TestCase, format string, f
 	return cases, format, found, nil
 }
 
-// Summarize counts cases by outcome. Warnings are their own bucket — a warning
+// Summarize counts cases by outcome. Warnings are their own bucket - a warning
 // case is NOT counted as passed.
 func Summarize(cases []TestCase) (passed, failed, skipped, warnings int) {
 	for _, c := range cases {
@@ -214,7 +214,7 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 		loc.Path, _ = lc.normalizePath(ctx.file)
 	}
 	// With both a real file and a dotted classname (pytest), the classname's
-	// leading segments usually just re-encode the file path — drop them.
+	// leading segments usually just re-encode the file path - drop them.
 	loc.Scope = dedupeScope(loc.Path, loc.Scope)
 
 	tc := TestCase{Name: name, Status: CasePassed, Path: loc.Path, Scope: loc.Scope, DurationMs: int64(c.Time * 1000)}
@@ -233,7 +233,7 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 	switch {
 	case loc.goPkg:
 		// gotestsum: the classname was a Go package import path, so the name is
-		// a Go test identifier — "TestFoo/sub/case" nests subtests as scope.
+		// a Go test identifier - "TestFoo/sub/case" nests subtests as scope.
 		if segs := strings.Split(name, "/"); len(segs) > 1 {
 			tc.Scope = append(tc.Scope, segs[:len(segs)-1]...)
 			tc.Name = segs[len(segs)-1]
@@ -242,7 +242,7 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 		// (+ line) in the checkout so Go cases tree by file too.
 		lc.resolveGoTestFile(&tc, true)
 	case loc.Path != "":
-		// vitest/jest join the describe chain into the name with " > " — split
+		// vitest/jest join the describe chain into the name with " > " - split
 		// it back into scope levels. Only applied under a real file path, so
 		// e.g. a bare Go subtest name is never mangled.
 		if segs := strings.Split(name, " > "); len(segs) > 1 {
@@ -252,7 +252,7 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 	}
 	// Tag each scope level's kind. A Go package classname (goPkg) means every
 	// scope level is a test *function* (the split "TestFoo/sub" parents); every
-	// other shape — a describe chain, a class chain — is a *module*. The two
+	// other shape - a describe chain, a class chain - is a *module*. The two
 	// origins never mix within one case, so the whole chain shares one kind.
 	tc.ScopeKinds = scopeKindsFor(tc.Scope, loc.goPkg)
 
@@ -317,7 +317,7 @@ func mapTrimSpace(in []string) []string {
 // scopeKindsFor builds the ScopeKinds slice parallel to `scope`. A Go package
 // classname (goPkg) means every level is a test *function* parent
 // (`TestFoo/sub`). Otherwise each level is classified on its own: a
-// class-shaped segment (PascalCase, no spaces — a JUnit/Java class, a pytest
+// class-shaped segment (PascalCase, no spaces - a JUnit/Java class, a pytest
 // TestClass) is a ScopeClass, and everything else (a lowercase package segment,
 // a describe block phrased as a sentence) stays a ScopeModule. Returns nil for
 // an empty scope so the field stays omitted.
@@ -355,5 +355,5 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return s[:n] + "..."
 }

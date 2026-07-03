@@ -7,7 +7,7 @@ import { ZoomPan } from './ZoomPan'
 // minimap scales down on small (phone-sized) frames instead of crowding the image.
 //
 // jsdom computes no layout, so the frame size ZoomPan measures (clientWidth/Height)
-// is mocked per render; ResizeObserver (absent in jsdom) is stubbed — ZoomPan also
+// is mocked per render; ResizeObserver (absent in jsdom) is stubbed - ZoomPan also
 // measures directly in its mount effect, so a no-op observer is enough.
 
 class ResizeObserverStub {

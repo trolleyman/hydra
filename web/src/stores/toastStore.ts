@@ -23,16 +23,16 @@ export interface ApprovalToastData {
   url?: string | null
   // mcp_tool: a compact one-line preview of the call's arguments.
   argsPreview?: string | null
-  // When the requesting agent runs in a DIFFERENT project, its project name — the
+  // When the requesting agent runs in a DIFFERENT project, its project name - the
   // card shows an amber "running in another project" banner and hides "always allow".
   crossProject?: string | null
 }
 
 // Structured payload for an agent status-transition toast (an agent crossing
-// into needs_input / finished) — also reused by the merge-lifecycle toasts
+// into needs_input / finished) - also reused by the merge-lifecycle toasts
 // (queued / merging / merged), which want the same visual identity. The renderer
 // draws a "<bot> <agent> <before> <status pill> <after>" row whose agent label
-// links through to the agent — so there's no separate "View" button.
+// links through to the agent - so there's no separate "View" button.
 export interface AgentTransitionToastData {
   // The agent's title (the clickable label) + where it lives (for the link).
   agentName: string
@@ -45,12 +45,12 @@ export interface AgentTransitionToastData {
   // armed merge pill / queue-merge button use. Defaults to the bot.
   icon?: 'merge-queued'
   // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
-  // the pill ("[merging] into `main`…"). Like `message`, `backtick` spans render
+  // the pill ("[merging] into `main`..."). Like `message`, `backtick` spans render
   // as inline mono branch pills.
   before?: string
   // Copy after the pill, e.g. the merge target ("into `main`").
   after?: string
-  // Set when the agent runs in a DIFFERENT project than the one in view — shown
+  // Set when the agent runs in a DIFFERENT project than the one in view - shown
   // as the neutral (gray) folder-icon project banner across the card's top,
   // the calm sibling of the approval card's amber one.
   projectName?: string | null
@@ -89,7 +89,7 @@ export interface Toast {
   // Optional action buttons rendered alongside the dismiss (X).
   actions?: ToastAction[]
   // Called when the toast is dismissed by the user (the X, or any non-silent
-  // dismiss) — but NOT on a silent dismiss. Security-gate toasts use this so
+  // dismiss) - but NOT on a silent dismiss. Security-gate toasts use this so
   // that dismissing the toast denies the parked tool call.
   onDismiss?: () => void
   // Optional dedup key. show() replaces the live toast carrying the same key
@@ -111,7 +111,7 @@ const EXIT_ANIMATION_MS = 220
 interface ToastState {
   toasts: Toast[]
   // Returns the new (or replaced) toast's id, so callers showing a persistent
-  // toast (duration: 0) can later dismiss() it — e.g. a "Merging…" indicator.
+  // toast (duration: 0) can later dismiss() it - e.g. a "Merging..." indicator.
   show: (options: {
     message: string
     type?: ToastType
@@ -124,7 +124,7 @@ interface ToastState {
   }) => number
   // silent: skip the toast's onDismiss callback. Used when the toast is being
   // torn down because its action already resolved the underlying request (e.g.
-  // "Allow" was clicked, or the gate cleared server-side) — so a deny-on-dismiss
+  // "Allow" was clicked, or the gate cleared server-side) - so a deny-on-dismiss
   // toast isn't also denied.
   dismiss: (id: number, opts?: { silent?: boolean }) => void
   // Suspend a toast's auto-dismiss timer (on pointer enter). Captures how much

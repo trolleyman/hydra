@@ -86,7 +86,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // True between receiving the backend's "size" event (the PTY's current width)
   // and writing the scrollback replay that follows it. The replay's cursor moves
   // and wrapping were computed for that width, so we size the xterm to it and
-  // suppress any fit/resize that would change the width mid-replay — which would
+  // suppress any fit/resize that would change the width mid-replay - which would
   // land the replayed bytes in the wrong cells and corrupt the history. Once the
   // replay is in we clear this and refit to our own layout (a clean reflow).
   const replaySizingRef = useRef(false)
@@ -99,7 +99,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // Latest status/diff handlers, read from the socket + data callbacks below. The
   // connection effect must NOT list them as deps (a fresh callback identity from the
   // parent each render would tear the terminal down and reconnect it), so mirror
-  // them here and keep the mirror current after commit — the callbacks fire later.
+  // them here and keep the mirror current after commit - the callbacks fire later.
   const onStatusUpdateRef = useRef(onStatusUpdate)
   const onDiffRefreshRef = useRef(onDiffRefresh)
   useEffect(() => {
@@ -109,7 +109,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
   // Latest context for the terminal's OSC 8 link handler. The handler is wired
   // once when the xterm instance is created (that effect must not depend on
-  // these — a changed branch/worktree shouldn't tear down and reconnect the
+  // these - a changed branch/worktree shouldn't tear down and reconnect the
   // socket), so it reads them through this ref, kept current after each commit.
   const linkCtxRef = useRef({ branchName, worktreePath, projectId, navigate })
   useEffect(() => {
@@ -161,7 +161,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // Only the visible pane drives the shared PTY size. A hidden pane's
     // ResizeObserver still fires (e.g. switching tabs flips it to display:none,
     // and the panel-resize drag re-lays-out every pane), and during the layout
-    // transition it can briefly measure a too-narrow width — sending that would
+    // transition it can briefly measure a too-narrow width - sending that would
     // reflow the agent narrow and bake the wrap into the scrollback, exactly the
     // corruption seen when re-showing a pane after closing a sibling tab.
     if (!active) return
@@ -213,7 +213,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     if (!active) return
     // The pane just went display:none -> display:flex. The container only has
     // its real size once displayed and the flex layout has settled, so stabilize
-    // on the width before sending — a bare fit here can read a half-laid-out
+    // on the width before sending - a bare fit here can read a half-laid-out
     // (too-narrow) size and reflow the agent narrow, which then sticks in the
     // scrollback. This is the close-a-sibling-tab / switch-back-to-agent case.
     const raf = requestAnimationFrame(() => {
@@ -225,7 +225,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   useEffect(() => {
     // Tracks whether this effect run is still current. Set in cleanup so async
     // work started here (e.g. a file upload below) doesn't paint a toast on a
-    // different agent after the user has switched — this pane is reused across
+    // different agent after the user has switched - this pane is reused across
     // agents, so a late resolve would land on the wrong terminal.
     let cancelled = false
 
@@ -237,7 +237,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     isRefreshing.current = false
     lastSentSize.current = { cols: 0, rows: 0 }
-    // Start each connection with a clean sizing state — these refs persist across
+    // Start each connection with a clean sizing state - these refs persist across
     // effect runs (agent switches / reconnects) and a stale value would suppress
     // the new connection's resize.
     settlingRef.current = false
@@ -274,7 +274,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       allowProposedApi: true,
       // Handle the OSC 8 hyperlinks agents print (Claude Code underlines the
       // files it touches, and prints https:// links for e.g. OAuth). Without a
-      // handler xterm pops a `confirm()` for every link — and drops file:// ones
+      // handler xterm pops a `confirm()` for every link - and drops file:// ones
       // entirely unless allowNonHttpProtocols is set. We take over both:
       //   • a file:// link inside this agent's worktree opens in the in-app
       //     repository view on the agent's branch (no prompt);
@@ -327,7 +327,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       // backend PTY our geometry. On a fresh mount (e.g. navigating back to an
       // agent) the flex layout can still be settling when the socket opens;
       // measuring then yields too few columns, and sending that reflows the
-      // agent's output narrow — which sticks in the scrollback and stays narrow
+      // agent's output narrow - which sticks in the scrollback and stays narrow
       // while detached. The backend replays the session's scrollback on attach,
       // so content renders without any buffer wiggling.
       stabilizeThenSend.current()
@@ -335,7 +335,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     // Clear the replay-sizing window and refit to our own layout. Called once the
     // replayed scrollback has been written (or, via the fallback timer, when no
-    // replay arrives at all — e.g. a fresh session with empty scrollback).
+    // replay arrives at all - e.g. a fresh session with empty scrollback).
     const finishReplaySizing = () => {
       if (replayFallbackRef.current) {
         clearTimeout(replayFallbackRef.current)
@@ -385,7 +385,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
                 replaySizingRef.current = true
                 term.resize(sizeEvent.cols, sizeEvent.rows)
                 // Fallback: if no replay chunk follows (empty scrollback), don't
-                // stay pinned to the PTY size — refit to our layout shortly.
+                // stay pinned to the PTY size - refit to our layout shortly.
                 if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)
                 replayFallbackRef.current = setTimeout(finishReplaySizing, 200)
               }
@@ -414,11 +414,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (e.type !== 'keydown') return true
 
       // While a modal dialog (or the shortcuts overlay) is open, Enter/Escape
-      // belong to it — Enter confirms the primary action, Escape cancels (see
+      // belong to it - Enter confirms the primary action, Escape cancels (see
       // the window listener in Dialog.tsx). Swallow them here so xterm never
       // also sends a stray CR/ESC to the PTY (which would submit the agent's
       // prompt behind the dialog). Returning false stops xterm from forwarding
-      // the byte while the keydown still bubbles to that window listener — the
+      // the byte while the keydown still bubbles to that window listener - the
       // same trick the Ctrl+M / Ctrl+U agent shortcuts rely on below.
       if (e.key === 'Enter' || e.key === 'Escape') {
         if (useDialogStore.getState().isOpen || useShortcutsStore.getState().open) {
@@ -435,7 +435,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       // tell Shift+Enter apart from Enter on its own (both yield a bare CR), so
       // the agent submits. Send a bare line feed (\n, 0x0a): agent prompts
       // (Claude Code, Gemini) treat LF as a literal newline while CR submits.
-      // The older ESC+CR (\x1b\r) sequence is unreliable on current Claude Code —
+      // The older ESC+CR (\x1b\r) sequence is unreliable on current Claude Code -
       // it shows a transient newline that collapses as soon as you keep typing.
       if (isShiftEnter) {
         if (ws.readyState === WebSocket.OPEN) {
@@ -503,7 +503,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         //
         // But NOT when the agent is asking a question (needs_input): answering
         // one AskUserQuestion prompt often just leads to the next one, so forcing
-        // "running" here would wrongly clear the "needs you" state — and the
+        // "running" here would wrongly clear the "needs you" state - and the
         // optimistic override would then mask the real backend needs_input for
         // its whole TTL. Leave needs_input alone and let the backend report the
         // true next state (another question, or genuinely running).
@@ -517,12 +517,12 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     // Intercept pastes that carry files (e.g. a screenshot, or a copied file).
     // We upload the file and type its absolute path into the agent's prompt so
-    // the agent can read it — the path is valid inside the sandbox. Plain text
+    // the agent can read it - the path is valid inside the sandbox. Plain text
     // pastes fall through to xterm. Capture phase + stopImmediatePropagation so
     // xterm never also handles a file paste.
     async function handlePastedFiles(files: File[]) {
       for (const file of files) {
-        showNotice(`Uploading ${file.name || 'file'}…`, false)
+        showNotice(`Uploading ${file.name || 'file'}...`, false)
         try {
           const res = await uploadFile(projectId, file)
           if (cancelled) return
@@ -565,7 +565,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
       // Drop any visible/pending toast so it doesn't linger on the agent we
-      // switch (or reconnect) to — the pane is reused across agents.
+      // switch (or reconnect) to - the pane is reused across agents.
       setNotice(null)
       termRef.current = null
       wsRef.current = null
@@ -658,7 +658,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   }, [])
 
   // The whole AgentDetail subtree (this component included) is remounted on every
-  // agent switch — the route keys it by project+agent — so each agent's terminal
+  // agent switch - the route keys it by project+agent - so each agent's terminal
   // mounts fresh with its own height, tabs and a brand-new xterm/WebSocket; the
   // backend replays scrollback on attach so the switch still looks seamless. No
   // hand-reset of height/tabs on an agent-id change is needed: this instance only

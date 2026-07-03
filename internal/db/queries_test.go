@@ -122,16 +122,16 @@ func TestSetArchivedEndStateMerged(t *testing.T) {
 	const root = "/tmp/proj"
 	store := newTestStore(t)
 
-	// A killed head whose branch was actually merged — should be corrected.
+	// A killed head whose branch was actually merged - should be corrected.
 	mustArchive(t, store, &Agent{ID: "was-merged", ProjectPath: root, AgentType: "claude", BranchName: "hydra/was-merged"}, "killed")
-	// A genuinely killed head (branch not in the merged set) — stays "killed".
+	// A genuinely killed head (branch not in the merged set) - stays "killed".
 	mustArchive(t, store, &Agent{ID: "killed", ProjectPath: root, AgentType: "claude", BranchName: "hydra/killed"}, "killed")
-	// Already "merged" — no-op (not counted).
+	// Already "merged" - no-op (not counted).
 	mustArchive(t, store, &Agent{ID: "merged", ProjectPath: root, AgentType: "claude", BranchName: "hydra/merged"}, "merged")
-	// An aborted spawn (empty end_state) whose branch happens to match — must NOT
+	// An aborted spawn (empty end_state) whose branch happens to match - must NOT
 	// be pulled into history by the merged correction.
 	mustArchive(t, store, &Agent{ID: "aborted", ProjectPath: root, AgentType: "claude", BranchName: "hydra/aborted"}, "")
-	// A head in a different project with a matching branch — must be untouched.
+	// A head in a different project with a matching branch - must be untouched.
 	mustArchive(t, store, &Agent{ID: "other", ProjectPath: "/tmp/other", AgentType: "claude", BranchName: "hydra/was-merged"}, "killed")
 
 	mergedBranches := []string{"hydra/was-merged", "hydra/merged", "hydra/aborted"}

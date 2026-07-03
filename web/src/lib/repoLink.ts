@@ -2,16 +2,16 @@
 // Agents such as Claude Code emit OSC 8 hyperlinks in their output: file://
 // URLs for the files they touch (the underlined paths in tool-call headers) and
 // https:// URLs for things like OAuth flows. xterm's built-in handler pops a
-// browser `confirm()` for every one — and, unless allowNonHttpProtocols is set,
+// browser `confirm()` for every one - and, unless allowNonHttpProtocols is set,
 // won't surface file:// links at all. These helpers let the terminal instead
 //   (a) turn a worktree file:// link into an in-app repository-view navigation
 //       on the agent's own branch, and
 //   (b) open a small set of trusted hosts without the confirm prompt.
 
 // TRUSTED_LINK_HOSTS are opened straight away, skipping the "Do you want to
-// navigate to…" confirm. Matched against the URL host exactly or as a parent of
+// navigate to..." confirm. Matched against the URL host exactly or as a parent of
 // a subdomain (so `claude.com` also trusts `console.claude.com`). The app's own
-// origin is always trusted (passed in at match time). Deliberately short — any
+// origin is always trusted (passed in at match time). Deliberately short - any
 // other host still gets the confirm guard.
 export const TRUSTED_LINK_HOSTS = [
   'claude.com',
@@ -42,7 +42,7 @@ export function isTrustedLinkUrl(url: string, selfOrigin?: string): boolean {
     try {
       // Same-origin includes the port (localhost:8080 !== localhost:9000).
       if (u.host === new URL(selfOrigin).host) return true
-    } catch { /* malformed origin — fall through to the host list */ }
+    } catch { /* malformed origin - fall through to the host list */ }
   }
   // Match the host list against the hostname (no port), so localhost:26662 and
   // any port on a trusted host still count.

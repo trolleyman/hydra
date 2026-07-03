@@ -301,7 +301,7 @@ func archivedAgentStatus(a *db.Agent) *api.AgentStatusInfo {
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID         string            // empty = auto-generated from the prompt, uniquified with a -2/-3… suffix
+	ID         string            // empty = auto-generated from the prompt, uniquified with a -2/-3... suffix
 	PrePrompt  string            // pre-prompt
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
@@ -311,8 +311,8 @@ type SpawnHeadOptions struct {
 	Resume     bool              // if true, resume the agent's prior conversation
 	// Replace allows an explicit ID to take over an ARCHIVED head with the same
 	// ID in the SAME project, overwriting its archived record (the restart and
-	// `hydra spawn --force` paths). Without it any existing record — active or
-	// archived, this project or another — fails the spawn with *HeadExistsError.
+	// `hydra spawn --force` paths). Without it any existing record - active or
+	// archived, this project or another - fails the spawn with *HeadExistsError.
 	Replace bool
 	Rows    uint16
 	Cols    uint16
@@ -391,7 +391,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 
 	// Even ephemeral (test) agents get a real throwaway worktree + branch so the
-	// sandbox — and especially the pre-spawn script — runs against the same layout
+	// sandbox - and especially the pre-spawn script - runs against the same layout
 	// a real agent sees: HYDRA_WORKTREE distinct from HYDRA_PROJECT_ROOT, never the
 	// project root itself. The worktree/branch are torn down when the test closes.
 	branchName := "hydra/" + opts.ID
@@ -492,7 +492,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 	// Pre-spawn is per-launch sandbox setup, not a once-per-head constructor: it
-	// runs on every agent launch — spawn and resume alike (see ResumeHead) — so a
+	// runs on every agent launch - spawn and resume alike (see ResumeHead) - so a
 	// configured script must be idempotent.
 	// COW mounts are re-applied on every launch (they are mount-time, not
 	// persistent), with a per-head writable upper so the agent's overwrites
@@ -696,7 +696,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 
 	// If the head's agent is running inside a supervisor, spawn this bash terminal
 	// as a sibling child of that one bwrap. It then shares the agent's single
-	// writable COW overlay — the whole point of the namespace host — rather than
+	// writable COW overlay - the whole point of the namespace host - rather than
 	// getting the COW sources read-only. When no supervisor is live (e.g. the agent
 	// has not started yet), we fall through to a standalone read-only-COW sandbox.
 	if sandboxed {
@@ -727,7 +727,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
 		// exec'd, closing the terminal instantly.
 		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
-		// Bash is an interactive shell, not an agent — no system prompt to inject,
+		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{})
 		if err != nil {
@@ -735,7 +735,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		}
 		// Expose the head's COW sources read-only here: this shell shares the
 		// head's worktree, and a live agent may already own a writable overlay on
-		// the same upperdir — two overlays must never share one, so the shell only
+		// the same upperdir - two overlays must never share one, so the shell only
 		// gets to read.
 		cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, false)
 		sb = sandbox.Options{
@@ -779,7 +779,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 // RestartHead relaunches a live head in a fresh sandbox: it kills the current
 // session, waits for it to exit, then resumes (re-seeding from the current
 // config). Used after granting an MCP-server request so the newly allow-listed
-// server — which MCP only loads at launch — becomes usable without the user
+// server - which MCP only loads at launch - becomes usable without the user
 // manually resuming. The conversation is restored by the resume's --continue.
 func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
 	if reg.IsLive(head.ID) {
@@ -813,7 +813,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	cfg, _ := config.Load(projectRoot)
 	// Capture the agent's last-known work status BEFORE the status writes below
 	// overwrite it: a "Continue" nudge is sent only to an agent that was actively
-	// working when it was cut off — never one that was idle waiting on the user
+	// working when it was cut off - never one that was idle waiting on the user
 	// (e.g. an unanswered question) or already finished. Read it from the DB so
 	// every resume path (boot, terminal attach, TUI) agrees on the same signal.
 	priorStatus := ""
@@ -827,8 +827,8 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// Pre-spawn is per-launch sandbox setup, so it runs on resume too: resume
 	// re-launches the agent in a fresh sandbox, and re-running the script is the
 	// only way a pre_spawn_script added (or changed) after a head was created ever
-	// reaches that head. It must therefore be idempotent — it runs on every launch
-	// — and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
+	// reaches that head. It must therefore be idempotent - it runs on every launch
+	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
 	if err != nil {
@@ -876,7 +876,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		return errtrace.Wrap(err)
 	}
 	// A resumed agent restores its prior conversation and then sits idle waiting
-	// for the user — it is not actively working. Report it as waiting rather than
+	// for the user - it is not actively working. Report it as waiting rather than
 	// letting it inherit a stale "running" (or the "stopped" left by a daemon
 	// restart): mark it in both status.json and the DB so the displayed status is
 	// correct immediately, instead of after the next JSON poll, and the two stay
@@ -885,7 +885,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// hook carries no resume signal.
 	//
 	// Exception: a head that had already *finished* its turn before the daemon
-	// stopped hasn't started waiting on anything just by being resumed — forcing it
+	// stopped hasn't started waiting on anything just by being resumed - forcing it
 	// to "waiting" would spuriously revert a finished head to "waiting" on every
 	// restart. Preserve its finished status instead. (A running head is nudged
 	// below, which flips it back to running, so its momentary "waiting" is fine.)
@@ -1050,22 +1050,22 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		reg.Remove(head.ID)
 		// Tear down the head's filtering egress proxy, if any.
 		stopEgressProxy(head.ID)
-		// Tear down any web bash shells for this head — they share its worktree,
+		// Tear down any web bash shells for this head - they share its worktree,
 		// which is about to be removed, so they must not outlive it.
 		reg.KillMatching(head.ID + "-shell")
 	}
 	if killErr == nil {
 		// Sandboxed teardown hook: the agent's session is dead but the worktree is
 		// still present, so run the configured pre_exit_script (best-effort,
-		// cwd=worktree) BEFORE the worktree is removed — e.g. to release a claimed
+		// cwd=worktree) BEFORE the worktree is removed - e.g. to release a claimed
 		// emulator slot from .hydra/emu.env. In shared-namespace mode this runs
 		// inside the head's still-live supervisor (the same bwrap as the agent), so
-		// it sees the agent's COW writes — which is why it must precede the
+		// it sees the agent's COW writes - which is why it must precede the
 		// removeNamespaceHost teardown below.
 		runPreExitScript(ctx, head, endState)
 	}
 
-	// Stop the shared-namespace supervisor (if any) — after the pre-exit hook, the
+	// Stop the shared-namespace supervisor (if any) - after the pre-exit hook, the
 	// single bwrap owning the writable COW overlay is no longer needed. Unconditional
 	// so a failed kill still reclaims it.
 	removeNamespaceHost(head.ID)
@@ -1114,7 +1114,7 @@ const preExitTimeout = 30 * time.Second
 
 // runPreExitScript runs the project's configured pre_exit_script for a head that
 // is ending, in a fresh SANDBOX with the head's sandbox policy, with the worktree
-// as the working directory — called after the agent's session is killed but
+// as the working directory - called after the agent's session is killed but
 // before the worktree is removed. It is best-effort: any failure is logged, never
 // returned. The script receives the same HYDRA_* head-context variables as the
 // agent, plus HYDRA_END_STATE ("killed"|"merged"|""). endState mirrors
@@ -1154,8 +1154,8 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	env = append(env, "HYDRA_END_STATE="+endState)
 
 	// Run the hook inside the head's live supervisor so it executes in the SAME
-	// bwrap as the agent — sharing the writable COW overlay and seeing the agent's
-	// writes — rather than in a fresh sandbox. Falls through to the standalone
+	// bwrap as the agent - sharing the writable COW overlay and seeing the agent's
+	// writes - rather than in a fresh sandbox. Falls through to the standalone
 	// sandbox below when there is no namespace host for this head.
 	if host, ok := namespaceHostFor(head.ID); ok {
 		log.Printf("heads: running pre_exit_script for agent %s in namespace host (end_state=%q)", head.ID, endState)
@@ -1212,8 +1212,8 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 //
 // It works on both live and already-archived heads (an archived head's session,
 // worktree and branch are already gone, so those steps are no-ops). Per-step
-// cleanup failures are logged but do not abort the purge — the aim is to remove
-// as much as possible — except a failure to hard-delete the DB row, which is
+// cleanup failures are logged but do not abort the purge - the aim is to remove
+// as much as possible - except a failure to hard-delete the DB row, which is
 // returned so the caller knows the record still exists.
 func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
 	log.Printf("heads: permanent delete requested for agent %s", head.ID)
@@ -1260,7 +1260,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 // directory. Claude derives it from the working directory (the head's worktree)
 // by replacing every non-alphanumeric character with '-', stored under
 // ~/.claude/projects/<slug>. Only Claude agents have one; other agent types are a
-// no-op (see the "delete for real" feature note). Best-effort — a missing dir or
+// no-op (see the "delete for real" feature note). Best-effort - a missing dir or
 // any error is logged and ignored.
 func removeClaudeSessionDir(head Head) {
 	if head.AgentType != sandbox.AgentTypeClaude {

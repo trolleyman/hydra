@@ -132,9 +132,9 @@ func ShowFile(projectRoot, ref, path string) ([]byte, error) {
 	return out, nil
 }
 
-// LsTreeEntryMode returns the git tree mode of the entry at p under ref —
+// LsTreeEntryMode returns the git tree mode of the entry at p under ref -
 // "100644"/"100755" for a regular/executable file, "120000" for a symbolic
-// link, "040000" for a directory — or "" when no entry exists at that path.
+// link, "040000" for a directory - or "" when no entry exists at that path.
 // The "--" guards p against being read as a git option.
 func LsTreeEntryMode(projectRoot, ref, p string) (string, error) {
 	if err := ValidateRef(ref); err != nil {
@@ -220,7 +220,7 @@ func AddWorktreeForBranch(projectRoot, worktreePath, branch string) error {
 // discarding any tracked local changes (`git checkout --detach --force`). Only
 // files that differ between the worktree's current commit and ref are rewritten,
 // so switching between nearby commits is far cheaper than recreating the worktree
-// from scratch. It does NOT remove untracked/ignored files — pair it with
+// from scratch. It does NOT remove untracked/ignored files - pair it with
 // CleanWorktree when reusing a worktree across refs.
 func CheckoutDetached(worktreeDir, ref string) error {
 	if err := ValidateRef(ref); err != nil {
@@ -237,10 +237,10 @@ func CheckoutDetached(worktreeDir, ref string) error {
 }
 
 // CleanWorktree removes untracked files and directories from a worktree
-// (`git clean -fd`). By default it LEAVES git-ignored files in place — so a reused
+// (`git clean -fd`). By default it LEAVES git-ignored files in place - so a reused
 // checkout keeps warm dependency/build caches (e.g. node_modules) rather than
 // re-fetching them on every ref switch. When includeIgnored is true it adds `-x`
-// (`git clean -fdx`), wiping ignored files too for a fully pristine tree — slower,
+// (`git clean -fdx`), wiping ignored files too for a fully pristine tree - slower,
 // but safe against stale ignored output leaking between commits.
 func CleanWorktree(worktreeDir string, includeIgnored bool) error {
 	args := []string{"-C", worktreeDir, "clean", "-fd"}
@@ -314,7 +314,7 @@ func WorktreeStateHash(dir string) (string, error) {
 }
 
 // GetCommonDir returns the absolute path to the repository's shared git
-// directory — the main repo's `.git`, where the index, refs, objects and logs
+// directory - the main repo's `.git`, where the index, refs, objects and logs
 // for every linked worktree actually live. The sandbox must bind this writable
 // for an agent to `git commit` from its worktree.
 func GetCommonDir(projectRoot string) (string, error) {

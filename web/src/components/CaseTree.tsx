@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Link, type LinkProps } from '@tanstack/react-router'
 import { AlertTriangle, Box, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
@@ -12,10 +13,10 @@ import { getFileIcon } from '../lib/fileIcons'
 //     dim secondary affordance on the leaf.
 // The tree is built from ALL of a runner's cases but renders only the
 // `visible` ones (post status-filter/search): node badges therefore always
-// tally everything under a node, while hidden rows — and subtrees with
-// nothing visible — stay out of the way.
+// tally everything under a node, while hidden rows - and subtrees with
+// nothing visible - stay out of the way.
 // Two densification rules keep it shallow: a chain of single-child folders
-// merges into one row (internal/artifacts — like VS Code compact folders), and
+// merges into one row (internal/artifacts - like VS Code compact folders), and
 // a subtree holding exactly ONE case collapses the whole chain into that
 // case's row, prefixed with the chain (so a lone warning isn't five expanders
 // deep). Each row carries per-segment icons (folder / file for path levels,
@@ -28,16 +29,20 @@ import { getFileIcon } from '../lib/fileIcons'
 type SegKind = 'path' | 'scope'
 // A scope level is a container (describe block / package / suite), a class/type
 // in a dotted class chain (a JUnit/Java class, a pytest TestClass), or a Go test
-// function that owns subtests — the backend tags this per level
+// function that owns subtests - the backend tags this per level
 // (TestCase.scope_kinds), since the strings alone can't tell TestClass (a
 // pytest class) from TestFoo (a Go func).
 type ScopeKind = 'module' | 'function' | 'class'
 type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 
-// OpenInRepo deep-links a row to the repository browser (the file/dir — and, for
-// a case, its line — at the tested ref). Undefined when there's no ref to browse
-// (see TestsPanel), which hides the affordance entirely.
-export type OpenInRepo = (path: string, line?: number | null) => void
+// OpenInRepo builds the <Link> target that deep-links a row to the repository
+// browser (the file/dir - and, for a case, its line - at the tested ref). It
+// returns props rather than navigating so the affordance renders as a real
+// anchor with an href: that's what lets middle-click / Ctrl-click open it in a
+// new tab (a plain onClick button has no href for the browser to act on).
+// Undefined when there's no ref to browse (see TestsPanel), which hides the
+// affordance entirely.
+export type OpenInRepo = (path: string, line?: number | null) => LinkProps
 
 function normScopeKind(k: string | null | undefined): ScopeKind {
   if (k === 'function') return 'function'
@@ -63,7 +68,7 @@ type TreeNode = {
   // the scope level with its own glyph.
   segs: Seg[]
   // Real path segments accumulated from the root through this node (path-kind
-  // segments only) — the copyable repo-relative path.
+  // segments only) - the copyable repo-relative path.
   pathParts: string[]
   key: string // stable identity for the collapse set
   children: Map<string, TreeNode>
@@ -179,7 +184,7 @@ function statusRank(s: string): number {
 
 // Tree geometry. Each nesting level indents by INDENT_STEP. A node row (with a
 // chevron) pads NODE_PAD, then spends CHEVRON_SLOT on the chevron+gap before its
-// icon — so a row's leading glyph sits at depth*INDENT_STEP + ICON_X. A case row
+// icon - so a row's leading glyph sits at depth*INDENT_STEP + ICON_X. A case row
 // has no chevron, so it pads straight to ICON_X, lining its status glyph up with
 // sibling nodes' icons (NOT with the parent's icon one level up, which is what
 // made child rows look like they shared the parent's column). GUIDE_X drops the
@@ -199,7 +204,7 @@ const CASE_TICK_Y = 15
 // a vertical line dropped under the parent's chevron, turning right at the
 // child's glyph. Rendered inside a `relative` wrapper around each child row.
 //   - The vertical runs the child's full height (├) so it flows into the next
-//     sibling, EXCEPT for the last child, where it stops at the tick (└) — the
+//     sibling, EXCEPT for the last child, where it stops at the tick (└) - the
 //     line turns right at the final item and terminates rather than spilling on.
 //   - The horizontal tick stops at the child's CHEVRON when the child is itself
 //     an expandable node, or reaches its ICON when the child is a standalone leaf
@@ -224,7 +229,7 @@ function ChildConnector({ parentDepth, hasChevron, isLast }: { parentDepth: numb
 }
 
 // NodeBadges shows a node's mixed per-status tallies (✓142 ⚠4 ✗2), omitting
-// zero buckets. In the tests tree these count EVERYTHING under the node —
+// zero buckets. In the tests tree these count EVERYTHING under the node -
 // the status filter and search hide rows, never the tallies.
 export function NodeBadges({ counts }: { counts: Record<string, number> }) {
   return (
@@ -261,16 +266,21 @@ function CopyButton({ text, title }: { text: string; title: string }) {
 
 // RepoLinkButton is the hover-revealed "open in the repository browser"
 // affordance, deep-linking a row to its file/dir (and line) at the tested ref.
-function RepoLinkButton({ onClick, title }: { onClick: () => void; title: string }) {
+// It renders a real <Link> (an <a href>), so left-click navigates in-app while
+// middle-click / Ctrl-click open the target in a new tab natively. stopPropagation
+// keeps a left-click from also toggling the row it sits on; it doesn't touch
+// default navigation, so the SPA nav (and the browser's new-tab handling) survive.
+function RepoLinkButton({ target, title }: { target: LinkProps; title: string }) {
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick() }}
+    <Link
+      {...target}
+      onClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
-      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400 transition-opacity cursor-pointer"
+      className="opacity-0 group-hover:opacity-100 shrink-0 inline-flex p-0.5 rounded text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400 transition-opacity cursor-pointer"
     >
       <SquareArrowOutUpRight className="w-3 h-3" />
-    </button>
+    </Link>
   )
 }
 
@@ -295,7 +305,7 @@ function FileGlyph({ name }: { name: string }) {
 // ScopeGlyph draws a scope level: a function glyph (ƒ, violet) for a Go test
 // function that owns subtests, a box glyph (indigo) for a class/type in a
 // dotted class chain (a JUnit/Java class, a pytest TestClass), or a braces glyph
-// ({ }, teal) for a container — a describe block, package or suite (the default
+// ({ }, teal) for a container - a describe block, package or suite (the default
 // when the kind is unknown).
 function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
   switch (scopeKind) {
@@ -313,7 +323,7 @@ function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
 // piece (the folder open when expanded), then each scope level is its own
 // module/function piece. So "auth/rotation.test.ts › key rotation" reads as a
 // file icon + "auth/rotation.test.ts" then a module glyph + "key rotation".
-// fileLine, when set, hangs a dim ":42" off the file piece — used on hoisted
+// fileLine, when set, hangs a dim ":42" off the file piece - used on hoisted
 // one-case rows so the line rides with the file it belongs to rather than
 // dangling at the end of the whole chain.
 function RowSegments({ segs, isDir, expanded, fileLine }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null }) {
@@ -350,7 +360,7 @@ function RowSegments({ segs, isDir, expanded, fileLine }: { segs: Seg[]; isDir: 
 // the file icon + the (non-lowlit) location chain, then the status glyph
 // immediately before the leaf name; a plain leaf row leads with the status
 // glyph. Both carry the message box for failing/warning cases, duration, a copy
-// affordance, an open-in-repo affordance, and — in scope mode — the file:line
+// affordance, an open-in-repo affordance, and - in scope mode - the file:line
 // secondary so the diff deep-link survives the axis switch.
 export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   c: TestCase
@@ -363,7 +373,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   onOpenInRepo?: OpenInRepo
 }) {
   const failedish = c.status === 'failed' || c.status === 'warning'
-  // Skipped cases show their message too (the skip reason, dimmed) — skipped is
+  // Skipped cases show their message too (the skip reason, dimmed) - skipped is
   // treated like every other status, not a mute roll-up.
   const showMessage = !!c.message && (failedish || c.status === 'skipped')
   const loc = caseLocation(c)
@@ -402,13 +412,13 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate shrink-1">{loc}</span>
         ) : !hasPathSeg && c.line != null && c.line > 0 ? (
           // No file piece on this row (plain leaf under a file node), so show the
-          // line here — a dim ":42", also the row's open-in-repo #L target. When a
+          // line here - a dim ":42", also the row's open-in-repo #L target. When a
           // file piece IS present the line already rides on it (see hasPathSeg).
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
         {onOpenInRepo && c.path ? (
-          <RepoLinkButton onClick={() => onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
+          <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
         ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
           <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
@@ -448,7 +458,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
         <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} />
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
-        {onOpenInRepo && copyPath ? <RepoLinkButton onClick={() => onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
+        {onOpenInRepo && copyPath ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
       </button>
       {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
@@ -513,7 +523,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
 }
 
 export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
-  // ALL of the runner's cases — badges tally these regardless of filters.
+  // ALL of the runner's cases - badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
   visible: TestCase[]

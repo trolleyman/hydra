@@ -94,7 +94,7 @@ func slugifyHeadID(text string, maxLen int) string {
 }
 
 // GenerateHeadID derives a head-ID slug from the first words of the prompt,
-// e.g. "Can you change the tests here to use …" →
+// e.g. "Can you change the tests here to use ..." →
 // "can-you-change-the-tests-here-to-use". Returns "" when the prompt has no
 // usable characters (the caller falls back to a random ID).
 func GenerateHeadID(prompt string) string {
@@ -106,7 +106,7 @@ func GenerateHeadID(prompt string) string {
 }
 
 // uniqueHeadID returns base if it is free, else the first free "base-2",
-// "base-3", … candidate (base is truncated so candidates stay within
+// "base-3", ... candidate (base is truncated so candidates stay within
 // maxHeadIDLen). If a hundred numbered candidates are somehow all taken it
 // falls back to a random hex suffix.
 func uniqueHeadID(base string, taken func(string) bool) string {
@@ -143,7 +143,7 @@ func headWorktreeExists(projectRoot, id string) bool {
 }
 
 // headIDTaken reports whether an ID is unusable for a new head in projectRoot:
-// a DB record exists anywhere (any project, archived included — the ID is a
+// a DB record exists anywhere (any project, archived included - the ID is a
 // global primary key), or the project already has the branch or worktree
 // directory (leftover state the DB may not know about).
 func headIDTaken(store *db.Store, projectRoot, id string) bool {

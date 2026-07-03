@@ -130,7 +130,7 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         className="w-full h-20 p-2 text-xs font-sans bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
-        placeholder="Write a comment… (Ctrl+Enter to submit)"
+        placeholder="Write a comment... (Ctrl+Enter to submit)"
       />
       <div className="flex justify-end gap-2 mt-2">
         <button
@@ -144,7 +144,7 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
           onClick={handleSubmit}
           className="px-2 py-1 text-[10px] font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded transition-colors cursor-pointer"
         >
-          {sending ? 'Sending…' : 'Send'}
+          {sending ? 'Sending...' : 'Send'}
         </button>
       </div>
     </div>
@@ -190,7 +190,7 @@ function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
 // trailingContext counts the unchanged context lines at the very end of a hunk,
 // ignoring a trailing "no newline" marker. `git diff -U<n>` emits up to `n`
 // context lines after the last change, so when a hunk shows fewer than the
-// requested context it has run out of file — the hunk already reaches EOF and
+// requested context it has run out of file - the hunk already reaches EOF and
 // there is nothing left below to expand into.
 function trailingContext(hunk: DiffHunk): number {
   let count = 0
@@ -206,7 +206,7 @@ function trailingContext(hunk: DiffHunk): number {
 // ── Line selection ────────────────────────────────────────────────────────────
 // Clicking a gutter number selects that line (shift+click extends the range);
 // the selection is a side (old/new) plus a 1-based [start,end]. Unlike the file
-// view it lives in local per-file state, not the URL — the diff isn't
+// view it lives in local per-file state, not the URL - the diff isn't
 // URL-addressable here (the agent diff has no per-file route, and the repo
 // compare-diff keeps its diff state out of the URL by design).
 
@@ -435,8 +435,8 @@ const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 
 const CTX = 3
 const EXPAND_STEP = 20
 // An unchanged run that would hide this few lines behind an expander isn't worth
-// collapsing — a "··· 1 line ···" toggle saves no vertical space and just adds a
-// click — so show those lines inline instead.
+// collapsing - a "··· 1 line ···" toggle saves no vertical space and just adds a
+// click - so show those lines inline instead.
 const MIN_COLLAPSE_GAP = 1
 // Files whose full content exceeds this many lines keep the lightweight `-U3`
 // view + network expansion rather than rendering the whole file client-side.
@@ -491,7 +491,7 @@ function mapFromHtml(ls: SideLine[], html: string[] | null): Map<number, string>
 }
 
 // buildHighlightMaps syntax-highlights a flat run of diff lines synchronously
-// (so multi-line constructs — block comments, template strings — highlight
+// (so multi-line constructs - block comments, template strings - highlight
 // correctly) and returns per-line-number → HTML maps for the old and new sides.
 // Used only for the small-file fast path; larger files go through the worker.
 function buildHighlightMaps(lines: DiffLine[], lang: string) {
@@ -648,7 +648,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
 // Mirrors STICKY_CARD_TOP's approach.
 export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
 
-// How long the file-body collapse/expand height glide runs — kept in JS so the
+// How long the file-body collapse/expand height glide runs - kept in JS so the
 // deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
@@ -671,11 +671,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   imageDiffMode?: ImageDiffMode
   imageBefore?: string | null
   imageAfter?: string | null
-  // When true, the line-level "add comment" affordances are hidden — used by the
+  // When true, the line-level "add comment" affordances are hidden - used by the
   // repository diff view, which has no agent to send comments to.
   readOnly?: boolean
   // When true, the per-file card chrome (border + collapsible header) is dropped
-  // and the diff body is rendered bare and always-expanded — used by the
+  // and the diff body is rendered bare and always-expanded - used by the
   // repository diff's one-file-at-a-time view, whose surrounding header already
   // carries the filename, change type, line counts and copy/raw actions.
   headless?: boolean
@@ -684,10 +684,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
-  // Collapse/expand glides the file body between 0 and its measured height — the
+  // Collapse/expand glides the file body between 0 and its measured height - the
   // same height-tween the tests/artifacts CollapsibleCard uses, so the two feel
   // identical. The body stays mounted while open and for one collapse animation,
-  // then unmounts so a collapsed file (and its highlighting) costs nothing —
+  // then unmounts so a collapsed file (and its highlighting) costs nothing -
   // hence the derived memos below key off `bodyMounted`, not the raw prop, so
   // their content stays put for the 200ms the glide plays. headless mode (the
   // repository one-file view) is always open and never animates.
@@ -712,7 +712,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   // Whole-file content for the reveal/collapse model. The server returns each
   // eligible file's entire content in the main diff response (full_context) and
-  // marks it `expanded`, so we derive the line list straight from the hunks —
+  // marks it `expanded`, so we derive the line list straight from the hunks -
   // no per-file round-trip. Files the server left at windowed context (too
   // large) aren't marked expanded and fall through to the `-U3` hunks + network
   // expand below. The size/contiguity checks are a defensive guard so a
@@ -728,7 +728,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   // Lines to highlight: the whole file when expanded (so multi-line constructs
   // stay correct), else the visible `-U3` hunks. Null when nothing is rendered
-  // (binary/collapsed/hidden) — highlighting an unseen body would be wasted work.
+  // (binary/collapsed/hidden) - highlighting an unseen body would be wasted work.
   const highlightSource = useMemo<DiffLine[] | null>(() => {
     if (file.binary || !bodyMounted || isHidden) return null
     const lines = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
@@ -740,7 +740,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   // Small files highlight inline (no flash, no worker round-trip). Larger files
   // would block the main thread if every one highlighted during the same render,
-  // so they paint as plain text and colourise from the Web Worker pool — the
+  // so they paint as plain text and colourise from the Web Worker pool - the
   // hljs work runs fully off the UI thread. Whole-file input keeps the
   // highlighting correct regardless of which path runs.
   // Fetch a not-yet-bundled grammar on demand (the worker path does this itself);
@@ -782,7 +782,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const { highlightedOld, highlightedNew } = syncHighlight ?? asyncHighlight
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
-  // rename) has nothing to collapse — render its lines plainly rather than
+  // rename) has nothing to collapse - render its lines plainly rather than
   // folding the entire body behind one expander.
   const noChanges = file.additions === 0 && file.deletions === 0
   const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
@@ -801,7 +801,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   // Per-file line selection driven by clicking gutter numbers. A plain click
   // selects one line (and becomes the shift-anchor); shift+click extends the
-  // range from the anchor along the same side. Local state — see the note by
+  // range from the anchor along the same side. Local state - see the note by
   // DiffLineSelection on why this isn't URL-synced like the file view.
   const [lineSel, setLineSel] = useState<DiffLineSelection | null>(null)
   const selAnchorRef = useRef<{ side: DiffSide; line: number } | null>(null)
@@ -870,13 +870,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       {/* Body. rounded-b-lg + overflow-hidden clip the edge-to-edge diff content's
           bottom corners (the root dropped its overflow-hidden so the header can be
           sticky). For the stacked view the wrapper also height-tweens the body on
-          collapse/expand — the inner measured div carries bodyRef; see
+          collapse/expand - the inner measured div carries bodyRef; see
           bodyOpen/bodyMounted. headless (the repo one-file view) is bare, always
           open, and never animates. */}
       <div
         // `isolate` keeps this body's positioned content (an in-tree image renders
         // as `absolute inset-0` via ImageDiffView) in its own stacking context so
-        // it can't paint over the sticky file/section/changes bars above it — see
+        // it can't paint over the sticky file/section/changes bars above it - see
         // the matching note in CollapsibleCard.
         className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
         style={headless ? undefined : { height: bodyOpen ? bodyH : 0 }}
@@ -1024,7 +1024,7 @@ function buildDiffParams(leftSel: LeftSel, rightSel: RightSel, ignoreWhitespace:
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
   if (!commit) return sha.slice(0, 7)
   const msg = commit.message.slice(0, 24)
-  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '…' : ''}`
+  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '...' : ''}`
 }
 
 // ── Commit info formatting ────────────────────────────────────────────────────
@@ -1451,7 +1451,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
             {/* Backdrop */}
             <div className="absolute inset-0" onClick={() => setOpen(false)} />
 
-            {/* Panel — mirrors the merge/kill RichConfirmPanel: icon tile + stacked
+            {/* Panel - mirrors the merge/kill RichConfirmPanel: icon tile + stacked
                 title/description, uppercase section labels, shared footer buttons. */}
             <div
               className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[560px] overflow-hidden animate-in zoom-in-95 duration-200"
@@ -1469,7 +1469,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   </h3>
                   <p className="text-[12.5px] leading-snug text-gray-500 dark:text-gray-400">
                     {count} file{plural ? 's' : ''} conflict{plural ? '' : 's'} with{' '}
-                    <span className="font-mono font-semibold text-red-600 dark:text-red-400">{baseBranch}</span> — resolve{' '}
+                    <span className="font-mono font-semibold text-red-600 dark:text-red-400">{baseBranch}</span> - resolve{' '}
                     {plural ? 'them' : 'it'} before this branch can merge.
                   </p>
                 </div>
@@ -1507,7 +1507,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
                     <p className="text-green-400">git commit</p>
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
-                    The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
+                    The worktree at <span className="font-mono">{worktreePath}</span> is isolated - changes only affect this agent's branch.
                   </p>
                 </div>
               </div>
@@ -1521,7 +1521,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   disabled={sending}
                   icon={sending ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
                 >
-                  {sending ? 'Sending…' : 'Fix with agent'}
+                  {sending ? 'Sending...' : 'Fix with agent'}
                 </DialogConfirmButton>
               </div>
             </div>
@@ -1551,10 +1551,10 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
 
   const baseBranch = agent.base_branch
   // Warn about a collision only when the agent is *actively working*, not merely
-  // alive. `session_status` is "running" for the whole life of the PTY session —
-  // including while the agent sits idle waiting for input — so gating on it
+  // alive. `session_status` is "running" for the whole life of the PTY session -
+  // including while the agent sits idle waiting for input - so gating on it
   // showed the "work in progress" warning even for a waiting/finished agent.
-  // The activity status (running|waiting|finished|…) reflects what it's doing.
+  // The activity status (running|waiting|finished|...) reflects what it's doing.
   const running = agent.agent_status?.status === 'running'
   const hasUncommitted = diff?.uncommitted_changes ?? false
 
@@ -1563,9 +1563,9 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
     // active work); it takes precedence over the uncommitted-changes note, the
     // way the merge dialog prioritises its parent-running warning.
     const note = running
-      ? 'An agent session is running — merging now may collide with work in progress.'
+      ? 'An agent session is running - merging now may collide with work in progress.'
       : hasUncommitted
-        ? "This branch has uncommitted changes — the merge may fail or conflict until they're committed."
+        ? "This branch has uncommitted changes - the merge may fail or conflict until they're committed."
         : undefined
 
     useDialogStore.getState().show({
@@ -1576,7 +1576,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       message: `Update from ${baseBranch}`,
       type: note ? 'warning' : 'confirm',
       variant: 'updateBase',
-      details: { fromBranch: baseBranch ?? '—', toBranch: agent.branch_name ?? '—', behind, note },
+      details: { fromBranch: baseBranch ?? '-', toBranch: agent.branch_name ?? '-', behind, note },
       onConfirm: async () => {
         setUpdating(true)
         try {
@@ -1586,7 +1586,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
           const body = apiErrorBody(err)
           if (body?.error === 'uncommitted_changes') {
             // The worktree has uncommitted changes the incoming base would overwrite
-            // — not a content conflict. Name the files and ask the user to commit/stash.
+            // - not a content conflict. Name the files and ask the user to commit/stash.
             const files = body.conflicting_files ?? []
             const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
@@ -1714,7 +1714,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
     artifactScale: number; onArtifactScaleChange: (v: number) => void
     testGroupResult: boolean; onTestGroupResultChange: (v: boolean) => void
     testUseScope: boolean; onTestUseScopeChange: (v: boolean) => void
-    // False when no loaded test case carries a logical scope — the "Group by
+    // False when no loaded test case carries a logical scope - the "Group by
     // scope" checkbox greys out rather than silently doing nothing.
     testScopeAvailable: boolean
   }) {
@@ -1776,7 +1776,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          {/* Test-results view modes — two orthogonal checkboxes (they compose):
+          {/* Test-results view modes - two orthogonal checkboxes (they compose):
               per-status sections, and trees keyed by class/describe scope instead
               of filesystem path. Scope greys out when no case carries one. */}
           <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Test Results</p>
@@ -1819,7 +1819,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
             />
             <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
           </div>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape — drag a tile to resize it.</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
         </div>
       )}
     </div>
@@ -1862,10 +1862,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     return Number.isFinite(stored) && stored > 0 ? Math.min(2, Math.max(0.5, stored)) : 1
   })
   // Global before/after view + "highlight changed pixels", shared across every A/B
-  // tile so they all flip / highlight together (keyboard B / H — see ArtifactsPanel).
+  // tile so they all flip / highlight together (keyboard B / H - see ArtifactsPanel).
   const [artifactView, setArtifactView] = useState<'before' | 'after'>(() => (readLocal(StorageKeys.diffArtifactView) === 'before' ? 'before' : 'after'))
   const [artifactHighlight, setArtifactHighlight] = useState<boolean>(() => readLocal(StorageKeys.diffArtifactHighlight) === 'true')
-  // Artifact masonry layout — per-tile span overrides (dragging a tile's edge);
+  // Artifact masonry layout - per-tile span overrides (dragging a tile's edge);
   // tiles without an override auto-span by aspect ratio. One set of overrides shared
   // across the artifacts panel and the repository artifacts view; persisted (see
   // lib/artifactColumns).
@@ -1900,18 +1900,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
   // DiffViewer is remounted on every agent switch (the route keys the whole
   // AgentDetail subtree by project+agent), so the collapsed-file set and the
-  // commit selectors initialise fresh from this agent's prefs above — no
+  // commit selectors initialise fresh from this agent's prefs above - no
   // hand-reset on an agent-id change is needed.
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])
 
-  // Tests-panel view modes — the two orthogonal cog checkboxes (see
+  // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
   const [testGroupResult, setTestGroupResult] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testGroupResult)
   const [testUseScope, setTestUseScope] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testUseScope)
   // Whether any loaded test case carries a logical scope (class/describe
-  // chain) — reported up by the TestsPanel so the cog can grey the "Group by
+  // chain) - reported up by the TestsPanel so the cog can grey the "Group by
   // scope" checkbox when the axis doesn't exist for this project's runners.
   const [testsHaveScope, setTestsHaveScope] = useState(false)
   useEffect(() => {
@@ -1960,7 +1960,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
 
-      // Select by path rather than [0] — the backend may return more than the
+      // Select by path rather than [0] - the backend may return more than the
       // requested file (e.g. the simulation server ignores the path filter).
       const updated = fileDiff.files.find((x) => x.path === path)
       setDiff((prev) => {
@@ -2018,7 +2018,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       const sig = JSON.stringify(f)
       nextSig.set(f.path, sig)
       if (prevSig.get(f.path) === sig) {
-        // Identical content — reuse the existing object so its FileDiff (memo)
+        // Identical content - reuse the existing object so its FileDiff (memo)
         // doesn't re-render, re-stringify, or re-highlight.
         const reused = prevFiles.get(f.path)!
         nextFiles.set(f.path, reused)
@@ -2071,8 +2071,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
   // Before/after raw-blob URLs for an in-tree image file in the diff, so FileDiff
   // can render the image differ. The before side reads the base ref; the after
-  // side reads the head ref, or — when the right side is the worktree
-  // (head_ref === "", i.e. an uncommitted/untracked change) — the worktree file
+  // side reads the head ref, or - when the right side is the worktree
+  // (head_ref === "", i.e. an uncommitted/untracked change) - the worktree file
   // itself. Returns nulls for the missing side of an added/deleted file.
   const imageUrlsFor = (file: DiffFile): { before: string | null; after: string | null } => {
     if (!diff || !projectId || !file.binary || !isImagePath(file.path)) return { before: null, after: null }
@@ -2097,7 +2097,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // The Changes toolbar sticks to the top of the scroll area; the artifacts filter
   // bar and each artifact-card header stack flush beneath it (see ArtifactsPanel).
   // Their sticky `top` offsets need the toolbar's CURRENT height, which grows when
-  // it wraps to multiple rows on narrow widths — so measure it and publish it as a
+  // it wraps to multiple rows on narrow widths - so measure it and publish it as a
   // CSS var (--sticky-changes-h) that those descendants read in their top: calc(...).
   // Defaults to the unwrapped height until the first measure lands.
   const changesBarRef = useRef<HTMLDivElement>(null)
@@ -2157,7 +2157,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
   //
   // Triggers must COALESCE, not drop. A diff_refresh that lands while a previous
-  // silent fetch is still in flight has to be serviced once that fetch finishes —
+  // silent fetch is still in flight has to be serviced once that fetch finishes -
   // otherwise a commit made moments after an edit is lost: the edit's fetch reads
   // the pre-commit state, the commit's trigger is dropped because a fetch was in
   // flight, and since externalRefreshTrigger never changes again nothing re-fetches,
@@ -2182,7 +2182,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       // Snapshot current per-file contexts before async work
       const contextsSnap = new Map(fileContextsRef.current)
 
-      // Refresh commits list silently — but only push it into state when it actually
+      // Refresh commits list silently - but only push it into state when it actually
       // changed, so an idle/no-op refresh never re-renders (and never disturbs a
       // text selection the user has in the diff).
       const commitsP = api.default.getAgentCommits(projectId ?? '', agent.id)
@@ -2195,11 +2195,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           }
         }).catch(() => { })
 
-      // Fetch full diff silently — preserves open comments since we diff against previous state.
+      // Fetch full diff silently - preserves open comments since we diff against previous state.
       const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
         .then((d) => {
-          // Defer applying while the user is selecting text — otherwise the re-render
+          // Defer applying while the user is selecting text - otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
           if (hasActiveSelection()) {
             pendingSilentRef.current = { d, contexts: contextsSnap }
@@ -2212,7 +2212,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
       Promise.allSettled([commitsP, diffP]).then(() => {
         silentRefreshRunningRef.current = false
-        // A newer trigger arrived while we were fetching — service it now.
+        // A newer trigger arrived while we were fetching - service it now.
         if (latestTriggerRef.current !== servicing) run()
       })
     }
@@ -2225,7 +2225,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   }, [])
 
   useEffect(() => {
-    // left='latest' and right='latest' is invalid — switch right to uncommitted
+    // left='latest' and right='latest' is invalid - switch right to uncommitted
     if (leftSel.type === 'latest' && rightSel.type === 'latest') {
       setRightSel({ type: 'uncommitted' }); return
     }
@@ -2246,7 +2246,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   }, [])
 
   // Stable per-path "show this file" callbacks. An inline `() => handleShowFile(path)`
-  // would be a fresh function identity on every render, breaking FileDiff's memo() —
+  // would be a fresh function identity on every render, breaking FileDiff's memo() -
   // every DiffViewer re-render would then re-render every FileDiff, re-apply the
   // highlighted lines' dangerouslySetInnerHTML, and recreate the text nodes an
   // in-progress sub-line selection is anchored to, collapsing it (issue #34). Caching
@@ -2287,7 +2287,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
   // identity across silent refreshes. Depending on diff/commits/sel directly would
   // give it a new identity on each refresh and re-render every FileDiff, defeating
-  // their memo() — the main cost behind the agent-view jank.
+  // their memo() - the main cost behind the agent-view jank.
   const diffRef = useRef(diff)
   diffRef.current = diff
   const leftSelRef = useRef(leftSel)
@@ -2414,11 +2414,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     <div ref={rootRef} className="mt-4" style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
-          header docks flush under the top bar — no overlap (was -top-6) and no
+          header docks flush under the top bar - no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0).
           z-[25] keeps it above the diff rows and the sticky file-list panel
           (z-20) while staying *below* the sidebar overlay backdrop (z-30 in
-          __root.tsx) — at equal z-index the later-DOM bar would paint over the
+          __root.tsx) - at equal z-index the later-DOM bar would paint over the
           scrim and stay bright when the off-canvas sidebar is open on
           tablet/phone. */}
       <div ref={changesBarRef} className="flex items-start gap-3 mb-6 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
@@ -2436,7 +2436,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           )}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow
-              never separates from its selectors — the whole "main → Latest commit"
+              never separates from its selectors - the whole "main → Latest commit"
               drops to the next line together when it can't fit beside the stats. */}
           <div className="flex items-center gap-3">
             <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
@@ -2497,7 +2497,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
         </div>
       </div>
 
-      {/* Test verdicts (PLAN #68) for the selected versions — single-sided, so it
+      {/* Test verdicts (PLAN #68) for the selected versions - single-sided, so it
           tracks the "after" commit (latest by default) like the artifacts below,
           and sits just under the Changes header. Renders nothing when the project
           configures no [[tests]] runners. */}
@@ -2533,7 +2533,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // Re-snapshot artifacts on the manual refresh button (refreshKey) AND
           // when a commit is auto-detected (externalArtifactRefresh). Both only
           // ever increment, so their sum strictly increases on either trigger,
-          // re-running ArtifactsPanel's effect to re-request — a cache hit when
+          // re-running ArtifactsPanel's effect to re-request - a cache hit when
           // the resolved commit SHA is unchanged, a regen when it moved. The
           // diff text itself updates silently via externalRefreshTrigger, so we
           // deliberately keep this out of the diff-loading effects (which would
@@ -2554,7 +2554,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       {!hasExistingDiff && loadingDiff ? (
         <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
           <LoaderCircle className="w-4 h-4 animate-spin mr-2" />
-          <span className="text-sm">Loading diff…</span>
+          <span className="text-sm">Loading diff...</span>
         </div>
       ) : !hasExistingDiff && diffError ? (
         <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -2566,7 +2566,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
         </div>
       ) : diff ? (
         <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
-          {/* File list sidebar (hidden on mobile — the diff content takes the full
+          {/* File list sidebar (hidden on mobile - the diff content takes the full
               width there; files are still all rendered below, or reachable via the
               prev/next pager in single-file mode) */}
           <div

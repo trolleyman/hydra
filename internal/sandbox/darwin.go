@@ -120,7 +120,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 func cowClone(m CowMount) error {
 	// An empty Upper marks a read-only COW request (e.g. bash shells). macOS has
 	// no bind-mount primitive in Seatbelt, so there is nothing to expose read-only
-	// here — skip rather than make a writable clone.
+	// here - skip rather than make a writable clone.
 	if m.Lower == "" || m.Dest == "" || m.Upper == "" {
 		return nil
 	}
@@ -131,7 +131,7 @@ func cowClone(m CowMount) error {
 		return errtrace.Wrap(err)
 	}
 	if entries, err := os.ReadDir(m.Dest); err == nil && len(entries) > 0 {
-		return nil // already populated (e.g. a resume) — keep the agent's edits
+		return nil // already populated (e.g. a resume) - keep the agent's edits
 	}
 	// Copy Lower's contents (not Lower itself) into the existing Dest dir.
 	out, err := exec.Command("cp", "-c", "-R", m.Lower+"/.", m.Dest).CombinedOutput()

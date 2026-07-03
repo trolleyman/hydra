@@ -1,12 +1,12 @@
 // Curated highlight.js build.
 //
 // Importing the default `highlight.js` entry registers ALL ~190 languages
-// (~900 kB minified) into every chunk that touches it — the main app bundle and
-// the highlight Web Worker alike — so highlight.js alone was two 900 kB+ chunks.
+// (~900 kB minified) into every chunk that touches it - the main app bundle and
+// the highlight Web Worker alike - so highlight.js alone was two 900 kB+ chunks.
 //
 // Instead we build from the lightweight `core` and eagerly register only a common
 // set of languages here (bundled, usable synchronously everywhere). The long tail
-// of ~150 rarer languages is loaded on demand — see hljsLazy.ensureLanguage, used
+// of ~150 rarer languages is loaded on demand - see hljsLazy.ensureLanguage, used
 // by the highlight worker so the diff viewer can still colourise anything without
 // paying for it up front.
 //

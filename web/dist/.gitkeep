@@ -1,11 +1,11 @@
 This file keeps web/dist/ present in every checkout.
 
 web/embed.go embeds this directory with `//go:embed all:dist`, which fails to
-compile — "pattern all:dist: no matching files found" — when the directory is
+compile - "pattern all:dist: no matching files found" - when the directory is
 absent, e.g. a fresh checkout that hasn't built the frontend (most importantly the
 `go` [[tests]] runner in .hydra/config.toml). dist/ is git-ignored, so this
 committed placeholder holds the directory open.
 
 A real Vite build empties dist/, writes the hashed assets, then re-creates this
-exact file (see keepDistGitkeep in web/vite.config.ts) — so building locally does
+exact file (see keepDistGitkeep in web/vite.config.ts) - so building locally does
 not leave a spurious change in `git status`.

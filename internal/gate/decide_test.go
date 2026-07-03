@@ -52,7 +52,7 @@ func TestDecide(t *testing.T) {
 		{"bash cat settings stderr-redirect allowed", "Bash", map[string]any{"command": "cat ~/.claude/settings.json 2>/dev/null"}, Allow},
 		{"bash grep settings allowed", "Bash", map[string]any{"command": "grep model ~/.claude/settings.json"}, Allow},
 		{"bash jq settings allowed", "Bash", map[string]any{"command": "jq .hooks /etc/claude-code/managed-settings.json | head"}, Allow},
-		// A bare mention of the tamper keys (no write) is allowed — e.g. a commit
+		// A bare mention of the tamper keys (no write) is allowed - e.g. a commit
 		// message describing the gate, or echoing the key name.
 		{"bash commit msg mentioning key allowed", "Bash", map[string]any{"command": `git commit -m "gate: deny disableAllHooks writes to .claude/settings.json"`}, Allow},
 		{"bash echo key no write allowed", "Bash", map[string]any{"command": "echo checking for disableAllHooks"}, Allow},
@@ -62,7 +62,7 @@ func TestDecide(t *testing.T) {
 		{"bash git push dry-run allowed", "Bash", map[string]any{"command": "git push --dry-run"}, Allow},
 		{"bash chained git push denied", "Bash", map[string]any{"command": "echo done && git push origin main"}, Deny},
 		// The bare substring "git push" inside an argument / grep pattern / commit
-		// message must NOT trip the wire — matching those would hard-deny a
+		// message must NOT trip the wire - matching those would hard-deny a
 		// legitimate command (the anchor to a command boundary is what saves them).
 		{"bash grep for git push allowed", "Bash", map[string]any{"command": "grep -rn 'git push' internal/"}, Allow},
 		{"bash commit msg mentioning git push allowed", "Bash", map[string]any{"command": "git commit -m 'document the git push flow'"}, Allow},
@@ -99,7 +99,7 @@ func TestDecideGateDisabledAllowsEverything(t *testing.T) {
 
 func TestDecideWebFetchFromNetworkPolicy(t *testing.T) {
 	// Filtering off (unrestricted/off network mode): WebFetch is never gated, even a
-	// brand-new host — there is nothing to gate because every host is reachable.
+	// brand-new host - there is nothing to gate because every host is reachable.
 	p := basePolicy()
 	p.WebFetchFilter = false
 	if r := Decide(p, "WebFetch", map[string]any{"url": "https://brand-new.test/x"}); r.Decision != Allow {

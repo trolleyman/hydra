@@ -29,7 +29,7 @@ const (
 	PushStatusChanged Type = "push_status_changed"
 	// AgentTestsChanged: one head's live test summary ticked (a streamed
 	// type=stdout run appending cases). Project-scoped, carries the new summary
-	// as Payload keyed by the agent id — the client patches the agent's chip in
+	// as Payload keyed by the agent id - the client patches the agent's chip in
 	// place instead of refetching the whole agent list.
 	AgentTestsChanged Type = "agent_tests_changed"
 )
@@ -40,7 +40,7 @@ const (
 //
 // Key + Payload turn an event into a payload event: instead of coalescing by
 // Type alone (a boolean "refetch this"), pending payload events coalesce by
-// (Type, Key) with the LATEST Payload winning — right for incremental state
+// (Type, Key) with the LATEST Payload winning - right for incremental state
 // where only the newest value matters (e.g. a ticking test summary per agent).
 type Event struct {
 	Type        Type
@@ -123,7 +123,7 @@ func (h *Hub) Subscribe(projectRoot string) *Subscription {
 // Subscription is one client's coalescing event queue. Pending plain events
 // are deduplicated by Type (many rapid agents_changed collapse to one) and
 // payload events by (Type, Key) with the latest payload winning, so a slow
-// reader never sees a backlog — only the set of resources that need refetching
+// reader never sees a backlog - only the set of resources that need refetching
 // plus the newest value of each incremental key.
 type Subscription struct {
 	hub  *Hub

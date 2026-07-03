@@ -116,7 +116,7 @@ rename to new.txt
 }
 
 // A diff scoped to a renamed-and-modified file's NEW name must still come back as
-// a rename with its real additions/deletions — not as a brand-new add of the
+// a rename with its real additions/deletions - not as a brand-new add of the
 // whole file. git only pairs a rename when both names are in the pathspec, so
 // GetDiff widens the pathspec with the old name (regression test for the diff
 // viewer showing renamed files as entirely added).
@@ -157,7 +157,7 @@ func TestGetDiffScopedRenameKeepsRename(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Scope to the new path only — the case the diff viewer fetches per file.
+	// Scope to the new path only - the case the diff viewer fetches per file.
 	files, err := GetDiff(dir, base, head, false, false, "new.txt", 3)
 	if err != nil {
 		t.Fatalf("GetDiff: %v", err)

@@ -12,7 +12,7 @@ interface InfoTooltipProps {
 
 // Thin preset over <Tooltip variant="card">: an Info icon trigger whose hover
 // card holds the passed-in body. All the portal/placement/show-hide logic lives
-// in Tooltip.tsx — this just wires up the icon and the card defaults.
+// in Tooltip.tsx - this just wires up the icon and the card defaults.
 export function InfoTooltip({ title, children, width = 384 }: InfoTooltipProps) {
   return (
     <Tooltip variant="card" title={title} width={width} content={children} className="ml-1 align-middle">

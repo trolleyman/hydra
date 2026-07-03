@@ -5,8 +5,8 @@
 // only rendered by the interactive `/usage` command. So, like the ClaudeBar
 // menu-bar app (https://github.com/tddworks/ClaudeBar), we drive `claude /usage`
 // inside a pseudo-terminal, render the TUI through a virtual-terminal emulator,
-// and parse the resulting screen text. This is inherently brittle — when
-// Anthropic restyles the `/usage` screen the parser may need updating — so the
+// and parse the resulting screen text. This is inherently brittle - when
+// Anthropic restyles the `/usage` screen the parser may need updating - so the
 // parser is covered by tests against captured sample output (usage_test.go).
 //
 // The probe is non-invasive: it auto-responds to trust/onboarding prompts by
@@ -32,7 +32,7 @@ type Snapshot struct {
 	CapturedAt time.Time
 	// Available is true when the probe produced a usable snapshot (at least the
 	// session quota). When false, Error explains why (CLI missing, not a
-	// subscription account, parse failure, …).
+	// subscription account, parse failure, ...).
 	Available bool
 	Error     string
 	// AccountTier is "Claude Max" / "Claude Pro" when detected, else "".
@@ -109,7 +109,7 @@ var (
 	percentRe = regexp.MustCompile(`(?i)(\d{1,3})\s*%\s*(left|used)`)
 	// resetInRe matches the relative session reset, e.g. "Resets in 2h 15m".
 	resetInRe = regexp.MustCompile(`(?i)resets?\s+in\s+([0-9hmsd][0-9hmsd .]*)`)
-	// resetLineRe matches any "Resets …" line (used for weekly, which is absolute).
+	// resetLineRe matches any "Resets ..." line (used for weekly, which is absolute).
 	resetLineRe = regexp.MustCompile(`(?i)(resets?\b[^\n]*)`)
 	// hoursRe / minsRe pick the hour/minute components out of "2h 15m".
 	hoursRe = regexp.MustCompile(`(?i)(\d+)\s*h`)
@@ -159,7 +159,7 @@ func Parse(text string, now time.Time) Snapshot {
 }
 
 // blockAfter returns the line containing label plus the next `window` lines,
-// joined — the slice of screen text holding one quota's bar + percent + reset.
+// joined - the slice of screen text holding one quota's bar + percent + reset.
 func blockAfter(text, label string, window int) string {
 	lines := strings.Split(text, "\n")
 	want := strings.ToLower(label)

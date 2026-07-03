@@ -15,8 +15,8 @@ import (
 // prefetchInterval is how often the daemon proactively pre-generates artifacts
 // for idle heads. A worktree head must look unchanged across one interval before
 // it is prefetched (see prefetchOnce), so a settled head's artifacts are ready
-// roughly two intervals after the agent stops writing — well before the user
-// clicks in, which is the whole point — while an actively-editing head is left
+// roughly two intervals after the agent stops writing - well before the user
+// clicks in, which is the whole point - while an actively-editing head is left
 // alone so its heavy build isn't run against a moving target.
 //
 // This periodic sweep is the backstop: the low-latency path is PrefetchHeadNow,
@@ -165,7 +165,7 @@ func (s *Server) RunArtifactPrefetcher(ctx context.Context, roots func() []strin
 // non-archived head with a branch it resolves the same comparison the diff
 // viewer shows by default (merge-base vs the working tree) and kicks off
 // background generation. A head whose working tree changed since the last sweep
-// is skipped this round — its build would be run against a moving target — so
+// is skipped this round - its build would be run against a moving target - so
 // only heads that have settled get pre-generated.
 func (s *Server) prefetchOnce(ctx context.Context, roots []string) {
 	st := s.prefetchState()
@@ -213,8 +213,8 @@ func (s *Server) prefetchOnce(ctx context.Context, roots []string) {
 			if changed {
 				// The working tree moved since we prefetched it, so the builds we
 				// kicked off for its previous state are stale. Cancel any still
-				// running purely as background work — freeing the generation slot and
-				// its build memory at once — instead of letting a dead render finish.
+				// running purely as background work - freeing the generation slot and
+				// its build memory at once - instead of letting a dead render finish.
 				for _, d := range st.takeDirs(head.ID) {
 					mgr.CancelStaleBackground(d)
 				}
@@ -251,7 +251,7 @@ func (s *Server) prefetchHead(projectRoot string, head *heads.Head) {
 // debounce. It is meant to be fired the moment a head transitions into a resting
 // status (finished / waiting / needs_input): the agent has stopped editing, so
 // its working tree is a stable target and there's no reason to wait up to two 30s
-// sweeps to notice. Best-effort and safe to call redundantly — the Manager dedups
+// sweeps to notice. Best-effort and safe to call redundantly - the Manager dedups
 // by version, so a version already cached or in-flight is a no-op. It shares the
 // sweep's bookkeeping, so a render it starts is cancellable by a later sweep if
 // the head resumes and moves on.

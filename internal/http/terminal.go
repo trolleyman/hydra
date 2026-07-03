@@ -21,8 +21,8 @@ import (
 )
 
 // checkOrigin guards WebSocket upgrades against cross-origin (CSRF) connections.
-// It allows same-origin sockets — the Origin's host:port matches the Host the
-// request was sent to — so the UI works when Hydra is reached by LAN IP or
+// It allows same-origin sockets - the Origin's host:port matches the Host the
+// request was sent to - so the UI works when Hydra is reached by LAN IP or
 // hostname (e.g. from a phone), not just on localhost. Loopback origins are also
 // trusted (covers dev setups where the page and API sit on different localhost
 // ports), as are requests with no Origin header (native/CLI clients). Remote
@@ -153,7 +153,7 @@ func sendDiffRefresh(conn *safeConn, headMoved bool) {
 // HandleShellClose terminates a single web bash shell immediately, so closing a
 // terminal tab kills its process now instead of waiting out the idle grace
 // period (which only covers reloads / transient disconnects).
-// URL pattern: POST /shells/projects/{project_id}/agents/{id}/close?shell_id=…&sandboxed=…
+// URL pattern: POST /shells/projects/{project_id}/agents/{id}/close?shell_id=...&sandboxed=...
 func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	if agentID == "" {
@@ -214,7 +214,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// session here, so a fresh/resumed agent renders at the right width straight
 	// away instead of flashing the default and reflowing. Falls back to this
 	// head's last persisted geometry (then the project fallback, then 80x24) when
-	// absent or out of range. This never resizes an already-live PTY — that path
+	// absent or out of range. This never resizes an already-live PTY - that path
 	// attaches with 0,0 and waits for the client's settled resize.
 	defRows, defCols := heads.LoadResumeSize(s.DB, projectRoot, agentID)
 	initRows, initCols := parseTermSize(r, defRows, defCols)
@@ -304,12 +304,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Attach without imposing a size (0,0). The session already has a width —
-	// either from its initial start or from the last client that sized it — and a
+	// Attach without imposing a size (0,0). The session already has a width -
+	// either from its initial start or from the last client that sized it - and a
 	// detached agent keeps producing output at that width. Passing a concrete size
 	// here would resize the live PTY on every reconnect, and since the browser
 	// opens this socket on a fresh mount (e.g. navigating back to an agent) before
-	// its flex layout has settled, that size is frequently wrong — it would reflow
+	// its flex layout has settled, that size is frequently wrong - it would reflow
 	// the agent narrow, baking narrow-wrapped lines into the scrollback ring that
 	// then look broken when the user scrolls up. Instead we leave the PTY at its
 	// current width and let the client send a single resize once its layout is
@@ -326,7 +326,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// Initial status again just in case it changed between checks. A just-resumed
 	// agent is idle waiting for the user (it restored its conversation but isn't
-	// working), so report waiting rather than a misleading "running" — unless it had
+	// working), so report waiting rather than a misleading "running" - unless it had
 	// already finished its turn, which ResumeHead preserves, so read back the status
 	// it actually wrote rather than assuming "waiting" and flashing it on a finished
 	// head.
@@ -416,13 +416,13 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// Send diff_refresh events only when the worktree content actually changes.
 	//
-	// We poll a cheap content fingerprint of the worktree (git.WorktreeStateHash —
+	// We poll a cheap content fingerprint of the worktree (git.WorktreeStateHash -
 	// HEAD + porcelain status + tracked diff + untracked sizes) on a short timer and
 	// emit only when it differs from what we last reported. A git command detected in
 	// the agent's status log triggers an immediate re-check so commits/checkouts show
 	// up faster than the poll interval. This replaces the previous unconditional
 	// 20-second ticker (issue #35), which forced every attached client to re-fetch the
-	// full diff on every idle tick — wasted work, and the trigger behind issue #34
+	// full diff on every idle tick - wasted work, and the trigger behind issue #34
 	// (the re-fetch periodically reset the user's in-progress text selection).
 	go func() {
 		defer func() {
@@ -440,7 +440,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// lastHash/lastHead start at the current state so attaching never fires a
-		// spurious initial refresh — the client already fetched the diff on mount.
+		// spurious initial refresh - the client already fetched the diff on mount.
 		var lastHash string
 		var lastHead string
 		if worktree != "" {

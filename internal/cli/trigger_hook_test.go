@@ -131,7 +131,7 @@ func TestTriggerHookPromptSubmitRunning(t *testing.T) {
 // TestTriggerHookSessionStartSource covers resume vs fresh start: a SessionStart
 // with source="resume" (claude --continue/--resume) means the agent restored its
 // conversation and is idle waiting for the user, so it must report "waiting", not
-// "running" — otherwise a resumed agent lingers as "running" after a daemon
+// "running" - otherwise a resumed agent lingers as "running" after a daemon
 // restart. Any other source (or none) is a fresh start and stays "running".
 func TestTriggerHookSessionStartSource(t *testing.T) {
 	cases := []struct {
@@ -159,7 +159,7 @@ func TestTriggerHookSessionStartSource(t *testing.T) {
 // head that had already finished its turn is resumed (claude --continue fires
 // SessionStart source="resume"). Because ResumeHead seeds the prior terminal
 // status into status.json before launch, the hook must NOT downgrade it to
-// "waiting" — otherwise a finished head spuriously reverts to waiting on every
+// "waiting" - otherwise a finished head spuriously reverts to waiting on every
 // restart. A non-terminal prior status still falls back to waiting.
 func TestTriggerHookResumePreservesTerminalStatus(t *testing.T) {
 	cases := []struct {
@@ -295,7 +295,7 @@ func runTriggerHookInfoForTest(t *testing.T, agentType, event string, payload ma
 
 // TestTriggerHookQuestionNotSuggested covers a user-input tool's PreToolUse: the
 // status flips to needs_input and the question becomes last_message, but it must
-// NOT be flagged as a suggested next message — it's a question the agent is
+// NOT be flagged as a suggested next message - it's a question the agent is
 // asking, not an instruction you'd send back, even though its shape looks terse.
 func TestTriggerHookQuestionNotSuggested(t *testing.T) {
 	info := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
@@ -371,7 +371,7 @@ func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payl
 // Hydra head runs fully autonomously in a throwaway sandbox, so the ExitPlanMode
 // permission gate is pure friction. The PermissionRequest hook must emit Claude's
 // "allow" decision on stdout (so the user is never prompted) and report the agent
-// as running — it proceeds straight into the work rather than waiting.
+// as running - it proceeds straight into the work rather than waiting.
 func TestTriggerHookExitPlanModeAutoApproves(t *testing.T) {
 	dir := t.TempDir()
 	statusPath := filepath.Join(dir, "status.json")
@@ -440,7 +440,7 @@ func TestTriggerHookExitPlanModeAutoApproves(t *testing.T) {
 
 // TestTriggerHookPermissionRequest covers a non-ExitPlanMode permission prompt: a
 // genuinely non-bypassable prompt still means the agent is explicitly blocked on
-// the user (needs_input) and is only observed — no approval is written to stdout.
+// the user (needs_input) and is only observed - no approval is written to stdout.
 func TestTriggerHookPermissionRequest(t *testing.T) {
 	other := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
 		"hook_event_name": "PermissionRequest",
@@ -457,7 +457,7 @@ func TestTriggerHookPermissionRequest(t *testing.T) {
 
 // TestTriggerHookNotificationTypes covers the AskUserQuestion fix: the
 // notification_type drives the status. An explicit prompt (permission_prompt /
-// elicitation_dialog) becomes needs_input — the red "the agent needs you now"
+// elicitation_dialog) becomes needs_input - the red "the agent needs you now"
 // state the poller flags at once; the idle nudge (idle_prompt / unrecognised)
 // becomes the softer waiting; an answered elicitation goes back to running;
 // auth_success writes nothing.
@@ -500,7 +500,7 @@ func TestTriggerHookNotificationTypes(t *testing.T) {
 }
 
 // fireHook runs runTriggerHook once against caller-provided status/subagents
-// paths so a multi-hook sequence (SubagentStart … Stop) shares the same files
+// paths so a multi-hook sequence (SubagentStart ... Stop) shares the same files
 // across calls. Returns the persisted status.json status ("" if none was written).
 func fireHook(t *testing.T, statusPath, subagentsDir, event string, payload map[string]interface{}) api.AgentStatus {
 	t.Helper()
@@ -546,7 +546,7 @@ func fireHook(t *testing.T, statusPath, subagentsDir, event string, payload map[
 // TestTriggerHookSubagentDoesNotClobberParent covers the sub-agent status bug: a
 // Claude sub-agent (Task tool) fires the same hooks against the head's shared
 // status.json, but its tool activity must NOT rewrite the parent agent's status
-// — otherwise a still-running sub-agent flips a needs_input/finished parent back
+// - otherwise a still-running sub-agent flips a needs_input/finished parent back
 // to running. Sub-agent hooks are identified by the agent_id field the main
 // agent's hooks lack.
 func TestTriggerHookSubagentDoesNotClobberParent(t *testing.T) {
@@ -583,7 +583,7 @@ func TestTriggerHookSubagentDoesNotClobberParent(t *testing.T) {
 
 // TestTriggerHookStopAwaitsSubagents covers finished-vs-still-working: when the
 // main turn ends (Stop) while sub-agents it launched are still running, the head
-// isn't done — it reports running, not finished. Once the sub-agents stop, the
+// isn't done - it reports running, not finished. Once the sub-agents stop, the
 // next Stop is a genuine finish. This is what makes "finished" reliable enough to
 // gate auto-merge on.
 func TestTriggerHookStopAwaitsSubagents(t *testing.T) {

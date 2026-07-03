@@ -72,7 +72,7 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	// unreachable". The guest must therefore be pinned to a synthetic subnet whose
 	// gateway IS the map address, and that address must not be link-local.
 	if strings.HasPrefix(MapAddr, "169.254.") {
-		t.Fatalf("MapAddr %q is link-local — unroutable via a gateway in the netns", MapAddr)
+		t.Fatalf("MapAddr %q is link-local - unroutable via a gateway in the netns", MapAddr)
 	}
 	args := PastaArgs("/usr/bin/pasta", MapAddr, nil)
 	// mapAddr must be handed to pasta as the gateway, so pasta installs a default
@@ -89,7 +89,7 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	if gp(GuestAddr) != gp(MapAddr) {
 		t.Errorf("GuestAddr %q and MapAddr %q must be in the same subnet", GuestAddr, MapAddr)
 	}
-	// Regression: -a/-n/-g only pick the values — pasta applies them to a spawned
+	// Regression: -a/-n/-g only pick the values - pasta applies them to a spawned
 	// netns solely under --config-net. Without it (and with DHCP/RA/NDP disabled)
 	// the interface stays unconfigured and every connect dies with ENETUNREACH.
 	if !contains(args, "--config-net") {
@@ -124,7 +124,7 @@ func TestPastaArgsLoopbackPorts(t *testing.T) {
 		t.Errorf("PastaArgs without ports must pass -T none: %v", args)
 	}
 	// With an allow-list, only those ports are spliced (-T), and everything else
-	// stays off — inbound (-t/-u) and outbound UDP (-U) in particular.
+	// stays off - inbound (-t/-u) and outbound UDP (-U) in particular.
 	args := PastaArgs("/usr/bin/pasta", MapAddr, []int{5037})
 	if !argHasValue(args, "-T", "5037") {
 		t.Errorf("PastaArgs must splice the allow-listed loopback port via -T: %v", args)

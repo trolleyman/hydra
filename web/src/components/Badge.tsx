@@ -3,12 +3,12 @@ import { TONE_BADGE } from './badgeTones'
 
 // Color tones are the single source of truth for agent status / session /
 // end-state colors. Each tone knows how to paint itself two ways: as a solid
-// status `dot` (TONE_DOT) and as a soft text `badge` (TONE_BADGE — light fill +
+// status `dot` (TONE_DOT) and as a soft text `badge` (TONE_BADGE - light fill +
 // readable text, with dark-mode variants), both in badgeTones. Because both
 // presentations come from the same tone, a status dot and badge never drift.
 //
-// `red` vs `redSoft` differ only as dots — needs_input reads a stronger red than
-// an exited/killing session — but share the same badge fill. The three grays
+// `red` vs `redSoft` differ only as dots - needs_input reads a stronger red than
+// an exited/killing session - but share the same badge fill. The three grays
 // (`neutral`/`muted`/`faint`) are progressively dimmer badge fills used for
 // pending → ended/archived → unknown states; their dots are identical.
 export type Tone =
@@ -31,7 +31,7 @@ export type Tone =
 // `xs` additionally pins a fixed height and centers its content (`inline-flex
 // items-center h-[18px]`) so every chip in the sidebar badge row is the SAME
 // height regardless of whether it carries a 12px icon (the test-verdict chips), a
-// 1px dashed border (the stale chip — box-border keeps it inside the 18px), or is
+// 1px dashed border (the stale chip - box-border keeps it inside the 18px), or is
 // plain text (the status badge). Without this the row's `items-center` grew to the
 // tallest child, so the layout jumped as a head's verdict changed. The fixed
 // height replaces vertical padding (hence no `py-*` on `xs`).
@@ -61,7 +61,7 @@ export function Badge({
   /**
    * Extra layout classes appended to the chip's outer span (always, alongside
    * the tone/`className` color). Use for sizing/overflow concerns like
-   * `min-w-0` so a chip can shrink and truncate within a tight row — kept
+   * `min-w-0` so a chip can shrink and truncate within a tight row - kept
    * separate from `className` so it doesn't clobber the tone color.
    */
   containerClassName?: string

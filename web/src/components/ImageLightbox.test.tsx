@@ -4,22 +4,22 @@ import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 
 // Two regression suites for the fullscreen lightbox:
 //
-// Closing — closing on backdrop click must require the pointer press to START on
+// Closing - closing on backdrop click must require the pointer press to START on
 // the backdrop: a drag that begins on the image (panning while zoomed, or
 // dragging a diff slider) and releases past the image's edge makes the browser
-// fire the trailing click on the press/release common ancestor — the backdrop —
+// fire the trailing click on the press/release common ancestor - the backdrop -
 // and that must NOT close the viewer.
 //
-// Focus management — the scenario that motivated it: open a lightbox while the
+// Focus management - the scenario that motivated it: open a lightbox while the
 // terminal owns focus (xterm parks the keyboard on a hidden <textarea>). Without
 // the focus steal, every keystroke kept feeding the shell and the X/B/A/H
 // comparator shortcuts were swallowed by applyABShortcut's typing-in-a-field
-// guard — so the lightbox looked keyboard-dead exactly when it was opened from
+// guard - so the lightbox looked keyboard-dead exactly when it was opened from
 // the terminal. The lightbox must take focus for as long as it's up, and hand it
 // back on close.
 //
 // ZoomPan (around the image / inside the comparator) needs a ResizeObserver;
-// jsdom has none, and a no-op stub is fine — the zero-sized frame jsdom measures
+// jsdom has none, and a no-op stub is fine - the zero-sized frame jsdom measures
 // just means no minimap.
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {

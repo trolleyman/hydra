@@ -45,7 +45,7 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	}
 
 	// A refresh request names one script whose cached result the user wants
-	// discarded and regenerated — chiefly to retry a cached failure. Drop the
+	// discarded and regenerated - chiefly to retry a cached failure. Drop the
 	// cache entry before generating so the Get calls below kick off a fresh run
 	// instead of returning the stale (errored) meta. refresh_side narrows that to
 	// just the before/after side, leaving the other side's cache untouched.
@@ -87,7 +87,7 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 
 	// Left version: a committed ref. When no explicit base ref is requested we
 	// baseline against the *merge-base* (fork point) of the base branch and the
-	// head branch — NOT the base branch tip. This mirrors the triple-dot diff used
+	// head branch - NOT the base branch tip. This mirrors the triple-dot diff used
 	// for code (see GetAgentDiff) so artifacts reflect only the branch's own
 	// changes. Otherwise commits landed on the base branch after the fork would
 	// regenerate the "before" artifact from newer state, producing spurious
@@ -165,7 +165,7 @@ func (p *artifactPlan) specsFor(name string) (left, right *config.ArtifactScript
 }
 
 // staleableDirs returns the cache dirs of this plan's right (head) side when that
-// side is the uncommitted working tree — the only versions that go stale as the
+// side is the uncommitted working tree - the only versions that go stale as the
 // head keeps editing. A commit/merge-base side is immutable and shared across
 // views, so it is deliberately excluded and never preempted. The prefetcher uses
 // these to cancel a head's superseded background renders when it moves on.
@@ -230,8 +230,8 @@ func (p *artifactPlan) invalidateSide(name, side string) {
 
 // artifactSpecsByName loads the artifact scripts that apply to one side of the
 // comparison and indexes them by name. It reads .hydra/config.toml as it existed
-// at that version — the worktree's own file for an uncommitted working tree, or
-// the file at the committed ref otherwise — so a branch's [[artifacts]] edits are
+// at that version - the worktree's own file for an uncommitted working tree, or
+// the file at the committed ref otherwise - so a branch's [[artifacts]] edits are
 // reflected on the side that introduced them. Scripts with an empty name or
 // command are dropped, and on a duplicate name the first definition wins.
 //
@@ -240,7 +240,7 @@ func (p *artifactPlan) invalidateSide(name, side string) {
 // a version is never allowed to grant itself host access. unsafe_host is honored
 // only when the trusted live config (config.Load of the project root, what a human
 // controls on the main branch) authorizes that exact name+command; otherwise the
-// command is forced back into the sandbox. Sandboxed commands need no such gate —
+// command is forced back into the sandbox. Sandboxed commands need no such gate -
 // the sandbox is the boundary and already runs the checkout's untrusted code.
 func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config.Config) (map[string]config.ArtifactScript, error) {
 	var content []byte
@@ -284,8 +284,8 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 }
 
 // disabledArtifacts returns the set of script names the live config marks
-// enabled = false. The live config is human-controlled, so it — not a diffed
-// ref's config — decides whether a script runs.
+// enabled = false. The live config is human-controlled, so it - not a diffed
+// ref's config - decides whether a script runs.
 func disabledArtifacts(cfg config.Config) map[string]bool {
 	disabled := map[string]bool{}
 	for _, s := range cfg.Artifacts {
@@ -360,14 +360,14 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	leftErrored := leftMeta.Status == artifacts.StatusError
 	rightErrored := rightMeta.Status == artifacts.StatusError
 
-	// Surface a single side's error as soon as it fails — BEFORE the status switch
+	// Surface a single side's error as soon as it fails - BEFORE the status switch
 	// below, so a partial failure is reported even while the other side is still
 	// generating. Otherwise a side that failed mid-set carries its persisted log
 	// URL (set above) but no error, and the live log column mistakes its drained
 	// live log + URL for a clean finish and paints it the green "succeeded" border.
 	// When BOTH sides fail the whole set is "error" and set.Error carries the
 	// combined message instead (the per-side fields stay null then, per the API
-	// contract — see left_error/right_error docs).
+	// contract - see left_error/right_error docs).
 	bothFailed := leftErrored && rightErrored
 	if leftErrored && !bothFailed {
 		set.LeftError = nonEmptyPtr(leftMeta.Error)
@@ -399,7 +399,7 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		set.Status = api.ArtifactSetStatusReady
 	}
 
-	// One side failed but the other rendered: fall through to Compare — the
+	// One side failed but the other rendered: fall through to Compare - the
 	// errored side carries no files, so the surviving side's artifacts surface as
 	// added/removed (the per-side error was set above so the panel can warn).
 	deltas := mgr.Compare(leftMeta, rightMeta)
@@ -440,7 +440,7 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 // pendingTags gathers the deduped, sorted union of every tag carried by the
 // files of the given metas. While a set generates, a settled side has files (so
 // contributes its tags) and a still-generating side has none, so this exposes
-// the tags learned so far — letting the filter bar show before both sides settle.
+// the tags learned so far - letting the filter bar show before both sides settle.
 func pendingTags(metas ...artifacts.Meta) []string {
 	seen := map[string]struct{}{}
 	for _, m := range metas {

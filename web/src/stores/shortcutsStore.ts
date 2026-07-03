@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 
 // Open/close state for the keyboard-shortcuts help overlay. A tiny store (rather
-// than local state in __root) so any surface can pop it open — the global `?`
-// handler, the sidebar footer button — without prop-drilling.
+// than local state in __root) so any surface can pop it open - the global `?`
+// handler, the sidebar footer button - without prop-drilling.
 interface ShortcutsState {
   open: boolean
   setOpen: (open: boolean) => void

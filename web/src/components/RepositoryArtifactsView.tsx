@@ -30,7 +30,7 @@ const POLL_MS = 2500
 // MediaCell shows one generated file: its name, tags, and the image (click-to-open)
 // or video. Mirrors the diff viewer's FileRow, minus the before/after comparison
 // machinery; width-driven (w-full) so it fills its masonry column. `gallery` is the
-// full list of the grid's image files (videos excluded — the lightbox is images
+// full list of the grid's image files (videos excluded - the lightbox is images
 // only); clicking opens the lightbox at this file's place in it, so ←/→ walk the
 // whole grid rather than being stuck on the one image.
 function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: LightboxImage[] }) {
@@ -98,7 +98,7 @@ function PersistedLog({ url }: { url: string }) {
   const [lines, setLines] = useState<ArtifactLogLine[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // Drop the cached log when the url changes (a regenerate swaps it) — during
+  // Drop the cached log when the url changes (a regenerate swaps it) - during
   // render so the stale log/error never shows against the new url.
   const [prevUrl, setPrevUrl] = useState(url)
   if (prevUrl !== url) { setPrevUrl(url); setLines(null); setErr(null) }
@@ -126,10 +126,10 @@ function PersistedLog({ url }: { url: string }) {
         err ? (
           <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
         ) : (
-          // While the log is in flight `lines` is still null — show the terminal
-          // straight away with "Loading…" inside it rather than a bare line of
+          // While the log is in flight `lines` is still null - show the terminal
+          // straight away with "Loading..." inside it rather than a bare line of
           // text, then swap in the output (or "No output") once it arrives.
-          <div className="my-2"><LogView log={lines ?? []} emptyText={lines === null ? 'Loading…' : 'No output'} /></div>
+          <div className="my-2"><LogView log={lines ?? []} emptyText={lines === null ? 'Loading...' : 'No output'} /></div>
         )
       )}
     </div>
@@ -157,7 +157,7 @@ export function RepositoryArtifactsView({
 
   // Tag/type filter + free-text search, reusing the diff viewer's filter bar and
   // rules (see ArtifactFilterBar / lib/artifactFilter). The change-type scope is
-  // omitted — a single ref has no before/after diff. The persisted filter is keyed
+  // omitted - a single ref has no before/after diff. The persisted filter is keyed
   // per project + script (a "repo:<script>" agent slot), reloaded when either
   // changes and saved only on an explicit edit so the reload can't clobber it.
   const filterAgentKey = `repo:${scriptName}`

@@ -110,7 +110,7 @@ func TestParseTestMarkerResolvesGoFile(t *testing.T) {
 	}
 }
 
-// A type=stdout runner's accumulated markers become the report — no file read —
+// A type=stdout runner's accumulated markers become the report - no file read -
 // and coalesced "counts" events stream the increments.
 func TestGenerateStreamingMarkers(t *testing.T) {
 	script := `
@@ -135,7 +135,7 @@ echo "plain log line"
 	var counts *RunningCounts
 	for ev := range events {
 		if ev.Kind == "counts" && ev.Counts != nil {
-			// Keep the last one — totals are cumulative.
+			// Keep the last one - totals are cumulative.
 			counts = ev.Counts
 		}
 		if ev.Kind == "settled" {

@@ -13,13 +13,13 @@ import (
 // ErrOperationInProgress is returned when a TrySetHeadStatus CAS fails.
 var ErrOperationInProgress = errors.New("operation already in progress")
 
-// ErrAgentIDTaken is returned by CreateAgent when a record with the same ID —
-// active or archived, in any project — already exists.
+// ErrAgentIDTaken is returned by CreateAgent when a record with the same ID -
+// active or archived, in any project - already exists.
 var ErrAgentIDTaken = errors.New("agent ID already taken")
 
 // reader returns the query-only read pool used by the read methods below, so
 // concurrent reads don't serialise behind the single writer connection. Falls
-// back to the writer if a Store was built without a read pool (defensive — Open
+// back to the writer if a Store was built without a read pool (defensive - Open
 // always sets one).
 func (s *Store) reader() *gorm.DB {
 	if s.read != nil {
@@ -35,7 +35,7 @@ func (s *Store) UpsertAgent(a *Agent) error {
 }
 
 // CreateAgent inserts a new agent record, never overwriting an existing one.
-// Returns ErrAgentIDTaken when a record with the same ID already exists — the
+// Returns ErrAgentIDTaken when a record with the same ID already exists - the
 // ID is a global primary key shared by every project, so this also guards a
 // spawn in one project from clobbering a same-ID head in another. The unique
 // constraint (not a pre-read) is what detects the clash, so concurrent spawns
@@ -137,7 +137,7 @@ func (s *Store) SetAgentTermSize(id string, rows, cols uint16) error {
 }
 
 // LatestTermSizeForProject returns the most recently active agent's terminal
-// geometry for a project — the fallback used to seed a head that has no size of
+// geometry for a project - the fallback used to seed a head that has no size of
 // its own yet. Returns (0,0) if no active agent has a recorded size.
 func (s *Store) LatestTermSizeForProject(projectRoot string) (rows, cols uint16, err error) {
 	var a Agent
@@ -160,7 +160,7 @@ func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 		// gorm's NamingStrategy derives the column for the `SessionPID` struct
 		// field as `session_p_id` (it splits the `PID` initialism). Struct-based
 		// reads/writes map automatically, but this raw-map write must use the real
-		// column name — `session_pid` here silently failed with
+		// column name - `session_pid` here silently failed with
 		// "no such column: session_pid", breaking the liveness reconciler.
 		"session_p_id": pid,
 	}
@@ -170,7 +170,7 @@ func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 
 // UpdateAgentStatus updates the agent status and its timestamp. When markUnread
 // is true the has_unread_changes flag is also raised (the caller decides this
-// based on the status transition); it is never lowered here — clearing is an
+// based on the status transition); it is never lowered here - clearing is an
 // explicit user action via MarkAgentRead.
 func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string, markUnread bool) error {
 	updates := map[string]interface{}{
@@ -187,7 +187,7 @@ func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string, markUnread 
 // RaiseUnread sets the has_unread_changes flag without touching the status or
 // its timestamp. The poller uses this to confirm a deferred running→finished
 // (or idle running→waiting) transition once the agent has held that state past
-// the debounce window — separating "raise the flag" from "update the status"
+// the debounce window - separating "raise the flag" from "update the status"
 // that UpdateAgentStatus does on the original transition.
 func (s *Store) RaiseUnread(id string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("has_unread_changes", true)
@@ -305,7 +305,7 @@ func (s *Store) ArchiveAgent(id, endState string) error {
 }
 
 // ListArchivedAgents returns a page of archived (soft-deleted, non-ephemeral,
-// with a recorded EndState) agents for the project, newest-created first — i.e.
+// with a recorded EndState) agents for the project, newest-created first - i.e.
 // ordered by the same creation timestamp the UI shows for each agent, matching
 // the active list's ordering. A limit <= 0 returns all; offset paginates.
 // Aborted spawns (soft-deleted but EndState "") are excluded.
@@ -346,17 +346,17 @@ func (s *Store) GetArchivedAgent(id string) (*Agent, error) {
 // as archived ("killed") so they surface in the browsable archived-history list.
 //
 // Before the EndState column existed, killing/merging a head simply soft-deleted
-// it with an empty EndState — in storage indistinguishable from an aborted spawn
+// it with an empty EndState - in storage indistinguishable from an aborted spawn
 // (which is also soft-deleted with EndState ""). We upgrade only rows that show
 // evidence of having actually run: a session that reached a non-"pending" status
 // (UpdateSessionInfo flips it to "running" only after the sandbox session
 // starts), or a reported agent status. Genuinely aborted spawns fail before the
-// session starts — they stay session_status "pending" with a nil agent_status —
+// session starts - they stay session_status "pending" with a nil agent_status -
 // so they remain excluded.
 //
 // endState is always "killed": the original kill/merge distinction was never
 // recorded, so it can't be reconstructed; "killed" is the safe, common default.
-// Idempotent — it only touches non-ephemeral soft-deleted rows whose EndState is
+// Idempotent - it only touches non-ephemeral soft-deleted rows whose EndState is
 // still empty, so it's a no-op on every boot after the first. Returns the number
 // of rows upgraded.
 func (s *Store) BackfillArchivedEndState() (int64, error) {
@@ -375,7 +375,7 @@ func (s *Store) BackfillArchivedEndState() (int64, error) {
 // from merge commits; this flips the matching rows (soft-deleted, non-ephemeral,
 // in the given project, branch in branchNames) to "merged".
 //
-// It only ever UPGRADES a non-empty, non-"merged" end_state — it never downgrades
+// It only ever UPGRADES a non-empty, non-"merged" end_state - it never downgrades
 // or touches active rows or aborted spawns (empty end_state). That one-way rule
 // keeps fast-forward merges (which git.MergedHydraBranches can't detect, so they
 // stay "killed") from being wrongly flipped back and forth. Returns rows changed.
@@ -392,8 +392,8 @@ func (s *Store) SetArchivedEndStateMerged(projectRoot string, branchNames []stri
 	return result.RowsAffected, errtrace.Wrap(result.Error)
 }
 
-// HardDeleteAgent permanently and irreversibly removes an agent row — active or
-// already soft-deleted (archived) — from the database, leaving no trace in the
+// HardDeleteAgent permanently and irreversibly removes an agent row - active or
+// already soft-deleted (archived) - from the database, leaving no trace in the
 // archived-history list. Used only by the "delete for real" purge path; normal
 // kill/merge archival uses ArchiveAgent (a soft delete) instead.
 func (s *Store) HardDeleteAgent(id string) error {

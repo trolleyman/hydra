@@ -5,28 +5,28 @@ import { startVisibilityPolling } from './visibilityPolling'
 // was copy-pasted across ~7 call sites (PLAN #57). Each of those owned, by hand:
 //   - a `useState` for the data,
 //   - a `let cancelled` flag threaded through an async fetch + try/catch swallow,
-//   - a `refetchRef.current = …` handle so a WebSocket event could trigger a
+//   - a `refetchRef.current = ...` handle so a WebSocket event could trigger a
 //     fetch without restarting the effect (and a noop reset on cleanup/disable),
-//   - a `startVisibilityPolling(fn, …)` fallback poll + its cleanup.
+//   - a `startVisibilityPolling(fn, ...)` fallback poll + its cleanup.
 //
 // The hook owns all of that. It deliberately does NOT open the events WebSocket
 // itself: the daemon serves one socket per project and several of these hooks
 // share a project, so each opening its own would multiply sockets. Instead the
 // hook returns a STABLE `refetch` handle (identity never changes across key
 // changes) that the call site wires straight into its existing single
-// `useEventStream(projectId, …)` — replacing the `refetchRef` ceremony without
+// `useEventStream(projectId, ...)` - replacing the `refetchRef` ceremony without
 // the socket fan-out.
 //
-// `key` doubles as the enable switch: a null key means "no source" — data resets
+// `key` doubles as the enable switch: a null key means "no source" - data resets
 // to `initial`, no fetch/poll runs, and `refetch` is a noop. The effect re-runs
 // (initial fetch + fresh poll) whenever `key` or any `deps` entry changes. Data is
-// reset to `initial` when the *key* changes (a different resource — so the old
+// reset to `initial` when the *key* changes (a different resource - so the old
 // one's data can't flash under the new one), but NOT when only a `deps` entry
-// changes (same resource, just revalidating — clearing there would flicker the UI).
+// changes (same resource, just revalidating - clearing there would flicker the UI).
 
 export interface UseServerDataOptions<T> {
   // Visibility-gated background poll interval in ms. Omit or 0 to disable polling
-  // (one fetch per key/deps change only — for event-driven or one-shot loads).
+  // (one fetch per key/deps change only - for event-driven or one-shot loads).
   intervalMs?: number
   // Value held before the first successful fetch and whenever the source is
   // disabled (key === null). Defaults to null.
@@ -46,7 +46,7 @@ export interface UseServerDataOptions<T> {
 export interface ServerData<T, A> {
   data: T
   setData: Dispatch<SetStateAction<T>>
-  // Triggers a fresh fetch against the current key. Stable identity — safe to
+  // Triggers a fresh fetch against the current key. Stable identity - safe to
   // wire straight into an event handler. Noops while the source is disabled.
   // An optional arg is forwarded to the fetcher (e.g. a force-refresh flag).
   refetch: (arg?: A) => void
@@ -81,7 +81,7 @@ export function useServerData<T = unknown, A = void>(
 
   // The key the current data belongs to, so we can clear stale data when the key
   // changes (a different resource) without clearing on a mere `deps` revalidation
-  // (same key) — the latter would flicker a status-keyed list on every status bump.
+  // (same key) - the latter would flicker a status-keyed list on every status bump.
   const dataKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export function useServerData<T = unknown, A = void>(
       runRef.current = () => {}
       return
     }
-    // Switched resources — drop the previous key's data so it can't flash under
+    // Switched resources - drop the previous key's data so it can't flash under
     // the new one before its fetch resolves.
     if (dataKeyRef.current !== key) {
       setData(initialRef.current)

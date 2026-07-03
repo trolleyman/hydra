@@ -37,7 +37,7 @@ export function buildFileTree(files: DiffFile[]): TreeNode[] {
 // horizontal indent that deeply nested trees would otherwise waste.
 //
 // A directory is folded into its child only when that child is its *sole* entry
-// and is itself a directory — so a folder holding a file (or more than one
+// and is itself a directory - so a folder holding a file (or more than one
 // child) stops the chain. The merged node keeps the deepest folder's `path`
 // (stable, unique → safe as a collapse-state / React key) and joins the segment
 // names for display.

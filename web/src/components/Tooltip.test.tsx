@@ -14,7 +14,7 @@ function wrapper(container: HTMLElement) {
   return container.querySelector('span') as HTMLElement
 }
 
-describe('Tooltip — dark variant (default)', () => {
+describe('Tooltip - dark variant (default)', () => {
   it('shows only after the hover delay and hides immediately on leave', () => {
     vi.useFakeTimers()
     try {
@@ -27,10 +27,10 @@ describe('Tooltip — dark variant (default)', () => {
       expect(screen.queryByText('Refresh')).toBeNull()
 
       fireEvent.mouseEnter(span)
-      // Still hidden one tick before the delay elapses…
+      // Still hidden one tick before the delay elapses...
       act(() => void vi.advanceTimersByTime(599))
       expect(screen.queryByText('Refresh')).toBeNull()
-      // …and visible once it does.
+      // ...and visible once it does.
       act(() => void vi.advanceTimersByTime(1))
       expect(screen.getByText('Refresh')).toBeInTheDocument()
 
@@ -81,7 +81,7 @@ describe('Tooltip — dark variant (default)', () => {
   })
 })
 
-describe('Tooltip — card variant', () => {
+describe('Tooltip - card variant', () => {
   it('shows immediately with title + content and survives the pointer moving into it', () => {
     vi.useFakeTimers()
     try {
@@ -98,9 +98,9 @@ describe('Tooltip — card variant', () => {
       expect(screen.getByText('OS Sandbox')).toBeInTheDocument()
       expect(screen.getByText('sandbox details')).toBeInTheDocument()
 
-      // Leaving the trigger starts a grace period rather than hiding at once…
+      // Leaving the trigger starts a grace period rather than hiding at once...
       fireEvent.mouseLeave(span)
-      // …and moving onto the card within that window keeps it open.
+      // ...and moving onto the card within that window keeps it open.
       const card = screen.getByText('sandbox details').closest('div.fixed') as HTMLElement
       fireEvent.mouseEnter(card)
       act(() => void vi.advanceTimersByTime(200))

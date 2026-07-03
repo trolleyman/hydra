@@ -115,12 +115,12 @@ func TestReadStatusLogTailQuestion(t *testing.T) {
 		t.Fatalf("lastMessage = %v, want %q", info.LastMessage, "Which DB?")
 	}
 	// The message is a question the agent is asking the user, not a suggestion you
-	// could send back — so it must not be flagged as a suggested next message even
+	// could send back - so it must not be flagged as a suggested next message even
 	// though its shape (short, single line, no mid-message break) looks terse.
 	if info.LastMessageIsSuggestedNextMessage != nil {
 		t.Fatalf("lastMessageIsSuggestedNextMessage = %v, want nil for a question", *info.LastMessageIsSuggestedNextMessage)
 	}
-	// A question tool isn't "activity" — the agent is blocked, not working.
+	// A question tool isn't "activity" - the agent is blocked, not working.
 	if info.Activity != nil {
 		t.Fatalf("activity = %v, want nil while waiting", info.Activity)
 	}
@@ -135,7 +135,7 @@ func TestIsSuggestedNextMessage(t *testing.T) {
 		{"verify it works by running the app", true},
 		{"  spin up the app  ", true}, // trimmed, still terse
 		{"", false},
-		{"The spike is built, tested, and committed. Here's what landed…", false}, // multi-sentence
+		{"The spike is built, tested, and committed. Here's what landed...", false}, // multi-sentence
 		{"line one\nline two", false},                               // multi-line
 		{strings.Repeat("x", 81), false},                            // too long
 		{"Where should the app binary be distributed first?", true}, // shape is terse; the question exclusion is applied by callers, not here

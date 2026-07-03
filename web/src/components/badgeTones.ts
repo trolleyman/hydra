@@ -3,7 +3,7 @@ import type { TestStatus } from '../api/models/TestStatus'
 
 // Color tones are the single source of truth for agent status / session /
 // end-state colors. Each tone knows how to paint itself two ways: as a solid
-// status `dot` (TONE_DOT) and as a soft text `badge` (TONE_BADGE — light fill +
+// status `dot` (TONE_DOT) and as a soft text `badge` (TONE_BADGE - light fill +
 // readable text, with dark-mode variants). Because both presentations come from
 // the same tone, a status dot and its badge can never drift out of sync.
 export const TONE_DOT: Record<Tone, string> = {
@@ -35,9 +35,9 @@ export const TONE_BADGE: Record<Tone, string> = {
 // Verdict → tone, the single source of truth for the test-gate chip colors
 // (PLAN #68, design 2026-06-29). passing=green, failing=red, running=blue,
 // errored=YELLOW (a "couldn't run / we don't know" caution, with a warning
-// triangle — distinct from a red failure), stale=gray (dashed). Skipped is NEVER
+// triangle - distinct from a red failure), stale=gray (dashed). Skipped is NEVER
 // its own verdict and renders GRAY inline (amber would imply a warning a skipped
-// test doesn't warrant — per user).
+// test doesn't warrant - per user).
 export function verdictTone(status: TestStatus): Tone {
   switch (status) {
     case 'passing':

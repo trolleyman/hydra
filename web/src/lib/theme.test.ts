@@ -21,7 +21,7 @@ describe('loadThemeMode', () => {
 
   // Regression guard for PLAN #64c: the legacy boolean `hydra-dark-mode` key used
   // to be migrated into a theme mode on first read. That migration window has
-  // passed and the code is gone, so a lingering legacy key must now be ignored —
+  // passed and the code is gone, so a lingering legacy key must now be ignored -
   // the preference falls through to the `system` default instead of resurrecting
   // the old light/dark choice.
   it('ignores the legacy hydra-dark-mode key', () => {

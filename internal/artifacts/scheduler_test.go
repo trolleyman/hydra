@@ -145,7 +145,7 @@ func TestSchedulerSetLimitUnlimitedAdmitsAll(t *testing.T) {
 // TestSchedulerNoPreemption is a sanity check that running generations are not
 // counted as preemptible: a foreground arrival does not free a held slot, it
 // only reorders the queue (covered above). Here we confirm the running count is
-// respected — a second acquire blocks until release even when foreground.
+// respected - a second acquire blocks until release even when foreground.
 func TestSchedulerNoPreemption(t *testing.T) {
 	s := newGenScheduler(1)
 	s.acquire("bg", false)

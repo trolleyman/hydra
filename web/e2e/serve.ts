@@ -2,7 +2,7 @@
 // Builds a hydra binary from the current checkout and runs it in --simulation
 // mode (mock data, no daemon) so the smoke specs drive the real built UI.
 //
-// Contract: the frontend (web/dist) must already be built — the Go binary embeds
+// Contract: the frontend (web/dist) must already be built - the Go binary embeds
 // it at build time (web/embed.go). Run `mage build` (or `bun run build`) first;
 // CI does this before the e2e step. Set E2E_PORT to override the port.
 import { spawn, spawnSync } from 'node:child_process'
@@ -15,7 +15,7 @@ const port = process.env.E2E_PORT ?? '41825'
 const addr = `127.0.0.1:${port}`
 
 if (!existsSync(join(repoRoot, 'web', 'dist', 'index.html'))) {
-  console.error('e2e: web/dist not built — run `mage build` (or `bun run build`) first')
+  console.error('e2e: web/dist not built - run `mage build` (or `bun run build`) first')
   process.exit(1)
 }
 

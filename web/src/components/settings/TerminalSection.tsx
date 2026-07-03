@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useDefaultTerminalRows, DEFAULT_SPAWN_ROWS, MIN_SPAWN_ROWS, MAX_SPAWN_ROWS } from '../../lib/terminalGeometry'
 import { SettingSection } from './shared'
 
-// Terminal — a client-only user preference (localStorage, global; not project-
+// Terminal - a client-only user preference (localStorage, global; not project-
 // scoped, so it reads/writes the same value on either settings page, like Theme)
 // for the height new heads start at. Width always follows the browser's last
 // terminal width; height follows the last height too, falling back to this
@@ -12,11 +12,11 @@ export function TerminalSection() {
   const [rows, setRows] = useDefaultTerminalRows()
   // Local draft so the field can hold an in-progress value (e.g. typing "3" on
   // the way to "30") without the min-clamp snapping it up on every keystroke.
-  // We only normalise — clamp to [MIN, MAX] — when the field loses focus.
+  // We only normalise - clamp to [MIN, MAX] - when the field loses focus.
   const [draft, setDraft] = useState<string>(rows == null ? '' : String(rows))
   // Re-sync when the stored value changes from elsewhere (another tab/page).
   // Done during render (rows only changes on commit or an external write, never
-  // mid-keystroke — the input owns `draft` while focused), so no extra paint.
+  // mid-keystroke - the input owns `draft` while focused), so no extra paint.
   const [prevRows, setPrevRows] = useState(rows)
   if (prevRows !== rows) { setPrevRows(rows); setDraft(rows == null ? '' : String(rows)) }
   const commit = () => {

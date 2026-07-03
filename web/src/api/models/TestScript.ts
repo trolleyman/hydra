@@ -15,7 +15,7 @@ export type TestScript = {
      */
     command: string;
     /**
-     * How results are read — "junit" (default; parse *.xml*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+     * How results are read - "junit" (default; parse *.xml*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
      */
     type?: string | null;
     /**
@@ -23,7 +23,7 @@ export type TestScript = {
      */
     timeout_sec?: number;
     /**
-     * Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
+     * Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
      */
     unsafe_host?: boolean;
     /**

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 // Behavioural smokes for the load-bearing sidebar flows, exercised against the
 // simulation server (internal/http/simulation.go). The sim seeds a project
 // "sim-project" (name "simulated-project") plus a second project "mobile-app",
-// and a handful of agents — agent-1 ("Add renameable agent titles", which
+// and a handful of agents - agent-1 ("Add renameable agent titles", which
 // carries the blue unread-changes dot), agent-2 ("Migrate auth providers to
 // OAuth", which is needs_input → red needs-input dot), agent-md, agent-3,
 // agent-approval. Selectors mirror the real markup:
@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test'
 const PROJECT = '/project/sim-project/'
 
 // Pre-trust the simulated projects so the first-open "Trust this project?" modal
-// (TrustProjectModal) — a fixed full-screen overlay that intercepts clicks —
+// (TrustProjectModal) - a fixed full-screen overlay that intercepts clicks -
 // never blocks these flows. Trust is client-side localStorage keyed by project
 // id (lib/storage StorageKeys.trustedProjects), so seeding it before the app
 // boots dismisses the gate, exactly as the screenshot harness does.
@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 
 // Locate a sidebar agent row by its (unique) title text. getByRole matches the
 // regex against the row button's full accessible name, so the leading title is
-// enough — no dependency on the trailing status/activity text.
+// enough - no dependency on the trailing status/activity text.
 function agentRow(page: import('@playwright/test').Page, title: string) {
   return page.locator('aside').getByRole('button', { name: new RegExp(title) })
 }
@@ -44,9 +44,9 @@ test('opening an agent from the sidebar navigates to its detail view', async ({ 
   await expect(row).toBeVisible()
   await row.click()
 
-  // URL reflects the opened agent…
+  // URL reflects the opened agent...
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
-  // …and the detail view renders agent-1's seeded prompt (unique to the detail
+  // ...and the detail view renders agent-1's seeded prompt (unique to the detail
   // page; the sidebar only shows the title + activity line).
   await expect(
     page.getByText('Let agents be renamed with a human-friendly title', { exact: false }),
@@ -77,12 +77,12 @@ test('a failed API mutation surfaces an error toast', async ({ page }) => {
   // through runWithToast, so a failing updateAgent must raise an error toast
   // prefixed "Failed to rename agent". The simulation server returns 501 for
   // updateAgent (UpdateAgent → WriteError "Not implemented in simulation mode"),
-  // so any real rename attempt fails — exactly the case we want to assert on.
+  // so any real rename attempt fails - exactly the case we want to assert on.
   await page.goto(PROJECT)
   await agentRow(page, 'Add renameable agent titles').click()
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
 
-  // The title is an always-mounted input (AgentTopBar) — read-only until focused.
+  // The title is an always-mounted input (AgentTopBar) - read-only until focused.
   // Clicking enters edit mode; changing the text and pressing Enter calls
   // saveTitle → updateAgent (→ 501). Located by its stable aria-label (the
   // "Rename" tooltip drops off once editing starts).
@@ -100,21 +100,21 @@ test('a failed API mutation surfaces an error toast', async ({ page }) => {
 
 test('the red needs-input dot stays lit when its agent is opened', async ({ page }) => {
   // Unlike the blue unread dot, the red needs-input marker is driven by the live
-  // status (agent-2 is needs_input), so it is NOT cleared by opening the agent —
+  // status (agent-2 is needs_input), so it is NOT cleared by opening the agent -
   // it clears on its own once the agent is answered. Two agents need input
   // (agent-2 + agent-approval), so the dot count holds across the open.
   await page.bringToFront()
   await page.goto(PROJECT)
 
-  // agent-2's sidebar row carries the red needs-input dot before it's opened…
+  // agent-2's sidebar row carries the red needs-input dot before it's opened...
   const row = agentRow(page, 'Migrate auth providers to OAuth')
   await expect(row.getByLabel('needs your input')).toBeVisible()
 
   await row.click()
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
 
-  // …and it's still there after opening (the dot is status-driven, so opening
-  // doesn't clear it — only answering the agent does).
+  // ...and it's still there after opening (the dot is status-driven, so opening
+  // doesn't clear it - only answering the agent does).
   await expect(row.getByLabel('needs your input')).toBeVisible()
 })
 
@@ -124,7 +124,7 @@ test('switching agents remounts the detail view, so an unsaved rename never blee
   // Open agent-1 and start an inline rename: focusing the title field begins the
   // edit (AgentTopBar), and we type a draft we never successfully save. In the
   // simulation server UpdateAgent returns 501, so the blur-triggered save fails
-  // and the editor is left open with the draft intact — exactly the state that
+  // and the editor is left open with the draft intact - exactly the state that
   // used to leak onto the next agent when AgentDetail was reused rather than
   // remounted.
   await agentRow(page, 'Add renameable agent titles').click()
@@ -136,7 +136,7 @@ test('switching agents remounts the detail view, so an unsaved rename never blee
 
   // Switch to agent-2 from the sidebar. The route keys the detail subtree by
   // project+agent, so it remounts with fresh state: agent-2's header shows
-  // agent-2's own title in a clean (read-only, not mid-edit) field — never the
+  // agent-2's own title in a clean (read-only, not mid-edit) field - never the
   // leftover draft from agent-1.
   await agentRow(page, 'Migrate auth providers to OAuth').click()
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
@@ -163,7 +163,7 @@ test("a failed service raises the project's health warning", async ({ page }) =>
 })
 
 test('a healthy project shows no service-health warning', async ({ page }) => {
-  await page.goto(PROJECT) // sim-project — its service pool is healthy
+  await page.goto(PROJECT) // sim-project - its service pool is healthy
   // Wait for the agent list to paint so the project's data has loaded, then
   // assert the warning never appears for the healthy project.
   await expect(agentRow(page, 'Add renameable agent titles')).toBeVisible()
@@ -187,7 +187,7 @@ test('the service-health warning is re-keyed when switching projects', async ({ 
 // Integration coverage for PLAN #64b: the sidebar status dot is coloured by
 // agentDotClass off the modern agent_status.status (AgentComponents.tsx). This
 // drives the real simulated agents end-to-end and asserts the rendered dot class
-// per status — guarding that the agent_status path (not the removed Docker
+// per status - guarding that the agent_status path (not the removed Docker
 // session-state normaliser) is what reaches the DOM. The dot is the first
 // rounded-full span inside the agent's sidebar row.
 test('sidebar status dots are coloured from agent_status', async ({ page }) => {

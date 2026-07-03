@@ -13,12 +13,12 @@ import (
 const miseTrustTimeout = 5 * time.Second
 
 // MiseTrustEnv returns a MISE_TRUSTED_CONFIG_PATHS override that trusts a
-// checkout dir's copied mise config — but only when the host already trusts the
+// checkout dir's copied mise config - but only when the host already trusts the
 // project's mise config. mise trust is path-based, so a copy of the project's
 // mise.toml living at a different path (a linked worktree, or an artifact
 // generator's ephemeral checkout) would otherwise prompt or error. Returns nil
-// when there's nothing to do (runDir is the project root, or — including when
-// mise is missing, errors, or emits unparseable output — the host doesn't
+// when there's nothing to do (runDir is the project root, or - including when
+// mise is missing, errors, or emits unparseable output - the host doesn't
 // demonstrably trust the project).
 func MiseTrustEnv(projectRoot, runDir string) []string {
 	if runDir == "" || runDir == projectRoot {

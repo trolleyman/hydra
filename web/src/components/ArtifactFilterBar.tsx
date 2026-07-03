@@ -11,7 +11,7 @@ import {
   type ArtifactTagFilter,
 } from '../lib/artifactPrefs'
 
-// The artifact filter bar — a search box plus one dropdown per tag scope — shared by
+// The artifact filter bar - a search box plus one dropdown per tag scope - shared by
 // the diff viewer's ArtifactsPanel and the repository browser's
 // RepositoryArtifactsView so both filter the same way. The pure filtering/search
 // rules live in lib/artifactFilter; this file owns the UI.
@@ -42,8 +42,8 @@ const EMPTY_OFF: string[] = []
 // carries "all" (top-left, re-check everything) and "clear" (top-right, uncheck
 // everything) so the menu's height never changes as you select. Shift-clicking a
 // value isolates it (clears the others). The count badge shows how many values
-// differ from the scope's default (see `defaultOff`), so a scope at its default —
-// e.g. "changes" hiding only 'unchanged' — shows no badge; selection is shared
+// differ from the scope's default (see `defaultOff`), so a scope at its default -
+// e.g. "changes" hiding only 'unchanged' - shows no badge; selection is shared
 // across every card via the parent's filter state.
 export function TagScopeFilter({
   label,
@@ -72,11 +72,11 @@ export function TagScopeFilter({
   onIsolate: (val: string) => void
   onAll: () => void
   onClear: () => void
-  // Extra controls rendered at the bottom of the dropdown, below the value list —
+  // Extra controls rendered at the bottom of the dropdown, below the value list -
   // used by the "changes" scope for its "% changed" threshold slider.
   footer?: ReactNode
   // Force the trigger into its active (highlighted) style even when nothing is
-  // hidden — e.g. the change threshold is set but no value checkbox is off.
+  // hidden - e.g. the change threshold is set but no value checkbox is off.
   highlight?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -112,7 +112,7 @@ export function TagScopeFilter({
   }, [open])
 
   // Close on an outside click or Escape, like the diff viewer's settings popup. The
-  // panel lives in a portal, so a click inside it isn't inside `ref` — check both.
+  // panel lives in a portal, so a click inside it isn't inside `ref` - check both.
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -137,7 +137,7 @@ export function TagScopeFilter({
   const changedCount = values.filter((v) => off.includes(v) !== defaultOff.includes(v)).length
   // select-none: shift-click isolates a value, but the browser's shift-click
   // range-selects text (which starts on mousedown, so the onClick preventDefault
-  // can't stop it) — making the row unselectable avoids the stray highlight.
+  // can't stop it) - making the row unselectable avoids the stray highlight.
   const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
 
   return (
@@ -207,7 +207,7 @@ export function TagScopeFilter({
 // ChangeThresholdControl is the "% changed" gate shown at the bottom of the
 // "changes" filter dropdown. A modified file whose change_ratio is below this
 // percentage is treated as identical (see effectiveChangeType): the slider says how
-// much of an image's pixels — or a video's frames — must differ before the change
+// much of an image's pixels - or a video's frames - must differ before the change
 // "counts". 0 means any difference counts (the default).
 function ChangeThresholdControl({ value, onChange }: { value: number; onChange: (pct: number) => void }) {
   return (
@@ -233,7 +233,7 @@ function ChangeThresholdControl({ value, onChange }: { value: number; onChange: 
   )
 }
 
-// ArtifactFilterBar is the whole filter group — search box, reset button, a dropdown
+// ArtifactFilterBar is the whole filter group - search box, reset button, a dropdown
 // per user-defined tag scope, the free-form "tags" group, and the built-in "type"
 // (image/video) and "changes" (added/removed/modified/unchanged) scopes. It derives
 // every offered value from `files` (plus `pendingTags`, the tags a side exposes
@@ -280,7 +280,7 @@ export function ArtifactFilterBar({
 
   // The built-in "changes" filter (added / removed / modified / unchanged), derived
   // from each file's change_type. Always lists all four change types (even ones no
-  // file currently has) so added/removed are a constant, predictable option — their
+  // file currently has) so added/removed are a constant, predictable option - their
   // per-value counts read 0 when absent. Unchanged is hidden by default (seeded in
   // loadTagFilter).
   const changeTypes = CHANGE_TYPE_ORDER
@@ -312,7 +312,7 @@ export function ArtifactFilterBar({
     [files, filter],
   )
 
-  // Nothing to offer — no tags, no media for the type filter, and the change filter
+  // Nothing to offer - no tags, no media for the type filter, and the change filter
   // is off. Render nothing so the caller's header doesn't carry an empty bar.
   if (!hasTags && !showTypeFilter && !showChangeFilter) return null
 
@@ -342,7 +342,7 @@ export function ArtifactFilterBar({
           </button>
         )}
       </div>
-      {/* Reset to defaults — shown only when the filter has moved off its default
+      {/* Reset to defaults - shown only when the filter has moved off its default
           (any tag/value hidden, or the changes filter no longer hides only
           'unchanged'). Restores every scope to "show all" + the change default. */}
       {!isDefaultTagFilter(filter) && (
@@ -386,7 +386,7 @@ export function ArtifactFilterBar({
           onClear={() => onFilterChange({ ...filter, free: [...collectedTags.free] })}
         />
       )}
-      {/* Built-in type scope — image vs video, derived from the file extensions
+      {/* Built-in type scope - image vs video, derived from the file extensions
           rather than a tag. */}
       {showTypeFilter && (
         <TagScopeFilter
@@ -403,7 +403,7 @@ export function ArtifactFilterBar({
           onClear={() => onFilterChange({ ...filter, scoped: { ...filter.scoped, [TYPE_CATEGORY]: [...fileTypes] } })}
         />
       )}
-      {/* Built-in change-type scope, last (rightmost) — added/removed/modified/
+      {/* Built-in change-type scope, last (rightmost) - added/removed/modified/
           unchanged, with unchanged hidden by default. Only the diff viewer offers
           it; a single ref has no diff. */}
       {showChangeFilter && (

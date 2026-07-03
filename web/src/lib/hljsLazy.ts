@@ -6,7 +6,7 @@
 import hljs from './hljs'
 import { LAZY_LANGUAGES } from './hljsLazyRegistry'
 
-// Languages that failed to load (unknown name, or import error) — don't retry.
+// Languages that failed to load (unknown name, or import error) - don't retry.
 const failed = new Set<string>()
 // In-flight/settled loads, so concurrent requests for the same language share one
 // import rather than fetching + registering it repeatedly.
@@ -15,7 +15,7 @@ const loading = new Map<string, Promise<boolean>>()
 // ensureLanguage registers `name` if it isn't already, resolving true once it's
 // available for hljs.highlight(). Returns false for the eager-or-unknown cases the
 // caller should just render as plain text: already-failed, not a real highlight.js
-// language, or an import failure. `name` may be an alias (e.g. 'toml', 'html') —
+// language, or an import failure. `name` may be an alias (e.g. 'toml', 'html') -
 // those resolve through an eager language and short-circuit on the getLanguage check.
 export function ensureLanguage(name: string): Promise<boolean> {
   if (!name || name === 'plaintext' || failed.has(name)) return Promise.resolve(false)

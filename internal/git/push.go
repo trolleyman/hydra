@@ -55,7 +55,7 @@ func GetRemoteStatus(projectRoot string) (RemoteStatus, error) {
 		return st, nil
 	}
 
-	// Commits on HEAD not reachable from any of the remote's tracking refs —
+	// Commits on HEAD not reachable from any of the remote's tracking refs -
 	// exactly what a push would add, whether or not an upstream is configured
 	// and whether or not the branch exists on the remote yet.
 	ahead, err := revListCount(projectRoot, "HEAD", "--not", "--remotes="+st.Remote)
@@ -202,7 +202,7 @@ func Pull(ctx context.Context, projectRoot, authorName, authorEmail string) erro
 	}
 	track := TrackingRef(projectRoot, st.Remote, st.Branch)
 	if track == "" {
-		return nil // branch isn't on the remote yet — nothing to integrate
+		return nil // branch isn't on the remote yet - nothing to integrate
 	}
 
 	// Already up to date: the tracking ref is reachable from HEAD.

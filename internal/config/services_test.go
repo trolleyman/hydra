@@ -24,7 +24,7 @@ func TestEnabledFlagRoundTrip(t *testing.T) {
 	}
 
 	tomlStr := renderConfig(nil, cfg)
-	// Count whole-line `enabled = false` matches only — not commented defaults or
+	// Count whole-line `enabled = false` matches only - not commented defaults or
 	// other keys that end in "enabled" (e.g. filter_enabled).
 	active := 0
 	for line := range strings.SplitSeq(tomlStr, "\n") {
@@ -188,7 +188,7 @@ host = true
 // commented-out example for an EMPTY section (here [[services]]) sat in the gap
 // before the next real array table ([[tests]]), got swallowed into that table's
 // leading comments as if it were user-written, and was re-emitted next to a
-// freshly generated example — duplicating the block on every save.
+// freshly generated example - duplicating the block on every save.
 func TestEmptySectionExampleDoesNotAccumulate(t *testing.T) {
 	countHeaders := func(text, header string) int {
 		n := 0

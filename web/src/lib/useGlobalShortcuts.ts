@@ -34,7 +34,7 @@ export function useGlobalShortcuts({
   const projectsRef = useRef(projects)
   const currentProjectIdRef = useRef(currentProjectId)
   const switcherIndexRef = useRef(switcherIndex)
-  // Keep the mirrors fresh in an effect (not during render — the listeners only
+  // Keep the mirrors fresh in an effect (not during render - the listeners only
   // read them later, from keydown/Ctrl-up, so post-commit is soon enough).
   useEffect(() => {
     selectProjectRef.current = selectProject
@@ -53,7 +53,7 @@ export function useGlobalShortcuts({
         return
       }
 
-      // `?` toggles the keyboard-shortcuts help overlay — except while typing (a
+      // `?` toggles the keyboard-shortcuts help overlay - except while typing (a
       // terminal, a form field), where `?` is just a character. No modifier so
       // it's as quick to reach as a real cheat-sheet key.
       if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -64,7 +64,7 @@ export function useGlobalShortcuts({
       }
 
       // Project switcher. Escape cancels; Ctrl+` (e.code === 'Backquote' so it's
-      // keyboard-layout independent — Shift+` is '~' on US layouts) steps the
+      // keyboard-layout independent - Shift+` is '~' on US layouts) steps the
       // highlight, Shift+` steps back (both wrap). We reveal the sidebar first
       // (transient, non-persisted) so the dropdown is on screen when collapsed.
       if (e.key === 'Escape') {

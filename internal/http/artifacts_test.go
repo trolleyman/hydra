@@ -191,7 +191,7 @@ unsafe_host = true
 		t.Fatal(err)
 	}
 	if right["audited"].UnsafeHost {
-		t.Error("branch modified the command — unsafe_host must be stripped")
+		t.Error("branch modified the command - unsafe_host must be stripped")
 	}
 	if right["sneaky"].UnsafeHost {
 		t.Error("branch-introduced unsafe_host command must be stripped")

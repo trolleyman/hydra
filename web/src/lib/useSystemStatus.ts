@@ -6,7 +6,7 @@ import { EVENT_FALLBACK_MS } from './visibilityPolling'
 import type { StatusResponse } from '../api'
 
 export interface SystemStatus {
-  // Stable refetch handle — wire into the caller's events stream.
+  // Stable refetch handle - wire into the caller's events stream.
   refetchStatus: () => void
   // Whether the server is running in dev mode (gates the restart button).
   development: boolean

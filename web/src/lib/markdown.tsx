@@ -25,13 +25,13 @@ type Seg =
 // optional so an empty block (```\n```, nothing between the fences) still matches
 // and gets highlighted.
 //
-// The closing ``` must stand alone on its line — only trailing spaces/tabs are
+// The closing ``` must stand alone on its line - only trailing spaces/tabs are
 // allowed after it, then a newline or end of input (CommonMark §4.5). So a fence
 // like ```#### does NOT close the block: trailing non-whitespace makes that line
 // part of the body, and with no later closing fence the whole thing is left
 // unmatched and falls through to inline/plain handling. (Without this, ```####
 // both closed the block AND, because the codeblock renders as a full-width
-// inline-block, pushed the #### onto its own visual line — drifting the highlight
+// inline-block, pushed the #### onto its own visual line - drifting the highlight
 // overlay away from the textarea caret.)
 const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```[ \t]*(?=\n|$)/
 
@@ -122,7 +122,7 @@ function trimAroundBlocks(segs: Seg[]): Seg[] {
   return out.filter((s) => !(s.kind === 'text' && s.value === ''))
 }
 
-// Inline-code styling for read-only renders. NOT tinted — it's just the default
+// Inline-code styling for read-only renders. NOT tinted - it's just the default
 // text colour in a rounded monospace chip. Deliberately uses only HORIZONTAL
 // padding and a slightly smaller (never larger) em size: vertical padding or a
 // bigger font would change the line height, and we want a line with a code span
@@ -137,7 +137,7 @@ const CODE_CLASS =
 // family. Not tinted either; when the info string names a language highlight.js
 // recognises, its tokens are coloured by the shared `.hljs-*` theme. The
 // `.hljs-*` token classes carry their own colours, so we deliberately do NOT add
-// the `.hljs` root class — that would also pull in github.css's white background.
+// the `.hljs` root class - that would also pull in github.css's white background.
 const CODEBLOCK_CLASS =
   'block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words'
 
@@ -158,7 +158,7 @@ export interface RenderMarkdownOptions {
   // activity lines that report a shell command being run.
   dollarCommand?: boolean
   // When true, render for a single-line preview (e.g. the sidebar's fixed-height
-  // activity row): collapse every whitespace run — newlines included — to a
+  // activity row): collapse every whitespace run - newlines included - to a
   // single space before parsing. This keeps the output one line and, since a
   // fenced code block needs real newlines to match, stops a code block in a
   // `last_message` from rendering as a multi-line `display:block` chip that would
@@ -233,7 +233,7 @@ function splitFence(raw: string): { open: string; body: string; close: string } 
 // used verbatim (no newline trimming): parseInline guarantees the concatenated
 // source of every segment equals `text` exactly, so in the `whitespace-pre-wrap`
 // backdrop the literal newlines reproduce the textarea's line breaks one-for-one
-// — and the fenced block is an ATOMIC inline-block (see the codeblock branch),
+// - and the fenced block is an ATOMIC inline-block (see the codeblock branch),
 // which flows exactly where the surrounding newlines place it without
 // manufacturing its own line breaks. That is what keeps the highlight glued to
 // the caret regardless of how many blank lines hug the block.
@@ -242,7 +242,7 @@ export function renderMarkdownSource(text: string): ReactNode {
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
-      // Background chip only, NOT tinted — same as the read-only inline style, so
+      // Background chip only, NOT tinted - same as the read-only inline style, so
       // it reads as the surrounding text wrapped in a chip. We must NOT switch to
       // a monospace font here: the textarea underneath uses the inherited
       // (proportional) font, so a font-mono run in the backdrop would be a
@@ -260,7 +260,7 @@ export function renderMarkdownSource(text: string): ReactNode {
       // Rendered as ONE full-width rounded background spanning the whole block
       // (not a chip hugging each line). The trick that keeps it glyph-aligned with
       // the textarea is `inline-block`: unlike `display:block`, an atomic
-      // inline-block does NOT manufacture its own line breaks — it simply flows
+      // inline-block does NOT manufacture its own line breaks - it simply flows
       // wherever the surrounding source newlines put it, so the block's source
       // (`open` + `body` + `close` === raw) stays char-for-char with the textarea
       // and no amount of blank lines hugging the fence can drift it. `w-full`
@@ -269,7 +269,7 @@ export function renderMarkdownSource(text: string): ReactNode {
       // the textarea's. It carries NO padding/margin (which would shift glyphs and
       // drift the caret) and stays in the inherited proportional font (a font swap
       // would change glyph widths). Syntax COLOURS come from the same highlight.js
-      // path as the read-only block — colour alone doesn't affect layout, and
+      // path as the read-only block - colour alone doesn't affect layout, and
       // `.md-src-code` strips the theme's bold/italic, which WOULD change glyph
       // advances. The highlighted HTML's text is exactly the inner code, so we
       // re-add the two fence newlines around it to stay char-for-char (`open` +

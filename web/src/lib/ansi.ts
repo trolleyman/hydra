@@ -5,7 +5,7 @@
 // inline it rather than pull in a dependency for a single one-liner.
 //
 // TODO(PLAN #46): render these sequences as actual colours/styles instead of
-// stripping them — see PLAN.md "Render ANSI in artifact logs/errors".
+// stripping them - see PLAN.md "Render ANSI in artifact logs/errors".
 const ANSI_PATTERN =
   '[\\u001B\\u009B][[\\]()#;?]*' +
   '(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*' +

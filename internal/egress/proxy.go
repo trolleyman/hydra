@@ -3,9 +3,9 @@
 // a network allow-list (`[<agent>.sandbox.network] allowed_hosts`) can reach the
 // hosts it needs and nothing else.
 //
-// Enforcement model (important, and deliberately honest — see AUDIT.md rec 3):
+// Enforcement model (important, and deliberately honest - see AUDIT.md rec 3):
 // this proxy is reached via the standard HTTP(S)_PROXY environment variables, and
-// every well-behaved client (claude, git, npm, curl, node, bun, …) honours those,
+// every well-behaved client (claude, git, npm, curl, node, bun, ...) honours those,
 // so for them the allow-list is enforced at this choke point. On its own that is
 // NOT an inescapable boundary: a process sharing the host network namespace can
 // open a direct socket and ignore the proxy (this is "advisory" mode).
@@ -15,7 +15,7 @@
 // egress except TCP to this proxy, so a raw socket has nowhere to go. Hard mode is
 // selected automatically when a smoke test confirms pasta+nft work on the host,
 // and otherwise degrades to advisory (surfaced via heads.EgressMode). The proxy
-// code below is identical for both modes — only the reachability of a bypass
+// code below is identical for both modes - only the reachability of a bypass
 // differs. `network mode = "off"` remains the absolute hard off-switch.
 //
 // A request is relayed iff its host is on the effective allow-list (user list +
@@ -45,7 +45,7 @@ const dialTimeout = 30 * time.Second
 
 // egressDebug enables a per-request trace of every proxied connection. Off by
 // default (Claude opens many connections; the trace is noisy) but invaluable when
-// diagnosing whether the agent's traffic reaches the proxy at all — a
+// diagnosing whether the agent's traffic reaches the proxy at all - a
 // ConnectionRefused at the client means it never did (a netns/pasta reachability
 // problem, below this code), while silence here with the client still failing
 // points upstream. Enable with HYDRA_EGRESS_DEBUG=1.
@@ -94,7 +94,7 @@ type inflightApproval struct {
 // Start binds a filtering proxy on a free loopback port and begins serving. id
 // is the head ID (for log lines); allowed is the effective host allow-list and
 // blocked is the block-list that overrides it (both exact or "*.suffix"). approve,
-// when non-nil, is consulted for a host on neither list — it can park the
+// when non-nil, is consulted for a host on neither list - it can park the
 // connection for user approval (and, if granted, the host is allowed for the rest
 // of the session). Close it when the head ends.
 func Start(id string, allowed, blocked []string, approve ApproveFunc) (*Proxy, error) {
@@ -212,9 +212,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 // authorize reports whether an outbound connection to host may proceed. A host on
 // the effective allow-list is permitted; one on the block-list is refused outright
-// (block wins — no prompt). An otherwise-unknown host is parked for user approval
+// (block wins - no prompt). An otherwise-unknown host is parked for user approval
 // via the approve callback (when configured), and a granted host is added to the
-// allow-list for the rest of the session. With no approver — or on deny/timeout —
+// allow-list for the rest of the session. With no approver - or on deny/timeout -
 // the host is refused.
 func (p *Proxy) authorize(host string) bool {
 	if host == "" {

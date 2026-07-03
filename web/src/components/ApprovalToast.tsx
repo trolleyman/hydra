@@ -1,14 +1,14 @@
 import React from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
-// tool calls). It names exactly what's being requested — a whole MCP server, a
+// tool calls). It names exactly what's being requested - a whole MCP server, a
 // specific tool call (with a read/write badge and its JSON arguments), or an
-// outbound fetch (with the host and URL) — plus the requesting agent, which is
+// outbound fetch (with the host and URL) - plus the requesting agent, which is
 // clickable to jump to it, including when it runs in another project.
 
 // A small pill: a tinted, uppercase kind/verb label.
@@ -64,7 +64,7 @@ function kindVisual(data: ApprovalToastData): {
         Icon: SquareTerminal,
         iconWrap: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
         title: 'Run MCP tool',
-        // WRITE is the risky one — flag it in the amber/warning tone; READ stays a
+        // WRITE is the risky one - flag it in the amber/warning tone; READ stays a
         // calm teal.
         badge: data.rw ? { text: read ? 'READ' : 'WRITE', tone: read ? 'teal' : 'amber' } : null,
       }
@@ -189,12 +189,12 @@ export const ApprovalCard: React.FC<{
   onDismiss: () => void
 }> = ({ data, actions, toastId, onDismiss }) => {
   const { Icon, iconWrap, title, badge } = kindVisual(data)
-  const navigate = useNavigate()
   // The subtitle links through to the requesting agent (when we know where it
-  // lives). Navigating leaves the approval pending — it does NOT dismiss the card
-  // (a non-silent dismiss would deny the call).
-  const openAgent = data.agentId && data.projectId
-    ? () => navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: data.projectId!, agentId: data.agentId! } })
+  // lives). Navigating leaves the approval pending - it does NOT dismiss the card
+  // (a non-silent dismiss would deny the call). A real <Link> also lets
+  // middle/Ctrl-click open the agent in a new tab.
+  const agentTarget = data.agentId && data.projectId
+    ? { projectId: data.projectId, agentId: data.agentId }
     : undefined
   return (
     <div
@@ -214,16 +214,24 @@ export const ApprovalCard: React.FC<{
               {badge && <Badge text={badge.text} tone={badge.tone} />}
             </div>
             {data.agentName && (
-              <button
-                type="button"
-                onClick={openAgent}
-                disabled={!openAgent}
-                title={openAgent ? 'Open this agent' : undefined}
-                className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 transition-colors enabled:cursor-pointer enabled:hover:text-gray-800 enabled:hover:underline dark:enabled:hover:text-gray-200"
-              >
-                <Bot className="w-3 h-3 shrink-0" />
-                <span className="truncate">{data.agentName}</span>
-              </button>
+              agentTarget ? (
+                <Link
+                  to="/project/$projectId/agent/$agentId"
+                  params={agentTarget}
+                  title="Open this agent"
+                  className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 transition-colors cursor-pointer hover:text-gray-800 hover:underline dark:hover:text-gray-200"
+                >
+                  <Bot className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{data.agentName}</span>
+                </Link>
+              ) : (
+                // No known location for the agent - render the name as plain,
+                // non-interactive text (no link, no hover affordance).
+                <span className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  <Bot className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{data.agentName}</span>
+                </span>
+              )
             )}
           </div>
           <IconButton onClick={onDismiss}>
@@ -242,7 +250,7 @@ export const ApprovalCard: React.FC<{
           )}
           {data.kind === 'webfetch' && (
             <Caption icon={<Globe className="w-3 h-3" />}>
-              Allowing trusts the whole host — every request to <span className="font-mono">{data.target}</span>, including POSTs — not just this URL.
+              Allowing trusts the whole host - every request to <span className="font-mono">{data.target}</span>, including POSTs - not just this URL.
             </Caption>
           )}
           {data.kind === 'egress' && (

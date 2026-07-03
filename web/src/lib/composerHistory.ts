@@ -2,20 +2,20 @@
 // the attachment chips.
 //
 // The composer turns large/file pastes into attachment chips (and a second paste
-// of the same block inlines it again — see SpawnForm / pastedText). Those
+// of the same block inlines it again - see SpawnForm / pastedText). Those
 // mutations call `e.preventDefault()`, so the browser's native textarea undo
 // never sees them and Ctrl+Z can't walk them back. This module replaces native
 // undo with an explicit snapshot stack so a single Ctrl+Z steps back through the
 // real history regardless of whether a step changed text, attachments, or both:
 //
-//   text… → [paste image] → typeA → [paste text] → [re-paste inlines it] → typeB
+//   text... → [paste image] → typeA → [paste text] → [re-paste inlines it] → typeB
 //
 // Ctrl+Z then unwinds typeB → un-inline (text back to a chip) → drop the text
-// chip → typeA → drop the image chip → text…, each as its own step.
+// chip → typeA → drop the image chip → text..., each as its own step.
 //
 // A snapshot is the whole composer state (prompt + attachments + caret). Typing
 // is coalesced into one step per burst (so a run of keystrokes is one Ctrl+Z,
-// not one-per-character) while every structural action — attach, remove, inline —
+// not one-per-character) while every structural action - attach, remove, inline -
 // is its own discrete step. Async upload results aren't user actions, so they
 // patch the matching chip across the whole timeline (`reconcileHistory`) instead
 // of creating an undo step, keeping a resolved path correct at any undo position.
@@ -44,7 +44,7 @@ export interface HistoryState {
   past: ComposerSnapshot[]
   present: ComposerSnapshot
   future: ComposerSnapshot[]
-  // Coalescing bookkeeping — not itself part of any undo step.
+  // Coalescing bookkeeping - not itself part of any undo step.
   lastKind: StepKind
   lastTime: number
 }
@@ -131,7 +131,7 @@ export function redoHistory(h: HistoryState): HistoryState {
 // present, future) WITHOUT creating an undo step. Used when an async upload
 // resolves its path/error: the resolution isn't a user action, and the chip may
 // be present in several snapshots, so undoing to any of them must show the
-// settled state, not a stale "uploading…".
+// settled state, not a stale "uploading...".
 export function reconcileHistory(
   h: HistoryState,
   id: number,
@@ -174,7 +174,7 @@ export function useComposerHistory(initial: ComposerSnapshot): ComposerHistory {
   // historyRef mirrors `history` so undo()/redo() can read the current state and
   // return the restored snapshot synchronously (no stale closure, and correct
   // even for two undos in one tick). Seeded from the initial state; thereafter
-  // it's only ever written by `apply`, which runs in event handlers — never
+  // it's only ever written by `apply`, which runs in event handlers - never
   // during render.
   const historyRef = useRef<HistoryState>(history)
 

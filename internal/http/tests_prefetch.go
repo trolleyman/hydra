@@ -16,7 +16,7 @@ import (
 // background instead of only when the panel is opened or the merge gate runs. It
 // mirrors prefetchInterval for artifacts. Tests run against the committed branch
 // tip, which only changes on a new commit, so the per-commit cache makes a sweep a
-// no-op until the tip moves — no settle debounce is needed (unlike the working-tree
+// no-op until the tip moves - no settle debounce is needed (unlike the working-tree
 // artifact prefetcher).
 const testPrefetchInterval = 30 * time.Second
 
@@ -92,12 +92,12 @@ func (s *Server) testPrefetchOnce(ctx context.Context, roots []string, lastSHA m
 			live[head.ID] = struct{}{}
 			sha, err := git.ResolveRef(root, *head.Branch)
 			if err != nil {
-				continue // branch deleted mid-sweep, etc. — skip rather than thrash
+				continue // branch deleted mid-sweep, etc. - skip rather than thrash
 			}
 			if prev, ok := lastSHA[head.ID]; ok && prev != sha {
 				// The branch tip moved since we prefetched it, so any run still in flight
 				// for the previous commit is stale. Cancel ones running purely as
-				// background work — freeing the generation slot — instead of letting a
+				// background work - freeing the generation slot - instead of letting a
 				// dead run finish.
 				for _, d := range lastDirs[head.ID] {
 					mgr.CancelStaleBackground(d)

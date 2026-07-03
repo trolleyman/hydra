@@ -59,8 +59,8 @@ export const Dialog: React.FC = () => {
   }
 
   return (
-    // z-[120] keeps confirmation dialogs (merge / kill / discard …) ABOVE the
-    // approval toasts (z-[110]) — you're mid-decision here, so an approval toast
+    // z-[120] keeps confirmation dialogs (merge / kill / discard ...) ABOVE the
+    // approval toasts (z-[110]) - you're mid-decision here, so an approval toast
     // must not cover the buttons.
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       {variant === 'merge' ? (
@@ -203,7 +203,7 @@ function RichConfirmPanel({
 
 // The merge-gate dialog (PLAN #68): shown when the head's tests aren't green and
 // the user hits Merge (or the server soft-gate 409s). It explains why merging is
-// gated and what the head's verdict is, then offers two outcomes — Force merge now
+// gated and what the head's verdict is, then offers two outcomes - Force merge now
 // (amber, the override) or Queue merge when green (emerald, the recommended path),
 // alongside Cancel. The verdict chip + branch chip make the situation concrete.
 function MergeGatePanel({
@@ -229,7 +229,7 @@ function MergeGatePanel({
   const amberCls = 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'
   const redCls = 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50'
   // The gate can be driven by the agent not being finished (agentGate) or by the
-  // test verdict (testStatus). agentGate wins — it's the reason the merge button
+  // test verdict (testStatus). agentGate wins - it's the reason the merge button
   // opened this dialog in that case.
   const agentGate = details?.agentGate
   const status = details?.testStatus
@@ -248,12 +248,12 @@ function MergeGatePanel({
         : { cls: amberCls, label: 'no verdict' }
   // Explains what the two buttons do, in this commit's terms.
   const gateHelp = agentGate
-    ? 'Force merge now to take the branch as-is — or queue it to merge automatically once the agent finishes and its tests pass.'
+    ? 'Force merge now to take the branch as-is - or queue it to merge automatically once the agent finishes and its tests pass.'
     : status === 'failing'
-      ? 'You can force the merge now, landing the failing tests on the branch — or queue it to merge automatically once the agent finishes and they pass.'
+      ? 'You can force the merge now, landing the failing tests on the branch - or queue it to merge automatically once the agent finishes and they pass.'
       : status === 'running'
-        ? 'You can force the merge now, but the branch may carry issues the tests would catch — or queue it to merge automatically once the agent finishes and they pass.'
-        : 'You can force the merge now without a passing verdict — or queue it to merge automatically once the agent finishes and the tests pass.'
+        ? 'You can force the merge now, but the branch may carry issues the tests would catch - or queue it to merge automatically once the agent finishes and they pass.'
+        : 'You can force the merge now without a passing verdict - or queue it to merge automatically once the agent finishes and the tests pass.'
   return (
     <div
       className="bg-white dark:bg-[#141a26] dark:border dark:border-[#252d3b] rounded-2xl shadow-2xl w-full max-w-[470px] overflow-hidden animate-in zoom-in-95 duration-200"
@@ -275,8 +275,8 @@ function MergeGatePanel({
           </div>
         </div>
         <BranchChip
-          from={details?.fromBranch || '—'}
-          to={details?.toBranch || '—'}
+          from={details?.fromBranch || '-'}
+          to={details?.toBranch || '-'}
           arrowClass="text-amber-600 dark:text-amber-400"
           right={
             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
@@ -312,7 +312,7 @@ function CautionNote({ note }: { note: string }) {
 }
 
 // The `from → to` branch chip shared by the merge / update-from-base panels.
-// Only `from` truncates (the agent branch is long); `to` is the base branch —
+// Only `from` truncates (the agent branch is long); `to` is the base branch -
 // usually short like `main`, so it keeps its own width and only ellipsizes once
 // it would eat more than ~40% of the row. `right` holds the trailing stats.
 function BranchChip({
@@ -337,8 +337,8 @@ function BranchChip({
 }
 
 function MergeDetails({ details }: { details?: DialogDetails }) {
-  const from = details?.fromBranch || '—'
-  const to = details?.toBranch || '—'
+  const from = details?.fromBranch || '-'
+  const to = details?.toBranch || '-'
   const loading = details?.loading ?? false
   return (
     <>
@@ -347,7 +347,7 @@ function MergeDetails({ details }: { details?: DialogDetails }) {
         to={to}
         right={
           loading ? (
-            <span className="text-gray-400 dark:text-gray-500">…</span>
+            <span className="text-gray-400 dark:text-gray-500">...</span>
           ) : (
             <>
               <span className="text-emerald-600 dark:text-emerald-400">+{details?.additions ?? 0}</span>
@@ -364,7 +364,7 @@ function MergeDetails({ details }: { details?: DialogDetails }) {
 // The update-from-base confirmation. Unlike the merge/kill panels (icon tile +
 // subtitle + chip), this one keeps a bordered header (icon tile + title + close)
 // over a prose body that embeds the branch names as inline pills, with a blue
-// Confirm — matching the agreed redesign. The base is merged *into* the agent's
+// Confirm - matching the agreed redesign. The base is merged *into* the agent's
 // branch, so the branch is named first and the base second.
 function UpdateBasePanel({
   title,
@@ -379,8 +379,8 @@ function UpdateBasePanel({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const base = details?.fromBranch || '—'
-  const branch = details?.toBranch || '—'
+  const base = details?.fromBranch || '-'
+  const branch = details?.toBranch || '-'
   const behind = details?.behind ?? 0
   return (
     <div

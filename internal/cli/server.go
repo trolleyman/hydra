@@ -68,7 +68,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 
 	// Also serve the daemon control socket so CLI commands (spawn/attach/list)
-	// share this process's session registry — agents started from the CLI show
+	// share this process's session registry - agents started from the CLI show
 	// up in the web UI and vice versa. Takes over any existing daemon.
 	cleanup, err := serveUnixSocket(ctx, srv, projectRoot)
 	if err != nil {
@@ -166,7 +166,7 @@ func runSimulationServer() error {
 	// Mock WebSocket events endpoint (sends the initial refetch nudge, then idles).
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 
-	// Raw repository blob — image bytes and raw text (mirrors the real server's
+	// Raw repository blob - image bytes and raw text (mirrors the real server's
 	// non-OpenAPI route; backs the image preview and the file viewer's Raw link).
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)

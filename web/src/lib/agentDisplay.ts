@@ -7,7 +7,7 @@ import type { AgentTypeIconName } from '../components/AgentTypeIcon'
 // Single source of truth for agent status colors + labels. Every status maps to
 // a `badge` tone (used by agentStatusBadge) and an optional `dot` tone (used by
 // agentDotClass). The dot tone is only set where the live dot wants its own
-// emphasis — needs_input reads a stronger red as a dot than its badge — and is
+// emphasis - needs_input reads a stronger red as a dot than its badge - and is
 // left off for states that only appear as a badge (deploying/ended/exited),
 // whose dot falls back to the raw session status. `killing`/`stopped` have no
 // badge of their own, so they reuse the dim `faint` fill (matching the previous
@@ -22,7 +22,7 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
   waiting: { label: 'waiting', badge: 'yellow', dot: 'yellow' },
   finished: { label: 'finished', badge: 'violet', dot: 'violet' },
   merging: { label: 'merging', badge: 'green', dot: 'green' },
-  // Not a live agent status — the end-state pill on the "merged into <base>"
+  // Not a live agent status - the end-state pill on the "merged into <base>"
   // toasts. Green (success), unlike the sidebar's muted archived chip
   // (archivedEndStateBadge), which deliberately stays quiet.
   merged: { label: 'merged', badge: 'green' },
@@ -47,7 +47,7 @@ export function statusDotClass(status: string): string {
 }
 
 // agentDotClass picks the sidebar status dot color. It mirrors the status badge
-// (agentStatusBadge) so the dot and badge never disagree — e.g. a waiting agent
+// (agentStatusBadge) so the dot and badge never disagree - e.g. a waiting agent
 // reads yellow at a distance, not green just because its session is still alive.
 // Falls back to the raw session status when no agent status has been reported.
 export function agentDotClass(agent: AgentResponse): string {
@@ -57,8 +57,8 @@ export function agentDotClass(agent: AgentResponse): string {
 }
 
 // agentDotAnimate returns the pulse-animation class for the status dot while the
-// agent is actively "whirring" — spinning up (starting/building/pending) or doing
-// work (running/merging/killing) — so the dot gently breathes to signal it's live.
+// agent is actively "whirring" - spinning up (starting/building/pending) or doing
+// work (running/merging/killing) - so the dot gently breathes to signal it's live.
 // Returns '' for settled states (waiting, needs_input, finished, stopped) so they
 // stay calm/static.
 export function agentDotAnimate(agent: AgentResponse): string {
@@ -71,7 +71,7 @@ export function agentDotAnimate(agent: AgentResponse): string {
     case 'killing':
       return 'animate-status-pulse'
   }
-  // No agent status yet — fall back to the raw session state so a live session
+  // No agent status yet - fall back to the raw session state so a live session
   // still pulses while it reports in.
   return agent.session_status === 'running' ? 'animate-status-pulse' : ''
 }
@@ -145,15 +145,15 @@ export function agentStatusDetail(agent: AgentResponse): string {
   const status = agent.agent_status
   if (!status) return ''
   // Show the live activity placeholder immediately while the agent is spinning
-  // up (pending/starting) as well as once it's running — so the line is
+  // up (pending/starting) as well as once it's running - so the line is
   // populated the moment the agent is created rather than blank until it
   // reports its first action.
   if (status.status === 'running' || status.status === 'starting' || status.status === 'pending') {
-    return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}…`
+    return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}...`
   }
   // The most recent message is shown as-is, except when it reads as a *suggested
-  // next message* — something you could send straight back to the agent (e.g.
-  // "run it", "spin up the app so I can see it") — in which case it's marked with
+  // next message* - something you could send straight back to the agent (e.g.
+  // "run it", "spin up the app so I can see it") - in which case it's marked with
   // a `❯ ` caret. That decision is made server-side (last_message_is_suggested_next_message):
   // a longer / multi-sentence message is a closing summary, and a question the
   // agent is asking the user isn't a suggestion either, so both stay plain.
@@ -162,12 +162,12 @@ export function agentStatusDetail(agent: AgentResponse): string {
       ? `❯ ${status.last_message}`
       : status.last_message
   }
-  // No message yet — keep the line meaningful for the active states.
+  // No message yet - keep the line meaningful for the active states.
   switch (status.status) {
-    case 'building':    return 'Building…'
-    case 'needs_input': return 'Waiting for your answer…'
-    case 'waiting':     return 'Waiting…'
-    case 'merging':     return 'Merging…'
+    case 'building':    return 'Building...'
+    case 'needs_input': return 'Waiting for your answer...'
+    case 'waiting':     return 'Waiting...'
+    case 'merging':     return 'Merging...'
     default:            return ''
   }
 }

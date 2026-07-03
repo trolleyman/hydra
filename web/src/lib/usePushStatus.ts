@@ -18,7 +18,7 @@ export interface PushStatus {
   // Commit the given uncommitted paths in the project root with the given
   // message. Resolves true on success (failures toast and resolve false).
   handleCommit: (message: string, paths: string[]) => Promise<boolean>
-  // Stable refetch handle — wire into the caller's events stream.
+  // Stable refetch handle - wire into the caller's events stream.
   refetchPushStatus: () => void
 }
 
@@ -52,7 +52,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     const projectId = currentProjectId
     const toast = useToastStore.getState()
     setSyncingProjects((prev) => new Set(prev).add(projectId))
-    const toastId = toast.show({ message: 'Syncing with remote…', type: 'info', duration: 0 })
+    const toastId = toast.show({ message: 'Syncing with remote...', type: 'info', duration: 0 })
     try {
       const result = await api.default.syncRepository(projectId)
       // Only paint the result if the user is still looking at this project;
@@ -68,7 +68,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
       const conflict = err instanceof ApiError && err.status === 409
       toast.show({
         message: conflict
-          ? `Sync failed: pull conflicts — resolve in the repository, then retry`
+          ? `Sync failed: pull conflicts - resolve in the repository, then retry`
           : `Sync failed: ${formatError(err)}`,
         type: 'error',
         duration: 6000,

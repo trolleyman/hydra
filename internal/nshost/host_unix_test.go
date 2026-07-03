@@ -13,8 +13,8 @@ import (
 
 // TestSupervisorSharedWrites proves the core namespace-host mechanism end to end
 // without bwrap: one supervisor (Serve) spawns two PTY-attached children via the
-// client, their master fds are passed back over the control socket, and — because
-// both are children of the one supervisor — they write to the *same* filesystem.
+// client, their master fds are passed back over the control socket, and - because
+// both are children of the one supervisor - they write to the *same* filesystem.
 // This is the property that, with a bwrap overlay underneath the supervisor,
 // lets the agent and its bash terminals share one writable copy-on-write path.
 //

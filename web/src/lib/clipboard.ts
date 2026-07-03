@@ -5,7 +5,7 @@
 
 // canCopyImages reports whether this browser/context can write images to the
 // clipboard. The async Clipboard API needs a secure context (https or localhost)
-// plus navigator.clipboard.write + the ClipboardItem constructor — none of which
+// plus navigator.clipboard.write + the ClipboardItem constructor - none of which
 // exist in older or insecure setups. Callers use this to hide the copy button
 // when image copy can't work, rather than offering a control that always fails.
 export function canCopyImages(): boolean {
@@ -18,7 +18,7 @@ export function canCopyImages(): boolean {
 
 // copyImageToClipboard fetches an image URL and writes it to the clipboard as
 // PNG. The Clipboard API only reliably accepts image/png across browsers, so
-// anything else (jpeg/gif/webp/svg/…) is rasterized to PNG via a canvas first.
+// anything else (jpeg/gif/webp/svg/...) is rasterized to PNG via a canvas first.
 // The PNG is produced lazily inside the ClipboardItem because Safari requires
 // write() to be invoked synchronously within the originating user gesture; it
 // (and Chromium) accept a Promise value and resolve it afterwards.

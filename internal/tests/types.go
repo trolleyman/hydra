@@ -1,8 +1,8 @@
 // Package tests runs a project's [[tests]] commands against a checkout and parses
 // their reports into a pass/fail verdict that gates a head's merge button (see
-// PLAN #68). It reuses the artifacts generation pipeline wholesale — the bounded
+// PLAN #68). It reuses the artifacts generation pipeline wholesale - the bounded
 // worktree-slot pool, the priority scheduler, the per-commit cache, and the live
-// log/progress stream — swapping only the post-run step: instead of scanning
+// log/progress stream - swapping only the post-run step: instead of scanning
 // image outputs it parses a JUnit-XML or Hydra-JSON test report.
 package tests
 
@@ -18,7 +18,7 @@ const (
 	// StatusFailing: the run produced a report with at least one failing case.
 	StatusFailing Status = "failing"
 	// StatusErrored: the command could not produce a verdict (failed to start,
-	// timed out, or wrote a malformed report). Distinct from failing — it means
+	// timed out, or wrote a malformed report). Distinct from failing - it means
 	// "we don't know", not "tests are red". Retryable via Invalidate.
 	StatusErrored Status = "errored"
 )
@@ -31,14 +31,14 @@ const (
 	CaseFailed  CaseStatus = "failed"
 	CaseSkipped CaseStatus = "skipped"
 	// CaseWarning is a non-failing diagnostic (e.g. an eslint warning, a
-	// deprecation notice). It never flips the verdict to failing — it's surfaced
+	// deprecation notice). It never flips the verdict to failing - it's surfaced
 	// informationally as its own count alongside passed/failed/skipped.
 	CaseWarning CaseStatus = "warning"
 )
 
 // ScopeKind classifies one Scope level (parallel to a case's Scope entries).
-// The distinction is only knowable while parsing — a describe block, a class
-// and a Go test function are indistinguishable strings once collapsed — so the
+// The distinction is only knowable while parsing - a describe block, a class
+// and a Go test function are indistinguishable strings once collapsed - so the
 // parsers tag it here rather than leaving consumers to guess.
 type ScopeKind string
 
@@ -51,7 +51,7 @@ const (
 	// resolved to a `func TestXxx` declaration). What a parametrized/subtest
 	// grouping hangs off.
 	ScopeFunction ScopeKind = "function"
-	// ScopeClass is a class/type level in a dotted class chain — the JUnit/Java
+	// ScopeClass is a class/type level in a dotted class chain - the JUnit/Java
 	// `com.example.FooTest`, a pytest `TestClass`, a Kotlin object. Detected by
 	// its class-shaped identifier (PascalCase, no spaces) so a package segment
 	// (lowercase `org.trolleyman`) stays a ScopeModule.
@@ -63,10 +63,10 @@ const (
 //
 // Location is split into two axes: Path is a *filesystem* location (a
 // repo-relative file, or a package dir for Go where the report doesn't expose
-// the file) — copyable and deep-linkable, optionally carrying line/col. Scope
+// the file) - copyable and deep-linkable, optionally carrying line/col. Scope
 // is the *logical* nesting chain between the path and the leaf name: a Java
 // class chain, a pytest class, a vitest describe chain, a Go subtest parent.
-// It's an array (not a joined string) because file names contain dots — a
+// It's an array (not a joined string) because file names contain dots - a
 // single separator-polymorphic string can't be split back apart reliably.
 // Old cached reports carry a pre-joined Name and no Path/Scope; consumers fall
 // back to the flat Name.
@@ -77,7 +77,7 @@ type TestCase struct {
 	Scope  []string   `json:"scope,omitempty"`
 	// ScopeKinds is parallel to Scope: the ScopeKind of each level ("module" |
 	// "function"). Empty or shorter than Scope for old reports / runners that
-	// don't tag it — consumers treat a missing level as ScopeModule.
+	// don't tag it - consumers treat a missing level as ScopeModule.
 	ScopeKinds []string `json:"scope_kinds,omitempty"`
 	Line       int      `json:"line,omitempty"` // 1-based; 0 = unknown
 	Col        int      `json:"col,omitempty"`
@@ -133,7 +133,7 @@ type Version struct {
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.
-// Kind is "log", "progress", "counts", or "settled" — the artifacts vocabulary
+// Kind is "log", "progress", "counts", or "settled" - the artifacts vocabulary
 // plus "counts", the streamed-tests increment (see RunningCounts).
 type Event struct {
 	Dir      string

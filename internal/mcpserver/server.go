@@ -1,6 +1,6 @@
 // Package mcpserver implements a minimal Model Context Protocol (MCP) server that
 // Hydra seeds into the agent's own toolset, so the inner agent can DISCOVER MCP
-// servers configured on the host and REQUEST access to one at runtime — gated by
+// servers configured on the host and REQUEST access to one at runtime - gated by
 // the same approval flow as the security gate. Granting a server appends it to the
 // allow-list; because MCP servers are loaded at launch, the new server becomes
 // usable on the agent's next launch/resume.

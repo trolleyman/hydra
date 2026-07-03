@@ -1,5 +1,5 @@
-// Per-project memory of the last view the user had open — the selected agent,
-// the repository browser, or the bare project page — so switching back to a
+// Per-project memory of the last view the user had open - the selected agent,
+// the repository browser, or the bare project page - so switching back to a
 // project (or reloading the app) restores where you were rather than always
 // dropping you on the spawn page. One project-view entry per project.
 

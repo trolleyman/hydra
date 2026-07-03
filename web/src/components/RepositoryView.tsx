@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
-import { useNavigate, useLocation } from '@tanstack/react-router'
+import { useNavigate, useLocation, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
 import { ensureLanguage } from '../lib/hljsLazy'
 import { getLanguage } from '../lib/language'
@@ -46,7 +46,7 @@ type TreeNode = {
 // ARTIFACTS_DIR is the virtual path of the dynamic artifacts folder, nested under
 // the repo's real .hydra/ folder. A script "file" lives at ARTIFACTS_DIR/<name>.
 // The real on-disk cache is .hydra/local/artifacts (gitignored), so this path
-// never collides with a tracked file in practice — but injection guards anyway.
+// never collides with a tracked file in practice - but injection guards anyway.
 const ARTIFACTS_DIR = '.hydra/artifacts'
 
 // artifactScriptOf returns the script name when a path points at a synthetic
@@ -248,10 +248,10 @@ function formatBytes(n: number): string {
 
 // ── File header actions (copy contents + raw) ─────────────────────────────────
 // Mirrors GitHub's per-file "copy" and "raw" controls. Copy writes the file's
-// text to the clipboard, or — for an image — the decoded image itself (when the
+// text to the clipboard, or - for an image - the decoded image itself (when the
 // browser's Clipboard API supports it). It's hidden for binaries, where there's
 // nothing useful to copy. Raw opens the unrendered blob in a new tab via the
-// same endpoint the image preview uses, so it works for any real file — text,
+// same endpoint the image preview uses, so it works for any real file - text,
 // image, or binary. Both buttons share the header button styling with
 // SettingsPopup.
 
@@ -469,7 +469,7 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
           </label>
         ))}
       </div>
-      {/* Image diff mode — applies to in-tree images in the diff, mirroring the
+      {/* Image diff mode - applies to in-tree images in the diff, mirroring the
           agent diff viewer's settings (shared storage key). */}
       <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
       <div className="flex flex-col gap-0.5">
@@ -527,7 +527,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
 // HeaderOverflowMenu is the small-screen hamburger that gathers the file header's
 // actions (copy / raw) and view settings into one dropdown, keeping the header
-// uncluttered on phones. It's rendered md:hidden — the desktop header shows the
+// uncluttered on phones. It's rendered md:hidden - the desktop header shows the
 // same controls inline. Children get a `close` callback (for the action rows;
 // the settings toggles leave the menu open).
 function HeaderOverflowMenu({ className = '', children }: { className?: string; children: (close: () => void) => ReactNode }) {
@@ -570,14 +570,16 @@ function HeaderOverflowMenu({ className = '', children }: { className?: string; 
 // ── Tree rendering ──────────────────────────────────────────────────────────────
 
 function TreeRow({
-  node, depth, expanded, toggle, selectedPath, onSelect, showIcons,
+  node, depth, expanded, toggle, selectedPath, fileLink, showIcons,
 }: {
   node: TreeNode
   depth: number
   expanded: Set<string>
   toggle: (path: string) => void
   selectedPath: string | null
-  onSelect: (path: string) => void
+  // Builds the <Link> target for a file leaf, so file rows are real anchors
+  // (middle-click / Ctrl-click open them in a new tab). Dir rows just toggle.
+  fileLink: (path: string) => LinkProps
   showIcons: boolean
 }) {
   const isOpen = expanded.has(node.path)
@@ -599,7 +601,7 @@ function TreeRow({
           <span className="truncate">{node.name}</span>
         </button>
         {isOpen && node.children.map((child) => (
-          <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} onSelect={onSelect} showIcons={showIcons} />
+          <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} fileLink={fileLink} showIcons={showIcons} />
         ))}
       </div>
     )
@@ -609,8 +611,8 @@ function TreeRow({
     ? { Icon: Camera, className: 'text-pink-500' }
     : getFileIcon(node.name)
   return (
-    <button
-      onClick={() => onSelect(node.path)}
+    <Link
+      {...fileLink(node.path)}
       style={pad}
       className={`w-full flex items-center gap-1.5 pr-2 py-1 text-sm transition-colors cursor-pointer text-left ${isSelected
         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
@@ -622,7 +624,7 @@ function TreeRow({
         ? <Icon className={`w-4 h-4 shrink-0 ${className}`} />
         : <FileIcon className="w-4 h-4 shrink-0 text-gray-400" />}
       <span className="truncate">{node.name}</span>
-    </button>
+    </Link>
   )
 }
 
@@ -702,7 +704,7 @@ function FileContent({
   highlightRange?: LineRange | null
   onSelectLine?: (line: number, extend: boolean) => void
 }) {
-  // For symlinks, render the file we resolved to (target_path) — its extension
+  // For symlinks, render the file we resolved to (target_path) - its extension
   // decides syntax highlighting / markdown / image handling, and the raw blob is
   // fetched from there. A symlink with no target_path couldn't be resolved.
   if (file.symlink && !file.target_path) {
@@ -739,7 +741,7 @@ function FileContent({
   if (file.binary || file.content == null) {
     return (
       <div className="min-h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-        Binary file ({formatBytes(file.size)}) — preview not available
+        Binary file ({formatBytes(file.size)}) - preview not available
       </div>
     )
   }
@@ -758,7 +760,7 @@ function FileContent({
       <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} highlightRange={highlightRange} onSelectLine={onSelectLine} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
-          File truncated — showing the first part only.
+          File truncated - showing the first part only.
         </div>
       )}
     </>
@@ -768,7 +770,7 @@ function FileContent({
 // ── File-not-found state ──────────────────────────────────────────────────────
 
 // FileNotFound is shown when the requested path doesn't exist at the selected
-// ref (a 404 from getRepositoryFile) — e.g. a stale deep link, or a file that
+// ref (a 404 from getRepositoryFile) - e.g. a stale deep link, or a file that
 // only exists on another branch. A dedicated state reads more clearly than a raw
 // error string.
 function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
@@ -791,7 +793,7 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
 // FilePathLabel renders the selected file's path in the content header, the same
 // way on mobile and desktop: the directory is lowlit and the filename
 // emphasised, and when the path is too wide it's the *leading* directory that's
-// clipped with a "…" — the filename stays visible (".../filename.go"), and only
+// clipped with a "..." - the filename stays visible (".../filename.go"), and only
 // if the filename alone overflows does it clip at its own end. Tapping it expands
 // to the full, wrapped path; tapping again collapses.
 function FilePathLabel({ path }: { path: string }) {
@@ -877,7 +879,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const navigate = useNavigate()
   const location = useLocation()
 
-  // The app's nav sidebar collapse state — the repository header hosts the
+  // The app's nav sidebar collapse state - the repository header hosts the
   // "show sidebar" toggle while it's hidden (small screens), matching the agent
   // page's top bar.
   const collapsed = useSidebarStore((s) => s.collapsed)
@@ -903,7 +905,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // ── Branch-compare diff view ──────────────────────────────────────────────
   // Picking a compare branch (head) diffs it against the browsed ref (base),
   // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
-  // is the whole diff state — '' means "not diffing" — and is ephemeral
+  // is the whole diff state - '' means "not diffing" - and is ephemeral
   // component state, deliberately kept out of the URL so the existing ref/path
   // splat parser stays untouched.
   const [compareRef, setCompareRef] = useState('')
@@ -1008,7 +1010,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       }
       return node
     })
-    // No real .hydra folder in the tree — synthesize one holding just artifacts.
+    // No real .hydra folder in the tree - synthesize one holding just artifacts.
     return injected ? next : [{ name: '.hydra', path: '.hydra', type: 'dir' as const, children: [artifactsDir] }, ...tree]
   }, [tree, artifactScripts, files])
 
@@ -1036,7 +1038,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Whether the content pane (not the list) is the active view on small screens.
   // For normal browsing that's an explicitly-selected path (the bare /repository
   // URL resolves to the README via defaultPath, but on a phone we still want to
-  // land on the file list — so key off parsed.path, not viewPath). In diff mode
+  // land on the file list - so key off parsed.path, not viewPath). In diff mode
   // it's the drill-down flag. At/above the md breakpoint both panes show side by
   // side (the tree column fits comfortably from tablet widths up) and this only
   // decides which one fills the screen below it.
@@ -1092,7 +1094,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, ready])
 
-  // Load the artifact-script list for the resolved ref (cheap — config only, no
+  // Load the artifact-script list for the resolved ref (cheap - config only, no
   // generation). Drives the dynamic ".hydra/artifacts" folder; [] hides it.
   useEffect(() => {
     if (!ready) return
@@ -1105,7 +1107,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }, [projectId, queryRef, ready])
 
   // Load the file content for the displayed path. Synthetic artifact paths are not
-  // real files — they render the artifacts viewer instead — so skip the fetch.
+  // real files - they render the artifacts viewer instead - so skip the fetch.
   useEffect(() => {
     if (!ready || !viewPath || artifactScriptOf(viewPath)) { setFile(null); return }
     let cancelled = false
@@ -1130,7 +1132,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }, [projectId, queryRef, viewPath, ready])
 
   // A file deep-link can carry an #L<n> / #L<a>-L<b> hash (e.g. a file://
-  // hyperlink clicked in the agent terminal, or a line number clicked here) —
+  // hyperlink clicked in the agent terminal, or a line number clicked here) -
   // the line(s) to highlight, with the first one scrolled into view.
   const selRange = useMemo(() => parseLineRange(location.hash || ''), [location.hash])
   // The anchor a shift+click extends from: the last plainly-clicked line. Kept
@@ -1302,8 +1304,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     const sp = path ? `${ref}/${path}` : ref
     navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: sp } })
   }
-  const selectFile = (path: string) => goTo(refStr, path)
   const selectBranch = (name: string) => goTo(name, parsed.path)
+  // <Link> target for a file at the current ref - used by the tree so file rows
+  // are real anchors (middle-click / Ctrl-click open them in a new tab).
+  const fileLinkProps = (path: string): LinkProps => linkOptions({
+    to: '/project/$projectId/repository/$',
+    params: { projectId, _splat: `${refStr}/${path}` },
+  })
 
   // Small-screen "back": pop the full-screen content view back to the list. In
   // diff mode that's the drill-down flag; when browsing it clears the file path
@@ -1315,7 +1322,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* Top header — the page title plus the branch picker and the compare /
+      {/* Top header - the page title plus the branch picker and the compare /
           diff selector, all hoisted up here (they used to live in the sidebar's
           own header row). On small screens it's hidden once a file/diff is open:
           the content pane's own header takes over there, with a back button. */}
@@ -1343,7 +1350,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           />
         ) : (
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
-            <GitBranch className="w-3.5 h-3.5" /> …
+            <GitBranch className="w-3.5 h-3.5" /> ...
           </div>
         )}
         {diffActive ? (
@@ -1451,12 +1458,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No tracked files</div>
           ) : (
             displayTree.map((node) => (
-              <TreeRow key={node.path} node={node} depth={0} expanded={expanded} toggle={toggle} selectedPath={viewPath} onSelect={selectFile} showIcons={settings.showIcons} />
+              <TreeRow key={node.path} node={node} depth={0} expanded={expanded} toggle={toggle} selectedPath={viewPath} fileLink={fileLinkProps} showIcons={settings.showIcons} />
             ))
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) — md+ only; the sidebar is full-width on
+        {/* Resize handle (PLAN.md #41i) - md+ only; the sidebar is full-width on
             phones. */}
         <div
           onMouseDown={startResizing}
@@ -1481,7 +1488,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           {diffActive ? (
             selectedDiffFile ? (
               // One-file-at-a-time view: a file-view-style header for the selected
-              // file — icon, path, change-type tag, line counts, then the same
+              // file - icon, path, change-type tag, line counts, then the same
               // copy/raw actions as the normal file view, and the diff settings.
               <>
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
@@ -1521,7 +1528,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 </div>
               </>
             ) : (
-              // All-files view (or while loading): the diff settings — a popup on
+              // All-files view (or while loading): the diff settings - a popup on
               // desktop, the hamburger on phones.
               <div className="ml-auto flex items-center">
                 <div className="hidden md:block"><DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} /></div>

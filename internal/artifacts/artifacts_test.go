@@ -91,7 +91,7 @@ func TestGenerateAndCache(t *testing.T) {
 	}
 
 	// Generation borrows a reusable worktree slot rather than a per-commit checkout,
-	// so a slot persists after generation (kept warm for reuse) — that's expected,
+	// so a slot persists after generation (kept warm for reuse) - that's expected,
 	// not a leak. CleanCheckouts (the boot / crash-recovery sweep) must wipe them.
 	if slots, _ := os.ReadDir(m.slotsDir()); len(slotDirs(slots)) == 0 {
 		t.Error("expected a reusable slot worktree to persist after generation")
@@ -265,7 +265,7 @@ func TestPersistedLogRoundTrip(t *testing.T) {
 
 // TestFailureSummaryAppendedToLog verifies the failure summary (the exit code,
 // or a timeout) is appended as the final stderr line of the captured log, so the
-// build log itself explains why the run ended — without a separate UI banner that
+// build log itself explains why the run ended - without a separate UI banner that
 // would duplicate the stderr. A timeout SIGKILLs the script and a bare non-zero
 // exit prints nothing, so this framing would otherwise be invisible.
 func TestFailureSummaryAppendedToLog(t *testing.T) {
@@ -583,7 +583,7 @@ func TestScanOutputsVideoPixelSize(t *testing.T) {
 
 // encodeTestWebM renders a 1s lossless VP9 .webm from an ffmpeg lavfi source
 // (e.g. "testsrc", "testsrc2"). The title metadata is muxed into the container
-// only — it changes the file bytes without touching the decoded frames, so two
+// only - it changes the file bytes without touching the decoded frames, so two
 // calls with the same source but different titles model "identical video, different
 // container" (the case byte-hash gets wrong and the frame check gets right).
 func encodeTestWebM(t *testing.T, source, title string) []byte {

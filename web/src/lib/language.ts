@@ -3,7 +3,7 @@
 // same set. Names here may be eager (bundled, see hljs.ts) or lazy (loaded on
 // demand, see hljsLazy.ts); an entry mapping to a lazy language colourises in the
 // diff viewer (which highlights via the async worker) and, once loaded, in the file
-// browser — anything unmapped or not-yet-loaded renders as plain text.
+// browser - anything unmapped or not-yet-loaded renders as plain text.
 const EXT_LANG_MAP: Record<string, string> = {
   // Web / TS-JS
   ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',

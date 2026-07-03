@@ -31,7 +31,7 @@ func cowDirName(rel string) string {
 // mountpoint (Dest) is that path inside the worktree. When writable, each mount
 // also gets a persistent per-head Upper/Work pair so the agent can overwrite the
 // files with the writes kept out of the real tree. When not writable (bash
-// shells, which share the worktree with a possibly-live agent — two overlays
+// shells, which share the worktree with a possibly-live agent - two overlays
 // must never share one upperdir), Upper/Work are left empty so the sandbox layer
 // exposes the source read-only instead.
 //

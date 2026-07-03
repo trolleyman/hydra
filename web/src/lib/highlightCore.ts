@@ -46,8 +46,8 @@ export function splitHighlightedLines(html: string): string[] {
   return lines
 }
 
-// highlightLines highlights a whole run of code (so multi-line constructs —
-// block comments, template strings — colourise correctly) and returns the
+// highlightLines highlights a whole run of code (so multi-line constructs -
+// block comments, template strings - colourise correctly) and returns the
 // per-line HTML. On any failure it falls back to plain, HTML-escaped lines.
 export function highlightLines(code: string, language: string): string[] {
   try {

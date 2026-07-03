@@ -31,10 +31,10 @@ func TestDeriveTitle(t *testing.T) {
 func TestDeriveTitleTruncates(t *testing.T) {
 	long := strings.Repeat("word ", 40) // ~200 chars
 	got := DeriveTitle(long)
-	if len([]rune(got)) > maxTitleLen+1 { // +1 for the ellipsis rune
+	if len([]rune(got)) > maxTitleLen+3 { // +3 for the "..." ellipsis
 		t.Errorf("DeriveTitle did not clamp length: got %d runes (%q)", len([]rune(got)), got)
 	}
-	if !strings.HasSuffix(got, "…") {
+	if !strings.HasSuffix(got, "...") {
 		t.Errorf("expected truncated title to end with ellipsis, got %q", got)
 	}
 }

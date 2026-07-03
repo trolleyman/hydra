@@ -1,4 +1,5 @@
 import { Clock } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -12,17 +13,29 @@ import {
 export function AgentSidebarItem({
   agent,
   selected,
-  onClick,
+  projectId,
+  onDeselect,
 }: {
   agent: AgentResponse
   selected: boolean
-  onClick: () => void
+  projectId: string
+  // Left-click on the already-open agent toggles back to the project home
+  // (mirrors the Repository button). Middle/Ctrl-click ignore this and open the
+  // agent page in a new tab, since the row is a real link to that page.
+  onDeselect: () => void
 }) {
   const archived = agent.archived ?? false
   return (
-    <button
-      onClick={onClick}
-      className={`relative w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+    <Link
+      to="/project/$projectId/agent/$agentId"
+      params={{ projectId, agentId: agent.id }}
+      onClick={(e) => {
+        if (selected) {
+          e.preventDefault()
+          onDeselect()
+        }
+      }}
+      className={`relative block w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
           : archived
@@ -88,13 +101,13 @@ export function AgentSidebarItem({
         // for the type/status/test chips instead of squeezing them against the date.
         //
         // Reserve a fixed-height line so the row keeps a constant height as the
-        // activity text appears, disappears, or changes between status transitions —
+        // activity text appears, disappears, or changes between status transitions -
         // otherwise the whole sidebar jumps around. The height MUST NOT be driven by
         // the rendered content's line box: an inline monospace `code` chip
         // (shell-command activity) and plain proportional status text are
         // baseline-aligned but have different font metrics, so even at an identical
         // `line-height` their inline boxes distribute that height differently around
-        // the baseline and the line box's union can exceed it — making a code line
+        // the baseline and the line box's union can exceed it - making a code line
         // taller than a plain one. Pinning line-height (a previous fix) wasn't enough
         // for that reason. Instead lock a fixed `h-4` and center the content
         // (`flex items-center`), clipping any overflow, so the row is exactly 1rem
@@ -117,6 +130,6 @@ export function AgentSidebarItem({
           ) : null}
         </div>
       )}
-    </button>
+    </Link>
   )
 }

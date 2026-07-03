@@ -23,7 +23,7 @@ func TestResolveFullscreen(t *testing.T) {
 	if off.ResolveFullscreen("claude") {
 		t.Error("[claude] fullscreen=false should resolve false")
 	}
-	// A value at the defaults level is ignored — fullscreen is Claude-table-only.
+	// A value at the defaults level is ignored - fullscreen is Claude-table-only.
 	def := Config{Defaults: AgentConfig{Fullscreen: boolPtr(true)}}
 	if def.ResolveFullscreen("claude") {
 		t.Error("defaults fullscreen should NOT apply (only [claude] is accepted)")
@@ -37,7 +37,7 @@ func TestResolveFullscreen(t *testing.T) {
 
 func TestFullscreenRenderRoundTrip(t *testing.T) {
 	// The empty template documents fullscreen as a commented-out default, and it
-	// lives under the [claude] section — never at the root.
+	// lives under the [claude] section - never at the root.
 	tmpl := renderConfig(nil, Config{})
 	if !strings.Contains(tmpl, docPrefix+" enable Claude Code's fullscreen") {
 		t.Errorf("template missing fullscreen doc line:\n%s", tmpl)
@@ -66,7 +66,7 @@ func TestFullscreenRenderRoundTrip(t *testing.T) {
 		t.Errorf("claude fullscreen lost on round-trip: %+v", decoded.Agents["claude"])
 	}
 
-	// A defaults-level fullscreen is Claude-only and must be dropped on render —
+	// A defaults-level fullscreen is Claude-only and must be dropped on render -
 	// it never appears outside [claude].
 	dropped := renderConfig(nil, Config{Defaults: AgentConfig{Fullscreen: boolPtr(true)}})
 	if strings.Contains(dropped, "fullscreen = true") {
@@ -85,9 +85,9 @@ func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 
 	out := renderConfig(nil, cfg)
 
-	// Should contain triple-quoted strings
-	if !contains(out, `"""`) {
-		t.Errorf("expected triple-quoted strings in output, got:\n%s", out)
+	// Should contain triple-apostrophe literal strings (no escaping needed)
+	if !contains(out, `'''`) {
+		t.Errorf("expected triple-apostrophe strings in output, got:\n%s", out)
 	}
 	// Should not contain escaped newlines
 	if contains(out, `\n`) {
@@ -774,7 +774,7 @@ func TestArtifactPrefetchRender(t *testing.T) {
 	}
 
 	// Unlike artifact_concurrency, a save that doesn't carry artifact_prefetch (cfg
-	// nil — the Settings editor has no field for it) PRESERVES the file's existing
+	// nil - the Settings editor has no field for it) PRESERVES the file's existing
 	// hand-edited value rather than resetting it.
 	const existing = `artifact_prefetch = false
 `
@@ -819,7 +819,7 @@ func TestArtifactConcurrencyRender(t *testing.T) {
 	}
 
 	// Clearing it (nil) resets to the default: the existing file's value is NOT
-	// preserved — the line is re-emitted commented-out, so a later load falls back
+	// preserved - the line is re-emitted commented-out, so a later load falls back
 	// to DefaultArtifactConcurrency. This is what makes the UI's "clear" work.
 	const existing = `artifact_concurrency = 7
 `

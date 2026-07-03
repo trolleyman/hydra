@@ -14,7 +14,7 @@ import (
 
 // MapAddr is the address the sandboxed netns uses to reach the host-loopback
 // proxy under pasta's --map-host-loopback translation. It doubles as the guest's
-// default gateway (see PastaArgs), so it MUST be on-link inside the netns — a
+// default gateway (see PastaArgs), so it MUST be on-link inside the netns - a
 // link-local address is NOT, because Linux refuses to route a link-local
 // destination via a gateway, which yields "Network is unreachable". We instead
 // synthesise a deterministic point-to-point subnet from RFC 5737's TEST-NET-1
@@ -44,7 +44,7 @@ var (
 
 // DetectHardMode reports whether a hard egress boundary is possible here, caching
 // the (host-stable) result. It requires: pasta with --map-host-loopback, an nft
-// binary, and — decisively — a SMOKE TEST that actually spins up the pasta netns +
+// binary, and - decisively - a SMOKE TEST that actually spins up the pasta netns +
 // nft ruleset and confirms it works. The smoke test means hard mode only ever
 // activates when it genuinely functions on this host (so an old pasta, a kernel
 // without unprivileged userns, or a missing capability all fall back cleanly to
@@ -57,31 +57,31 @@ func DetectHardMode() HardMode {
 func detectHardMode() HardMode {
 	pasta := lookPasta()
 	if pasta == "" {
-		log.Printf("hydra egress: hard mode unavailable — pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
 		return HardMode{}
 	}
 	nft := lookNft()
 	if nft == "" {
-		log.Printf("hydra egress: hard mode unavailable — nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
 		return HardMode{}
 	}
 	// --map-host-loopback is required for a deterministic proxy address; older
 	// pasta builds lack it, so don't even smoke-test those.
 	if !pastaHasMapHostLoopback(pasta) {
-		log.Printf("hydra egress: hard mode unavailable — pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
+		log.Printf("hydra egress: hard mode unavailable - pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
 		return HardMode{}
 	}
 	if reason := smokeTest(pasta, nft); reason != "" {
-		log.Printf("hydra egress: hard mode unavailable — smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
+		log.Printf("hydra egress: hard mode unavailable - smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
 		return HardMode{}
 	}
-	log.Printf("hydra egress: hard mode AVAILABLE — proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)
+	log.Printf("hydra egress: hard mode AVAILABLE - proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)
 	return HardMode{Available: true, PastaPath: pasta, NftPath: nft}
 }
 
 // lookPasta resolves the pasta binary. HYDRA_PASTA overrides PATH lookup so a
 // newer pasta (e.g. one with --map-host-loopback, dropped in ~/.local/bin) can be
-// used without touching the system binary — mirrors HYDRA_BWRAP.
+// used without touching the system binary - mirrors HYDRA_BWRAP.
 func lookPasta() string {
 	if p := os.Getenv("HYDRA_PASTA"); p != "" {
 		return p
@@ -118,7 +118,7 @@ func pastaHasMapHostLoopback(pasta string) bool {
 // "" on success, or a short human-readable reason on failure.
 //
 // This is the load-bearing check: it is not enough that pasta creates the netns and
-// nft loads the ruleset — the agent must be able to open a TCP connection to the
+// nft loads the ruleset - the agent must be able to open a TCP connection to the
 // host-loopback proxy at MapAddr:port, or every request dies with ConnectionRefused
 // (the proxy never even sees the traffic). The old smoke test only ran `true`
 // inside the netns, so a host where --map-host-loopback does not deliver traffic to
@@ -166,13 +166,13 @@ func smokeTest(pasta, nft string) string {
 	if err != nil {
 		return fmt.Sprintf("proxy unreachable from netns (%v): %s", err, detail)
 	}
-	return fmt.Sprintf("proxy unreachable from netns — token not received: %s", detail)
+	return fmt.Sprintf("proxy unreachable from netns - token not received: %s", detail)
 }
 
 // stripPastaNoise drops pasta's benign stderr chatter so a smoke-test failure
 // reports the real cause instead of burying it. The AVX2 line in particular is
 // emitted on every run when the pasta.avx2 sibling isn't present next to the
-// binary — pasta transparently falls back to the non-AVX2 build — yet it used to
+// binary - pasta transparently falls back to the non-AVX2 build - yet it used to
 // lead the failure detail and read as if it were the error. (Bundling the
 // pasta.avx2 sibling, as `mage tools:ensure` does, silences it at the source; this
 // keeps logs clean for a system pasta too.)

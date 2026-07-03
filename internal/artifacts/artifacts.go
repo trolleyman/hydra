@@ -18,14 +18,14 @@
 // Security note: scripts run *inside the OS sandbox* (the same bubblewrap /
 // sandbox-exec confinement agents get), not on the host. The command string may
 // come from the version being rendered (each side of a diff loads [[artifacts]]
-// from its own .hydra/config.toml, so a branch's edits show up — see
+// from its own .hydra/config.toml, so a branch's edits show up - see
 // internal/http/artifacts.go), and it executes against an attacker-controllable
-// checkout — build tooling and package lifecycle scripts run the diffed ref's
-// own code — so confining it is what keeps a malicious branch from escaping onto
+// checkout - build tooling and package lifecycle scripts run the diffed ref's
+// own code - so confining it is what keeps a malicious branch from escaping onto
 // the host. The checkout dir, the artifact output dir, the dev caches and the git
 // common dir are writable; credentials are masked; network is on (cold installs
 // need it). A script can opt out with `unsafe_host = true` in config, which runs
-// it unconfined on the host — only safe for self-contained, audited commands. So
+// it unconfined on the host - only safe for self-contained, audited commands. So
 // that a branch cannot grant *itself* host access, unsafe_host is honored only
 // when the trusted live config authorizes that exact command; the gating lives in
 // internal/http/artifacts.go, and buildCommandSpec just executes the decision.
@@ -93,9 +93,9 @@ const (
 
 // ProgressMarker prefixes a stdout line a script emits to set the live progress
 // header explicitly, e.g. `echo "::hydra:progress:: capturing home 3/24"`. The
-// manager strips the prefix, uses the remainder as the header progress, and —
-// once any marker is seen for a generation — stops treating ordinary stdout
-// lines as progress, so a noisy build (bun install, vite output, …) can't hijack
+// manager strips the prefix, uses the remainder as the header progress, and -
+// once any marker is seen for a generation - stops treating ordinary stdout
+// lines as progress, so a noisy build (bun install, vite output, ...) can't hijack
 // the header. The line still lands in the full log, with the prefix stripped.
 // Documented in the artifacts panel's info tooltip (web ArtifactsPanel.tsx).
 const ProgressMarker = "::hydra:progress::"
@@ -112,7 +112,7 @@ type LogLine struct {
 // dir (the caller maps that back to a script + side). Kind is one of:
 //   - "log":      a new line landed, carried in Line.
 //   - "progress": the header progress changed, carried in Progress.
-//   - "settled":  generation finished — the caller should re-read the now-written meta.
+//   - "settled":  generation finished - the caller should re-read the now-written meta.
 type Event struct {
 	Dir      string
 	Kind     string
@@ -124,7 +124,7 @@ type Event struct {
 // still images plus animated/video formats: .webp can be an animated image and
 // .webm is video, both rendered by the diff viewer's video modes. Comparison of
 // video falls back to a byte-hash verdict (Compare only pixel-refines formats the
-// Go stdlib can decode), so a non-deterministic encode always reads "modified" —
+// Go stdlib can decode), so a non-deterministic encode always reads "modified" -
 // produce lossless WebM (e.g. libvpx-vp9 -lossless 1) for a stable, meaningful diff.
 var mediaExts = map[string]string{
 	".png":  "image/png",
@@ -154,7 +154,7 @@ type FileMeta struct {
 	Size int64  `json:"size"`
 	Hash string `json:"hash"` // sha256 hex of the file contents
 	// Tags are labels read from the file's sibling JSON sidecar (<file>.meta,
-	// {"tags": [...]}) — see readSidecar/normalizeTags. They drive the diff
+	// {"tags": [...]}) - see readSidecar/normalizeTags. They drive the diff
 	// viewer's tag badges and filter. Already normalized: deduped, sorted, and
 	// with GitLab-style scoped labels collapsed to one value per category.
 	Tags []string `json:"tags,omitempty"`
@@ -171,7 +171,7 @@ type FileMeta struct {
 	Width  int `json:"width,omitempty"`
 	Height int `json:"height,omitempty"`
 	// Dpi is the media's pixel density (device-scale factor) from the same sidecar
-	// ({"dpi": 2}) — physical pixels per logical pixel at capture time. It lets the
+	// ({"dpi": 2}) - physical pixels per logical pixel at capture time. It lets the
 	// web grid size a tile by the image's *logical* width (Width / Dpi) rather than
 	// its raw pixel count, so a phone shot captured at 2x doesn't lay out twice as
 	// wide as the same shot at 1x. Zero/absent → treated as 1 (logical == physical).
@@ -225,17 +225,17 @@ type FileDelta struct {
 	Tags []string
 	// Unverified is set only on a video file left as ChangeModified because the
 	// per-frame check could not run (ffmpeg missing or errored), so the verdict
-	// is the raw byte-hash one and may be spurious — see Manager.Compare. The UI
+	// is the raw byte-hash one and may be spurious - see Manager.Compare. The UI
 	// caveats it with a badge. Always false for images and frame-verified video.
 	Unverified bool
 	// ChangeRatio is the fraction (0..1) of the media that differs, for a
 	// ChangeModified file whose pixel/frame check ran. Images report the share of
 	// differing pixels; video the share of differing frames (per-frame
-	// granularity — ffmpeg hashes whole frames). 0 means identical (such a file is
+	// granularity - ffmpeg hashes whole frames). 0 means identical (such a file is
 	// downgraded to ChangeUnchanged), 1 a wholesale change (e.g. differing
 	// dimensions). Left at 0 for added/removed/unchanged files and for video left
 	// Unverified. The UI uses it to apply a "% changed" threshold below which a
-	// modified file is treated as identical — see Manager.Compare.
+	// modified file is treated as identical - see Manager.Compare.
 	ChangeRatio float64
 	// Fps is the video frame rate from the file's sidecar, with the head (right)
 	// side preferred over the base when both declare one. Zero when neither side
@@ -244,7 +244,7 @@ type FileDelta struct {
 	// Width and Height are the media's natural pixel dimensions, with the head
 	// (right) side preferred over the base when present (so an added/removed file
 	// carries its one extant side's size). Both zero when undetermined on both
-	// sides — see FileMeta.Width.
+	// sides - see FileMeta.Width.
 	Width  int
 	Height int
 	// Dpi is the media's pixel density (device-scale factor), head-preferred like
@@ -335,7 +335,7 @@ func AnyChanged(deltas []FileDelta) bool {
 // difference.
 //
 // Only formats the standard library can decode (PNG, JPEG, GIF) get the pixel
-// check; other still types — and any file that fails to decode — keep the
+// check; other still types - and any file that fails to decode - keep the
 // byte-hash verdict.
 //
 // Video (.webm) cannot be decoded by the stdlib, so it is refined out-of-process
@@ -381,7 +381,7 @@ func (m *Manager) Compare(left, right Meta) []FileDelta {
 }
 
 // isVideoFile reports whether name's extension is one of the video media types
-// (currently only .webm) — the formats that go through the ffmpeg frame check
+// (currently only .webm) - the formats that go through the ffmpeg frame check
 // rather than the stdlib pixel decoder.
 func isVideoFile(name string) bool {
 	return strings.HasPrefix(mediaExts[strings.ToLower(filepath.Ext(name))], "video/")
@@ -389,7 +389,7 @@ func isVideoFile(name string) bool {
 
 // videoFramesDiffRatio reports the fraction (0..1) of frames that differ between
 // two video files, by comparing per-frame content hashes from ffmpeg. Granularity
-// is per frame, not per pixel — framemd5 yields one hash per frame, so a frame
+// is per frame, not per pixel - framemd5 yields one hash per frame, so a frame
 // counts as changed if any of its pixels changed. A frame-count mismatch counts
 // the surplus frames as changed. It returns 0 when the frame sequences are
 // identical, and an error (so the caller falls back to the byte-hash verdict) when
@@ -419,7 +419,7 @@ func videoFramesDiffRatio(leftPath, rightPath string) (float64, error) {
 
 // videoFrameHashes returns the per-frame content hashes for the first video stream
 // of path, using `ffmpeg -f framemd5`. Each entry is the md5 of that frame's
-// decoded (rawvideo) pixels, so it depends only on the visual content — container
+// decoded (rawvideo) pixels, so it depends only on the visual content - container
 // muxing, timestamps and writing-app metadata do not affect it. Only the hash
 // column is kept, so differing presentation timestamps on otherwise-identical
 // frames don't register as a change.
@@ -443,7 +443,7 @@ func videoFrameHashes(path string) ([]string, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		// Skip the comment header (#software, #stream metadata, …) and blanks;
+		// Skip the comment header (#software, #stream metadata, ...) and blanks;
 		// keep only the trailing hash field of each frame row.
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -511,7 +511,7 @@ func decodeImage(path string) (image.Image, error) {
 }
 
 // mediaPixelSize returns the natural pixel dimensions of an artifact file,
-// best-effort. Images are measured from their header only (image.DecodeConfig —
+// best-effort. Images are measured from their header only (image.DecodeConfig -
 // no full pixel decode); video is measured with ffprobe when it is on PATH. Either
 // branch returns (0, 0) when the size can't be determined (unsupported/corrupt
 // file, ffprobe missing/errored): the dimensions are optional cache metadata, so a
@@ -564,7 +564,7 @@ func videoPixelSize(path string) (width, height int) {
 
 // equalRawPix is a fast path that reports true only when two images share the
 // same concrete pixel type and byte-identical pixel buffers. A false result
-// means "unknown" — the caller falls back to the general per-pixel comparison.
+// means "unknown" - the caller falls back to the general per-pixel comparison.
 func equalRawPix(a, b image.Image) bool {
 	switch av := a.(type) {
 	case *image.RGBA:
@@ -691,7 +691,7 @@ func (m *Manager) Subscribe() (<-chan Event, func()) {
 }
 
 // broadcastLocked delivers ev to every subscriber without blocking. Callers must
-// hold m.mu — that serializes against Subscribe's close, so we never send on a
+// hold m.mu - that serializes against Subscribe's close, so we never send on a
 // closed channel.
 func (m *Manager) broadcastLocked(ev Event) {
 	for _, ch := range m.subs {
@@ -765,7 +765,7 @@ func (m *Manager) entryDir(script, key string) string {
 
 // Cache-key kinds. A key is "<kind>/<id>": a commit is keyed by its resolved
 // SHA, the working tree by a content fingerprint. The kind is the first path
-// segment, so on disk an entry lives at out/<script>/<kind>/<id>/ — commits and
+// segment, so on disk an entry lives at out/<script>/<kind>/<id>/ - commits and
 // working-tree snapshots sit in separate, self-describing subtrees.
 const (
 	keyKindCommit   = "commit"
@@ -805,7 +805,7 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 // the work on click. It returns immediately; the result is the cache entry it
 // will populate (StatusGenerating while it runs). Background generations yield
 // their slot to foreground requests in the queue but are never preempted once
-// running, so the proactive work is never wasted — a subsequent Get for the same
+// running, so the proactive work is never wasted - a subsequent Get for the same
 // version reuses the in-flight run or its cached result. See the daemon's
 // artifact prefetcher (internal/http/prefetch.go).
 func (m *Manager) Prefetch(spec config.ArtifactScript, v Version) (Meta, error) {
@@ -865,7 +865,7 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 
 		meta := m.generate(genCtx, spec, v, key, ref)
 		// A cancelled generation was preempted (a newer version superseded this
-		// one): don't cache the aborted run as an error — drop the entry so a later
+		// one): don't cache the aborted run as an error - drop the entry so a later
 		// request regenerates cleanly instead of serving a stale failure.
 		cancelled := genCtx.Err() != nil
 		if cancelled {
@@ -898,7 +898,7 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 }
 
 // Invalidate drops the cached entry for (script, v) so the next Get regenerates
-// it from scratch. This is how a user-initiated "refresh" busts a stale result —
+// it from scratch. This is how a user-initiated "refresh" busts a stale result -
 // most importantly a cached StatusError, which otherwise sticks until the version
 // key changes or the entry is pruned. It is a no-op when a generation for that
 // entry is already in flight (that run will write a fresh result) or when nothing
@@ -919,7 +919,7 @@ func (m *Manager) Invalidate(script string, v Version) error {
 }
 
 // CancelStaleBackground cancels the in-flight generation for the cache entry at
-// dir, but only while it is still running purely as background work — i.e. no
+// dir, but only while it is still running purely as background work - i.e. no
 // foreground viewer has claimed it (see the fgWant guard). The daemon's
 // prefetcher calls this when a head moves to a newer version so the now-stale
 // build (e.g. a render of the head's previous working-tree state) is killed at
@@ -981,9 +981,9 @@ func (m *Manager) setProgressLocked(dir, text string) {
 }
 
 // generate runs the script for one version and returns the resulting Meta. The
-// parent ctx is cancellable (per generation): cancelling it kills the command —
+// parent ctx is cancellable (per generation): cancelling it kills the command -
 // and, because the sandbox's bwrap is the init of its own PID namespace, the
-// whole process tree — so a preempted run frees its resources at once.
+// whole process tree - so a preempted run frees its resources at once.
 func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v Version, key, ref string) Meta {
 	meta := Meta{Script: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
 
@@ -999,8 +999,8 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	}
 
 	// Resolve the directory the script runs in. For a commit ref (no caller-supplied
-	// worktree) borrow a reusable slot from the pool — checked out at `ref` (an
-	// already-resolved commit SHA) — rather than creating and destroying a full
+	// worktree) borrow a reusable slot from the pool - checked out at `ref` (an
+	// already-resolved commit SHA) - rather than creating and destroying a full
 	// worktree per generation (PLAN #51). Released for reuse when generation ends.
 	runDir := v.WorktreeDir
 	if runDir == "" {
@@ -1100,9 +1100,9 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	err = cmd.Wait()
 	scanWG.Wait() // drain both pipes before reading stderr / returning
 	if err != nil {
-		// A concise failure summary: the exit code, or "timed out after …" when the
-		// per-script timeout fired. This is Hydra's framing — NOT something the
-		// script prints — so it is otherwise invisible: a timeout SIGKILLs the
+		// A concise failure summary: the exit code, or "timed out after ..." when the
+		// per-script timeout fired. This is Hydra's framing - NOT something the
+		// script prints - so it is otherwise invisible: a timeout SIGKILLs the
 		// script before it can say anything, and a bare non-zero exit may print
 		// nothing after its last progress line.
 		summary := err.Error()
@@ -1114,7 +1114,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 			summary = "timed out after " + timeout.String()
 		}
 		// Append the summary as the log's final line so the captured build log
-		// itself explains why the run ended — the script's own stderr is already
+		// itself explains why the run ended - the script's own stderr is already
 		// streamed above, so the UI shows this inline as the last (red) line rather
 		// than in a separate banner that would duplicate the stderr and push the
 		// terminal down.
@@ -1159,12 +1159,12 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 
 // buildCommandSpec resolves the script command into a launch spec. By default
 // it runs inside the OS sandbox (the same confinement agents get), because the
-// command executes against an attacker-controllable checkout — the diffed ref's
+// command executes against an attacker-controllable checkout - the diffed ref's
 // build tooling and package lifecycle scripts run its code. runDir (the
 // checkout/working tree) and outputDir (HYDRA_ARTIFACT_OUTPUT) are writable
 // along with the dev caches and the git common dir; credentials are masked; the
 // network is on (cold `bun install`/`go mod download` need it, warm caches stay
-// mostly offline) — matching the agent default. When spec.UnsafeHost is set the
+// mostly offline) - matching the agent default. When spec.UnsafeHost is set the
 // command runs unconfined on the host instead (sandbox.Options.NoSandbox).
 func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir, ref string) (*sandbox.Spec, error) {
 	home, _ := os.UserHomeDir()
@@ -1179,7 +1179,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		"HYDRA_ARTIFACT_REF="+ref,
 	)
 	// Trust the checkout's copied mise config when the host trusts the project's,
-	// so mise-managed toolchains (go, bun, …) resolve inside the run dir.
+	// so mise-managed toolchains (go, bun, ...) resolve inside the run dir.
 	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
 
 	command := spec.Command
@@ -1221,7 +1221,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 
 // keyRe matches valid cache keys produced by versionKey ("commit/<sha>" or
 // "worktree/<hash>"). Anchored with a single fixed kind segment and a hex id, so
-// a key can never contain ".." or extra path segments — BlobPath relies on this
+// a key can never contain ".." or extra path segments - BlobPath relies on this
 // to keep the resolved blob path inside the entry dir.
 var keyRe = regexp.MustCompile(`^(commit|worktree)/[0-9a-f]+$`)
 
@@ -1247,7 +1247,7 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 }
 
 // CleanCheckouts removes leftover ephemeral checkouts and resets the worktree-slot
-// pool. Safe to call on boot, before any generation is in flight — this is also
+// pool. Safe to call on boot, before any generation is in flight - this is also
 // the crash-recovery path: a process that died mid-generation leaves slot (and,
 // pre-slot-pool, per-commit checkout) worktrees behind, which this wipes and
 // prunes so the pool starts clean and recreates slots on demand.
@@ -1265,7 +1265,7 @@ var legacyKeyRe = regexp.MustCompile(`^([cw])([0-9a-f]+)$`)
 // "c<sha>"/"w<hash>" layout into the current out/<script>/<kind>/<id> layout,
 // rewriting each meta.json's key field to match its new path (the field is
 // returned verbatim and feeds the blob URLs, so a stale key would 404).
-// Migrating — rather than discarding — keeps already-generated screenshots valid
+// Migrating - rather than discarding - keeps already-generated screenshots valid
 // across the upgrade. Best-effort and idempotent: safe to run on every boot, and
 // it skips an entry whose new-format dir already exists (a fresh regen wins).
 // Returns the number of entries moved.
@@ -1354,7 +1354,7 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 		scriptPath := filepath.Join(m.outDir(), sd.Name())
 		// Entries nest two levels below the script dir: <kind>/<id> (see
 		// versionKey). Anything else directly under the script dir is a leftover
-		// from the old flat "c<sha>"/"w<hash>" layout — skip it (don't delete), so
+		// from the old flat "c<sha>"/"w<hash>" layout - skip it (don't delete), so
 		// a not-yet-migrated cache survives until MigrateLegacyLayout (run on boot)
 		// moves it over.
 		kindDirs, err := os.ReadDir(scriptPath)
@@ -1531,7 +1531,7 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 // {"tags": ["a", "theme::dark"], "fps": 60}. The "meta" extension is a single,
 // extensible home for per-file metadata. A missing/unreadable sidecar yields
 // nothing and no warnings (the common case); malformed JSON yields a warning (and
-// no metadata). fps is reported only when present and positive — a non-positive
+// no metadata). fps is reported only when present and positive - a non-positive
 // value is ignored (zero, the caller's "unset", with a warning).
 func readSidecar(filePath string) (tags []string, fps float64, dpi float64, warnings []string) {
 	data, err := os.ReadFile(filePath + ".meta")

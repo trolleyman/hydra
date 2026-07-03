@@ -2,7 +2,7 @@
 //
 // The generated OpenAPI client only handles JSON bodies, so uploads use a raw
 // multipart request against the same-origin /uploads endpoint (proxied to the
-// backend in dev — see vite.config.ts). The backend stores the file under the
+// backend in dev - see vite.config.ts). The backend stores the file under the
 // project's .hydra/local/uploads dir and returns its absolute path, which is valid
 // both on the host and inside the agent sandbox. Inserting that path into the
 // prompt/terminal lets the agent read the file directly.
@@ -47,10 +47,10 @@ const IMAGE_RE = /^image\//
  * distinct File object stamped with its own `lastModified` (set when the object
  * is materialized). Those stamps usually match, but if a millisecond boundary is
  * crossed between reading the two lists they differ by 1ms and any dedupe keyed
- * on `lastModified` lets the duplicate through — pasting one image twice.
+ * on `lastModified` lets the duplicate through - pasting one image twice.
  *
  * So we prefer `items` (the reliable source for pastes) and only fall back to
- * `files` when `items` yielded nothing — some browsers populate only `files`.
+ * `files` when `items` yielded nothing - some browsers populate only `files`.
  * A `seen` set still guards against duplicates within a single source.
  */
 export function extractFiles(dt: DataTransfer | null): File[] {
