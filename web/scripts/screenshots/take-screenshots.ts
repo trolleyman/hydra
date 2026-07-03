@@ -682,6 +682,19 @@ try {
           agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'finished' },
         },
       },
+      // 2a. A transition in ANOTHER project (the background count diff in
+      // useAgentNotifications): the same card topped with the neutral gray
+      // "in another project" banner — the calm sibling of the approval card's
+      // amber one (agent-approvals-another-project).
+      {
+        name: 'toast-finished-another-project',
+        path: '/settings',
+        toast: {
+          message: 'Agent "Reconcile Stripe events" in project "payments-api" transitioned to finished',
+          type: 'success',
+          agentTransition: { agentName: 'Reconcile Stripe events', agentId: 'agent-md', projectId: 'sim-project', status: 'finished', projectName: 'payments-api' },
+        },
+      },
       // 2b. Merge-lifecycle toasts (AgentDetail armMerge/executeMerge + the
       // background auto-merge detector in agentStore): the same agent card, with
       // the pill/copy describing the merge instead of a status transition.

@@ -1,8 +1,9 @@
 import React from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Server, SquareTerminal, Globe, Network, Bot, Shield, Folder, Check, X } from 'lucide-react'
+import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
+import { CrossProjectBanner } from './CrossProjectBanner'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
 // tool calls). It names exactly what's being requested — a whole MCP server, a
@@ -201,12 +202,7 @@ export const ApprovalCard: React.FC<{
       aria-label={title}
       className="relative w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
     >
-      {data.crossProject && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200/70 dark:border-amber-500/20 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-          <Folder className="w-3 h-3" />
-          Running in another project · <span className="font-mono normal-case tracking-normal">{data.crossProject}</span>
-        </div>
-      )}
+      {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">
         <div className="flex items-start gap-3">
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconWrap}`}>
