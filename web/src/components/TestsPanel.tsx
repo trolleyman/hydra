@@ -519,7 +519,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
     >
       {/* Running: a thin progress bar above the live log tail — determinate
           (completed cases over the declared total) when the run streams a
-          denominator, an indeterminate pulse otherwise. */}
+          denominator, an indeterminate sliding barber pole otherwise. */}
       {running && (
         <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
           {liveDenominator(runner) > 0 ? (
@@ -528,7 +528,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
               style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
             />
           ) : (
-            <div className="h-full bg-blue-500 animate-pulse w-1/2" />
+            <div className="h-full w-full bg-blue-500 animate-barber-pole" />
           )}
         </div>
       )}
@@ -628,14 +628,16 @@ function completedCases(runner: TestRunResult): number {
   return (runner.passed ?? 0) + (runner.failed ?? 0) + (runner.warnings ?? 0) + (runner.skipped ?? 0)
 }
 
-// liveDenominator is an in-flight runner's declared ::hydra:test:total::, but
-// only when it exceeds the cases seen so far — with no declared total the
-// backend floors `total` at the case count, and "82/82" would misread as
-// almost-done. 0 = don't show one. Settled runs always have total == the case
-// sum, so this is inherently running-only.
+// liveDenominator is an in-flight runner's declared ::hydra:test:total::
+// denominator. The backend reports 0 (on every path — stream and poll) when no
+// total was declared, so a positive total is always a real, meaningful
+// denominator: we keep it even once the completed cases catch up to it, so the
+// determinate bar holds at 100% instead of snapping back to the indeterminate
+// pulse for "the final bit" of the run. 0 = don't show one. Settled runs always
+// have total == the case sum, so this is inherently running-only.
 function liveDenominator(runner: TestRunResult): number {
   const total = runner.total ?? 0
-  return total > completedCases(runner) ? total : 0
+  return total > 0 ? total : 0
 }
 
 function Summary({ runner }: { runner: TestRunResult }) {

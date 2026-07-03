@@ -595,17 +595,34 @@ func simTestRunners(id string) []api.TestRunResult {
 		}}
 	}
 	if id == "agent-md" {
-		// A run in flight, for the running-state screenshot.
-		return []api.TestRunResult{{
-			Name: "go", Status: api.TestStatusRunning,
-			Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
-			StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"),
-			Log: &[]api.ArtifactLogLine{
-				{Text: "$ vitest run --reporter=dot", Stream: "stdout"},
-				{Text: "✓ internal/heads/heads.test.ts (31)", Stream: "stdout"},
-				{Text: "✗ auth/rotation.test.ts (2 failed)", Stream: "stderr"},
+		// Two runs in flight, for the running-state screenshots. "go" declared a
+		// ::hydra:test:total:: (142) so its bar is determinate (84/142); "eslint"
+		// is a streamed run with NO declared total — tallies tick but there's no
+		// denominator — so its bar is the indeterminate sliding barber pole.
+		return []api.TestRunResult{
+			{
+				Name: "go", Status: api.TestStatusRunning,
+				Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
+				StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"),
+				Log: &[]api.ArtifactLogLine{
+					{Text: "$ vitest run --reporter=dot", Stream: "stdout"},
+					{Text: "✓ internal/heads/heads.test.ts (31)", Stream: "stdout"},
+					{Text: "✗ auth/rotation.test.ts (2 failed)", Stream: "stderr"},
+				},
 			},
-		}}
+			{
+				Name: "eslint", Status: api.TestStatusRunning,
+				// No Total: a streamed runner that never declared ::hydra:test:total::,
+				// so the panel shows a sliding barber pole instead of a fill percentage.
+				Passed: ptr(213), Warnings: ptr(3),
+				StartedAt: ptr(simNow().Add(-3 * time.Second).Unix()), Progress: ptr("216"), Format: ptr("stdout"),
+				Log: &[]api.ArtifactLogLine{
+					{Text: "$ eslint -f junit .", Stream: "stdout"},
+					{Text: "web/src/DiffViewer.tsx", Stream: "stdout"},
+					{Text: "  1742:9  warning  'onionSkin' is assigned a value but never used", Stream: "stdout"},
+				},
+			},
+		}
 	}
 	return []api.TestRunResult{passing}
 }
