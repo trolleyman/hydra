@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
-import { useNavigate, useLocation } from '@tanstack/react-router'
+import { useNavigate, useLocation, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
 import { ensureLanguage } from '../lib/hljsLazy'
 import { getLanguage } from '../lib/language'
@@ -570,14 +570,16 @@ function HeaderOverflowMenu({ className = '', children }: { className?: string; 
 // ── Tree rendering ──────────────────────────────────────────────────────────────
 
 function TreeRow({
-  node, depth, expanded, toggle, selectedPath, onSelect, showIcons,
+  node, depth, expanded, toggle, selectedPath, fileLink, showIcons,
 }: {
   node: TreeNode
   depth: number
   expanded: Set<string>
   toggle: (path: string) => void
   selectedPath: string | null
-  onSelect: (path: string) => void
+  // Builds the <Link> target for a file leaf, so file rows are real anchors
+  // (middle-click / Ctrl-click open them in a new tab). Dir rows just toggle.
+  fileLink: (path: string) => LinkProps
   showIcons: boolean
 }) {
   const isOpen = expanded.has(node.path)
@@ -599,7 +601,7 @@ function TreeRow({
           <span className="truncate">{node.name}</span>
         </button>
         {isOpen && node.children.map((child) => (
-          <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} onSelect={onSelect} showIcons={showIcons} />
+          <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} fileLink={fileLink} showIcons={showIcons} />
         ))}
       </div>
     )
@@ -609,8 +611,8 @@ function TreeRow({
     ? { Icon: Camera, className: 'text-pink-500' }
     : getFileIcon(node.name)
   return (
-    <button
-      onClick={() => onSelect(node.path)}
+    <Link
+      {...fileLink(node.path)}
       style={pad}
       className={`w-full flex items-center gap-1.5 pr-2 py-1 text-sm transition-colors cursor-pointer text-left ${isSelected
         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
@@ -622,7 +624,7 @@ function TreeRow({
         ? <Icon className={`w-4 h-4 shrink-0 ${className}`} />
         : <FileIcon className="w-4 h-4 shrink-0 text-gray-400" />}
       <span className="truncate">{node.name}</span>
-    </button>
+    </Link>
   )
 }
 
@@ -1302,8 +1304,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     const sp = path ? `${ref}/${path}` : ref
     navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: sp } })
   }
-  const selectFile = (path: string) => goTo(refStr, path)
   const selectBranch = (name: string) => goTo(name, parsed.path)
+  // <Link> target for a file at the current ref - used by the tree so file rows
+  // are real anchors (middle-click / Ctrl-click open them in a new tab).
+  const fileLinkProps = (path: string): LinkProps => linkOptions({
+    to: '/project/$projectId/repository/$',
+    params: { projectId, _splat: `${refStr}/${path}` },
+  })
 
   // Small-screen "back": pop the full-screen content view back to the list. In
   // diff mode that's the drill-down flag; when browsing it clears the file path
@@ -1451,7 +1458,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No tracked files</div>
           ) : (
             displayTree.map((node) => (
-              <TreeRow key={node.path} node={node} depth={0} expanded={expanded} toggle={toggle} selectedPath={viewPath} onSelect={selectFile} showIcons={settings.showIcons} />
+              <TreeRow key={node.path} node={node} depth={0} expanded={expanded} toggle={toggle} selectedPath={viewPath} fileLink={fileLinkProps} showIcons={settings.showIcons} />
             ))
           )}
         </div>

@@ -651,15 +651,17 @@ function RootLayout() {
                               : `Up to date with ${remote}`
                 return (
                   <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
+                    <Link
+                      to="/project/$projectId/repository"
+                      params={{ projectId: currentProjectId }}
+                      onClick={(e) => {
                         if (repositoryActive) {
-                          // Toggle off: clicking the active Repository button returns
-                          // to the project home screen, mirroring agent deselection.
+                          // Toggle off: left-clicking the active Repository button
+                          // returns to the project home screen, mirroring agent
+                          // deselection. Middle/Ctrl-click ignore this and open the
+                          // repository in a new tab (it's a real link).
+                          e.preventDefault()
                           navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                        } else {
-                          navigate({ to: '/project/$projectId/repository', params: { projectId: currentProjectId } })
                         }
                       }}
                       className={
@@ -670,7 +672,7 @@ function RootLayout() {
                     >
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
-                    </button>
+                    </Link>
                     {/* Uncommitted-changes warning: the project checkout is dirty
                         (e.g. a Settings save rewrote .hydra/config.toml). Click to
                         review the paths and commit them all. */}
@@ -746,19 +748,13 @@ function RootLayout() {
                   : 'Spawn an agent to get started'}
               </div>
             ) : (
-              filteredAgents.map((agent) => (
+              currentProjectId && filteredAgents.map((agent) => (
                 <AgentSidebarItem
                   key={agent.id}
                   agent={agent}
                   selected={agent.id === selectedAgentId}
-                  onClick={() => {
-                    if (!currentProjectId) return
-                    if (agent.id === selectedAgentId) {
-                      navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                    } else {
-                      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
-                    }
-                  }}
+                  projectId={currentProjectId}
+                  onDeselect={() => navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })}
                 />
               ))
             )}
@@ -790,14 +786,8 @@ function RootLayout() {
                       key={agent.id}
                       agent={agent}
                       selected={agent.id === selectedAgentId}
-                      onClick={() => {
-                        if (!currentProjectId) return
-                        if (agent.id === selectedAgentId) {
-                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                        } else {
-                          navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
-                        }
-                      }}
+                      projectId={currentProjectId}
+                      onDeselect={() => navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })}
                     />
                   ))}
               </>
