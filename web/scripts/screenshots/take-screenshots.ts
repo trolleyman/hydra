@@ -941,10 +941,15 @@ try {
       { name: 'tests-merge-gate-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // A fully-expanded tests runner card: agent-2's vitest card opened, then the
       // status filter switched to "all" so the failing cases, the passing case and
-      // the skipped row are all visible together as a folder/file/function tree
-      // below the Changes header (the dropdown is dismissed by clicking the Tests
-      // heading before the capture).
+      // the skipped row are all visible together as a folder/file/scope tree below
+      // the Changes header. The scope levels are vitest describe blocks, so they
+      // render with the module ({}) glyph and a file-icon-led location chain (the
+      // dropdown is dismissed by clicking the Tests heading before the capture).
       { name: 'tests-card-expanded', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("status")', 'button:text-is("all")', 'h3:has-text("Tests")'] },
+      // The counterpart with FUNCTION-kind scopes: agent-1's Go "go" runner, whose
+      // two Go cases carry a `func TestXxx` subtest parent → the ƒ function glyph
+      // (vs agent-2's {} module describe blocks), amid a real dir/file tree.
+      { name: 'tests-card-functions', path: '/project/sim-project/agent/agent-1', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("status")', 'button:text-is("all")', 'h3:has-text("Tests")'] },
       // The merge-gate dialog while tests are still running: agent-3 (running, not
       // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.

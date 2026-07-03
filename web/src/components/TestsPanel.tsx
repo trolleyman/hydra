@@ -14,6 +14,7 @@ import { InfoTooltip } from './InfoTooltip'
 import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, TreeGuide, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
+import { formatLineHash } from '../lib/lineRange'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -236,13 +237,18 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   const statusCounts = useMemo(() => computeStatusCounts(allCases), [allCases])
 
   // Deep-link a case/file/dir row to the repository browser at the agent's
-  // branch. Omitted when there's no ref to browse, which hides the affordance.
-  // (The repo browser has no line anchor yet, so `line` is accepted but unused.)
+  // branch. Omitted when there's no ref to browse, which hides the affordance. A
+  // case's line is carried as an #L<n> hash, which the repo view scrolls to and
+  // highlights (see RepositoryView's selRange).
   const navigate = useNavigate()
   const onOpenInRepo = useMemo<OpenInRepo | undefined>(() => {
     if (!repoRef) return undefined
-    return (path: string) => {
-      void navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: `${repoRef}/${path}` } })
+    return (path: string, line?: number | null) => {
+      void navigate({
+        to: '/project/$projectId/repository/$',
+        params: { projectId, _splat: `${repoRef}/${path}` },
+        hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
+      })
     }
   }, [navigate, projectId, repoRef])
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { AlertTriangle, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { AlertTriangle, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
@@ -18,30 +18,47 @@ import { getFileIcon } from '../lib/fileIcons'
 // merges into one row (internal/artifacts — like VS Code compact folders), and
 // a subtree holding exactly ONE case collapses the whole chain into that
 // case's row, prefixed with the chain (so a lone warning isn't five expanders
-// deep). Dir/file rows carry a hover copy button (repo-relative path); case
-// rows copy path:line. Each row also carries a hover "open in repository"
-// affordance that deep-links to the file/dir in the repo browser. Cases with no
+// deep). Each row carries per-segment icons (folder / file for path levels,
+// {} module vs ƒ function for scope levels), a hover copy button (repo-relative
+// path or path:line) and a hover "open in repository" affordance that
+// deep-links to the file/dir (and line) in the repo browser. Cases with no
 // location (old cached reports, exit-code fallbacks) land at the root as flat
 // rows.
 
 type SegKind = 'path' | 'scope'
-type Seg = { label: string; kind: SegKind }
+// A scope level is either a container (a describe block / class / suite) or a
+// Go test function that owns subtests — the backend tags this per level
+// (TestCase.scope_kinds), since the strings alone can't tell TestClass (a
+// pytest class) from TestFoo (a Go func).
+type ScopeKind = 'module' | 'function'
+type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 
-// OpenInRepo deep-links a row to the repository browser (the file/dir at the
-// tested ref). Undefined when there's no ref to browse (see TestsPanel), which
-// hides the affordance entirely.
+// OpenInRepo deep-links a row to the repository browser (the file/dir — and, for
+// a case, its line — at the tested ref). Undefined when there's no ref to browse
+// (see TestsPanel), which hides the affordance entirely.
 export type OpenInRepo = (path: string, line?: number | null) => void
+
+function normScopeKind(k: string | null | undefined): ScopeKind {
+  return k === 'function' ? 'function' : 'module'
+}
 
 function caseSegs(c: TestCase, useScope: boolean): Seg[] {
   const path: Seg[] = splitPath(c.path).map((label) => ({ label, kind: 'path' as const }))
-  const scope: Seg[] = (c.scope ?? []).map((label) => ({ label, kind: 'scope' as const }))
+  const kinds = c.scope_kinds ?? []
+  const scope: Seg[] = (c.scope ?? []).map((label, i) => ({ label, kind: 'scope' as const, scopeKind: normScopeKind(kinds[i]) }))
   if (useScope) return scope.length > 0 ? scope : path
   return [...path, ...scope]
 }
 
 type TreeNode = {
-  label: string // display label; single-child chains merge into it
+  label: string // joined display label (used for sorting + copy fallback)
   kind: SegKind
+  // The display segments this row shows: one seg per node, or the whole merged
+  // chain once compact() folds single-child chains together. Preserving the
+  // per-segment kind (path vs scope, module vs function) is what lets a merged
+  // "auth/rotation.test.ts › key rotation" row lead with a file icon and mark
+  // the scope level with its own glyph.
+  segs: Seg[]
   // Real path segments accumulated from the root through this node (path-kind
   // segments only) — the copyable repo-relative path.
   pathParts: string[]
@@ -54,12 +71,17 @@ type TreeNode = {
   visTotal: number // filter-surviving cases in the subtree; 0 → node not rendered
 }
 
-function newNode(label: string, kind: SegKind, pathParts: string[], key: string): TreeNode {
-  return { label, kind, pathParts, key, children: new Map(), cases: [], visCases: [], counts: {}, total: 0, visTotal: 0 }
+function newNode(seg: Seg | null, pathParts: string[], key: string): TreeNode {
+  return {
+    label: seg?.label ?? '',
+    kind: seg?.kind ?? 'path',
+    segs: seg ? [seg] : [],
+    pathParts, key, children: new Map(), cases: [], visCases: [], counts: {}, total: 0, visTotal: 0,
+  }
 }
 
 function buildTree(cases: TestCase[], visibleSet: Set<TestCase>, useScope: boolean): TreeNode {
-  const root = newNode('', 'path', [], '')
+  const root = newNode(null, [], '')
   for (const c of cases) {
     const vis = visibleSet.has(c)
     let node = root
@@ -70,7 +92,7 @@ function buildTree(cases: TestCase[], visibleSet: Set<TestCase>, useScope: boole
       const childKey = `${node.key}/${seg.label}`
       let child = node.children.get(childKey)
       if (!child) {
-        child = newNode(seg.label, seg.kind, seg.kind === 'path' ? [...node.pathParts, seg.label] : node.pathParts, childKey)
+        child = newNode(seg, seg.kind === 'path' ? [...node.pathParts, seg.label] : node.pathParts, childKey)
         node.children.set(childKey, child)
       }
       node = child
@@ -88,13 +110,15 @@ function buildTree(cases: TestCase[], visibleSet: Set<TestCase>, useScope: boole
 // compact merges every childless-of-cases single-child chain into one row:
 // internal → artifacts becomes "internal/artifacts" (path segments join with
 // "/", scope levels with "›"). The merged node keeps the DEEPEST child's key,
-// so its collapse state survives re-renders that change the chain above it.
+// so its collapse state survives re-renders that change the chain above it, and
+// concatenates the segment lists so each level keeps its own icon.
 function compact(node: TreeNode): void {
   for (let child of [...node.children.values()]) {
     node.children.delete(child.key)
     while (child.cases.length === 0 && child.children.size === 1) {
       const only = [...child.children.values()][0]
       only.label = `${child.label}${only.kind === 'path' ? '/' : ' › '}${only.label}`
+      only.segs = [...child.segs, ...only.segs]
       child = only
     }
     compact(child)
@@ -104,31 +128,31 @@ function compact(node: TreeNode): void {
 
 // nodeIsDir distinguishes a directory (holds further path segments) from a file
 // (its children are scope levels, or it holds cases directly). Drives the
-// folder-vs-file icon on path rows.
+// folder-vs-file icon on the leading path group.
 function nodeIsDir(node: TreeNode): boolean {
   for (const c of node.children.values()) if (c.kind === 'path') return true
   return false
 }
 
 // hoistedCase returns the single case of a one-case subtree along with the
-// chain of segments leading to it, or null when the subtree holds more than
-// one. Only a subtree whose FULL total is one hoists: with hidden siblings the
-// node keeps its expandable row so the everything-counted badges have a home.
+// merged chain of segments leading to it, or null when the subtree holds more
+// than one. Only a subtree whose FULL total is one hoists: with hidden siblings
+// the node keeps its expandable row so the everything-counted badges have a home.
 function hoistedCase(node: TreeNode): { c: TestCase; segs: Seg[] } | null {
   if (node.total !== 1 || node.visTotal !== 1) return null
-  const segs: Seg[] = [{ label: node.label, kind: node.kind }]
+  const segs: Seg[] = [...node.segs]
   let cur = node
   while (cur.cases.length === 0) {
     const next: TreeNode | undefined = [...cur.children.values()][0]
     if (!next) return null
-    segs.push({ label: next.label, kind: next.kind })
+    segs.push(...next.segs)
     cur = next
   }
   return { c: cur.cases[0], segs }
 }
 
 // segText joins a segment chain the way the tree merges labels: path→path with
-// "/", anything into a scope level with " › ".
+// "/", anything into a scope level with " › ". Used for the copy fallback.
 function segText(segs: Seg[]): string {
   return segs.map((s, i) => (i === 0 ? s.label : `${s.kind === 'path' ? '/' : ' › '}${s.label}`)).join('')
 }
@@ -201,7 +225,7 @@ function CopyButton({ text, title }: { text: string; title: string }) {
 }
 
 // RepoLinkButton is the hover-revealed "open in the repository browser"
-// affordance, deep-linking a row to its file/dir at the tested ref.
+// affordance, deep-linking a row to its file/dir (and line) at the tested ref.
 function RepoLinkButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
     <button
@@ -228,46 +252,61 @@ function StatusGlyph({ status }: { status: string }) {
   }
 }
 
-// NodeTypeIcon renders the folder / file / function icon that precedes a node's
-// label: a folder (open when expanded) for directories, the shared file icon
-// for files, and a function glyph for scope levels (describe/class blocks that
-// hold sub-cases).
-function NodeTypeIcon({ node, isDir, expanded }: { node: TreeNode; isDir: boolean; expanded: boolean }) {
-  if (node.kind === 'scope') {
-    return <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
-  }
-  if (isDir) {
-    return expanded
-      ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-      : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-  }
-  const { Icon, className } = getFileIcon(filenameOf(node.label))
+function FileGlyph({ name }: { name: string }) {
+  const { Icon, className } = getFileIcon(name)
   return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} />
 }
 
-// FileLeadIcon is the leading icon of a hoisted case row: the file icon of the
-// deepest path segment in the chain, or a function glyph when the chain is
-// scope-only (scope mode).
-function FileLeadIcon({ segs }: { segs: Seg[] }) {
-  for (let i = segs.length - 1; i >= 0; i--) {
-    if (segs[i].kind === 'path') {
-      const { Icon, className } = getFileIcon(filenameOf(segs[i].label))
-      return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} />
-    }
+// ScopeGlyph draws a scope level: a function glyph (ƒ, violet) for a Go test
+// function that owns subtests, or a braces glyph ({ }, teal) for a container —
+// a describe block, class or suite (the default when the kind is unknown).
+function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
+  return scopeKind === 'function'
+    ? <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
+    : <Braces className="w-3.5 h-3.5 text-teal-500 dark:text-teal-400 shrink-0" />
+}
+
+// RowSegments renders a location chain as a sequence of icon+label pieces
+// separated by "›": the leading path segments collapse into ONE file/folder
+// piece (the folder open when expanded), then each scope level is its own
+// module/function piece. So "auth/rotation.test.ts › key rotation" reads as a
+// file icon + "auth/rotation.test.ts" then a module glyph + "key rotation".
+function RowSegments({ segs, isDir, expanded }: { segs: Seg[]; isDir: boolean; expanded: boolean }) {
+  const pathSegs = segs.filter((s) => s.kind === 'path')
+  const scopeSegs = segs.filter((s) => s.kind === 'scope')
+  const pieces: { icon: ReactNode; text: string; textClass: string }[] = []
+  if (pathSegs.length > 0) {
+    const icon = isDir
+      ? (expanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />)
+      : <FileGlyph name={filenameOf(pathSegs[pathSegs.length - 1].label)} />
+    pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300' })
   }
-  return <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
+  for (const s of scopeSegs) {
+    pieces.push({ icon: <ScopeGlyph scopeKind={s.scopeKind} />, text: s.label, textClass: 'italic text-gray-500 dark:text-gray-400' })
+  }
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      {pieces.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span> : null}
+          {p.icon}
+          <span className={`font-mono text-xs truncate min-w-0 ${p.textClass}`}>{p.text}</span>
+        </Fragment>
+      ))}
+    </span>
+  )
 }
 
 // CaseRow renders one test case: for a hoisted one-case subtree it leads with
-// the file icon and the (non-lowlit) location chain, then the status glyph
+// the file icon + the (non-lowlit) location chain, then the status glyph
 // immediately before the leaf name; a plain leaf row leads with the status
 // glyph. Both carry the message box for failing/warning cases, duration, a copy
 // affordance, an open-in-repo affordance, and — in scope mode — the file:line
 // secondary so the diff deep-link survives the axis switch.
 export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   c: TestCase
-  // The compacted segment chain leading here when this row was hoisted out of a
-  // one-case subtree (rendered before the leaf name, file icon and all).
+  // The merged segment chain leading here when this row was hoisted out of a
+  // one-case subtree (rendered before the leaf name, icons and all).
   segs?: Seg[]
   // Show the case's path:line inline (scope-mode leaves, flat lists).
   showLocation?: boolean
@@ -292,14 +331,13 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
 
   return (
     <div className={`group flex flex-col gap-1.5 py-1.5 pr-3 ${boxTone}`} style={{ paddingLeft: `${indent * 14 + 12}px` }}>
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-1.5 min-w-0">
         {segs ? (
           <>
-            <FileLeadIcon segs={segs} />
-            {/* The location chain (folders/file/scope), NOT lowlit — it reads as
-                a real path — with the status glyph then sitting right before the
-                leaf test name. */}
-            <span className="font-mono text-xs text-gray-600 dark:text-gray-400 shrink-0 max-w-[45%] truncate">{prefix} ›</span>
+            <RowSegments segs={segs} isDir={false} expanded={false} />
+            {/* The status glyph sits right before the leaf test name, after the
+                location chain. */}
+            <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span>
           </>
         ) : null}
         <StatusGlyph status={c.status} />
@@ -349,10 +387,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
       >
         {/* One chevron, rotated 90° when expanded, so the twist animates. */}
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
-        <NodeTypeIcon node={node} isDir={isDir} expanded={!isCollapsed} />
-        <span className={`text-xs font-mono truncate min-w-0 ${node.kind === 'path' ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400 italic'}`}>
-          {node.label}
-        </span>
+        <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} />
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
         {onOpenInRepo && copyPath ? <RepoLinkButton onClick={() => onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />

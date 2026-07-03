@@ -3010,6 +3010,12 @@ components:
             type: string
           nullable: true
           description: Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+        scope_kinds:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Per-level kind for `scope`, parallel to it — "module" (a describe block / class / suite) or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
         line:
           type: integer
           nullable: true
