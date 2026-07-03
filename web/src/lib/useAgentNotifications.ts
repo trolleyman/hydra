@@ -1,9 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
+import { fireNotification } from './notifyPrefs'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
@@ -34,10 +36,28 @@ const FINISHED_TOAST_MS = 8_000
 // Transitions are detected by diffing each agent's status against the previous
 // poll; a first-seen agent never toasts (so a page load / project switch where
 // an agent is *already* needs_input/finished stays quiet).
-export function useAgentNotifications(currentProjectId: string | null) {
+//
+// Each toast-worthy transition ALSO fires a desktop (OS) notification when the
+// tab is not in front (`!pageActive`) and the user has opted in - the toast only
+// helps while you're looking at the page, so the out-of-tab channel covers the
+// backgrounded/unfocused case. A focused tab gets the toast only (no redundant
+// OS notification). See lib/notifyPrefs.
+export function useAgentNotifications(currentProjectId: string | null, pageActive: boolean) {
   const agents = useAgentStore((s) => s.agents)
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
+  const navigate = useNavigate()
+
+  // Open an agent from an OS-notification click: select its project first (a
+  // no-op for the current one), then route to it. Mirrors the toast's "View".
+  // Memoised so it's a stable effect dependency.
+  const openAgent = useCallback(
+    (projectId: string, agentId: string) => {
+      useProjectStore.getState().setSelectedProjectId(projectId)
+      void navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId } })
+    },
+    [navigate],
+  )
 
   // projectId → last-observed (needs_input_count, unread_count), for
   // cross-project change detection.
@@ -94,6 +114,15 @@ export function useAgentNotifications(currentProjectId: string | null) {
           duration: NEEDS_INPUT_TOAST_MS,
           agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
         })
+        if (!pageActive) {
+          fireNotification({
+            title: `${name} needs input`,
+            body: 'The agent is blocked waiting on you.',
+            tag: `needs-input:${agent.id}`,
+            sticky: true,
+            onClick: () => openAgent(currentProjectId, agent.id),
+          })
+        }
       } else if (status === 'finished') {
         toast.show({
           message: `"${name}" transitioned to finished`,
@@ -101,6 +130,15 @@ export function useAgentNotifications(currentProjectId: string | null) {
           duration: FINISHED_TOAST_MS,
           agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
         })
+        if (!pageActive) {
+          fireNotification({
+            title: `${name} finished`,
+            body: 'The agent has completed its task.',
+            tag: `finished:${agent.id}`,
+            sticky: false,
+            onClick: () => openAgent(currentProjectId, agent.id),
+          })
+        }
       }
     }
     lastStatus.current = next
@@ -158,6 +196,9 @@ export function useAgentNotifications(currentProjectId: string | null) {
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
         // dedups so a repeat fetch (or StrictMode double-run) reuses the toast.
         for (const a of approvals) {
+          // Notify only for a call we haven't already surfaced, so a re-fetch of
+          // the same still-parked request doesn't re-alert.
+          const isNewApproval = !reqMap.has(a.reqid)
           // mcp / mcp_tool / webfetch / egress persist an "always allow"; bash
           // (e.g. git push) is one-shot only.
           const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
@@ -215,10 +256,19 @@ export function useAgentNotifications(currentProjectId: string | null) {
             },
           })
           reqMap.set(a.reqid, id)
+          if (isNewApproval && !pageActive) {
+            fireNotification({
+              title: `${agentName} needs approval`,
+              body: a.summary,
+              tag: `approval:${agentId}:${a.reqid}`,
+              sticky: true,
+              onClick: () => openAgent(currentProjectId, agentId),
+            })
+          }
         }
       })()
     }
-  }, [agents, agentsProjectId, currentProjectId])
+  }, [agents, agentsProjectId, currentProjectId, pageActive, openAgent])
 
   // Cross-project status toasts. The agent list is only loaded for the selected
   // project (handled agent-by-agent above), but the daemon broadcasts every
@@ -265,6 +315,15 @@ export function useAgentNotifications(currentProjectId: string | null) {
             // project first), and projectName draws the cross-project banner.
             agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName },
           })
+          if (!pageActive) {
+            fireNotification({
+              title: `${agentName} needs input`,
+              body: `In project "${projectName}" - the agent is blocked waiting on you.`,
+              tag: `needs-input:${a.id}`,
+              sticky: true,
+              onClick: () => openAgent(pid, a.id),
+            })
+          }
         }
         // Record the current blocked set so an agent that unblocks then blocks
         // again later re-toasts, while still-blocked agents don't.
@@ -292,6 +351,17 @@ export function useAgentNotifications(currentProjectId: string | null) {
             duration: FINISHED_TOAST_MS,
             agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName },
           })
+          // Desktop notification for finished only (waiting is a soft idle nudge
+          // the user opted out of).
+          if (status === 'finished' && !pageActive) {
+            fireNotification({
+              title: `${agentName} finished`,
+              body: `In project "${projectName}" - the agent has completed its task.`,
+              tag: `finished:${a.id}`,
+              sticky: false,
+              onClick: () => openAgent(pid, a.id),
+            })
+          }
         }
         // Record every currently-unread agent (whatever its status), so a flag
         // that clears (the user reads it) and is later re-raised re-toasts,
@@ -300,5 +370,5 @@ export function useAgentNotifications(currentProjectId: string | null) {
       })()
     }
     lastBgCounts.current = next
-  }, [projects, currentProjectId])
+  }, [projects, currentProjectId, pageActive, openAgent])
 }

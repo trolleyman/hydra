@@ -8,6 +8,7 @@ import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
 import { SettingSection, type SettingsSection } from './shared'
 import { ThemeSection } from './ThemeSection'
 import { TerminalSection } from './TerminalSection'
+import { NotificationsSection } from './NotificationsSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
 import { TestsEditor } from './TestsEditor'
@@ -128,6 +129,7 @@ export function SettingsContent({
     <>
       <ThemeSection />
       <TerminalSection />
+      <NotificationsSection />
       {scopeSelector}
       <SettingSection
         title="Agent"

@@ -22,6 +22,11 @@ export const StorageKeys = {
   // CLI's own default.
   defaultModel: 'hydra-default-model',
   spawnHeight: 'hydra-sidebar-spawn-height',
+  // '1' when the user has opted in to desktop (browser) notifications for agent
+  // transitions (needs_input / approval / finished) that happen while this tab is
+  // backgrounded or unfocused. Absent = off (the default; enabling requires an
+  // explicit user gesture so the OS permission prompt has one). See lib/notifyPrefs.
+  desktopNotifications: 'hydra-desktop-notifications',
 
   diffSideBySide: 'hydra-diff-side-by-side',
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
