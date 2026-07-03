@@ -28,6 +28,7 @@ import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
+import { parseLineRange, formatLineHash, inRange, type LineRange } from '../lib/lineRange'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -627,7 +628,7 @@ function TreeRow({
 
 // ── File content pane ───────────────────────────────────────────────────────────
 
-function CodeView({ content, lang, wrap, highlightLine }: { content: string; lang: string; wrap: boolean; highlightLine?: number | null }) {
+function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { content: string; lang: string; wrap: boolean; highlightRange?: LineRange | null; onSelectLine?: (line: number, extend: boolean) => void }) {
   // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
   // its worker), then re-highlight: hasGrammar flips false→true once it lands.
   const [, bumpLoaded] = useState(0)
@@ -662,14 +663,19 @@ function CodeView({ content, lang, wrap, highlightLine }: { content: string; lan
       {lines.map((html, i) => {
         // The 1-based line number doubles as the scroll/highlight anchor: the
         // page scrolls the row carrying data-line into view (see contentRef
-        // effect) when the URL hash is #L<n>, and we tint it like GitHub.
+        // effect) when the URL hash selects it, and we tint the selected
+        // range GitHub-style. Clicking the gutter number selects the line
+        // (shift+click extends the range) via onSelectLine.
         const ln = i + 1
-        const isHi = ln === highlightLine
+        const isHi = inRange(ln, highlightRange)
         return (
           <div key={i} data-line={ln} className={`flex ${isHi ? 'bg-amber-100/70 dark:bg-amber-400/10' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'}`}>
             <span
+              onMouseDown={onSelectLine ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
+              onClick={onSelectLine ? (e) => onSelectLine(ln, e.shiftKey) : undefined}
+              title={onSelectLine ? `Select line ${ln}` : undefined}
               style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
-              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${isHi
+              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
                 ? 'text-amber-700 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-400/10 border-amber-200 dark:border-amber-500/20'
                 : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800'}`}
             >
@@ -687,13 +693,14 @@ function CodeView({ content, lang, wrap, highlightLine }: { content: string; lan
 }
 
 function FileContent({
-  file, wrap, projectId, refStr, highlightLine,
+  file, wrap, projectId, refStr, highlightRange, onSelectLine,
 }: {
   file: RepositoryFileResponse
   wrap: boolean
   projectId: string
   refStr: string
-  highlightLine?: number | null
+  highlightRange?: LineRange | null
+  onSelectLine?: (line: number, extend: boolean) => void
 }) {
   // For symlinks, render the file we resolved to (target_path) — its extension
   // decides syntax highlighting / markdown / image handling, and the raw blob is
@@ -748,7 +755,7 @@ function FileContent({
 
   return (
     <>
-      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} highlightLine={highlightLine} />
+      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} highlightRange={highlightRange} onSelectLine={onSelectLine} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
           File truncated — showing the first part only.
@@ -1122,28 +1129,62 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     return () => { cancelled = true }
   }, [projectId, queryRef, viewPath, ready])
 
-  // A file deep-link can carry an #L<n> hash (e.g. a file:// hyperlink clicked
-  // in the agent terminal) — the target line to scroll to and highlight.
-  const hashLine = useMemo(() => {
-    const m = /^#?L(\d+)/.exec(location.hash || '')
-    return m ? parseInt(m[1], 10) : null
-  }, [location.hash])
+  // A file deep-link can carry an #L<n> / #L<a>-L<b> hash (e.g. a file://
+  // hyperlink clicked in the agent terminal, or a line number clicked here) —
+  // the line(s) to highlight, with the first one scrolled into view.
+  const selRange = useMemo(() => parseLineRange(location.hash || ''), [location.hash])
+  // The anchor a shift+click extends from: the last plainly-clicked line. Kept
+  // in a ref (not state) so it survives without re-rendering. Seeded from the
+  // initial range (a deep link) and cleared on file change; a shift+click with
+  // no anchor falls back to the current selection's start, so a deep-linked
+  // range still extends correctly.
+  const anchorRef = useRef<number | null>(selRange?.start ?? null)
+  useEffect(() => { anchorRef.current = null }, [viewPath])
 
-  // Position the content when the displayed file (or target line) changes: jump
-  // to the #L<n> row if there is one and it's present, otherwise reset to the
-  // top (PLAN.md #41g). This runs after FileContent renders, so the data-line
-  // row exists; markdown/binary/image files have no such row and fall back to
-  // the top.
+  // Select a line by clicking its gutter number. A plain click selects just that
+  // line and becomes the new anchor; shift+click extends the selection from the
+  // anchor to the clicked line. Either way the URL hash is updated so the
+  // selection is shareable and survives a reload.
+  const selectLine = useCallback((line: number, extend: boolean) => {
+    let start = line
+    let end = line
+    if (extend) {
+      const anchor = anchorRef.current ?? selRange?.start ?? line
+      start = Math.min(anchor, line)
+      end = Math.max(anchor, line)
+    } else {
+      anchorRef.current = line
+    }
+    navigate({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: splat },
+      hash: formatLineHash(start, end),
+    })
+  }, [navigate, projectId, splat, selRange])
+
+  // Position the content when the displayed file (or selection) changes: scroll
+  // the selection's first row into view if it isn't already visible, otherwise
+  // reset to the top (PLAN.md #41g). Clicking an already-visible line thus
+  // doesn't jump the view; a deep link to an off-screen line does. Runs after
+  // FileContent renders, so the data-line row exists; markdown/binary/image
+  // files have no such row and fall back to the top.
   const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = contentRef.current
     if (!el) return
-    if (hashLine != null) {
-      const target = el.querySelector(`[data-line="${hashLine}"]`)
-      if (target) { target.scrollIntoView({ block: 'center' }); return }
+    if (selRange) {
+      const target = el.querySelector(`[data-line="${selRange.start}"]`)
+      if (target) {
+        const cr = el.getBoundingClientRect()
+        const tr = target.getBoundingClientRect()
+        if (tr.top < cr.top || tr.bottom > cr.bottom) target.scrollIntoView({ block: 'center' })
+        return
+      }
     }
     el.scrollTop = 0
-  }, [viewPath, file, hashLine])
+    // selRange is memoized on location.hash, so its identity is stable until
+    // the selection actually changes.
+  }, [viewPath, file, selRange])
 
   // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
   // full_context so context can be revealed client-side without round-trips.
@@ -1598,7 +1639,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <LoaderCircle className="w-5 h-5 animate-spin" />
             </div>
           ) : file ? (
-            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightLine={hashLine} />
+            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightRange={selRange} onSelectLine={selectLine} />
           ) : null}
         </div>
       </div>
