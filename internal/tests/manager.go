@@ -27,10 +27,11 @@ import (
 )
 
 const (
-	defaultTimeout = 10 * time.Minute // test suites run longer than artifact renders
-	maxLogLines    = 5000
-	reportFile     = "report.json"
-	logFile        = "build.log"
+	defaultTimeout  = 10 * time.Minute // test suites run longer than artifact renders
+	maxLogLines     = 5000
+	reportFile      = "report.json"
+	logFile         = "build.log"
+	branchTotalFile = "total.json" // per-branch denominator estimate (see recordBranchTotal)
 )
 
 // ProgressMarker prefixes a stdout line a test command emits to set the live
@@ -205,9 +206,18 @@ func (m *Manager) entryDir(runner, key string) string {
 	return filepath.Join(m.outDir(), sanitizeName(runner), filepath.FromSlash(key))
 }
 
+// branchTotalDir is where a runner's per-branch total sidecar lives:
+// out/<runner>/branch/<sanitized-branch>/. Kept beside the commit/worktree entry
+// dirs but under its own kind so it never collides with a report.json entry (and
+// Latest, which only reads report.json files, ignores it).
+func (m *Manager) branchTotalDir(runner, branch string) string {
+	return filepath.Join(m.outDir(), sanitizeName(runner), keyKindBranch, sanitizeName(branch))
+}
+
 const (
 	keyKindCommit   = "commit"
 	keyKindWorktree = "worktree"
+	keyKindBranch   = "branch" // holds per-branch total.json sidecars, not report.json entries
 )
 
 func (m *Manager) versionKey(v Version) (key, ref string, err error) {
@@ -325,6 +335,13 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 			_ = os.RemoveAll(dir)
 		} else if err := writeReport(dir, rep); err != nil {
 			_ = err
+		}
+		if !cancelled {
+			// Attribute this run's case count to its branch so the next run of the
+			// branch can estimate its denominator (see fallbackTotal). ref is the
+			// resolved commit SHA for a commit run ("working tree" for a worktree
+			// run, which recordBranchTotal ignores).
+			m.recordBranchTotal(spec.Name, v, rep, ref)
 		}
 		m.mu.Lock()
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
@@ -531,11 +548,26 @@ func (m *Manager) seedEstimatedTotal(dir string, total int) {
 
 // fallbackTotal estimates a streaming denominator for a run that declares no
 // ::hydra:test:total:: by reusing a prior run's case count. It consults refs in
-// order — typically the head's own branch, then its base branch — reading each
-// ref's cached commit report, and returns the first positive Total. Failing
-// that it falls back to the most-recently-updated cached report for the runner
-// (Latest), mirroring the stale-verdict fallback. 0 = nothing usable is cached.
+// priority order — typically the head's own branch, then its base branch:
+//
+//  1. The per-branch total (recordBranchTotal): the last case count run against
+//     that branch, keyed by branch name. This is the one that hits in practice —
+//     a commit is usually tested only once, but every run of a branch refreshes
+//     its per-branch total, so the head's own branch almost always has one.
+//  2. Failing that, a cached commit report for the ref's current tip (a prior
+//     run of that exact commit).
+//
+// As a last resort it uses the most-recently-updated cached report for the
+// runner (Latest), mirroring the stale-verdict fallback. 0 = nothing usable.
 func (m *Manager) fallbackTotal(runner string, refs []string) int {
+	for _, ref := range refs {
+		if ref == "" {
+			continue
+		}
+		if bt, ok := readBranchTotal(m.branchTotalDir(runner, ref)); ok && bt.Total > 0 {
+			return bt.Total
+		}
+	}
 	for _, ref := range refs {
 		if ref == "" {
 			continue
@@ -552,6 +584,34 @@ func (m *Manager) fallbackTotal(runner string, refs []string) int {
 		return rep.Total
 	}
 	return 0
+}
+
+// recordBranchTotal saves a settled run's case count under its branch (v.Branch)
+// so the next run of that branch can estimate its denominator (see
+// fallbackTotal) even at a brand-new commit. Accuracy guard: a *commit* run is
+// only attributed to the branch when it IS the branch's current tip — an
+// explicitly-selected old commit must not overwrite the moving branch's total;
+// a *worktree* run is the branch's own working checkout, so it always counts.
+// Degenerate verdicts (the exit-code fallback, errored runs, empty reports) are
+// never recorded — only a real parsed report with cases.
+func (m *Manager) recordBranchTotal(runner string, v Version, rep Report, runSHA string) {
+	if v.Branch == "" || rep.Total <= 0 {
+		return
+	}
+	if rep.Status != StatusPassing && rep.Status != StatusFailing {
+		return
+	}
+	if rep.Format == "" || rep.Format == "exit" {
+		return // exit-code fallback (Total==1) isn't a real case count
+	}
+	tip, err := git.ResolveRef(m.projectRoot, v.Branch)
+	if err != nil {
+		return
+	}
+	if v.WorktreeDir == "" && runSHA != tip {
+		return // an old/explicit commit — don't attribute it to the branch tip
+	}
+	_ = writeBranchTotal(m.branchTotalDir(runner, v.Branch), branchTotal{Total: rep.Total, Ref: tip, UpdatedAt: time.Now().Unix()})
 }
 
 // declaredTotal is the ::hydra:test:total:: denominator, floored at the cases
@@ -902,6 +962,37 @@ func writeReport(dir string, rep Report) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, reportFile), data, 0o644))
+}
+
+// branchTotal is the per-branch denominator sidecar: the case count of the last
+// run against a branch, plus the commit it was computed for (informational).
+type branchTotal struct {
+	Total     int    `json:"total"`
+	Ref       string `json:"ref,omitempty"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+func readBranchTotal(dir string) (branchTotal, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, branchTotalFile))
+	if err != nil {
+		return branchTotal{}, false
+	}
+	var bt branchTotal
+	if err := json.Unmarshal(data, &bt); err != nil {
+		return branchTotal{}, false
+	}
+	return bt, true
+}
+
+func writeBranchTotal(dir string, bt branchTotal) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	data, err := json.MarshalIndent(bt, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, branchTotalFile), data, 0o644))
 }
 
 func writeLogFile(dir string, lines []LogLine) {

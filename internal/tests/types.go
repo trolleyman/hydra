@@ -148,6 +148,12 @@ type Version struct {
 	// un-instrumented run still shows a determinate progress bar. Never part of
 	// the cache key (versionKey ignores it).
 	TotalHintRefs []string
+	// Branch is the branch this run's total is attributed to on settle
+	// (recordBranchTotal), so the next run of the branch can estimate its
+	// denominator — even at a new commit. Empty = don't record. A commit run is
+	// only recorded when it's the branch's current tip; a worktree run always is.
+	// Never part of the cache key.
+	Branch string
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.

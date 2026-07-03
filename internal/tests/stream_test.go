@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
 )
 
 func TestParseTestMarker(t *testing.T) {
@@ -240,6 +241,49 @@ func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
 	}
 	if rep.Total != 2 {
 		t.Errorf("settled total = %d, want exact 2 (estimate must not leak into the settled report)", rep.Total)
+	}
+}
+
+// A settled run's case count is recorded under its branch so the next run of
+// that branch can estimate its denominator — but only when the total is
+// genuinely the branch's: a worktree run always counts, an old/explicit commit
+// (not the branch tip) never does, and the degenerate exit-code fallback never
+// does. fallbackTotal then prefers that per-branch total over anything else.
+func TestBranchTotalRecordAndRead(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	gitRun(t, repo, "checkout", "-q", "-B", "feature")
+	m := NewManager(repo)
+
+	// A worktree run of the branch → recorded under "feature".
+	wt := Version{WorktreeDir: repo, Branch: "feature", TotalHintRefs: []string{"feature"}}
+	m.recordBranchTotal("t", wt, Report{Runner: "t", Status: StatusPassing, Total: 7, Format: "stdout"}, "working tree")
+	if got := m.fallbackTotal("t", []string{"feature"}); got != 7 {
+		t.Errorf("fallbackTotal after worktree run = %d, want 7 (per-branch total)", got)
+	}
+
+	// An explicit OLD commit (not the branch tip) must not overwrite the branch.
+	old := Version{Ref: "0000000000000000000000000000000000000000", Branch: "feature"}
+	m.recordBranchTotal("t2", old, Report{Runner: "t2", Status: StatusPassing, Total: 99, Format: "stdout"}, "0000000000000000000000000000000000000000")
+	if got := m.fallbackTotal("t2", []string{"feature"}); got != 0 {
+		t.Errorf("non-tip commit was attributed to the branch (got %d), want 0", got)
+	}
+
+	// The exit-code fallback (Format "exit", Total 1) is never recorded.
+	m.recordBranchTotal("t3", wt, Report{Runner: "t3", Status: StatusPassing, Total: 1, Format: "exit"}, "working tree")
+	if got := m.fallbackTotal("t3", []string{"feature"}); got != 0 {
+		t.Errorf("exit-code fallback was recorded (got %d), want 0", got)
+	}
+
+	// A commit run AT the branch tip IS recorded (tip resolves to HEAD).
+	tip := Version{Ref: "feature", Branch: "feature"}
+	headSHA, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatalf("resolve feature: %v", err)
+	}
+	m.recordBranchTotal("t4", tip, Report{Runner: "t4", Status: StatusFailing, Total: 42, Format: "junit"}, headSHA)
+	if got := m.fallbackTotal("t4", []string{"feature"}); got != 42 {
+		t.Errorf("branch-tip commit run = %d, want 42 (recorded)", got)
 	}
 }
 

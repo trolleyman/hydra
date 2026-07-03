@@ -124,13 +124,20 @@ func trustedHostTestCommands(cfg config.Config) map[string]bool {
 // working tree (when requested and available), an explicit ref, or its branch tip.
 func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hydratests.Version {
 	hints := headTotalHintRefs(head)
+	branch := "" // the branch this run's total is attributed to on settle
+	if head.Branch != nil {
+		branch = *head.Branch
+	}
 	switch {
 	case includeUncommitted && head.Worktree != nil:
-		return hydratests.Version{WorktreeDir: *head.Worktree, TotalHintRefs: hints}
+		return hydratests.Version{WorktreeDir: *head.Worktree, TotalHintRefs: hints, Branch: branch}
 	case headRef != nil && *headRef != "":
-		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints}
+		// An explicit ref: the Manager records it to the branch only if it's the
+		// branch's current tip (recordBranchTotal guards this), so viewing an old
+		// commit can't overwrite the branch's total.
+		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints, Branch: branch}
 	case head.Branch != nil:
-		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints}
+		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints, Branch: branch}
 	default:
 		return hydratests.Version{}
 	}
@@ -630,7 +637,7 @@ func (s *Server) ArmMergeWhenGreen(ctx context.Context, request api.ArmMergeWhen
 	// Kick a run so a verdict exists for the watcher to act on.
 	if s.Tests != nil {
 		mgr := s.Tests.Manager(projectRoot)
-		v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head)}
+		v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head), Branch: *head.Branch}
 		if liveCfg, err := config.Load(projectRoot); err == nil {
 			for _, r := range s.testRunnersFor(projectRoot, v, liveCfg) {
 				_, _ = mgr.Get(r, v)
