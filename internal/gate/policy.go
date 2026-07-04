@@ -62,6 +62,11 @@ type Policy struct {
 	// "write") captured from the server-declared readOnlyHint annotation at seed
 	// time. It takes precedence over the name heuristic when present.
 	MCPToolRW map[string]string `json:"mcp_tool_rw,omitempty"`
+	// KnownTools extends the built-in known-tool allow-list (defaultKnownToolNames)
+	// with extra tool names a project marks safe via config (policy.known_tools), so
+	// a legitimate tool the gate doesn't ship recognizing can be allowed without a
+	// code change instead of parking every call. Matched case-insensitively.
+	KnownTools []string `json:"known_tools,omitempty"`
 	// WebFetchFilter reports whether WebFetch is host-gated at all. It mirrors the
 	// sandbox network policy's FilterHosts: with network filtering off
 	// (mode = "unrestricted" or "off") there is nothing to gate - every host is

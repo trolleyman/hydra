@@ -57,6 +57,11 @@ func TestPolicyRenderRoundTrip(t *testing.T) {
 			t.Errorf("template missing %q:\n%s", want, tmpl)
 		}
 	}
+	// known_tools documents the built-in default set (a sample entry proves the list
+	// is rendered, not just the empty key).
+	if !strings.Contains(tmpl, "# known_tools = [") || !strings.Contains(tmpl, `"Bash"`) {
+		t.Errorf("template missing documented known_tools default:\n%s", tmpl)
+	}
 
 	// A per-agent policy override round-trips through render→decode unchanged
 	// (i.e. is not dropped on save).

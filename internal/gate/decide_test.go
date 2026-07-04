@@ -1,6 +1,9 @@
 package gate
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func basePolicy() Policy {
 	return Policy{
@@ -148,6 +151,39 @@ func TestDecideUnrecognizedToolFailsClosed(t *testing.T) {
 	// A recognized built-in that the switch doesn't special-case still fails open.
 	if r := Decide(p, "Glob", map[string]any{"pattern": "**/*.go"}); r.Decision != Allow {
 		t.Errorf("known builtin Glob = %s, want Allow", r.Decision)
+	}
+}
+
+// policy.known_tools extends the built-in allow-list so a project can register a
+// tool the gate doesn't ship recognizing, instead of parking every call.
+func TestDecideKnownToolsExtends(t *testing.T) {
+	p := basePolicy()
+	if r := Decide(p, "AcmeCustomTool", nil); r.Decision != Ask {
+		t.Fatalf("unregistered custom tool = %s, want Ask", r.Decision)
+	}
+	p.KnownTools = []string{"AcmeCustomTool"}
+	if r := Decide(p, "AcmeCustomTool", nil); r.Decision != Allow {
+		t.Errorf("registered custom tool = %s, want Allow", r.Decision)
+	}
+	// Case-insensitive, matching the MCP allow-list semantics.
+	if r := Decide(p, "acmecustomtool", nil); r.Decision != Allow {
+		t.Errorf("registered custom tool (case-insensitive) = %s, want Allow", r.Decision)
+	}
+}
+
+// DefaultKnownTools is sorted, non-empty, and a copy (mutating it must not affect
+// the gate). It backs the documented default for policy.known_tools.
+func TestDefaultKnownTools(t *testing.T) {
+	a := DefaultKnownTools()
+	if len(a) == 0 {
+		t.Fatal("DefaultKnownTools is empty")
+	}
+	if !slices.IsSorted(a) {
+		t.Errorf("DefaultKnownTools is not sorted: %v", a)
+	}
+	a[0] = "ZZZ-mutated"
+	if Decide(basePolicy(), "Bash", map[string]any{"command": "echo hi"}).Decision != Allow {
+		t.Error("mutating DefaultKnownTools result affected the gate")
 	}
 }
 

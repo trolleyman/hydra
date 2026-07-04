@@ -14,6 +14,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
 	"github.com/pelletier/go-toml/v2/unstable"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -131,6 +132,12 @@ type PolicyConfig struct {
 	// MCPAutoAllowRead auto-allows MCP tools the read/write classifier deems
 	// read-only (parking only writes/unknown). Best-effort heuristic; off by default.
 	MCPAutoAllowRead *bool `toml:"mcp_auto_allow_read"`
+	// KnownTools extends the gate's built-in known-tool allow-list with extra tool
+	// names to treat as safe (allowed without parking). The gate fails closed on any
+	// tool it doesn't recognize - not a known built-in and without the mcp__ prefix -
+	// so a legitimate tool it doesn't ship recognizing can be registered here instead
+	// of parking every call. The generated config documents the built-in default set.
+	KnownTools []string `toml:"known_tools"`
 	// NOTE: WebFetch host-gating is no longer a dedicated policy field. It is derived
 	// from [sandbox.network] (mode + allowed_hosts/blocked_hosts): with filtering off
 	// nothing is gated, and with filtering on the WebFetch tool shares the network
@@ -159,6 +166,9 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 	}
 	if other.MCPAutoAllowRead != nil {
 		p.MCPAutoAllowRead = other.MCPAutoAllowRead
+	}
+	if other.KnownTools != nil {
+		p.KnownTools = other.KnownTools
 	}
 }
 
@@ -1472,6 +1482,12 @@ func defaultsSpec() []specEntry {
 				return "", false
 			},
 		},
+		{
+			table: "policy", key: "known_tools",
+			doc: "extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.",
+			def: func() string { return tomlStringArray(gate.DefaultKnownTools()) },
+			get: policySlice(func(p *PolicyConfig) []string { return p.KnownTools }),
+		},
 	}
 }
 
@@ -2641,6 +2657,7 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	if p.MCPAutoAllowRead != nil {
 		emitSetField(out, name+".policy", "mcp_auto_allow_read", fmt.Sprintf("%t", *p.MCPAutoAllowRead), true, keyComments)
 	}
+	emitSetField(out, name+".policy", "known_tools", tomlStringArray(p.KnownTools), len(p.KnownTools) > 0, keyComments)
 }
 
 // emitSetField appends "key = text" (with any preserved user comment) when set.
@@ -2665,7 +2682,7 @@ func policyHasContent(p *PolicyConfig) bool {
 		return false
 	}
 	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
-		p.MCPAutoAllowRead != nil
+		p.MCPAutoAllowRead != nil || len(p.KnownTools) > 0
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {
