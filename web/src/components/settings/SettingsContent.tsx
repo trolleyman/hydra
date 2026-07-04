@@ -97,6 +97,7 @@ export function SettingsContent({
   onCloseTestAgent,
   projectId,
   scopeSelector,
+  iconSection,
 }: {
   config: ConfigResponse
   setConfig: (c: ConfigResponse) => void
@@ -112,6 +113,9 @@ export function SettingsContent({
   // The scope (Project / Global) selector - rendered between Theme and Agent.
   // Supplied by the project settings page; the global page passes nothing.
   scopeSelector?: ReactNode
+  // The project-icon editor - a project-scoped concern, rendered next to the
+  // scope selector. Supplied by the project settings page; global passes nothing.
+  iconSection?: ReactNode
 }) {
   // Escape closes the test console, matching the X button. We defer to the
   // embedded terminal: when focus is in the xterm (or any field) Esc belongs to
@@ -131,6 +135,7 @@ export function SettingsContent({
       <TerminalSection />
       <NotificationsSection />
       {scopeSelector}
+      {iconSection}
       <SettingSection
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."

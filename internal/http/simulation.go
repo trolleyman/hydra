@@ -82,15 +82,18 @@ func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
-	simUnread := 1       // matches the one unread agent in ListAgents
-	simNeedsInput := 1   // matches the one needs_input agent in ListAgents
-	otherUnread := 3     // updates waiting in a project you're not looking at
-	otherNeedsInput := 1 // one of those is blocked on you → red dot elsewhere
+	simUnread := 1             // matches the one unread agent in ListAgents
+	simNeedsInput := 1         // matches the one needs_input agent in ListAgents
+	otherUnread := 3           // updates waiting in a project you're not looking at
+	otherNeedsInput := 1       // one of those is blocked on you → red dot elsewhere
+	simIcon := "🚀"             // emoji icon
+	mobileIcon := "Smartphone" // lucide icon name
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
 			Path:            "/simulated/project",
 			Name:            "simulated-project",
+			Icon:            &simIcon,
 			UnreadCount:     &simUnread,
 			NeedsInputCount: &simNeedsInput,
 		},
@@ -98,11 +101,16 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			Id:              "mobile-app",
 			Path:            "/simulated/mobile-app",
 			Name:            "mobile-app",
+			Icon:            &mobileIcon,
 			UnreadCount:     &otherUnread,
 			NeedsInputCount: &otherNeedsInput,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *SimulationServer) SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
 func (s *SimulationServer) AddProject(w http.ResponseWriter, r *http.Request) {

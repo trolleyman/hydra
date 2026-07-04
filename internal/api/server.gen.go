@@ -752,6 +752,9 @@ type PolicyConfig struct {
 
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
+	// Icon Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
+	Icon *string `json:"icon,omitempty"`
+
 	// Id Unique project identifier (derived from folder name)
 	Id string `json:"id"`
 
@@ -1001,6 +1004,12 @@ type ServiceStatusState string
 // ServiceStatusResponse defines model for ServiceStatusResponse.
 type ServiceStatusResponse struct {
 	Services []ServiceStatus `json:"services"`
+}
+
+// SetProjectIconRequest defines model for SetProjectIconRequest.
+type SetProjectIconRequest struct {
+	// Icon The new icon value: an emoji, a lucide-react icon name, or an image path/URL. An empty string clears the icon, restoring the default folder icon.
+	Icon string `json:"icon"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
@@ -1451,6 +1460,9 @@ type SendAgentInputJSONRequestBody = AgentInputRequest
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
 
+// SetProjectIconJSONRequestBody defines body for SetProjectIcon for application/json ContentType.
+type SetProjectIconJSONRequestBody = SetProjectIconRequest
+
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
 
@@ -1549,6 +1561,9 @@ type ServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
+	// Set (or clear) a project's custom icon
+	// (PUT /api/projects/{project_id}/icon)
+	SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string)
 	// List the artifact scripts configured at a ref
 	// (GET /api/projects/{project_id}/repository/artifacts)
 	GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryArtifactsParams)
@@ -2757,6 +2772,31 @@ func (siw *ServerInterfaceWrapper) GetProjectConfigToml(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// SetProjectIcon operation middleware
+func (siw *ServerInterfaceWrapper) SetProjectIcon(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetProjectIcon(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryArtifacts operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request) {
 
@@ -3420,6 +3460,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config-toml", wrapper.GetProjectConfigToml)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/icon", wrapper.SetProjectIcon)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
@@ -4600,6 +4641,51 @@ func (response GetProjectConfigToml500JSONResponse) VisitGetProjectConfigTomlRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SetProjectIconRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Body      *SetProjectIconJSONRequestBody
+}
+
+type SetProjectIconResponseObject interface {
+	VisitSetProjectIconResponse(w http.ResponseWriter) error
+}
+
+type SetProjectIcon200JSONResponse ProjectInfo
+
+func (response SetProjectIcon200JSONResponse) VisitSetProjectIconResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetProjectIcon400JSONResponse ErrorResponse
+
+func (response SetProjectIcon400JSONResponse) VisitSetProjectIconResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetProjectIcon404JSONResponse ErrorResponse
+
+func (response SetProjectIcon404JSONResponse) VisitSetProjectIconResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetProjectIcon500JSONResponse ErrorResponse
+
+func (response SetProjectIcon500JSONResponse) VisitSetProjectIconResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryArtifactsRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetRepositoryArtifactsParams
@@ -5208,6 +5294,9 @@ type StrictServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
+	// Set (or clear) a project's custom icon
+	// (PUT /api/projects/{project_id}/icon)
+	SetProjectIcon(ctx context.Context, request SetProjectIconRequestObject) (SetProjectIconResponseObject, error)
 	// List the artifact scripts configured at a ref
 	// (GET /api/projects/{project_id}/repository/artifacts)
 	GetRepositoryArtifacts(ctx context.Context, request GetRepositoryArtifactsRequestObject) (GetRepositoryArtifactsResponseObject, error)
@@ -6145,6 +6234,39 @@ func (sh *strictHandler) GetProjectConfigToml(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetProjectConfigTomlResponseObject); ok {
 		if err := validResponse.VisitGetProjectConfigTomlResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetProjectIcon operation middleware
+func (sh *strictHandler) SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request SetProjectIconRequestObject
+
+	request.ProjectId = projectId
+
+	var body SetProjectIconJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetProjectIcon(ctx, request.(SetProjectIconRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetProjectIcon")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetProjectIconResponseObject); ok {
+		if err := validResponse.VisitSetProjectIconResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

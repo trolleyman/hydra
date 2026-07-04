@@ -16,6 +16,10 @@ export type ProjectInfo = {
      */
     name: string;
     /**
+     * Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
+     */
+    icon?: string;
+    /**
      * Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
      */
     unread_count?: number;

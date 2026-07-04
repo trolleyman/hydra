@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Folder, FolderOpen, Plus, Check, X } from 'lucide-react'
+import { ChevronDown, FolderOpen, Plus, Check, X } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useDialogStore } from '../stores/dialogStore'
 import { useFinePointer } from '../lib/useFinePointer'
+import { ProjectIcon } from '../lib/projectIcon'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
@@ -23,7 +24,6 @@ export function ProjectDropdown({
   onDeselect,
   onAddProject,
   onRemoveProject,
-  keyboardIndex,
 }: {
   projects: ProjectInfo[]
   selectedId: string | null
@@ -31,10 +31,6 @@ export function ProjectDropdown({
   onDeselect: () => void
   onAddProject: (path: string) => Promise<void>
   onRemoveProject: (id: string) => Promise<void>
-  // Drives the Ctrl+` alt-tab switcher: when non-null the dropdown is forced open
-  // and the row at this index is highlighted (committed on Ctrl release by the
-  // handler in RootLayout). null = normal click-driven dropdown.
-  keyboardIndex: number | null
 }) {
   const [open, setOpen] = useState(false)
   const [showAddInput, setShowAddInput] = useState(false)
@@ -52,7 +48,6 @@ export function ProjectDropdown({
   const triggerRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const activeRowRef = useRef<HTMLDivElement>(null)
   // The menu is rendered in a portal so it escapes the sidebar's
   // `overflow-hidden` (which clips its collapse width-tween and would otherwise
   // swallow the menu whenever the sidebar is narrower than the menu). We
@@ -61,10 +56,7 @@ export function ProjectDropdown({
   // The Ctrl+` switch hint is keyboard-only - hide it on touch devices.
   const finePointer = useFinePointer()
 
-  // The Ctrl+` switcher forces the dropdown open and highlights a row; otherwise
-  // it's the usual click-to-open menu.
-  const keyboardActive = keyboardIndex !== null
-  const isOpen = open || keyboardActive
+  const isOpen = open
 
   // Menu geometry, kept in sync with the classes on the portalled menu below.
   const MENU_WIDTH = 288 // w-72
@@ -100,12 +92,6 @@ export function ProjectDropdown({
       window.removeEventListener('resize', updateCoords)
     }
   }, [isOpen])
-
-  // Keep the keyboard-highlighted row in view as the user steps through a long
-  // project list.
-  useEffect(() => {
-    if (keyboardActive) activeRowRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [keyboardIndex, keyboardActive])
 
   const selected = projects.find((p) => p.id === selectedId)
   // Unread agents sitting in projects other than the one you're looking at -
@@ -227,8 +213,8 @@ export function ProjectDropdown({
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
-        <span className="relative shrink-0">
-          <Folder className="w-3.5 h-3.5" />
+        <span className="relative shrink-0 inline-flex">
+          <ProjectIcon icon={selected?.icon} projectId={selected?.id ?? ''} size={14} />
           {otherProjectsNeedsInput > 0 ? (
             <span
               aria-label="an agent in another project needs your input"
@@ -254,14 +240,11 @@ export function ProjectDropdown({
         >
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
-              {projects.map((p, i) => (
+              {projects.map((p) => (
                 <div
                   key={p.id}
-                  ref={keyboardActive && i === keyboardIndex ? activeRowRef : undefined}
                   className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                    keyboardActive && i === keyboardIndex
-                      ? 'bg-blue-100 dark:bg-blue-900/40'
-                      : p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
                   onMouseEnter={() => setHoveredId(p.id)}
                   onMouseLeave={() => setHoveredId(null)}
@@ -274,7 +257,9 @@ export function ProjectDropdown({
                     setOpen(false)
                   }}
                 >
-                  <Folder className="w-3.5 h-3.5 mt-0.5 shrink-0 text-gray-400" />
+                  <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
+                    <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
@@ -297,6 +282,7 @@ export function ProjectDropdown({
                     <button
                       onClick={(e) => handleRemove(e, p.id, p.name)}
                       className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                      aria-label={`Remove ${p.name}`}
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>

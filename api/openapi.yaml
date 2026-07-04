@@ -178,6 +178,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/icon:
+    put:
+      summary: Set (or clear) a project's custom icon
+      operationId: setProjectIcon
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetProjectIconRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectInfo'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/config-toml:
     get:
       summary: Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
@@ -2000,6 +2042,15 @@ components:
         name:
           type: string
           description: Human-readable project name (last path component)
+        icon:
+          type: string
+          description: >-
+            Optional custom project icon that replaces the default folder glyph.
+            Interpreted by its content by the web UI: an emoji is rendered as-is; a
+            lucide-react icon name (e.g. "Rocket") renders that icon; a value ending
+            in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s)
+            or data: URI is used directly, any other value is a path served from the
+            project by the backend. Empty = the default folder icon.
         unread_count:
           type: integer
           description: Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
@@ -2017,6 +2068,17 @@ components:
         exists:
           type: boolean
           description: Whether a .hydra/config.toml file is present in the project
+
+    SetProjectIconRequest:
+      type: object
+      required: [icon]
+      properties:
+        icon:
+          type: string
+          description: >-
+            The new icon value: an emoji, a lucide-react icon name, or an image
+            path/URL. An empty string clears the icon, restoring the default folder
+            icon.
 
     AddProjectRequest:
       type: object

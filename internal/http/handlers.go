@@ -260,8 +260,68 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
 		}
+		// The custom icon lives in the project's .hydra/config.toml (committed with
+		// the repo). LoadFile is mtime-cached, so this stays cheap across polls; a
+		// missing/unreadable config just means no custom icon.
+		if icon := projectIconValue(p.Path); icon != "" {
+			resp[i].Icon = &icon
+		}
 	}
 	return resp, nil
+}
+
+// projectIconValue returns the trimmed custom icon configured in a project's
+// .hydra/config.toml, or "" when there is none (or the config can't be read).
+func projectIconValue(projectRoot string) string {
+	cfg, err := config.LoadFile(config.GetProjectConfigPath(projectRoot))
+	if err != nil || cfg == nil || cfg.Icon == nil {
+		return ""
+	}
+	return strings.TrimSpace(*cfg.Icon)
+}
+
+// SetProjectIcon sets (or clears) a project's custom icon in its
+// .hydra/config.toml and returns the updated ProjectInfo. An empty icon restores
+// the default folder glyph.
+func (s *Server) SetProjectIcon(_ context.Context, request api.SetProjectIconRequestObject) (api.SetProjectIconResponseObject, error) {
+	if request.Body == nil {
+		return api.SetProjectIcon400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "icon is required",
+		}, nil
+	}
+	p := s.ProjectsManager.GetByID(request.ProjectId)
+	if p == nil {
+		return api.SetProjectIcon404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	// Load the current project config, set just the icon, and write it back. The
+	// save renders on top of the existing file, so comments and every other
+	// setting survive (see config.SaveToFile).
+	cfg, err := config.LoadFile(config.GetProjectConfigPath(p.Path))
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	icon := strings.TrimSpace(request.Body.Icon)
+	cfg.Icon = &icon // authoritative; "" writes an empty value (the default icon)
+	if err := config.Save(p.Path, *cfg); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, Name: p.Name}
+	if icon != "" {
+		resp.Icon = &icon
+	}
+	// Nudge every connected client to refresh so the new icon shows up in their
+	// project dropdown / switcher without a manual reload.
+	s.Events.ProjectsChanged()
+	return api.SetProjectIcon200JSONResponse(resp), nil
 }
 
 func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObject) (api.AddProjectResponseObject, error) {

@@ -1,21 +1,21 @@
-## Hydra project configuration — .hydra/config.toml
+## Hydra project configuration - .hydra/config.toml
 ##
 ## Hydra runs autonomous coding agents ("heads"), each on its own git branch in an
 ## isolated worktree and OS sandbox, supervised by a per-project daemon. This file
 ## configures those agents and the daemon: the default pre-prompt, the sandbox
 ## policy (what agents may read, write and reach over the network), the decision
-## gate, per-agent ([claude], [gemini], …) overrides, and the [[artifacts]],
+## gate, per-agent ([claude], [gemini], ...) overrides, and the [[artifacts]],
 ## [[services]] and [[tests]] commands run per project.
 ##
 ## Reading this file:
-##   ##  lines are Hydra's own docs and defaults — rewritten on every save, so edit
+##   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit
 ##       the setting below each, not the ## text itself.
 ##   # key = value   is a commented-out default; delete the leading "# " to override it.
 ##   # your note     a single-# comment is yours and is preserved across saves.
 ## Most settings are also editable from the Settings screen in the web UI.
 
 ## extra instructions appended to every agent's system prompt.
-pre_prompt = """
+pre_prompt = '''
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
@@ -27,7 +27,7 @@ pre_prompt = """
   - Playwright scripts MUST live under web/ (bun resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers with `cd web && bun x playwright install chromium` (never bare `bun x playwright install` outside web/ - it GCs the pinned revision).
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available, /api/auth/status.
-"""
+'''
 
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
 # resume_prompt = "Continue"
@@ -35,13 +35,13 @@ pre_prompt = """
 ## max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default 2).
 artifact_concurrency = 4
 
-## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).
+## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing - foreground generation and the concurrency cap still apply (default true).
 # artifact_prefetch = true
 
 ## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
 # test_concurrency = 1
 
-## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge — foreground runs and the concurrency cap still apply (default true).
+## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
 
 [sandbox]
@@ -50,7 +50,7 @@ artifact_concurrency = 4
 # checksum-db tree head there when fetching a new module, so without it fetching a
 # tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
 ## extra paths made writable in the sandbox (added to the built-in defaults).
-writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb"]
+writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", ""]
 
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
@@ -64,14 +64,14 @@ restore_ro = ["~/.config/go"]
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
 
-## shell script run in the sandbox before every agent launch — spawn and resume, so it must be idempotent (e.g. mise trust).
+## shell script run in the sandbox before every agent launch - spawn and resume, so it must be idempotent (e.g. mise trust).
 # pre_spawn_script = ""
 
-## shell script run in a sandbox when a head ends, before its worktree is removed — gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.
+## shell script run in a sandbox when a head ends, before its worktree is removed - gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.
 # pre_exit_script = ""
 
 [sandbox.network]
-## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
+## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
 mode = "hard"
 
 ## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default true).
@@ -84,12 +84,12 @@ strict = true
 # filter_enabled = false
 
 ## extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).
-allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com"]
+allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com"]
 
-## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed — overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
+## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []
 
-## host-loopback TCP ports reachable from the sandbox even under mode = "hard" (whose netns otherwise cuts off the host's 127.0.0.1) — for host-local daemons that hardcode loopback, e.g. adb's server: [5037]. No effect in other modes (they share the host loopback already).
+## host-loopback TCP ports reachable from the sandbox even under mode = "hard" (whose netns otherwise cuts off the host's 127.0.0.1) - for host-local daemons that hardcode loopback, e.g. adb's server: [5037]. No effect in other modes (they share the host loopback already).
 # allowed_loopback_ports = []
 
 [policy]
@@ -102,12 +102,12 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ## individual MCP tools ("<server>__<tool>") allowed even when the whole server is not; the server is kept (spawned) so those tools work, other tools park for approval (default none).
 # mcp_tools_allowed = []
 
-## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic — off by default.
+## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic - off by default.
 # mcp_auto_allow_read = false
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
 # [claude]
-## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
+## enable Claude Code's fullscreen (alternate-screen) rendering - flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
 # fullscreen = false
 
 ## Gemini-specific overrides: any of the settings above, applied only to gemini agents.
@@ -125,9 +125,9 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ##   name         unique label, also used as the cache directory (required).
 ##   command      shell command run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
-##   unsafe_host  run on the host with NO sandbox — full access to your machine and
+##   unsafe_host  run on the host with NO sandbox - full access to your machine and
 ##                credentials; only for audited, self-contained commands (default false).
-##   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run —
+##   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run -
 ##                a pristine checkout (git clean -fdx) instead of the default that keeps
 ##                dependency/build caches warm (-fd). Slower; set true only if stale
 ##                ignored output can leak between commits (default false).
@@ -147,8 +147,8 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as
 ## labels and offers a filter. A "category::value" tag is a scoped label: only one
 ## value per category is kept (the last one wins); plain tags are free-form.
-## The sidecar may also carry an optional dpi — the device-scale factor the shot was
-## captured at, e.g. {"tags": [...], "dpi": 2} — so the grid sizes a tile by its
+## The sidecar may also carry an optional dpi - the device-scale factor the shot was
+## captured at, e.g. {"tags": [...], "dpi": 2} - so the grid sizes a tile by its
 ## logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.
 ## For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff
 ## viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).
@@ -173,7 +173,7 @@ timeout_sec = 900
 ## Fields:
 ##   name          unique label, shown in the UI and logs (required).
 ##   command       shell command run via `bash -c` from the project root (required).
-##   host          run on the host with NO sandbox — full machine/credential access;
+##   host          run on the host with NO sandbox - full machine/credential access;
 ##                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).
 ##   max_restarts  relaunch cap after an unexpected exit (default 3; 0 = never).
 ##   strict        run the command under `set -eo pipefail` so a failed startup step
@@ -191,23 +191,23 @@ timeout_sec = 900
 ##   name         unique label, also used as the cache directory (required).
 ##   command      shell command run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
-##   unsafe_host  run on the host with NO sandbox — runs the diffed ref's test code;
+##   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;
 ##                only for trusted refs (default false).
 ##   clean_ignored  also delete git-ignored files before each run (default false).
 ##   strict       run the command under `set -eo pipefail` (default true). Note: a
 ##                runner exiting non-zero because tests FAILED is a valid verdict,
-##                not a strict abort — strict only governs the shell pipeline.
+##                not a strict abort - strict only governs the shell pipeline.
 ##   enabled      set false to skip this runner (default true).
 ##   type         "junit" (default) reads report files after exit; "stdout" parses
 ##                ::hydra:test:*:: markers live from stdout (see streaming note below).
-## The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test
-## via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json
+## The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml - go test
+## via gotestsum, pytest, jest/vitest, cargo-nextest, ...) or a Hydra-native *.json
 ## ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).
 ## Every *.xml / *.json in the dir is parsed and the cases are merged, so one
 ## command may emit several reports (e.g. a test report plus a lint report).
 ## If it writes no report, the exit code alone becomes a red/green verdict.
 ## Warnings: a case with status "warning" (Hydra JSON), or a JUnit <failure
-## type="warning">, is a non-failing diagnostic — it shows as an amber ⚠ N on the
+## type="warning">, is a non-failing diagnostic - it shows as an amber ⚠ N on the
 ## long verdict chip (agent header / tests panel) but never fails the run or gates
 ## the merge (lint errors stay failures and do gate). ESLint 9's junit formatters
 ## don't tag severity, so feed lint via `-f json` converted to a Hydra-JSON report
@@ -223,9 +223,9 @@ timeout_sec = 900
 ##   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
 ## The token before the first › is the location (path[:line[:col]] or dotted class),
 ## middle › tokens are scope levels, the last is the test name, text after | is the
-## message. A marker is one line; in the message an escape sequence expands —
+## message. A marker is one line; in the message an escape sequence expands -
 ## backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return
-## (so a multi-line stack trace fits on the one line) — and a doubled backslash
+## (so a multi-line stack trace fits on the one line) - and a doubled backslash
 ## becomes one literal backslash. Any other escape is left as-is.
 [[tests]]
 # Go test suite (type = "stdout": streams per-case results into the panel live via
