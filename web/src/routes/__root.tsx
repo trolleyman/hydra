@@ -10,6 +10,8 @@ import { usePushStatus } from '../lib/usePushStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { useArchivedAgents } from '../lib/useArchivedAgents'
 import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
+import { ProjectSwitcher } from '../components/ProjectSwitcher'
+import { touchProject } from '../lib/projectRecency'
 import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
@@ -136,6 +138,12 @@ function RootLayout() {
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+
+  // Record every project you land on (via dropdown, switcher, direct nav, or
+  // boot restore) so the Ctrl+` switcher can order by last-visited.
+  useEffect(() => {
+    if (currentProjectId) touchProject(currentProjectId)
+  }, [currentProjectId])
   // Whether the user actually has this page in front of them (foreground tab +
   // focused window). Gates the unread auto-clear so a backgrounded page doesn't
   // silently dismiss agents the user hasn't actually looked at.
@@ -418,12 +426,11 @@ function RootLayout() {
     }
   }, [location.pathname])
 
-  // App-wide keyboard shortcuts (PLAN #58): Ctrl+. sidebar toggle, `?` help
-  // overlay, and the Ctrl+` alt-tab project switcher - all merged into one hook.
-  // The switcher feeds its highlight index back through `switcherIndex`, which is
-  // passed to ProjectDropdown via `keyboardIndex` (forcing the dropdown open and
-  // styling the active row, so the switcher reuses the real selector UI).
-  const switcherIndex = useGlobalShortcuts({ projects, currentProjectId, selectProject })
+  // App-wide keyboard shortcuts: Ctrl+. sidebar toggle, `?` help overlay, and the
+  // Ctrl+` alt-tab project switcher - all merged into one hook. The switcher state
+  // (projects in last-visited order + the highlighted index) is rendered by the
+  // dedicated ProjectSwitcher overlay below.
+  const switcher = useGlobalShortcuts({ projects, currentProjectId, selectProject })
 
   async function handleRestart() {
     setRestarting(true)
@@ -531,6 +538,11 @@ function RootLayout() {
     }
   }
 
+  async function handleSetProjectIcon(id: string, icon: string) {
+    const updated = await api.default.setProjectIcon(id, { icon })
+    setProjects(projects.map(p => (p.id === id ? updated : p)))
+  }
+
   async function handleRemoveProject(id: string) {
     await api.default.removeProject(id)
     const updated = projects.filter(p => p.id !== id)
@@ -611,7 +623,7 @@ function RootLayout() {
               }}
               onAddProject={handleAddProject}
               onRemoveProject={handleRemoveProject}
-              keyboardIndex={switcherIndex}
+              onSetIcon={handleSetProjectIcon}
             />
           </div>
           <Tooltip content="Hide sidebar (Ctrl+.)">
@@ -906,6 +918,7 @@ function RootLayout() {
       <Dialog />
       <Toaster />
       <KeyboardShortcutsModal />
+      <ProjectSwitcher state={switcher} />
       {trustPrompt && (
         <TrustProjectModal
           name={trustPrompt.name}

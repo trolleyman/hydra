@@ -22,6 +22,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
+import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { TestsResponse } from '../models/TestsResponse';
@@ -160,6 +161,32 @@ export class DefaultService {
                 'project_id': projectId,
             },
             errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Set (or clear) a project's custom icon
+     * @param projectId
+     * @param requestBody
+     * @returns ProjectInfo OK
+     * @throws ApiError
+     */
+    public setProjectIcon(
+        projectId: string,
+        requestBody: SetProjectIconRequest,
+    ): CancelablePromise<ProjectInfo> {
+        return this.httpRequest.request({
+            method: 'PUT',
+            url: '/api/projects/{project_id}/icon',
+            path: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },

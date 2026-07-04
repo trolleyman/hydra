@@ -24,7 +24,7 @@ function renderDropdown() {
       onDeselect={() => {}}
       onAddProject={async () => {}}
       onRemoveProject={async () => {}}
-      keyboardIndex={null}
+      onSetIcon={async () => {}}
     />,
   )
 }

@@ -260,8 +260,44 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
 		}
+		if p.Icon != "" {
+			icon := p.Icon
+			resp[i].Icon = &icon
+		}
 	}
 	return resp, nil
+}
+
+// SetProjectIcon sets (or clears) a project's custom icon and returns the updated
+// ProjectInfo. An empty icon restores the default folder glyph.
+func (s *Server) SetProjectIcon(_ context.Context, request api.SetProjectIconRequestObject) (api.SetProjectIconResponseObject, error) {
+	if request.Body == nil {
+		return api.SetProjectIcon400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "icon is required",
+		}, nil
+	}
+	p, ok, err := s.ProjectsManager.SetIcon(request.ProjectId, request.Body.Icon)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if !ok {
+		return api.SetProjectIcon404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, Name: p.Name}
+	if p.Icon != "" {
+		icon := p.Icon
+		resp.Icon = &icon
+	}
+	// Nudge every connected client to refresh so the new icon shows up in their
+	// project dropdown / switcher without a manual reload.
+	s.Events.ProjectsChanged()
+	return api.SetProjectIcon200JSONResponse(resp), nil
 }
 
 func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObject) (api.AddProjectResponseObject, error) {

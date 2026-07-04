@@ -3,16 +3,25 @@ import type { ProjectInfo } from '../api'
 import { useSidebarStore } from './sidebar'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { isTypingTarget } from './shortcuts'
+import { recencyOrder } from './projectRecency'
 
-// useGlobalShortcuts owns the app-wide keyboard handling that used to live in
-// three separate effects in RootLayout:
-//   - Ctrl/Cmd + .  toggles the sidebar (treated as an explicit toggle → persists)
+// The live state of the Ctrl+` project switcher: the ordered list snapshot taken
+// when it opened (most-recently-visited first) and the currently highlighted
+// index. null means the switcher is closed.
+export interface SwitcherState {
+  items: ProjectInfo[]
+  index: number
+}
+
+// useGlobalShortcuts owns the app-wide keyboard handling:
+//   - Ctrl/Cmd + .  toggles the sidebar (treated as an explicit toggle -> persists)
 //   - ?             toggles the keyboard-shortcuts help overlay (unless typing)
 //   - Ctrl + `      alt-tab-style project switcher (Shift reverses)
-// They share a single keydown listener now; the keys are distinct so the branches
-// don't interfere. Returns the switcher's highlight index, which the caller feeds
-// to ProjectDropdown via `keyboardIndex` (the switcher reuses the real selector UI
-// rather than a separate overlay).
+// They share a single keydown listener; the keys are distinct so the branches
+// don't interfere. The switcher works like a window switcher: while Ctrl is held,
+// each Ctrl+` press steps the highlight through a centered overlay (ProjectSwitcher)
+// whose list is ordered by last-visited, and releasing Ctrl commits the highlight.
+// Returns the switcher state (null when closed) for the caller to render.
 export function useGlobalShortcuts({
   projects,
   currentProjectId,
@@ -21,11 +30,8 @@ export function useGlobalShortcuts({
   projects: ProjectInfo[]
   currentProjectId: string | null
   selectProject: (id: string) => void
-}): number | null {
-  // Alt-tab-style project switcher: while Ctrl is held, each Ctrl+` press steps
-  // the highlight through this overlay (Shift reverses); releasing Ctrl commits.
-  // `null` = overlay closed; otherwise the highlighted index into `projects`.
-  const [switcherIndex, setSwitcherIndex] = useState<number | null>(null)
+}): SwitcherState | null {
+  const [switcher, setSwitcher] = useState<SwitcherState | null>(null)
 
   // The switcher commits on Ctrl-up using the latest projects/selection/handler;
   // read them through refs so the listeners stay stable (bound once) and never
@@ -33,14 +39,12 @@ export function useGlobalShortcuts({
   const selectProjectRef = useRef(selectProject)
   const projectsRef = useRef(projects)
   const currentProjectIdRef = useRef(currentProjectId)
-  const switcherIndexRef = useRef(switcherIndex)
-  // Keep the mirrors fresh in an effect (not during render - the listeners only
-  // read them later, from keydown/Ctrl-up, so post-commit is soon enough).
+  const switcherRef = useRef(switcher)
   useEffect(() => {
     selectProjectRef.current = selectProject
     projectsRef.current = projects
     currentProjectIdRef.current = currentProjectId
-    switcherIndexRef.current = switcherIndex
+    switcherRef.current = switcher
   })
 
   useEffect(() => {
@@ -63,38 +67,41 @@ export function useGlobalShortcuts({
         return
       }
 
-      // Project switcher. Escape cancels; Ctrl+` (e.code === 'Backquote' so it's
-      // keyboard-layout independent - Shift+` is '~' on US layouts) steps the
-      // highlight, Shift+` steps back (both wrap). We reveal the sidebar first
-      // (transient, non-persisted) so the dropdown is on screen when collapsed.
+      // Escape cancels the switcher (React bails if it's already closed).
       if (e.key === 'Escape') {
-        setSwitcherIndex(null) // no-op (React bails) if already closed
+        setSwitcher(null)
         return
       }
+
+      // Project switcher. Ctrl+` (e.code === 'Backquote' so it's keyboard-layout
+      // independent - Shift+` is '~' on US layouts) steps the highlight forward,
+      // Shift+` steps back (both wrap). The list is snapshotted in last-visited
+      // order on the first press so it doesn't reshuffle mid-cycle; since the
+      // current project sits at the front, the first tap lands on the previous one.
       if (e.code !== 'Backquote' || !e.ctrlKey || e.altKey || e.metaKey) return
       const list = projectsRef.current
       if (list.length < 2) return
       e.preventDefault()
       if (e.repeat) return // one step per physical press, not per auto-repeat
-      if (switcherIndexRef.current === null) useSidebarStore.getState().setCollapsed(false, false)
       const dir = e.shiftKey ? -1 : 1
-      setSwitcherIndex((cur) => {
-        // First press steps off the current project; later presses step off the
-        // current highlight. With nothing selected, land on first/last.
-        const base = cur ?? list.findIndex((p) => p.id === currentProjectIdRef.current)
-        const start = base === -1 ? (dir === 1 ? -1 : 0) : base
-        return (start + dir + list.length) % list.length
+      setSwitcher((cur) => {
+        if (cur === null) {
+          const items = recencyOrder(list)
+          const start = dir === 1 ? 1 : items.length - 1
+          return { items, index: ((start % items.length) + items.length) % items.length }
+        }
+        return { items: cur.items, index: (cur.index + dir + cur.items.length) % cur.items.length }
       })
     }
     function onKeyUp(e: KeyboardEvent) {
       if (e.key !== 'Control') return
-      const cur = switcherIndexRef.current
+      const cur = switcherRef.current
       if (cur === null) return
-      setSwitcherIndex(null)
-      const proj = projectsRef.current[cur]
+      setSwitcher(null)
+      const proj = cur.items[cur.index]
       if (proj && proj.id !== currentProjectIdRef.current) selectProjectRef.current(proj.id)
     }
-    function onBlur() { setSwitcherIndex(null) }
+    function onBlur() { setSwitcher(null) }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
@@ -105,5 +112,5 @@ export function useGlobalShortcuts({
     }
   }, [])
 
-  return switcherIndex
+  return switcher
 }
