@@ -21,6 +21,12 @@ pre_prompt = """
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && bun run lint` (eslint) and fix the errors AND warnings you introduced
 - After changing Go code, run `go test ./...` and make sure it passes
+- Verify web UI changes end-to-end (real rendered app, console + DOM, not just tests) by booting the simulation server and driving it with Playwright:
+  - `cd web && bun run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
+  - Useful pages: /project/sim-project/agent/agent-1 (8-file diff, largest, incl. a >1000-changed-lines hidden "Load diff" file), agent-2 (small diff incl. a plaintext .txt file, tests panel data), agent-md (markdown / running-tests states).
+  - Playwright scripts MUST live under web/ (bun resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers with `cd web && bun x playwright install chromium` (never bare `bun x playwright install` outside web/ - it GCs the pinned revision).
+  - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
+  - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available, /api/auth/status.
 """
 
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
