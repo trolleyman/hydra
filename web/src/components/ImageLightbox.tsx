@@ -268,8 +268,18 @@ export function ImageLightbox({
             // Wrapped in ZoomPan so the image can be magnified past fit (wheel),
             // panned (drag once zoomed), and navigated with the corner minimap -
             // useful when a shot is too small to read at fit. The wrapper keys off
-            // the parent's index remount, so zoom resets on navigation.
-            <ZoomPan minimapSrc={current.url} className="rounded-lg shadow-2xl">
+            // the parent's index remount, so zoom resets on navigation. maxWidth/
+            // maxHeight let the frame GROW into the empty lightbox space as you zoom
+            // (capped at the same box the image fits within) - so zooming a very
+            // vertical (or wide) shot reveals its full width/height at magnification
+            // rather than a thin sliver. The cap matches figureWidth so the growing
+            // frame never overflows the figure.
+            <ZoomPan
+              minimapSrc={current.url}
+              className="rounded-lg shadow-2xl"
+              maxWidth={hasSiblings ? '80vw' : '90vw'}
+              maxHeight="85vh"
+            >
               <img
                 src={current.url}
                 alt={current.filename}
