@@ -430,7 +430,8 @@ function RootLayout() {
   // Ctrl+` alt-tab project switcher - all merged into one hook. The switcher state
   // (projects in last-visited order + the highlighted index) is rendered by the
   // dedicated ProjectSwitcher overlay below.
-  const switcher = useGlobalShortcuts({ projects, currentProjectId, selectProject })
+  const { state: switcherState, setIndex: switcherSetIndex, commit: switcherCommit } =
+    useGlobalShortcuts({ projects, currentProjectId, selectProject })
 
   async function handleRestart() {
     setRestarting(true)
@@ -912,7 +913,7 @@ function RootLayout() {
       <Dialog />
       <Toaster />
       <KeyboardShortcutsModal />
-      <ProjectSwitcher state={switcher} />
+      <ProjectSwitcher state={switcherState} onHover={switcherSetIndex} onSelect={switcherCommit} />
       {trustPrompt && (
         <TrustProjectModal
           name={trustPrompt.name}

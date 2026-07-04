@@ -6,7 +6,16 @@ import { ProjectIcon } from '../lib/projectIcon'
 // while Ctrl+` is held (state owned by useGlobalShortcuts): it lists projects in
 // last-visited order and highlights the one that will be committed when Ctrl is
 // released. Purely presentational - all key handling lives in the hook.
-export function ProjectSwitcher({ state }: { state: SwitcherState | null }) {
+export function ProjectSwitcher({
+  state,
+  onHover,
+  onSelect,
+}: {
+  state: SwitcherState | null
+  // Hovering a row moves the highlight; clicking one commits that project.
+  onHover?: (index: number) => void
+  onSelect?: (id: string) => void
+}) {
   const activeRef = useRef<HTMLDivElement>(null)
 
   // Keep the highlighted row in view as the user cycles through a long list.
@@ -38,7 +47,9 @@ export function ProjectSwitcher({ state }: { state: SwitcherState | null }) {
               <div
                 key={p.id}
                 ref={active ? activeRef : undefined}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
+                onMouseEnter={() => onHover?.(i)}
+                onClick={() => onSelect?.(p.id)}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer ${
                   active ? 'bg-blue-500 text-white' : 'text-gray-700 dark:text-gray-200'
                 }`}
               >
