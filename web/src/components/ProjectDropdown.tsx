@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, FolderOpen, Plus, Check, X } from 'lucide-react'
+import { ChevronDown, FolderOpen, Plus } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
-import { useDialogStore } from '../stores/dialogStore'
 import { useFinePointer } from '../lib/useFinePointer'
 import { ProjectIcon } from '../lib/projectIcon'
+import { ProjectAgentCounts } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
@@ -23,14 +23,12 @@ export function ProjectDropdown({
   onSelect,
   onDeselect,
   onAddProject,
-  onRemoveProject,
 }: {
   projects: ProjectInfo[]
   selectedId: string | null
   onSelect: (id: string) => void
   onDeselect: () => void
   onAddProject: (path: string) => Promise<void>
-  onRemoveProject: (id: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [showAddInput, setShowAddInput] = useState(false)
@@ -42,7 +40,6 @@ export function ProjectDropdown({
   // dialog is open and we're awaiting the user's pick.
   const [pickerAvailable, setPickerAvailable] = useState(false)
   const [browsing, setBrowsing] = useState(false)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
   // triggerRef wraps the button; menuRef is the portalled menu. Both are needed
   // for outside-click detection now that the menu lives outside this subtree.
   const triggerRef = useRef<HTMLDivElement>(null)
@@ -185,27 +182,6 @@ export function ProjectDropdown({
     }
   }
 
-  function handleRemove(e: React.MouseEvent, projectId: string, projectName: string) {
-    e.stopPropagation()
-    useDialogStore.getState().show({
-      title: 'Remove Project',
-      message: `Remove "${projectName}" from Hydra? This will not delete any files on disk.`,
-      type: 'confirm',
-      showCancel: true,
-      onConfirm: async () => {
-        try {
-          await onRemoveProject(projectId)
-        } catch (err) {
-          useDialogStore.getState().show({
-            title: 'Remove Failed',
-            message: `Failed to remove project: ${formatError(err)}`,
-            type: 'error',
-          })
-        }
-      },
-    })
-  }
-
   return (
     <div ref={triggerRef} className="relative shrink-0">
       <button
@@ -246,8 +222,6 @@ export function ProjectDropdown({
                   className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                     p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
-                  onMouseEnter={() => setHoveredId(p.id)}
-                  onMouseLeave={() => setHoveredId(null)}
                   onClick={() => {
                     if (p.id === selectedId) {
                       onDeselect()
@@ -264,29 +238,12 @@ export function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                  {(p.needs_input_count ?? 0) > 0 ? (
-                    <span
-                      aria-label={`${p.needs_input_count} agents need your input`}
-                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-red-500"
-                    />
-                  ) : (p.unread_count ?? 0) > 0 ? (
-                    <span
-                      aria-label={`${p.unread_count} agents with unread changes`}
-                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
-                    />
-                  ) : null}
-                  {p.id === selectedId && hoveredId !== p.id && (
-                    <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                  )}
-                  {hoveredId === p.id && (
-                    <button
-                      onClick={(e) => handleRemove(e, p.id, p.name)}
-                      className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
-                      aria-label={`Remove ${p.name}`}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  {/* Per-project agent tally (total + running/waiting/finished/
+                      needs_input + an unread marker). Fixed to the trailing edge,
+                      centered against the two-line name/path - nothing here
+                      appears on hover, so the counts never shift. Removal moved to
+                      the project's Settings page. */}
+                  <ProjectAgentCounts project={p} className="shrink-0 self-center" />
                 </div>
               ))}
             </div>

@@ -752,6 +752,12 @@ type PolicyConfig struct {
 
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
+	// AgentCount Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
+	AgentCount *int `json:"agent_count,omitempty"`
+
+	// FinishedCount Number of this project's active agents currently in the `finished` status (done but not yet archived).
+	FinishedCount *int `json:"finished_count,omitempty"`
+
 	// Icon Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
 	Icon *string `json:"icon,omitempty"`
 
@@ -767,8 +773,14 @@ type ProjectInfo struct {
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
 
+	// RunningCount Number of this project's active agents currently in the `running` status.
+	RunningCount *int `json:"running_count,omitempty"`
+
 	// UnreadCount Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
 	UnreadCount *int `json:"unread_count,omitempty"`
+
+	// WaitingCount Number of this project's active agents currently in the `waiting` (gone quiet) status.
+	WaitingCount *int `json:"waiting_count,omitempty"`
 }
 
 // RepositoryArtifactFile defines model for RepositoryArtifactFile.

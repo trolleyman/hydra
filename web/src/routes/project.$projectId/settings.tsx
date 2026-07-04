@@ -14,6 +14,7 @@ import {
 } from '../../components/SettingsComponents'
 import { PageTopBar } from '../../components/PageTopBar'
 import { ProjectIconSection } from '../../components/settings/ProjectIconSection'
+import { RemoveProjectSection } from '../../components/settings/RemoveProjectSection'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
@@ -183,6 +184,7 @@ function ProjectSettingsPage() {
               </SettingSection>
             }
           />
+          {selectedProject && <RemoveProjectSection project={selectedProject} />}
         </div>
       </div>
     </div>
