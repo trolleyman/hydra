@@ -170,8 +170,8 @@ const egressApprovalPoll = 500 * time.Millisecond
 // security-gate approval channel: it writes a request the web UI surfaces as an
 // approval toast (the same mechanism as a parked MCP/WebFetch call) and polls for
 // the decision the UI writes back. While any host is pending it flips the head's
-// status to a policy-approval wait so the toast appears, restoring "running" once
-// the last pending host resolves.
+// status to a policy-approval wait so the toast appears, restoring the status the
+// head held beforehand once the last pending host resolves.
 //
 // It runs on the host (inside the daemon), so unlike the in-sandbox `hydra gate`
 // hook it talks to the status/approval files directly rather than over env-var
@@ -188,7 +188,8 @@ type egressApprover struct {
 	id          string
 	agentType   sandbox.AgentType
 	mu          sync.Mutex
-	active      int // hosts currently parked; the last to resolve clears the wait
+	active      int                  // hosts currently parked; the last to resolve clears the wait
+	saved       *api.AgentStatusInfo // head status captured before the first park, restored when the last resolves
 }
 
 // liveAllowedHost re-resolves the head's network allow-list from the on-disk config
@@ -265,23 +266,37 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 }
 
 // enter records a newly-parked host and flips the head into a policy-approval wait
-// so the UI surfaces the approval toast.
+// so the UI surfaces the approval toast. The first host to park snapshots the
+// head's current status so leave() can put it back afterwards, rather than forcing
+// "running" over a head that was finished or idle when a background connection was
+// parked.
 func (e *egressApprover) enter(summary string) {
 	e.mu.Lock()
+	if e.active == 0 {
+		// Capture the pre-approval status, unless it is already one of our own
+		// policy-approval waits (e.g. a stale write) - we don't want to "restore"
+		// the head right back into a needs-input state.
+		if prev := ReadAgentStatus(e.projectRoot, e.id); prev != nil &&
+			(prev.NotificationType == nil || *prev.NotificationType != gate.NotificationPolicyApproval) {
+			e.saved = prev
+		} else {
+			e.saved = nil
+		}
+	}
 	e.active++
 	e.mu.Unlock()
 	e.writeApprovalStatus(summary)
 }
 
-// leave drops a resolved host; when it was the last pending one it restores the
-// head to "running" so the wait (and its toast) clears.
+// leave drops a resolved host; when it was the last pending one it clears the wait
+// by restoring the status the head was in before it was parked.
 func (e *egressApprover) leave() {
 	e.mu.Lock()
 	e.active--
 	last := e.active <= 0
 	e.mu.Unlock()
 	if last {
-		e.restoreRunning()
+		e.restore()
 	}
 }
 
@@ -298,17 +313,29 @@ func (e *egressApprover) writeApprovalStatus(summary string) {
 	})
 }
 
-// restoreRunning clears the policy-approval wait, but only if it still owns the
-// status (nothing newer - e.g. the agent's own hook - has moved it on).
-func (e *egressApprover) restoreRunning() {
+// restore clears the policy-approval wait by putting back the status the head held
+// before it was parked (finished, waiting, running - whatever it was), so resolving
+// an egress prompt doesn't leave an idle or finished head looking like it's running.
+// It only acts if it still owns the status: if something newer - e.g. the agent's
+// own hook - has moved it off our policy-approval wait, that is left in place. When
+// no prior status was captured it falls back to "running", the previous behaviour.
+func (e *egressApprover) restore() {
 	if s := ReadAgentStatus(e.projectRoot, e.id); s != nil &&
 		(s.NotificationType == nil || *s.NotificationType != gate.NotificationPolicyApproval) {
 		return
 	}
-	_ = WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
-		Status:    api.Running,
-		Timestamp: time.Now().Format(time.RFC3339Nano),
-	})
+	e.mu.Lock()
+	prev := e.saved
+	e.saved = nil
+	e.mu.Unlock()
+
+	next := &api.AgentStatusInfo{Status: api.Running}
+	if prev != nil {
+		next = prev
+	}
+	// Advance the timestamp so the JSON poller notices the transition.
+	next.Timestamp = time.Now().Format(time.RFC3339Nano)
+	_ = WriteAgentStatus(e.projectRoot, e.id, next)
 }
 
 func itoa(n int) string {
