@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ProjectInfo } from '../api'
 import { useSidebarStore } from './sidebar'
 import { useShortcutsStore } from '../stores/shortcutsStore'
@@ -21,7 +21,16 @@ export interface SwitcherState {
 // don't interfere. The switcher works like a window switcher: while Ctrl is held,
 // each Ctrl+` press steps the highlight through a centered overlay (ProjectSwitcher)
 // whose list is ordered by last-visited, and releasing Ctrl commits the highlight.
-// Returns the switcher state (null when closed) for the caller to render.
+// Returns the switcher state (null when closed) plus mouse handlers so the
+// overlay's rows can be hovered (moves the highlight) and clicked (commits),
+// mirroring the keyboard cycle-and-release flow.
+export interface Switcher {
+  state: SwitcherState | null
+  // Move the highlight to a row (hover). No-op while the switcher is closed.
+  setIndex: (i: number) => void
+  // Commit a project by id (click), matching the Ctrl-up behaviour.
+  commit: (id: string) => void
+}
 export function useGlobalShortcuts({
   projects,
   currentProjectId,
@@ -30,7 +39,7 @@ export function useGlobalShortcuts({
   projects: ProjectInfo[]
   currentProjectId: string | null
   selectProject: (id: string) => void
-}): SwitcherState | null {
+}): Switcher {
   const [switcher, setSwitcher] = useState<SwitcherState | null>(null)
 
   // The switcher commits on Ctrl-up using the latest projects/selection/handler;
@@ -112,5 +121,16 @@ export function useGlobalShortcuts({
     }
   }, [])
 
-  return switcher
+  // Hover moves the highlight; the shared `index` keeps keyboard and mouse in sync.
+  const setIndex = useCallback((i: number) => {
+    setSwitcher((cur) => (cur ? { items: cur.items, index: i } : cur))
+  }, [])
+
+  // Click commits a project, closing the switcher - same rule as the Ctrl-up path.
+  const commit = useCallback((id: string) => {
+    setSwitcher(null)
+    if (id !== currentProjectIdRef.current) selectProjectRef.current(id)
+  }, [])
+
+  return { state: switcher, setIndex, commit }
 }
