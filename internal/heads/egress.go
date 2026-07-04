@@ -75,7 +75,28 @@ func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandb
 
 	allowed := append(sandbox.DefaultAllowedHosts(agentType), net.AllowedHosts...)
 	approver := &egressApprover{projectRoot: projectRoot, id: id, agentType: agentType}
-	p, err := egress.Start(id, allowed, net.BlockedHosts, approver.approve)
+	// Pin the proxy to the port the head's netns already allows. If a supervisor is
+	// already live for this head (a resume/restart, not a first spawn), its nft rule
+	// hard-codes the port baked at first launch and is never rebuilt, so the proxy
+	// MUST come back on that same port or the agent is firewalled off and sees a
+	// permanent ConnectionRefused. A first spawn (no supervisor yet) binds a fresh
+	// ephemeral port, which is then baked into the supervisor built moments later
+	// via the EgressWrap below.
+	fixedPort := 0
+	if _, live := namespaceHostFor(id); live {
+		fixedPort = rememberedEgressPort(id)
+		if fixedPort == 0 {
+			log.Printf("hydra egress[%s]: supervisor already live but no remembered proxy port; a newly allocated port may desync the netns firewall", id)
+		}
+	}
+	p, err := egress.Start(id, fixedPort, allowed, net.BlockedHosts, approver.approve)
+	if err != nil && fixedPort != 0 {
+		// Couldn't reclaim the baked port; fall back to a fresh one so the head at
+		// least keeps a proxy, and make the (now likely) firewall desync visible
+		// rather than silent. A full head restart clears it.
+		log.Printf("hydra egress[%s]: could not re-bind proxy to netns-allowed port %d; falling back to a fresh port (egress may stay blocked until the head is fully restarted): %v", id, fixedPort, err)
+		p, err = egress.Start(id, 0, allowed, net.BlockedHosts, approver.approve)
+	}
 	if err != nil {
 		if net.Mode == sandbox.NetHard && net.Strict {
 			log.Printf("hydra egress[%s]: STRICT hard egress but proxy failed to start; failing closed (no network): %v", id, err)
@@ -88,6 +109,9 @@ func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandb
 		return nil, nil
 	}
 	port := egress.HostPort(p.Addr())
+	// Remember the bound port for the supervisor's lifetime so any later relaunch
+	// re-binds it (see egressPorts). Cleared by forgetEgressPort on teardown.
+	setEgressPort(id, port)
 
 	if net.Mode == sandbox.NetHard {
 		if hm := egress.DetectHardMode(); hm.Available && port != 0 {
@@ -154,6 +178,41 @@ func stopEgressProxy(id string) {
 	if e != nil && e.proxy != nil {
 		_ = e.proxy.Close()
 	}
+}
+
+// egressPorts remembers the loopback port each head's egress proxy is bound to,
+// for the lifetime of the head's namespace-host supervisor. In hard mode the
+// supervisor's pasta/nft netns bakes this exact port as the sole allowed egress at
+// first launch (via EgressWrap) and never rebuilds it, so every later proxy
+// restart for the head (resume, RestartHead, ...) MUST re-bind the same port or
+// the agent is firewalled off - a permanent ConnectionRefused. Cleared by
+// forgetEgressPort when the supervisor is torn down, so the next fresh supervisor
+// starts from a newly allocated port.
+var egressPorts = struct {
+	mu sync.Mutex
+	m  map[string]int
+}{m: map[string]int{}}
+
+func rememberedEgressPort(id string) int {
+	egressPorts.mu.Lock()
+	defer egressPorts.mu.Unlock()
+	return egressPorts.m[id]
+}
+
+func setEgressPort(id string, port int) {
+	egressPorts.mu.Lock()
+	egressPorts.m[id] = port
+	egressPorts.mu.Unlock()
+}
+
+// forgetEgressPort drops a head's remembered proxy port. Called when its
+// namespace-host supervisor is torn down (removeNamespaceHost / its watcher), so
+// the next fresh supervisor - and its fresh nft rule - starts from a newly
+// allocated port instead of trying to reclaim a stale one.
+func forgetEgressPort(id string) {
+	egressPorts.mu.Lock()
+	delete(egressPorts.m, id)
+	egressPorts.mu.Unlock()
 }
 
 // egressApprovalTimeout bounds how long a blocked outbound connection waits for a

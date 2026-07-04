@@ -26,7 +26,7 @@ func TestProxyAllowsListedHostForwardsHTTP(t *testing.T) {
 	defer upstream.Close()
 	host := mustHost(t, upstream.URL)
 
-	p, err := Start("h1", []string{host}, nil, nil)
+	p, err := Start("h1", 0, []string{host}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestProxyBlocksUnlistedHost(t *testing.T) {
 	defer upstream.Close()
 
 	// Allow-list deliberately excludes the upstream host.
-	p, err := Start("h1", []string{"only.example.com"}, nil, nil)
+	p, err := Start("h1", 0, []string{"only.example.com"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestProxyWildcard(t *testing.T) {
 	host := mustHost(t, upstream.URL) // 127.0.0.1
 
 	// A wildcard that does not cover the loopback host must still block it.
-	p, err := Start("h1", []string{"*.example.com"}, nil, nil)
+	p, err := Start("h1", 0, []string{"*.example.com"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestProxyApproveGrantsUnlistedHost(t *testing.T) {
 		return h == host // approve exactly the upstream host
 	}
 	// Empty allow-list: the host is unknown and must be approved to be reached.
-	p, err := Start("h1", nil, nil, approve)
+	p, err := Start("h1", 0, nil, nil, approve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestProxyApproveDeniesUnlistedHost(t *testing.T) {
 	defer upstream.Close()
 
 	approve := func(string, <-chan struct{}) bool { return false }
-	p, err := Start("h1", nil, nil, approve)
+	p, err := Start("h1", 0, nil, nil, approve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestProxyApproveBlockListNeverPrompts(t *testing.T) {
 	var calls int32
 	approve := func(string, <-chan struct{}) bool { atomic.AddInt32(&calls, 1); return true }
 	// Host is explicitly block-listed: block wins, the approver is never consulted.
-	p, err := Start("h1", nil, []string{host}, approve)
+	p, err := Start("h1", 0, nil, []string{host}, approve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestProxyApproveCollapsesConcurrentSameHost(t *testing.T) {
 		<-release // hold every in-flight prompt open until released
 		return true
 	}
-	p, err := Start("h1", nil, nil, approve)
+	p, err := Start("h1", 0, nil, nil, approve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestProxyBlockListOverridesAllow(t *testing.T) {
 	host := mustHost(t, upstream.URL)
 
 	// Host is on the allow-list but also on the block-list - block wins.
-	p, err := Start("h1", []string{host}, []string{host}, nil)
+	p, err := Start("h1", 0, []string{host}, []string{host}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,5 +238,33 @@ func TestProxyBlockListOverridesAllow(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("block-list should override allow-list, got %d", resp.StatusCode)
+	}
+}
+
+// TestStartReusesFixedPort covers the ConnectionRefused fix: a head's pasta/nft
+// netns bakes one allowed proxy port for its whole life, so a proxy that restarts
+// (resume/restart) must re-bind that exact port. Binding a fixed port right after
+// closing the previous listener on it must succeed and land on the same port.
+func TestStartReusesFixedPort(t *testing.T) {
+	p1, err := Start("h1", 0, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := HostPort(p1.Addr())
+	if port == 0 {
+		t.Fatalf("expected a bound ephemeral port, got addr %q", p1.Addr())
+	}
+
+	// Close and re-bind the SAME port, as ResumeHead/RestartHead do.
+	if err := p1.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := Start("h1", port, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("re-binding the same port after Close should succeed: %v", err)
+	}
+	defer p2.Close()
+	if got := HostPort(p2.Addr()); got != port {
+		t.Fatalf("proxy re-bound to port %d, want the pinned %d", got, port)
 	}
 }
