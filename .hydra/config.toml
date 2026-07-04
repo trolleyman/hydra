@@ -29,6 +29,9 @@ pre_prompt = '''
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available, /api/auth/status.
 '''
 
+## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.
+# icon = "Rocket"
+
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
 # resume_prompt = "Continue"
 
@@ -83,7 +86,24 @@ strict = true
 ## LEGACY (use mode): enforce the allowed_hosts list (deny-by-default egress). Honoured only when mode is unset. Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable; false = allow every host.
 # filter_enabled = false
 
-## extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).
+## extra outbound hosts (exact host or *.suffix) allowed when filtering is on,
+## unioned on top of the built-in default allow-list below. Leaving this empty
+## does NOT disable the defaults - to remove one, list it in blocked_hosts.
+## Built-in defaults, always allowed regardless of agent (package registries,
+## language toolchains, git hosts):
+##     registry.npmjs.org, *.npmjs.org, *.yarnpkg.com, pypi.org, *.pypi.org,
+##     files.pythonhosted.org, *.golang.org, proxy.golang.org,
+##     sum.golang.org, crates.io, *.crates.io, static.crates.io,
+##     rubygems.org, *.rubygems.org, github.com, *.github.com,
+##     *.githubusercontent.com, codeload.github.com, gitlab.com,
+##     *.gitlab.com, bitbucket.org, *.bitbucket.org
+## Plus the AI-provider hosts for the agent's own type (a bash or unknown agent
+## gets the union of every provider's hosts):
+##     claude: *.anthropic.com, claude.ai, *.claude.ai, *.claudeusercontent.com,
+##       platform.claude.com, http-intake.logs.us5.datadoghq.com
+##     codex: api.openai.com, *.openai.com, chatgpt.com
+##     gemini: *.googleapis.com
+##     copilot: *.githubcopilot.com
 allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
@@ -104,6 +124,9 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 
 ## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic - off by default.
 # mcp_auto_allow_read = false
+
+## extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.
+# known_tools = ["Agent", "Artifact", "AskUserQuestion", "Bash", "BashOutput", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "Grep", "KillBash", "KillShell", "LS", "LSP", "Monitor", "MultiEdit", "NotebookEdit", "NotebookRead", "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "SlashCommand", "Task", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write"]
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
 # [claude]
