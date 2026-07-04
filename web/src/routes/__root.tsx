@@ -285,7 +285,7 @@ function RootLayout() {
   const { refetchAgents } = useAgentPolling(currentProjectId)
   const { pushStatus, syncing, handleSync, committing, handleCommit, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
-  useAgentNotifications(currentProjectId, pageActive)
+  useAgentNotifications(currentProjectId, pageActive, selectedAgentId)
   const { refetchStatus, development, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the

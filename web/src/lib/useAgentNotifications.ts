@@ -42,7 +42,17 @@ const FINISHED_TOAST_MS = 8_000
 // helps while you're looking at the page, so the out-of-tab channel covers the
 // backgrounded/unfocused case. A focused tab gets the toast only (no redundant
 // OS notification). See lib/notifyPrefs.
-export function useAgentNotifications(currentProjectId: string | null, pageActive: boolean) {
+//
+// `selectedAgentId` is the agent (branch) whose page is currently open. Its own
+// state-transition toasts are suppressed - you're already looking at that branch,
+// so a toast announcing what its header already shows is just noise. The out-of-
+// tab OS notification still fires (it's gated on `!pageActive`, i.e. you've
+// navigated away), and cross-project / approval toasts are unaffected.
+export function useAgentNotifications(
+  currentProjectId: string | null,
+  pageActive: boolean,
+  selectedAgentId?: string,
+) {
   const agents = useAgentStore((s) => s.agents)
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
@@ -107,13 +117,19 @@ export function useAgentNotifications(currentProjectId: string | null, pageActiv
 
       const notifType = agent.agent_status?.notification_type
       const name = agent.title || agent.id
+      // Suppress the in-page toast for the branch you're currently viewing - its
+      // header already reflects the change - but still let the out-of-tab OS
+      // notification below fire when you've navigated away.
+      const isSelected = agent.id === selectedAgentId
       if (status === 'needs_input' && notifType !== 'policy_approval') {
-        toast.show({
-          message: `"${name}" transitioned to needs input`,
-          type: 'warning',
-          duration: NEEDS_INPUT_TOAST_MS,
-          agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
-        })
+        if (!isSelected) {
+          toast.show({
+            message: `"${name}" transitioned to needs input`,
+            type: 'warning',
+            duration: NEEDS_INPUT_TOAST_MS,
+            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+          })
+        }
         if (!pageActive) {
           fireNotification({
             title: `${name} needs input`,
@@ -124,12 +140,14 @@ export function useAgentNotifications(currentProjectId: string | null, pageActiv
           })
         }
       } else if (status === 'finished') {
-        toast.show({
-          message: `"${name}" transitioned to finished`,
-          type: 'success',
-          duration: FINISHED_TOAST_MS,
-          agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
-        })
+        if (!isSelected) {
+          toast.show({
+            message: `"${name}" transitioned to finished`,
+            type: 'success',
+            duration: FINISHED_TOAST_MS,
+            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+          })
+        }
         if (!pageActive) {
           fireNotification({
             title: `${name} finished`,
@@ -270,7 +288,7 @@ export function useAgentNotifications(currentProjectId: string | null, pageActiv
         }
       })()
     }
-  }, [agents, agentsProjectId, currentProjectId, pageActive, openAgent])
+  }, [agents, agentsProjectId, currentProjectId, pageActive, openAgent, selectedAgentId])
 
   // Cross-project status toasts. The agent list is only loaded for the selected
   // project (handled agent-by-agent above), but the daemon broadcasts every
