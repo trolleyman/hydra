@@ -538,11 +538,6 @@ function RootLayout() {
     }
   }
 
-  async function handleSetProjectIcon(id: string, icon: string) {
-    const updated = await api.default.setProjectIcon(id, { icon })
-    setProjects(projects.map(p => (p.id === id ? updated : p)))
-  }
-
   async function handleRemoveProject(id: string) {
     await api.default.removeProject(id)
     const updated = projects.filter(p => p.id !== id)
@@ -623,7 +618,6 @@ function RootLayout() {
               }}
               onAddProject={handleAddProject}
               onRemoveProject={handleRemoveProject}
-              onSetIcon={handleSetProjectIcon}
             />
           </div>
           <Tooltip content="Hide sidebar (Ctrl+.)">

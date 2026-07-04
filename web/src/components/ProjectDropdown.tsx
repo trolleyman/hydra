@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, FolderOpen, Plus, Check, X, Pencil } from 'lucide-react'
+import { ChevronDown, FolderOpen, Plus, Check, X } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -24,7 +24,6 @@ export function ProjectDropdown({
   onDeselect,
   onAddProject,
   onRemoveProject,
-  onSetIcon,
 }: {
   projects: ProjectInfo[]
   selectedId: string | null
@@ -32,24 +31,12 @@ export function ProjectDropdown({
   onDeselect: () => void
   onAddProject: (path: string) => Promise<void>
   onRemoveProject: (id: string) => Promise<void>
-  // Persist a project's custom icon (emoji, lucide name, or image path/URL).
-  onSetIcon: (id: string, icon: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [showAddInput, setShowAddInput] = useState(false)
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
-  // Inline icon editor: the id of the project row currently being edited (null =
-  // none), plus the in-progress icon value and a saving flag for that row.
-  const [editingIconId, setEditingIconId] = useState<string | null>(null)
-  const [iconDraft, setIconDraft] = useState('')
-  const [savingIcon, setSavingIcon] = useState(false)
-  const iconInputRef = useRef<HTMLInputElement>(null)
-  // Mirror of editingIconId read by the (bound-once) Escape handler so it can
-  // tell "close the editor" from "close the whole dropdown" without stale state.
-  const editingIconIdRef = useRef<string | null>(null)
-  useEffect(() => { editingIconIdRef.current = editingIconId }, [editingIconId])
   // Native folder picker: only offered to local clients on a system with a
   // dialog tool (the daemon checks both). `browsing` is true while the OS
   // dialog is open and we're awaiting the user's pick.
@@ -106,11 +93,6 @@ export function ProjectDropdown({
     }
   }, [isOpen])
 
-  // Focus the icon input when a row enters edit mode.
-  useEffect(() => {
-    if (editingIconId) iconInputRef.current?.focus()
-  }, [editingIconId])
-
   const selected = projects.find((p) => p.id === selectedId)
   // Unread agents sitting in projects other than the one you're looking at -
   // drives the dot on the folder button ("updates waiting elsewhere").
@@ -135,15 +117,9 @@ export function ProjectDropdown({
       setOpen(false)
       setShowAddInput(false)
       setAddError(null)
-      cancelEditIcon()
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        // A row's icon editor swallows Escape first (closing just the editor).
-        if (editingIconIdRef.current) {
-          cancelEditIcon()
-          return
-        }
         setOpen(false)
         setShowAddInput(false)
         setAddError(null)
@@ -209,35 +185,6 @@ export function ProjectDropdown({
     }
   }
 
-  function startEditIcon(e: React.MouseEvent, p: ProjectInfo) {
-    e.stopPropagation()
-    setEditingIconId(p.id)
-    setIconDraft(p.icon ?? '')
-    setSavingIcon(false)
-  }
-
-  function cancelEditIcon() {
-    setEditingIconId(null)
-    setIconDraft('')
-    setSavingIcon(false)
-  }
-
-  async function saveIcon(id: string) {
-    if (savingIcon) return
-    setSavingIcon(true)
-    try {
-      await onSetIcon(id, iconDraft.trim())
-      cancelEditIcon()
-    } catch (err) {
-      setSavingIcon(false)
-      useDialogStore.getState().show({
-        title: 'Set Icon Failed',
-        message: `Failed to set project icon: ${formatError(err)}`,
-        type: 'error',
-      })
-    }
-  }
-
   function handleRemove(e: React.MouseEvent, projectId: string, projectName: string) {
     e.stopPropagation()
     useDialogStore.getState().show({
@@ -294,112 +241,53 @@ export function ProjectDropdown({
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
               {projects.map((p) => (
-                editingIconId === p.id ? (
-                  // Inline icon editor for this row. Live preview of the draft plus
-                  // an input that accepts an emoji, a lucide icon name, or an image
-                  // path/URL. Clicks are stopped so they don't select the project.
-                  <div
-                    key={p.id}
-                    className="flex flex-col gap-1.5 px-3 py-2 bg-gray-50 dark:bg-gray-700/40"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="shrink-0 inline-flex w-5 h-5 items-center justify-center text-gray-500 dark:text-gray-300">
-                        <ProjectIcon icon={iconDraft} projectId={p.id} size={18} />
-                      </span>
-                      <input
-                        ref={iconInputRef}
-                        type="text"
-                        value={iconDraft}
-                        onChange={(e) => setIconDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { e.preventDefault(); void saveIcon(p.id) }
-                        }}
-                        placeholder="emoji, icon name, or image path"
-                        disabled={savingIcon}
-                        className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-500 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void saveIcon(p.id)}
-                        disabled={savingIcon}
-                        className="shrink-0 p-1 rounded text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 disabled:opacity-50 cursor-pointer"
-                        aria-label="Save icon"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={cancelEditIcon}
-                        className="shrink-0 p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
-                        aria-label="Cancel"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">
-                      An emoji, a lucide icon name (e.g. Rocket), or an image path/URL. Empty resets to the folder icon.
-                    </p>
+                <div
+                  key={p.id}
+                  className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                    p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                  onMouseEnter={() => setHoveredId(p.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => {
+                    if (p.id === selectedId) {
+                      onDeselect()
+                    } else {
+                      onSelect(p.id)
+                    }
+                    setOpen(false)
+                  }}
+                >
+                  <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
+                    <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
+                    <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                ) : (
-                  <div
-                    key={p.id}
-                    className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                      p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                    }`}
-                    onMouseEnter={() => setHoveredId(p.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                    onClick={() => {
-                      if (p.id === selectedId) {
-                        onDeselect()
-                      } else {
-                        onSelect(p.id)
-                      }
-                      setOpen(false)
-                    }}
-                  >
-                    <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
-                      <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
-                      <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
-                    </div>
-                    {(p.needs_input_count ?? 0) > 0 ? (
-                      <span
-                        aria-label={`${p.needs_input_count} agents need your input`}
-                        className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-red-500"
-                      />
-                    ) : (p.unread_count ?? 0) > 0 ? (
-                      <span
-                        aria-label={`${p.unread_count} agents with unread changes`}
-                        className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
-                      />
-                    ) : null}
-                    {p.id === selectedId && hoveredId !== p.id && (
-                      <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                    )}
-                    {hoveredId === p.id && (
-                      <>
-                        <button
-                          onClick={(e) => startEditIcon(e, p)}
-                          className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-blue-500 transition-colors cursor-pointer"
-                          aria-label={`Set icon for ${p.name}`}
-                          title="Set icon"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={(e) => handleRemove(e, p.id, p.name)}
-                          className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
-                          aria-label={`Remove ${p.name}`}
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )
+                  {(p.needs_input_count ?? 0) > 0 ? (
+                    <span
+                      aria-label={`${p.needs_input_count} agents need your input`}
+                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-red-500"
+                    />
+                  ) : (p.unread_count ?? 0) > 0 ? (
+                    <span
+                      aria-label={`${p.unread_count} agents with unread changes`}
+                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
+                    />
+                  ) : null}
+                  {p.id === selectedId && hoveredId !== p.id && (
+                    <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                  )}
+                  {hoveredId === p.id && (
+                    <button
+                      onClick={(e) => handleRemove(e, p.id, p.name)}
+                      className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                      aria-label={`Remove ${p.name}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}

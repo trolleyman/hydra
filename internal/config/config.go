@@ -406,6 +406,14 @@ type Config struct {
 	// Tests are per-project test-runner commands whose pass/fail verdict gates a
 	// head's merge button (see internal/tests, PLAN #68).
 	Tests []TestScript `toml:"tests"`
+	// Icon is an optional custom project icon shown in the web UI's project
+	// switcher and dropdown, in place of the default folder glyph. A single string
+	// interpreted by its content: an emoji (e.g. "🚀") renders as-is; a lucide-react
+	// icon name (e.g. "Rocket") renders that icon; a value ending in an image
+	// extension (.png/.svg/.ico/.jpg/...) is an image - an http(s)/data URI is used
+	// directly, any other value is a path served from the project by the backend
+	// (see the /project-icon route). nil/"" = the default folder icon.
+	Icon *string `toml:"icon"`
 	// ResumePrompt is the message typed into an agent that was actively working
 	// when the daemon was restarted, so it picks up where it left off instead of
 	// sitting idle after its conversation is restored (see DefaultResumePrompt).
@@ -513,6 +521,7 @@ type rawConfig struct {
 	Artifacts           []ArtifactScript `toml:"artifacts"`
 	Services            []ServiceScript  `toml:"services"`
 	Tests               []TestScript     `toml:"tests"`
+	Icon                *string          `toml:"icon"`
 	ResumePrompt        *string          `toml:"resume_prompt"`
 	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
 	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
@@ -529,6 +538,7 @@ var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
 	"tests":         true,
+	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true,
 }
@@ -661,6 +671,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.Artifacts = raw.Artifacts
 	cfg.Services = raw.Services
 	cfg.Tests = raw.Tests
+	cfg.Icon = raw.Icon
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
 	cfg.ArtifactPrefetch = raw.ArtifactPrefetch
@@ -1539,6 +1550,10 @@ func managedKeySet() map[string]bool {
 	for _, e := range defaultsSpec() {
 		m[e.key] = true
 	}
+	// icon is rendered outside the spec (Config-level, emitIcon); its regenerated
+	// "# icon = ..." default line is recognised and dropped rather than kept as a
+	// stray user comment on the next save.
+	m["icon"] = true
 	// resume_prompt is rendered outside the spec (it is Config-level, not
 	// per-agent), but is still managed: a regenerated "# resume_prompt = ..."
 	// line must be recognised and dropped rather than kept as a user comment.
@@ -2243,6 +2258,16 @@ func renderConfig(existing []byte, cfg Config) string {
 	testBlocks := prior.testBlocks
 	testMeta := prior.testMeta // name -> preserved comments
 
+	// icon is not part of the structured save payload (the Settings UI's config
+	// save doesn't send it - it is written via its own SetProjectIcon path), so a
+	// save that doesn't carry it must preserve whatever the file already had rather
+	// than silently dropping it. An explicit cfg.Icon (incl. "" to clear) wins.
+	icon := cfg.Icon
+	if icon == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			icon = prev.Icon
+		}
+	}
 	// resume_prompt is not part of the structured save payload (the Settings UI
 	// doesn't send it), so a save that doesn't carry it must preserve whatever the
 	// file already had rather than silently dropping a hand-edited value. An
@@ -2289,6 +2314,7 @@ func renderConfig(existing []byte, cfg Config) string {
 		out = append(out, tc...)
 	}
 	emitSpecTable(&out, spec, "", "", cfg.Defaults, keyComments, tableComments)
+	emitIcon(&out, icon, keyComments)
 	emitResumePrompt(&out, resumePrompt, keyComments)
 	emitArtifactConcurrency(&out, artifactConcurrency, keyComments)
 	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
@@ -2430,6 +2456,23 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 		} else {
 			*out = append(*out, "# "+e.key+" = "+e.def())
 		}
+	}
+}
+
+// emitIcon renders the top-level icon key (a Config-level setting): the project's
+// custom icon shown in the web UI's project switcher and dropdown. Mirrors
+// emitResumePrompt: preserved user comment, Hydra doc line, then the value
+// (commented-out example when unset).
+func emitIcon(out *[]string, icon *string, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
+	if uc := keyComments["\x00icon"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+` custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.`)
+	if icon != nil {
+		*out = append(*out, "icon = "+tomlStringValue(*icon))
+	} else {
+		*out = append(*out, `# icon = "Rocket"`)
 	}
 }
 

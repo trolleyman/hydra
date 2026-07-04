@@ -13,6 +13,7 @@ import {
   SettingSection,
 } from '../../components/SettingsComponents'
 import { PageTopBar } from '../../components/PageTopBar'
+import { ProjectIconSection } from '../../components/settings/ProjectIconSection'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
@@ -165,6 +166,7 @@ function ProjectSettingsPage() {
             onTest={handleTest}
             onCloseTestAgent={handleCloseTestAgent}
             projectId={projectId}
+            iconSection={scope === 'project' && selectedProject ? <ProjectIconSection project={selectedProject} /> : undefined}
             scopeSelector={
               <SettingSection title="Scope" description={scopeDescription}>
                 <div className="inline-flex p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">

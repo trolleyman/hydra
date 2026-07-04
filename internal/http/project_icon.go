@@ -28,19 +28,24 @@ func isImageIcon(icon string) bool {
 func (s *Server) HandleProjectIcon(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
 	p := s.ProjectsManager.GetByID(projectID)
-	if p == nil || p.Icon == "" || !isImageIcon(p.Icon) {
+	if p == nil {
+		http.NotFound(w, r)
+		return
+	}
+	icon := projectIconValue(p.Path)
+	if icon == "" || !isImageIcon(icon) {
 		http.NotFound(w, r)
 		return
 	}
 	// An http(s) or data: URI is loaded directly by the browser and should never
 	// be requested here; refuse to treat it as a filesystem path.
-	if strings.HasPrefix(p.Icon, "http://") || strings.HasPrefix(p.Icon, "https://") || strings.HasPrefix(p.Icon, "data:") {
+	if strings.HasPrefix(icon, "http://") || strings.HasPrefix(icon, "https://") || strings.HasPrefix(icon, "data:") {
 		http.NotFound(w, r)
 		return
 	}
-	full := p.Icon
+	full := icon
 	if !filepath.IsAbs(full) {
-		full = filepath.Join(p.Path, filepath.FromSlash(p.Icon))
+		full = filepath.Join(p.Path, filepath.FromSlash(icon))
 	}
 	f, err := os.Open(full)
 	if err != nil {

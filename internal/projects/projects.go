@@ -50,15 +50,6 @@ type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
-	// Icon is an optional custom project icon that replaces the default folder
-	// glyph in the web UI. It is a single string interpreted by its content:
-	//   - an emoji (e.g. "🚀") is rendered as-is;
-	//   - a lucide-react icon name (e.g. "Rocket", "Database") renders that icon;
-	//   - a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an
-	//     image - an http(s) or data: URI is used directly, any other value is a
-	//     path served from the project by the backend (see the /project-icon route).
-	// Empty falls back to the default folder icon.
-	Icon string `json:"icon,omitempty"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.
@@ -164,27 +155,6 @@ func (m *Manager) RemoveProject(id string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// SetIcon sets (or, when icon is empty, clears) the custom icon of the project
-// with the given ID and persists the change. Returns the updated ProjectInfo and
-// true, or false if no project has that ID.
-func (m *Manager) SetIcon(id, icon string) (ProjectInfo, bool, error) {
-	icon = strings.TrimSpace(icon)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i := range m.projects {
-		if m.projects[i].ID == id {
-			prev := m.projects[i].Icon
-			m.projects[i].Icon = icon
-			if err := m.save(); err != nil {
-				m.projects[i].Icon = prev // rollback in-memory change
-				return ProjectInfo{}, false, errtrace.Wrap(err)
-			}
-			return m.projects[i], true, nil
-		}
-	}
-	return ProjectInfo{}, false, nil
 }
 
 // AddProject registers the given absolute path as a project (idempotent by path).
