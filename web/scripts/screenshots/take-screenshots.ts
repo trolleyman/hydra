@@ -418,6 +418,12 @@ try {
       // shortcut handler rather than being typed into a field. Used to open the
       // keyboard-shortcuts overlay the way a user does - by pressing `?`.
       pressKey?: string
+      // Opens the Ctrl+` alt-tab project switcher and leaves it open for capture.
+      // Unlike pressKey (a full down+up chord), this HOLDS Control down and taps
+      // Backquote - the switcher commits and closes on Ctrl release, so a chord
+      // would shut it again before the shot. Control is never released (the page
+      // context is torn down after the capture). Needs >= 2 projects.
+      openSwitcher?: boolean
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state - e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -655,6 +661,13 @@ try {
       // area rather than be clipped by the sidebar's `overflow-hidden` - verifies
       // the portal-rendered menu (mirrors the Ctrl+` switcher's forced-open state).
       { name: 'project-switcher-narrow', path: '/', click: 'button[aria-label="Select project"]', narrowSidebar: true },
+      // The Ctrl+` alt-tab project switcher: a centered overlay listing projects
+      // in last-visited order (each with its custom icon), the highlighted row
+      // being the one committed on Ctrl release. Opened on a project page so the
+      // current project (sim-project) is the most-recent, and the first tap lands
+      // on the next one (mobile-app) - the classic alt-tab move. viewportOnly
+      // since the overlay is a fixed, centered modal.
+      { name: 'project-switcher', path: '/project/sim-project/', openSwitcher: true, viewportOnly: true },
       // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
       // live status transitions / security-gate parks that the static simulation
       // never produces, so they're rendered deterministically via the toast
@@ -2119,6 +2132,15 @@ try {
           // press it - used to open the keyboard-shortcuts overlay via `?`.
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
           await page.keyboard.press(pg.pressKey)
+          await settle(page)
+        }
+        if (pg.openSwitcher) {
+          // Hold Ctrl and tap Backquote to open the alt-tab project switcher, then
+          // leave Ctrl held so the overlay stays up for the shot (releasing it
+          // commits + closes). Blur first so the keydown reaches the window handler.
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+          await page.keyboard.down('Control')
+          await page.keyboard.press('Backquote')
           await settle(page)
         }
         if (pg.clicks) {
