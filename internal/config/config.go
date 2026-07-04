@@ -1298,6 +1298,62 @@ func policySlice(pick func(*PolicyConfig) []string) func(AgentConfig) (string, b
 	}
 }
 
+// allowedHostsDoc builds the documentation for the allowed_hosts setting. It
+// enumerates the built-in default allow-list - the hosts already reachable
+// before the user adds anything - so the written config is self-explanatory. The
+// host lists are sourced from the sandbox package (InfraAllowedHosts /
+// ProviderHostGroups), the same source the egress boundary enforces, so what is
+// documented can never drift from what is actually allowed.
+func allowedHostsDoc() string {
+	var b strings.Builder
+	b.WriteString("extra outbound hosts (exact host or *.suffix) allowed when filtering is on,\n")
+	b.WriteString("unioned on top of the built-in default allow-list below. Leaving this empty\n")
+	b.WriteString("does NOT disable the defaults - to remove one, list it in blocked_hosts.\n")
+	b.WriteString("Built-in defaults, always allowed regardless of agent (package registries,\n")
+	b.WriteString("language toolchains, git hosts):")
+	for _, line := range wrapHosts(sandbox.InfraAllowedHosts()) {
+		b.WriteString("\n    ")
+		b.WriteString(line)
+	}
+	b.WriteString("\nPlus the AI-provider hosts for the agent's own type (a bash or unknown agent\n")
+	b.WriteString("gets the union of every provider's hosts):")
+	for _, g := range sandbox.ProviderHostGroups() {
+		b.WriteString("\n    ")
+		b.WriteString(string(g.Type))
+		b.WriteString(": ")
+		for i, line := range wrapHosts(g.Hosts) {
+			if i > 0 {
+				b.WriteString("\n      ")
+			}
+			b.WriteString(line)
+		}
+	}
+	return b.String()
+}
+
+// wrapHosts groups host patterns into comma-separated lines of a readable width
+// so an enumerated default list stays legible inside a doc comment.
+func wrapHosts(hosts []string) []string {
+	const width = 68
+	var lines []string
+	cur := ""
+	for _, h := range hosts {
+		switch {
+		case cur == "":
+			cur = h
+		case len(cur)+2+len(h) > width:
+			lines = append(lines, cur+",")
+			cur = h
+		default:
+			cur += ", " + h
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
 // defaultsSpec is the ordered, declarative description of the managed default
 // settings. Root scalars come first because TOML requires root keys to precede
 // any table header. Adding an entry here makes it appear (commented-out) on the
@@ -1407,7 +1463,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "allowed_hosts",
-			doc: "extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).",
+			doc: allowedHostsDoc(),
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
@@ -2363,7 +2419,12 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 		if uc := keyComments[table+"\x00"+e.key]; len(uc) > 0 {
 			*out = append(*out, uc...)
 		}
-		*out = append(*out, docPrefix+" "+e.doc)
+		// A doc may span several lines (e.g. an enumerated default list); each is
+		// emitted with the docPrefix so the whole block is recognised and refreshed
+		// on the next save (see isManagedDoc).
+		for line := range strings.SplitSeq(e.doc, "\n") {
+			*out = append(*out, docPrefix+" "+line)
+		}
 		if isSet {
 			*out = append(*out, e.key+" = "+text)
 		} else {

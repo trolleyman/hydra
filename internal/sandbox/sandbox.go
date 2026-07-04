@@ -114,8 +114,16 @@ type NetworkPolicy struct {
 // don't silently grant reach to OpenAI's API, and vice versa. User AllowedHosts
 // are unioned on top; a host can be subtracted again via BlockedHosts.
 func DefaultAllowedHosts(t AgentType) []string {
-	// Common infrastructure every agent needs regardless of provider.
-	hosts := []string{
+	return append(InfraAllowedHosts(), providerAllowedHosts(t)...)
+}
+
+// InfraAllowedHosts is the shared, provider-independent part of the built-in
+// egress allow-list: the package registries, language toolchains, and git hosts
+// every agent needs regardless of which AI provider it uses. Kept separate from
+// the provider hosts (see ProviderHostGroups) so callers - including the config
+// file's self-documentation - can enumerate the two categories independently.
+func InfraAllowedHosts() []string {
+	return []string{
 		// Package registries + language toolchains.
 		"registry.npmjs.org", "*.npmjs.org", "*.yarnpkg.com",
 		"pypi.org", "*.pypi.org", "files.pythonhosted.org",
@@ -126,38 +134,52 @@ func DefaultAllowedHosts(t AgentType) []string {
 		"github.com", "*.github.com", "*.githubusercontent.com", "codeload.github.com",
 		"gitlab.com", "*.gitlab.com", "bitbucket.org", "*.bitbucket.org",
 	}
-	return append(hosts, providerAllowedHosts(t)...)
+}
+
+// ProviderHostGroup pairs an agent type with the AI-provider hosts its defaults
+// grant (its own model API, auth, and telemetry).
+type ProviderHostGroup struct {
+	Type  AgentType
+	Hosts []string
+}
+
+// ProviderHostGroups returns the per-agent-type AI-provider host lists in a
+// stable order. It is the single source of truth for providerAllowedHosts and
+// for the config file's documentation, so the enforced defaults and the
+// documented defaults can never drift apart. The groups are kept separate from
+// the shared infra list (InfraAllowedHosts) so each agent's defaults grant only
+// its own provider - a Claude agent's defaults don't silently reach OpenAI's
+// API, and vice versa.
+func ProviderHostGroups() []ProviderHostGroup {
+	return []ProviderHostGroup{
+		// Anthropic / Claude, including platform.claude.com and Claude Code's
+		// Datadog log intake.
+		{AgentTypeClaude, []string{
+			"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
+			"platform.claude.com", "http-intake.logs.us5.datadoghq.com",
+		}},
+		{AgentTypeCodex, []string{"api.openai.com", "*.openai.com", "chatgpt.com"}}, // OpenAI / Codex
+		{AgentTypeGemini, []string{"*.googleapis.com"}},
+		{AgentTypeCopilot, []string{"*.githubcopilot.com"}},
+	}
 }
 
 // providerAllowedHosts returns the AI-provider hosts the given agent type talks
-// to (its own model API, auth, and telemetry). Kept separate from the shared
-// infra list in DefaultAllowedHosts so each agent's defaults grant only its own
-// provider. bash (and any unknown type) is a general shell that may invoke any
-// of the CLIs, so it gets the union of every provider.
+// to. bash (and any unknown type) is a general shell that may invoke any of the
+// CLIs, so it gets the union of every provider.
 func providerAllowedHosts(t AgentType) []string {
-	// Anthropic / Claude, including platform.claude.com and Claude Code's
-	// Datadog log intake.
-	claude := []string{
-		"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
-		"platform.claude.com", "http-intake.logs.us5.datadoghq.com",
+	groups := ProviderHostGroups()
+	for _, g := range groups {
+		if g.Type == t {
+			return g.Hosts
+		}
 	}
-	openai := []string{"api.openai.com", "*.openai.com", "chatgpt.com"} // Codex
-	gemini := []string{"*.googleapis.com"}
-	copilot := []string{"*.githubcopilot.com"}
-	switch t {
-	case AgentTypeClaude:
-		return claude
-	case AgentTypeCodex:
-		return openai
-	case AgentTypeGemini:
-		return gemini
-	case AgentTypeCopilot:
-		return copilot
-	default:
-		all := append(claude, openai...)
-		all = append(all, gemini...)
-		return append(all, copilot...)
+	// bash / unknown: union of every provider.
+	var all []string
+	for _, g := range groups {
+		all = append(all, g.Hosts...)
 	}
+	return all
 }
 
 // Bind maps a host path into the sandbox at Target. Used to seed per-head
