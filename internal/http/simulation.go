@@ -1855,9 +1855,15 @@ var simRepoFiles = map[string]string{
 		"- Collapsible file & folder tree\n" +
 		"- Syntax-highlighted file contents\n" +
 		"- Markdown rendering for `README` files\n\n" +
+		"| Feature            | Status | Notes                          |\n" +
+		"| ------------------ | :----: | ------------------------------ |\n" +
+		"| File & folder tree |   Yes  | Collapsible, VS Code-style     |\n" +
+		"| Syntax highlight   |   Yes  | Powered by highlight.js        |\n" +
+		"| Markdown tables    |   Yes  | Right here in this README      |\n\n" +
 		"## Getting started\n\n" +
 		"```sh\nbun install\nbun run dev\n```\n\n" +
-		"Enjoy exploring the tree!\n",
+		"See the [demo server](internal/server/server.go) for the entrypoint, or\n" +
+		"browse [the components](web/src/App.tsx). Enjoy exploring the tree!\n",
 	"go.mod": "module github.com/example/hydra-demo\n\ngo 1.26\n",
 	"package.json": "{\n  \"name\": \"hydra-demo\",\n  \"version\": \"1.0.0\",\n" +
 		"  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"vite build\"\n  }\n}\n",

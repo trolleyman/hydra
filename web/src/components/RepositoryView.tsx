@@ -164,9 +164,106 @@ function splitHighlightedLines(html: string): string[] {
   return lines
 }
 
-// Minimal, self-contained markdown → HTML for README rendering. Input is HTML
+// escapeAttr escapes a string for use inside a double-quoted HTML attribute.
+// The markdown body is HTML-escaped elsewhere; this covers the URLs/paths we
+// build ourselves and inject as href / data-* values.
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
+// MarkdownContext carries what relative-link resolution needs: the project, the
+// ref being browsed, and the current file's repo-relative path (so a link like
+// `docs/artifacts.md` resolves against the file's own directory).
+interface MarkdownContext { projectId: string; refStr: string; filePath: string }
+
+// isExternalHref reports whether a link target has a URL scheme (http:, mailto:,
+// ...) or is protocol-relative (//host) - i.e. it points outside the repo and
+// should open in a new tab rather than navigate the repository view.
+function isExternalHref(href: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')
+}
+
+// dirOf returns the directory portion of a repo-relative file path ('' for a
+// file at the repo root).
+function dirOf(path: string): string {
+  const i = path.lastIndexOf('/')
+  return i >= 0 ? path.slice(0, i) : ''
+}
+
+// resolveRepoPath resolves a relative link target against a base directory,
+// collapsing '.'/'..' segments. A leading '/' makes it repo-root-relative.
+function resolveRepoPath(baseDir: string, rel: string): string {
+  const parts = rel.startsWith('/') || !baseDir ? [] : baseDir.split('/')
+  for (const seg of rel.replace(/^\/+/, '').split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') { parts.pop(); continue }
+    parts.push(seg)
+  }
+  return parts.join('/')
+}
+
+// encodePath percent-encodes each path segment while keeping the '/' separators,
+// so a branch ref like `hydra/foo` or a path with spaces stays a valid URL.
+function encodePath(p: string): string {
+  return p.split('/').map(encodeURIComponent).join('/')
+}
+
+// mdLink builds the <a> for a markdown link. External links and in-page anchors
+// (#heading) are emitted as-is (external ones open in a new tab); a relative
+// repo link is resolved against the current file and pointed at the repository
+// view for the same ref. Internal links carry data-repo-* so MarkdownView's
+// click handler can select the file in-app, while the real href lets
+// middle/ctrl-click open it in a new tab.
+function mdLink(label: string, href: string, ctx: MarkdownContext): string {
+  const cls = 'text-blue-600 dark:text-blue-400 hover:underline'
+  if (href.startsWith('#')) {
+    return `<a class="${cls}" href="${escapeAttr(href)}">${label}</a>`
+  }
+  if (isExternalHref(href)) {
+    return `<a class="${cls}" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${label}</a>`
+  }
+  const hashIdx = href.indexOf('#')
+  const hash = hashIdx >= 0 ? href.slice(hashIdx) : ''
+  let path = hashIdx >= 0 ? href.slice(0, hashIdx) : href
+  const q = path.indexOf('?')
+  if (q >= 0) path = path.slice(0, q)
+  const resolved = resolveRepoPath(dirOf(ctx.filePath), path)
+  const splat = resolved ? `${ctx.refStr}/${resolved}` : ctx.refStr
+  const url = `/project/${encodePath(ctx.projectId)}/repository/${encodePath(splat)}${hash}`
+  const hashAttr = hash ? ` data-repo-hash="${escapeAttr(hash.slice(1))}"` : ''
+  return `<a class="${cls}" href="${escapeAttr(url)}" data-repo-splat="${escapeAttr(splat)}"${hashAttr}>${label}</a>`
+}
+
+// splitTableRow splits a `| a | b |` row into trimmed cell strings, tolerating a
+// missing leading/trailing pipe (GitHub allows both).
+function splitTableRow(l: string): string[] {
+  let s = l.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|')) s = s.slice(0, -1)
+  return s.split('|').map((c) => c.trim())
+}
+
+// isTableSep reports whether a line is a GFM table delimiter row - only pipes,
+// dashes, colons and spaces, with every cell a valid `:?-+:?` alignment spec.
+function isTableSep(l: string): boolean {
+  const s = l.trim()
+  if (!s.includes('-') || !/^[\s|:-]+$/.test(s)) return false
+  return splitTableRow(s).every((c) => /^:?-+:?$/.test(c))
+}
+
+// cellAlign reads a delimiter cell's colons into a CSS text-align.
+function cellAlign(sep: string): '' | 'left' | 'center' | 'right' {
+  const l = sep.startsWith(':')
+  const r = sep.endsWith(':')
+  if (l && r) return 'center'
+  if (r) return 'right'
+  if (l) return 'left'
+  return ''
+}
+
+// Minimal, self-contained markdown -> HTML for README rendering. Input is HTML
 // escaped first, so the output is safe to inject.
-function renderMarkdown(src: string): string {
+function renderMarkdown(src: string, ctx: MarkdownContext): string {
   const lines = src.replace(/\r\n/g, '\n').split('\n')
   const out: string[] = []
   let i = 0
@@ -179,8 +276,23 @@ function renderMarkdown(src: string): string {
     t = t.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[0.85em] font-mono">$1</code>')
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a class="text-blue-600 dark:text-blue-400 hover:underline" href="$2" target="_blank" rel="noreferrer">$1</a>')
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label, href) => mdLink(label, href, ctx))
     return t
+  }
+
+  // renderTable emits a GFM table. `aligns` come from the delimiter row; body
+  // rows are padded/truncated to the header's column count.
+  const renderTable = (header: string[], aligns: ReturnType<typeof cellAlign>[], rows: string[][]): string => {
+    const cols = header.length
+    const cell = 'border border-gray-300 dark:border-gray-600 px-3 py-1.5'
+    const style = (n: number) => (aligns[n] ? ` style="text-align:${aligns[n]}"` : '')
+    const th = header.map((c, n) => `<th class="${cell} font-semibold bg-gray-50 dark:bg-gray-800/60"${style(n)}>${inline(c)}</th>`).join('')
+    const body = rows.map((row) => {
+      let tds = ''
+      for (let n = 0; n < cols; n++) tds += `<td class="${cell}"${style(n)}>${inline(row[n] ?? '')}</td>`
+      return `<tr>${tds}</tr>`
+    }).join('')
+    return `<div class="my-3 overflow-x-auto"><table class="border-collapse text-sm"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`
   }
 
   while (i < lines.length) {
@@ -203,6 +315,21 @@ function renderMarkdown(src: string): string {
         html = escapeHtml(joined)
       }
       out.push(`<pre class="my-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 overflow-x-auto text-sm"><code class="hljs font-mono">${html}</code></pre>`)
+      continue
+    }
+    // A table is a header row of `| ... |` cells followed by a delimiter row; we
+    // require the delimiter so a stray '|' in prose isn't mistaken for a table.
+    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      closeList()
+      const header = splitTableRow(line)
+      const aligns = splitTableRow(lines[i + 1]).map(cellAlign)
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && lines[i].trim() !== '' && lines[i].includes('|')) {
+        rows.push(splitTableRow(lines[i]))
+        i++
+      }
+      out.push(renderTable(header, aligns, rows))
       continue
     }
     const heading = line.match(/^(#{1,6})\s+(.*)$/)
@@ -694,6 +821,39 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
   )
 }
 
+// MarkdownView renders a markdown file's rendered HTML and intercepts clicks on
+// internal repo links so they select the target file in-app. A plain left-click
+// navigates within the repository view; a middle-click or a modified click
+// (ctrl/cmd/shift/alt) falls through to the browser, which opens the anchor's
+// real href in a new tab/window. External links and in-page anchors aren't
+// tagged with data-repo-splat, so they're left entirely to the browser.
+function MarkdownView({ content, projectId, refStr, filePath }: { content: string; projectId: string; refStr: string; filePath: string }) {
+  const navigate = useNavigate()
+  const html = useMemo(
+    () => renderMarkdown(content, { projectId, refStr, filePath }),
+    [content, projectId, refStr, filePath],
+  )
+  const onClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    const a = (e.target as HTMLElement).closest('a')
+    const splat = a?.getAttribute('data-repo-splat')
+    if (splat == null) return // external link / in-page anchor: let the browser handle it
+    e.preventDefault()
+    navigate({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: splat },
+      hash: a!.getAttribute('data-repo-hash') || undefined,
+    })
+  }, [navigate, projectId])
+  return (
+    <div
+      onClick={onClick}
+      className="max-w-3xl mx-auto px-8 py-6 text-gray-800 dark:text-gray-200"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
 function FileContent({
   file, wrap, projectId, refStr, highlightRange, onSelectLine,
 }: {
@@ -747,12 +907,7 @@ function FileContent({
   }
 
   if (isMarkdown(contentPath)) {
-    return (
-      <div
-        className="max-w-3xl mx-auto px-8 py-6 text-gray-800 dark:text-gray-200"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(file.content) }}
-      />
-    )
+    return <MarkdownView content={file.content} projectId={projectId} refStr={refStr} filePath={contentPath} />
   }
 
   return (
