@@ -12,6 +12,7 @@ import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loa
 import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
+import { closeWebSocket } from '../lib/ws'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
@@ -1217,8 +1218,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     }
     return () => {
       cancelled = true
-      ws.onclose = null
-      ws.close()
+      closeWebSocket(ws)
       if (wsRef.current === ws) wsRef.current = null
     }
   }, [projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, applyMessage])

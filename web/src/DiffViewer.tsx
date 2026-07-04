@@ -588,6 +588,66 @@ function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
   return segs
 }
 
+// ── Lazy body mounting ────────────────────────────────────────────────────────
+// A big diff used to mount every file's rows (and highlight them) in one render,
+// blocking the main thread for seconds. Instead each file's body stays an empty
+// placeholder until its card first scrolls near the viewport; the placeholder is
+// sized from the row estimate below so the scrollbar and sidebar jump-to-file
+// stay roughly honest before the real rows exist.
+
+// Diff rows are one leading-5 (20px) line each (wrapped lines make a row taller,
+// but this is only a placeholder estimate).
+const EST_ROW_H = 20
+// How far beyond the viewport a body mounts, so scrolling at a normal pace hits
+// already-rendered rows instead of placeholders.
+const LAZY_MARGIN = '1000px 0px'
+
+// nearestScrollParent walks up to the element's scroll container (the agent
+// page's overflow-auto main pane). The IntersectionObserver's rootMargin must be
+// measured against it: with the default viewport root, the container's clipping
+// would cancel the pre-mount margin and bodies would only mount once actually
+// visible.
+function nearestScrollParent(el: HTMLElement): Element | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p)
+    if (overflowY === 'auto' || overflowY === 'scroll') return p
+  }
+  return null
+}
+
+// estimateVisibleRows approximates how many rows a file's body renders in its
+// default state (no per-region reveals) without building anything: change runs
+// count in full, each unchanged run contributes up to CTX context per adjacent
+// change plus one expander row - mirroring buildSegments. Non-expanded files
+// render their -U3 hunks as-is plus expander rows.
+function estimateVisibleRows(file: DiffFile): number {
+  const hunks = file.hunks ?? []
+  if (hunks.length === 0) return 2
+  if (!file.expanded) {
+    let rows = hunks.length + 1 // expander rows between/around hunks
+    for (const h of hunks) rows += h.lines.length
+    return rows
+  }
+  const runs: { change: boolean; len: number }[] = []
+  for (const h of hunks) {
+    for (const l of h.lines) {
+      const change = isChangeLine(l)
+      const last = runs[runs.length - 1]
+      if (last && last.change === change) last.len++
+      else runs.push({ change, len: 1 })
+    }
+  }
+  let rows = 0
+  runs.forEach((run, ri) => {
+    if (run.change) { rows += run.len; return }
+    const top = Math.min(run.len, ri === 0 ? 0 : CTX)
+    const bot = Math.min(run.len - top, ri === runs.length - 1 ? 0 : CTX)
+    const hidden = run.len - top - bot
+    rows += hidden <= MIN_COLLAPSE_GAP ? run.len : top + bot + 1
+  })
+  return rows
+}
+
 function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
   return (
     <button
@@ -684,6 +744,27 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
+  // Lazy body mount: the body renders as a fixed-height placeholder until the
+  // card first scrolls near the viewport (one-way latch - once mounted, a body
+  // stays mounted so scrolling back up never re-does the work). The headless
+  // one-file view renders immediately; so do environments without
+  // IntersectionObserver (tests).
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const [near, setNear] = useState(() => headless || typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (near) return
+    const el = cardRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setNear(true)
+        io.disconnect()
+      }
+    }, { root: nearestScrollParent(el), rootMargin: LAZY_MARGIN })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [near])
+
   // Collapse/expand glides the file body between 0 and its measured height - the
   // same height-tween the tests/artifacts CollapsibleCard uses, so the two feel
   // identical. The body stays mounted while open and for one collapse animation,
@@ -707,8 +788,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // Signature of the visible hunks. A background refresh hands us new file
   // objects even when nothing changed, so keying derived work on identity would
   // recompute on every refresh. The string signature is stable across no-op
-  // refreshes, so we only recompute when content truly changes.
-  const hunksSig = useMemo(() => JSON.stringify(file.hunks), [file.hunks])
+  // refreshes, so we only recompute when content truly changes. Skipped (along
+  // with everything derived from it) while the body is still a lazy placeholder.
+  const hunksSig = useMemo(() => (near ? JSON.stringify(file.hunks) : ''), [file.hunks, near])
 
   // Whole-file content for the reveal/collapse model. The server returns each
   // eligible file's entire content in the main diff response (full_context) and
@@ -718,25 +800,25 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // expand below. The size/contiguity checks are a defensive guard so a
   // malformed response can't drive the reveal model with non-whole-file lines.
   const fullLines = useMemo<DiffLine[] | null>(() => {
-    if (file.binary || isHidden || !bodyMounted || !file.expanded) return null
+    if (file.binary || isHidden || !bodyMounted || !near || !file.expanded) return null
     const lines = file.hunks ? file.hunks.flatMap((h) => h.lines) : []
     if (lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) return null
     return lines
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hunksSig, file.binary, file.expanded, isHidden, bodyMounted])
+  }, [hunksSig, file.binary, file.expanded, isHidden, bodyMounted, near])
 
   // Lines to highlight: the whole file when expanded (so multi-line constructs
   // stay correct), else the visible `-U3` hunks. Null when nothing is rendered
   // (binary/collapsed/hidden) - highlighting an unseen body would be wasted work.
   const highlightSource = useMemo<DiffLine[] | null>(() => {
-    if (file.binary || !bodyMounted || isHidden) return null
+    if (file.binary || !bodyMounted || isHidden || !near) return null
     const lines = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
     return lines.length ? lines : null
     // hunksSig (not file.hunks identity) so an unchanged file isn't recomputed
     // when an unrelated file changes and the whole diff object is replaced.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullLines, hunksSig, file.binary, bodyMounted, isHidden])
+  }, [fullLines, hunksSig, file.binary, bodyMounted, isHidden, near])
 
   // Small files highlight inline (no flash, no worker round-trip). Larger files
   // would block the main thread if every one highlighted during the same render,
@@ -780,6 +862,16 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     return () => { cancelled = true }
   }, [highlightSource, lang])
   const { highlightedOld, highlightedNew } = syncHighlight ?? asyncHighlight
+
+  // Placeholder height while the body is lazy-unmounted. Also used directly as
+  // the tween wrapper's height during that phase: bodyH is 0 until the
+  // ResizeObserver's first measurement, and if every card rendered at ~0 body
+  // height for that first frame they would all cluster inside the observer's
+  // pre-mount margin and defeat the laziness entirely.
+  const estBodyH = useMemo(
+    () => (near ? 0 : isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H),
+    [near, isHidden, file],
+  )
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
   // rename) has nothing to collapse - render its lines plainly rather than
@@ -825,7 +917,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   )
 
   return (
-    <div ref={fileRef} className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}>
+    <div
+      ref={(el) => { cardRef.current = el; fileRef?.(el) }}
+      className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
+    >
       {!headless && (
       // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
       // same Y as the file-list sidebar) while the file's diff scrolls under it,
@@ -879,12 +974,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         // it can't paint over the sticky file/section/changes bars above it - see
         // the matching note in CollapsibleCard.
         className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
-        style={headless ? undefined : { height: bodyOpen ? bodyH : 0 }}
+        style={headless ? undefined : { height: !bodyOpen ? 0 : near ? bodyH : estBodyH }}
         aria-hidden={headless ? undefined : !bodyOpen}
       >
         {(headless || bodyMounted) && (
         <div ref={headless ? undefined : bodyRef}>
-          {file.binary && isImagePath(file.path) ? (
+          {!near ? (
+            // Placeholder while the card is still far off-screen: hold roughly
+            // the height the rows will take so the scrollbar and jump-to-file
+            // targets stay stable, without paying for any row or highlight work.
+            <div data-lazy-placeholder style={{ height: estBodyH }} />
+          ) : file.binary && isImagePath(file.path) ? (
             // In-tree image: reuse the artifacts panel's before/after differ.
             <div className="p-3">
               <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} name={file.path} />
