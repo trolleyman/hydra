@@ -103,9 +103,11 @@ var settingsInPlaceRe = regexp.MustCompile(`(?i)(\bsed\s+-i|\bperl\s+-i|\b(cp|mv
 
 // Decide returns the gate's verdict for one tool call. It is a pure function of
 // the policy and the hook payload so it is exhaustively unit-testable. The
-// guiding principle (see AUDIT.md): default-allow for unrecognized tools (the OS
-// sandbox is the boundary; a fail-closed gate would block every new tool), and
-// fail-closed only for MCP, where the allow-list is the point.
+// guiding principle (see AUDIT.md): recognized built-in tools are allowed (the OS
+// sandbox is the boundary), while MCP calls AND tools the gate doesn't recognize
+// fail closed (parked for approval) - an un-vetted MCP/connector tool must not
+// slip through under a name the mcp__ check misses, even with permissions skipped.
+// Newly-shipped built-ins are registered in knownBuiltinTools to stop them parking.
 func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 	if !p.GateEnabled {
 		return Result{Decision: Allow}
@@ -231,9 +233,61 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		return Result{Decision: Allow}
 	}
 
-	// Unrecognized tool: fail open. The OS sandbox confines the blast radius.
-	return Result{Decision: Allow}
+	// A recognized built-in tool we don't specially handle above is safe to allow:
+	// the OS sandbox confines its blast radius.
+	if knownBuiltinTools[toolName] {
+		return Result{Decision: Allow}
+	}
+
+	// Unrecognized tool: fail CLOSED. An un-prefixed tool the mcp__ check above
+	// didn't catch could be an un-vetted MCP/connector tool exposed under a
+	// non-standard name, so parking it (rather than failing open) keeps a head from
+	// reaching capabilities the user never allow-listed - even under
+	// --dangerously-skip-permissions. Genuinely new built-in tools also land here;
+	// the reason tells the head to have the user register it (see knownBuiltinTools).
+	return Result{
+		Decision: Ask, Kind: "tool", Target: toolName,
+		Reason: "tool " + quote(toolName) + " is not recognized by Hydra's security gate - it may be an un-vetted MCP/connector tool. It has been parked for approval. If this is a legitimate built-in tool, ask the user to add it to knownBuiltinTools in internal/gate/decide.go so Hydra stops gating it.",
+	}
 }
+
+// knownBuiltinTools is the allow-list of Claude Code built-in tool names the gate
+// recognizes as safe (they run confined by the OS sandbox). Anything NOT here and
+// without the mcp__ prefix is parked for approval (fail-closed) rather than
+// allowed, so a mystery-named MCP/connector tool can't slip through. It is the
+// UNION across agent configs and Claude Code versions - keep it broad. When a new
+// built-in tool ships and starts getting parked, add its name here.
+//
+// Tools the switch above already handles (Bash, Read, Write, Edit, MultiEdit,
+// NotebookEdit, WebFetch) are listed too for documentation; they never reach this
+// map because their cases return first.
+var knownBuiltinTools = func() map[string]bool {
+	names := []string{
+		// File + shell (also special-cased above).
+		"Bash", "BashOutput", "KillBash", "KillShell",
+		"Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "NotebookRead",
+		"Glob", "Grep", "LS",
+		// Web.
+		"WebFetch", "WebSearch",
+		// Planning / control.
+		"ExitPlanMode", "EnterPlanMode", "TodoWrite", "SlashCommand", "Skill",
+		// Sub-agents + orchestration.
+		"Task", "Agent", "Workflow", "ToolSearch", "Monitor",
+		// Task list.
+		"TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate",
+		// Scheduling / notifications / messaging.
+		"CronCreate", "CronDelete", "CronList", "ScheduleWakeup",
+		"PushNotification", "RemoteTrigger", "SendMessage",
+		// Worktrees, design, artifacts, reporting, LSP.
+		"EnterWorktree", "ExitWorktree", "DesignSync", "Artifact",
+		"AskUserQuestion", "ReportFindings", "LSP",
+	}
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
+}()
 
 // mcpServerTool splits an MCP tool call name into its server and tool segments,
 // or reports false for a non-MCP tool. mcp__<server>__<tool> → (<server>, <tool>).

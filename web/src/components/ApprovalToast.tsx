@@ -73,6 +73,10 @@ function kindVisual(data: ApprovalToastData): {
       return { Icon: Globe, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Web fetch', badge: { text: 'NETWORK', tone: 'teal' } }
     case 'egress':
       return { Icon: Network, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Allow network host', badge: { text: 'NETWORK', tone: 'teal' } }
+    case 'tool':
+      // A tool Hydra's gate doesn't recognize (not a known built-in, no mcp__
+      // prefix) - flagged amber because it could be an un-vetted MCP/connector tool.
+      return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'TOOL', tone: 'amber' } }
     default:
       return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'SHELL', tone: 'gray' } }
   }
@@ -94,6 +98,8 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
       return <>An agent wants to fetch from <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
     case 'egress':
       return <>An agent wants to connect to <ChipClause><Chip>{data.target}</Chip>,</ChipClause> which isn&rsquo;t on its network allow-list.</>
+    case 'tool':
+      return <>An agent wants to use <ChipClause><Chip>{data.target}</Chip>,</ChipClause> a tool Hydra&rsquo;s security gate doesn&rsquo;t recognize.</>
     default:
       return <>An agent wants to run <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
   }
@@ -256,6 +262,11 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'egress' && (
             <Caption icon={<Network className="w-3 h-3" />}>
               Allow once opens <span className="font-mono">{data.target}</span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
+            </Caption>
+          )}
+          {data.kind === 'tool' && (
+            <Caption icon={<Shield className="w-3 h-3" />}>
+              Allowing runs it just this once. If it&rsquo;s a legitimate tool, add <span className="font-mono">{data.target}</span> to Hydra&rsquo;s known-tools list so it stops prompting.
             </Caption>
           )}
         </div>

@@ -200,7 +200,9 @@ export function useAgentNotifications(currentProjectId: string | null, pageActiv
           // the same still-parked request doesn't re-alert.
           const isNewApproval = !reqMap.has(a.reqid)
           // mcp / mcp_tool / webfetch / egress persist an "always allow"; bash
-          // (e.g. git push) is one-shot only.
+          // (e.g. git push) and tool (an unrecognized tool - the permanent fix is
+          // registering it in Hydra's known-tools list, not a per-call grant) are
+          // one-shot only.
           const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
           const actions = [
             {

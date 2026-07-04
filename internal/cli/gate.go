@@ -171,6 +171,8 @@ func approvalSummary(r gate.Result) string {
 		return "wants to fetch from " + strconv.Quote(r.Target)
 	case "bash":
 		return "wants to run " + r.Target
+	case "tool":
+		return "wants to use unrecognized tool " + strconv.Quote(r.Target)
 	default:
 		return r.Reason
 	}
