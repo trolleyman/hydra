@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -103,4 +105,110 @@ func TestEgressLiveAllowedHost(t *testing.T) {
 	if e.liveAllowedHost("drivemcp.googleapis.com") {
 		t.Error("blocked host must win over the allow-list")
 	}
+}
+
+// TestEgressApproverRestoresPriorStatus verifies that parking a head for an egress
+// approval and then resolving it puts the head back into the status it held before
+// the park (finished, waiting, ...) rather than force-writing "running". A parked
+// connection can come from a background process while the agent itself is idle or
+// done, so forcing "running" would leave the head looking busy forever.
+func TestEgressApproverRestoresPriorStatus(t *testing.T) {
+	newApprover := func() *egressApprover {
+		return &egressApprover{projectRoot: t.TempDir(), id: "h1", agentType: sandbox.AgentTypeClaude}
+	}
+	str := func(s string) *string { return &s }
+
+	t.Run("restores a finished head", func(t *testing.T) {
+		e := newApprover()
+		if err := WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+			Status: api.Finished, Timestamp: "2020-01-01T00:00:00Z", LastMessage: str("all done"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		e.enter("wants to connect to \"example.com\"")
+		if got := ReadAgentStatus(e.projectRoot, e.id); got == nil || got.Status != api.NeedsInput {
+			t.Fatalf("during park: status = %v, want needs_input", got)
+		}
+
+		e.leave()
+		got := ReadAgentStatus(e.projectRoot, e.id)
+		if got == nil || got.Status != api.Finished {
+			t.Fatalf("after resolve: status = %v, want finished restored", got)
+		}
+		if got.LastMessage == nil || *got.LastMessage != "all done" {
+			t.Errorf("last_message not preserved: %v", got.LastMessage)
+		}
+		if got.Timestamp == "2020-01-01T00:00:00Z" {
+			t.Error("timestamp should advance so the poller notices the transition")
+		}
+	})
+
+	t.Run("falls back to running when there was no prior status", func(t *testing.T) {
+		e := newApprover() // no status.json written
+		e.enter("wants to connect to \"example.com\"")
+		e.leave()
+		got := ReadAgentStatus(e.projectRoot, e.id)
+		if got == nil || got.Status != api.Running {
+			t.Fatalf("status = %v, want running fallback", got)
+		}
+	})
+
+	t.Run("does not clobber a newer non-approval status", func(t *testing.T) {
+		e := newApprover()
+		if err := WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+			Status: api.Waiting, Timestamp: "2020-01-01T00:00:00Z",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.enter("wants to connect to \"example.com\"")
+		// Simulate the agent's own hook advancing the status while parked.
+		if err := WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+			Status: api.Running, Timestamp: "2020-01-02T00:00:00Z",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.leave()
+		got := ReadAgentStatus(e.projectRoot, e.id)
+		if got == nil || got.Status != api.Running {
+			t.Fatalf("status = %v, want the newer running status left in place", got)
+		}
+	})
+
+	t.Run("last of several parked hosts restores once", func(t *testing.T) {
+		e := newApprover()
+		if err := WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+			Status: api.Finished, Timestamp: "2020-01-01T00:00:00Z",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.enter("host a")
+		e.enter("host b")
+		e.leave() // one still parked -> stay in the wait
+		if got := ReadAgentStatus(e.projectRoot, e.id); got == nil || got.Status != api.NeedsInput {
+			t.Fatalf("with one host still parked: status = %v, want needs_input", got)
+		}
+		e.leave() // last one -> restore
+		if got := ReadAgentStatus(e.projectRoot, e.id); got == nil || got.Status != api.Finished {
+			t.Fatalf("after last resolve: status = %v, want finished restored", got)
+		}
+	})
+
+	// A stale policy-approval status left on disk must not be captured as the
+	// "prior" state - otherwise resolving would restore the head into needs_input.
+	t.Run("ignores a stale policy-approval status when capturing", func(t *testing.T) {
+		e := newApprover()
+		nt := gate.NotificationPolicyApproval
+		if err := WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+			Status: api.NeedsInput, Timestamp: "2020-01-01T00:00:00Z", NotificationType: &nt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.enter("host a")
+		e.leave()
+		got := ReadAgentStatus(e.projectRoot, e.id)
+		if got == nil || got.Status != api.Running {
+			t.Fatalf("status = %v, want running fallback (stale approval not restored)", got)
+		}
+	})
 }
