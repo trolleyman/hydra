@@ -6,7 +6,8 @@ export type ToastType = 'info' | 'success' | 'error' | 'warning'
 // the renderer draws the rich approval card (icon, kind/RW badge, task + target,
 // preview block, reason, and the toast's actions) instead of the plain message.
 export interface ApprovalToastData {
-  // What is being approved: mcp (whole server), mcp_tool (one tool), webfetch, bash.
+  // What is being approved: mcp (whole server), mcp_tool (one tool), webfetch,
+  // egress, bash, or tool (a tool the gate doesn't recognize).
   kind: string
   // The server name / "server__tool" / host / command the approval is about.
   target: string

@@ -1,6 +1,9 @@
 package gate
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func basePolicy() Policy {
 	return Policy{
@@ -67,8 +70,11 @@ func TestDecide(t *testing.T) {
 		{"bash grep for git push allowed", "Bash", map[string]any{"command": "grep -rn 'git push' internal/"}, Allow},
 		{"bash commit msg mentioning git push allowed", "Bash", map[string]any{"command": "git commit -m 'document the git push flow'"}, Allow},
 		{"bash normal allowed", "Bash", map[string]any{"command": "go test ./..."}, Allow},
-		{"unrecognized tool allowed", "SomeNewTool", map[string]any{"x": "y"}, Allow},
+		{"unrecognized tool parked", "SomeNewTool", map[string]any{"x": "y"}, Ask},
 		{"websearch allowed", "WebSearch", map[string]any{"query": "x"}, Allow},
+		{"known builtin grep allowed", "Grep", map[string]any{"pattern": "x"}, Allow},
+		{"known builtin task allowed", "Task", map[string]any{"prompt": "x"}, Allow},
+		{"known builtin todowrite allowed", "TodoWrite", map[string]any{"todos": nil}, Allow},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -127,6 +133,57 @@ func TestDecideAskCarriesTarget(t *testing.T) {
 	}
 	if r := Decide(p, "WebFetch", map[string]any{"url": "https://evil.test/x"}); r.Kind != "webfetch" || r.Target != "evil.test" {
 		t.Errorf("webfetch ask target: kind=%q target=%q", r.Kind, r.Target)
+	}
+}
+
+// An un-vetted tool exposed under a name the mcp__ check doesn't catch (e.g. a
+// claude.ai connector surfaced without the prefix) must fail closed - parked as
+// kind "tool" carrying the tool name - so it can't run even under skip-permissions.
+func TestDecideUnrecognizedToolFailsClosed(t *testing.T) {
+	p := basePolicy()
+	r := Decide(p, "google_calendar_create_event", nil)
+	if r.Decision != Ask {
+		t.Fatalf("unrecognized tool decision = %s, want Ask", r.Decision)
+	}
+	if r.Kind != "tool" || r.Target != "google_calendar_create_event" {
+		t.Errorf("unrecognized tool ask: kind=%q target=%q", r.Kind, r.Target)
+	}
+	// A recognized built-in that the switch doesn't special-case still fails open.
+	if r := Decide(p, "Glob", map[string]any{"pattern": "**/*.go"}); r.Decision != Allow {
+		t.Errorf("known builtin Glob = %s, want Allow", r.Decision)
+	}
+}
+
+// policy.known_tools extends the built-in allow-list so a project can register a
+// tool the gate doesn't ship recognizing, instead of parking every call.
+func TestDecideKnownToolsExtends(t *testing.T) {
+	p := basePolicy()
+	if r := Decide(p, "AcmeCustomTool", nil); r.Decision != Ask {
+		t.Fatalf("unregistered custom tool = %s, want Ask", r.Decision)
+	}
+	p.KnownTools = []string{"AcmeCustomTool"}
+	if r := Decide(p, "AcmeCustomTool", nil); r.Decision != Allow {
+		t.Errorf("registered custom tool = %s, want Allow", r.Decision)
+	}
+	// Case-insensitive, matching the MCP allow-list semantics.
+	if r := Decide(p, "acmecustomtool", nil); r.Decision != Allow {
+		t.Errorf("registered custom tool (case-insensitive) = %s, want Allow", r.Decision)
+	}
+}
+
+// DefaultKnownTools is sorted, non-empty, and a copy (mutating it must not affect
+// the gate). It backs the documented default for policy.known_tools.
+func TestDefaultKnownTools(t *testing.T) {
+	a := DefaultKnownTools()
+	if len(a) == 0 {
+		t.Fatal("DefaultKnownTools is empty")
+	}
+	if !slices.IsSorted(a) {
+		t.Errorf("DefaultKnownTools is not sorted: %v", a)
+	}
+	a[0] = "ZZZ-mutated"
+	if Decide(basePolicy(), "Bash", map[string]any{"command": "echo hi"}).Decision != Allow {
+		t.Error("mutating DefaultKnownTools result affected the gate")
 	}
 }
 

@@ -1,8 +1,11 @@
 package heads
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -55,4 +58,49 @@ func TestStartEgressMode(t *testing.T) {
 			t.Errorf("mode = %q, want empty sentinel", got)
 		}
 	})
+}
+
+// TestEgressLiveAllowedHost verifies the approver re-reads the on-disk config
+// allow-list so a host added to config.toml AFTER a head launched is allowed
+// without a respawn or a prompt. It also checks the built-in defaults are unioned
+// in and that blocked_hosts still wins.
+func TestEgressLiveAllowedHost(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := config.GetProjectConfigPath(dir)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) {
+		if err := os.WriteFile(cfgPath, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e := &egressApprover{projectRoot: dir, id: "h1", agentType: sandbox.AgentTypeClaude}
+
+	// No user allow-list yet: a built-in default (Claude gets *.anthropic.com) is
+	// allowed; an arbitrary host is not.
+	write("[sandbox.network]\nmode = \"hard\"\n")
+	if !e.liveAllowedHost("api.anthropic.com") {
+		t.Error("default *.anthropic.com host should be allowed")
+	}
+	if e.liveAllowedHost("drivemcp.googleapis.com") {
+		t.Error("googleapis host should NOT be allowed before it's added")
+	}
+
+	// Add the host to config (as if the user just edited it): now allowed live, no
+	// respawn.
+	write("[sandbox.network]\nmode = \"hard\"\nallowed_hosts = [\"drivemcp.googleapis.com\"]\n")
+	if !e.liveAllowedHost("drivemcp.googleapis.com") {
+		t.Error("host added to config.toml should be allowed on re-read")
+	}
+	if e.liveAllowedHost("evil.example.com") {
+		t.Error("unrelated host should still be denied")
+	}
+
+	// blocked_hosts overrides the allow-list.
+	write("[sandbox.network]\nmode = \"hard\"\nallowed_hosts = [\"drivemcp.googleapis.com\"]\nblocked_hosts = [\"drivemcp.googleapis.com\"]\n")
+	if e.liveAllowedHost("drivemcp.googleapis.com") {
+		t.Error("blocked host must win over the allow-list")
+	}
 }

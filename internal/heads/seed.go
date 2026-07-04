@@ -267,6 +267,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		MCPAllowed:       p.MCPAllowed,
 		MCPToolsAllowed:  p.MCPToolsAllowed,
 		AutoAllowReadMCP: p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
+		KnownTools:       p.KnownTools,
 	}
 	// WebFetch host-gating is derived from the sandbox network policy rather than a
 	// dedicated list: WebFetch content is fetched provider-side (it does not go
