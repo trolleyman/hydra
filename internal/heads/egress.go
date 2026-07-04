@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -73,7 +74,7 @@ func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandb
 	}
 
 	allowed := append(sandbox.DefaultAllowedHosts(agentType), net.AllowedHosts...)
-	approver := &egressApprover{projectRoot: projectRoot, id: id}
+	approver := &egressApprover{projectRoot: projectRoot, id: id, agentType: agentType}
 	p, err := egress.Start(id, allowed, net.BlockedHosts, approver.approve)
 	if err != nil {
 		if net.Mode == sandbox.NetHard && net.Strict {
@@ -177,11 +178,37 @@ const egressApprovalPoll = 500 * time.Millisecond
 // paths. A granted host is added to the proxy's live allow-list by the proxy
 // itself; "always allow" additionally persists it to the project config via the
 // API's remember path (internal/http/approvals.go).
+//
+// Before parking a host it re-reads the on-disk config allow-list (liveAllowedHost)
+// and auto-allows silently if the host is there now: the proxy snapshots the
+// allow-list at launch, so this is what lets a host ADDED to config.toml after a
+// head started take effect without a respawn or a prompt.
 type egressApprover struct {
 	projectRoot string
 	id          string
+	agentType   sandbox.AgentType
 	mu          sync.Mutex
 	active      int // hosts currently parked; the last to resolve clears the wait
+}
+
+// liveAllowedHost re-resolves the head's network allow-list from the on-disk config
+// and reports whether host is permitted now (allow-listed and not blocked). The
+// proxy's allow-list is otherwise fixed at launch, so consulting this before
+// prompting is what makes a host added to config.toml post-launch "just work". It
+// mirrors the launch-time resolution in startEgress (DefaultAllowedHosts unioned
+// with the resolved [sandbox.network] allowed_hosts, minus blocked_hosts).
+// Best-effort: a config that won't load falls through to the normal prompt.
+func (e *egressApprover) liveAllowedHost(host string) bool {
+	cfg, err := config.Load(e.projectRoot)
+	if err != nil {
+		return false
+	}
+	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(string(e.agentType))
+	if gate.HostAllowed(net.BlockedHosts, host) {
+		return false // blocked wins, same as the proxy
+	}
+	allowed := append(sandbox.DefaultAllowedHosts(e.agentType), net.AllowedHosts...)
+	return gate.HostAllowed(allowed, host)
 }
 
 // approve is the egress.ApproveFunc: it blocks until the user decides (or the
@@ -189,6 +216,15 @@ type egressApprover struct {
 func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 	if e.projectRoot == "" {
 		return false // no channel to ask over (e.g. tests) → deny, as before
+	}
+	// A host allow-listed in config.toml after this head launched isn't in the
+	// proxy's launch-time snapshot, so it would be parked for a prompt even though
+	// the user already granted it. Re-read the on-disk config first and allow it
+	// silently if it's there now - no toast, no respawn. The proxy caches the
+	// returned host, so this read happens once per host.
+	if e.liveAllowedHost(host) {
+		log.Printf("hydra egress[%s]: %q is on the current config allow-list; allowing without prompt", e.id, host)
+		return true
 	}
 	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
 	reqid := "egress-" + strconv.FormatInt(time.Now().UnixNano(), 10)
