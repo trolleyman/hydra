@@ -30,7 +30,7 @@ pre_prompt = '''
 '''
 
 ## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.
-# icon = "Rocket"
+icon = "web/public/icon.png"
 
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
 # resume_prompt = "Continue"
