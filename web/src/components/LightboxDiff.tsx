@@ -76,44 +76,54 @@ export function LightboxDiff({ left, right, name, mode, onModeChange, view, onVi
   return (
     <ABControlsContext.Provider value={ab}>
       <div className="dark flex flex-col items-center gap-3">
-        {/* In A/B mode the Before/After toggle + Highlight sit ABOVE the image - on the
-            tile, where the grid keeps them - rather than down in the toolbar (also on the
-            keyboard: X flips, B/A jump). Width-matched to the image so they line up. */}
-        {mode === 'ab' && (
-          <div style={{ width }} className="max-w-[94vw] flex flex-wrap items-center gap-2">
-            <span title="X flips · B = Before · A = After">
-              <SegmentedToggle
-                value={view}
-                onChange={onViewChange}
-                options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
-              />
-            </span>
-            <label
-              title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
-              className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-                canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={highlight && canDiff}
-                disabled={!canDiff}
-                onChange={(e) => onHighlightChange(e.target.checked)}
-                className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
-              />
-              Highlight
-            </label>
-          </div>
-        )}
         {/* ZoomPan magnifies the comparator past fit (wheel), pans it (drag once
             zoomed), and gives a corner minimap - at fit the inner view keeps its own
             click/slider/onion gestures; pan only takes over above 1×. The minimap
-            thumbnail uses the "after" side (or whichever exists). */}
-        <ZoomPan minimapSrc={right ?? left} style={{ width }} className="max-w-[94vw]">
-          <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
+            thumbnail uses the "after" side (or whichever exists). maxWidth/maxHeight
+            put it in grow mode: the frame expands into the empty lightbox space as you
+            zoom (so a very vertical pair reveals its full width, not a sliver) rather
+            than magnifying inside the fit-sized box. The fit `width` moves to an inner
+            wrapper so the comparator stays laid out at its fit size while the frame
+            around it grows (feeding it the frame width instead would reflow the diff,
+            not magnify it). */}
+        <ZoomPan minimapSrc={right ?? left} className="max-w-[94vw]" maxWidth="94vw" maxHeight="80vh">
+          <div style={{ width }}>
+            <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
+          </div>
         </ZoomPan>
-        {/* Switch comparison modes without leaving the lightbox. */}
+        {/* All controls sit in one row BELOW the comparator so the growing frame can't
+            shuffle them around (the Before/After toggle + Highlight used to sit above
+            the image, which the grow would push about). In A/B mode they render to the
+            LEFT of the mode selector; other modes show just the selector. The keyboard
+            still drives them (X flips, B/A jump, H highlight - see ImageLightbox). */}
         <div className="flex flex-wrap items-center justify-center gap-2">
+          {mode === 'ab' && (
+            <>
+              <span title="X flips · B = Before · A = After">
+                <SegmentedToggle
+                  value={view}
+                  onChange={onViewChange}
+                  options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+                />
+              </span>
+              <label
+                title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
+                className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                  canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={highlight && canDiff}
+                  disabled={!canDiff}
+                  onChange={(e) => onHighlightChange(e.target.checked)}
+                  className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+                />
+                Highlight
+              </label>
+            </>
+          )}
+          {/* Switch comparison modes without leaving the lightbox. */}
           <SegmentedToggle value={mode} onChange={onModeChange} options={IMAGE_DIFF_MODES} />
         </div>
       </div>
