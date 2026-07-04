@@ -1396,26 +1396,9 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const [open, setOpen] = useState(false)
   const [sending, setSending] = useState(false)
 
-  // Escape closes the panel, matching the backdrop click and close button.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open])
-
-  if (!diff?.merge_conflict) return null
-
-  const conflictFiles = diff.conflict_files ?? []
-  const n = conflictFiles.length
-  const count = n || '?'
-  const plural = n !== 1
-  const worktreePath = agent.worktree_path ?? '<worktree-path>'
   const baseBranch = agent.base_branch
 
-  const handleFixWithAgent = async () => {
+  const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     try {
       await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
@@ -1425,7 +1408,31 @@ function MergeConflictButton({ diff, agent, projectId }: {
     } finally {
       setSending(false)
     }
-  }
+  }, [projectId, agent.id, baseBranch])
+
+  // Escape closes the panel; Enter confirms (Fix with agent), mirroring the
+  // footer buttons. The keyboard path bypasses the button's disabled attribute,
+  // so guard against a double-send while one is already in flight.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+      else if (e.key === 'Enter' && !sending) {
+        e.preventDefault()
+        void handleFixWithAgent()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, sending, handleFixWithAgent])
+
+  if (!diff?.merge_conflict) return null
+
+  const conflictFiles = diff.conflict_files ?? []
+  const n = conflictFiles.length
+  const count = n || '?'
+  const plural = n !== 1
+  const worktreePath = agent.worktree_path ?? '<worktree-path>'
 
   return (
     <>
