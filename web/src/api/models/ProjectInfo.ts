@@ -27,5 +27,21 @@ export type ProjectInfo = {
      * Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
      */
     needs_input_count?: number;
+    /**
+     * Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
+     */
+    agent_count?: number;
+    /**
+     * Number of this project's active agents currently in the `running` status.
+     */
+    running_count?: number;
+    /**
+     * Number of this project's active agents currently in the `waiting` (gone quiet) status.
+     */
+    waiting_count?: number;
+    /**
+     * Number of this project's active agents currently in the `finished` status (done but not yet archived).
+     */
+    finished_count?: number;
 };
 

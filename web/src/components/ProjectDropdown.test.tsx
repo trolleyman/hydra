@@ -23,7 +23,6 @@ function renderDropdown() {
       onSelect={() => {}}
       onDeselect={() => {}}
       onAddProject={async () => {}}
-      onRemoveProject={async () => {}}
     />,
   )
 }

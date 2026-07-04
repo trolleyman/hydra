@@ -2057,6 +2057,18 @@ components:
         needs_input_count:
           type: integer
           description: Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
+        agent_count:
+          type: integer
+          description: Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
+        running_count:
+          type: integer
+          description: Number of this project's active agents currently in the `running` status.
+        waiting_count:
+          type: integer
+          description: Number of this project's active agents currently in the `waiting` (gone quiet) status.
+        finished_count:
+          type: integer
+          description: Number of this project's active agents currently in the `finished` status (done but not yet archived).
 
     ConfigTomlResponse:
       type: object

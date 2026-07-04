@@ -249,16 +249,39 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// A third groups every project's active agents by status, for the switcher's
+	// per-project tally (total + running/waiting/finished breakdown).
+	statusCounts, err := s.DB.CountByStatusAndProject()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
 		count := unread[p.Path]
 		needs := needsInput[p.Path]
+		// Sum the per-status counts into a total and pull out the named states.
+		var total, running, waiting, finished int
+		for status, n := range statusCounts[p.Path] {
+			total += n
+			switch status {
+			case "running":
+				running = n
+			case "waiting":
+				waiting = n
+			case "finished":
+				finished = n
+			}
+		}
 		resp[i] = api.ProjectInfo{
 			Id:              p.ID,
 			Path:            p.Path,
 			Name:            p.Name,
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
+			AgentCount:      &total,
+			RunningCount:    &running,
+			WaitingCount:    &waiting,
+			FinishedCount:   &finished,
 		}
 		// The custom icon lives in the project's .hydra/config.toml (committed with
 		// the repo). LoadFile is mtime-cached, so this stays cheap across polls; a

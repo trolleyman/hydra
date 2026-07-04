@@ -128,7 +128,7 @@ function RootLayout() {
   } | null>(null)
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
-  const { agents, setAgents, addAgent, markRead, patchAgentTests } = useAgentStore()
+  const { agents, addAgent, markRead, patchAgentTests } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
   const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
@@ -539,17 +539,6 @@ function RootLayout() {
     }
   }
 
-  async function handleRemoveProject(id: string) {
-    await api.default.removeProject(id)
-    const updated = projects.filter(p => p.id !== id)
-    setProjects(updated)
-    if (selectedProjectId === id || currentProjectId === id) {
-      setSelectedProjectId(null)
-      setAgents([])
-      navigate({ to: '/' })
-    }
-  }
-
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
     // Spawn in the background: only jump to the new agent if the user isn't
@@ -618,7 +607,6 @@ function RootLayout() {
                 navigate({ to: '/' })
               }}
               onAddProject={handleAddProject}
-              onRemoveProject={handleRemoveProject}
             />
           </div>
           <Tooltip content="Hide sidebar (Ctrl+.)">

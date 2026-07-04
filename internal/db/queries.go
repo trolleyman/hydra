@@ -254,6 +254,42 @@ func (s *Store) CountNeedsInputByProject() (map[string]int, error) {
 	return counts, nil
 }
 
+// CountByStatusAndProject returns, for every project, a map of agent_status ->
+// count over its active (non-ephemeral, non-archived) agents. Projects with no
+// such agents are omitted; a nil/unreported agent_status is bucketed under "".
+// Used to drive the project switcher's per-project agent tally (total plus the
+// running/waiting/finished/needs_input breakdown). The default gorm scope
+// excludes soft-deleted (archived) rows, so this counts only live agents.
+func (s *Store) CountByStatusAndProject() (map[string]map[string]int, error) {
+	var rows []struct {
+		ProjectPath string
+		AgentStatus *string
+		N           int
+	}
+	err := s.reader().Model(&Agent{}).
+		Select("project_path, agent_status, count(*) as n").
+		Where("ephemeral = ?", false).
+		Group("project_path, agent_status").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	counts := make(map[string]map[string]int, len(rows))
+	for _, r := range rows {
+		byStatus := counts[r.ProjectPath]
+		if byStatus == nil {
+			byStatus = make(map[string]int)
+			counts[r.ProjectPath] = byStatus
+		}
+		status := ""
+		if r.AgentStatus != nil {
+			status = *r.AgentStatus
+		}
+		byStatus[status] += r.N
+	}
+	return counts, nil
+}
+
 // UpdateAgentTitle updates the user-facing display title for an agent.
 func (s *Store) UpdateAgentTitle(id, title string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("title", title)

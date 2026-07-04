@@ -88,6 +88,10 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	otherNeedsInput := 1       // one of those is blocked on you → red dot elsewhere
 	simIcon := "🚀"             // emoji icon
 	mobileIcon := "Smartphone" // lucide icon name
+	// Per-project agent tallies for the switcher (total = sum of the breakdown,
+	// including the needs_input count above).
+	simTotal, simRunning, simWaiting, simFinished := 5, 2, 1, 1
+	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
@@ -96,6 +100,10 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			Icon:            &simIcon,
 			UnreadCount:     &simUnread,
 			NeedsInputCount: &simNeedsInput,
+			AgentCount:      &simTotal,
+			RunningCount:    &simRunning,
+			WaitingCount:    &simWaiting,
+			FinishedCount:   &simFinished,
 		},
 		{
 			Id:              "mobile-app",
@@ -104,6 +112,10 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			Icon:            &mobileIcon,
 			UnreadCount:     &otherUnread,
 			NeedsInputCount: &otherNeedsInput,
+			AgentCount:      &otherTotal,
+			RunningCount:    &otherRunning,
+			WaitingCount:    &otherWaiting,
+			FinishedCount:   &otherFinished,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
