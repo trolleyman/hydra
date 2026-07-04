@@ -52,9 +52,25 @@ export interface AgentTransitionToastData {
   // Copy after the pill, e.g. the merge target ("into `main`").
   after?: string
   // Set when the agent runs in a DIFFERENT project than the one in view - shown
-  // as the neutral (gray) folder-icon project banner across the card's top,
-  // the calm sibling of the approval card's amber one.
+  // as the neutral (gray) project banner across the card's top, the calm sibling
+  // of the approval card's amber one.
   projectName?: string | null
+  // The project's custom icon string (the same value the project switcher uses),
+  // rendered in the banner instead of the plain folder. Omit for the folder.
+  projectIcon?: string | null
+}
+
+// Project context for a plain toast whose work belongs to a specific project
+// (e.g. a sync started for project A). The renderer draws the neutral project
+// header ONLY while a DIFFERENT project is in view - so the toast reads as "this
+// is happening over in project A" once you switch away, and stays header-less
+// while you are still looking at the project it ran for.
+export interface ToastProjectContext {
+  projectId: string
+  projectName: string
+  // The project's custom icon string (the same value the project switcher uses),
+  // resolved to the switcher's ProjectIcon in the header. Omit for the folder.
+  icon?: string | null
 }
 
 // An action button rendered inside the toast (e.g. "Allow"/"Deny" on a
@@ -103,6 +119,9 @@ export interface Toast {
   // When set, the renderer draws the "<agent> transitioned to <status>" row
   // (the `message` is then only a fallback for non-visual surfaces).
   agentTransition?: AgentTransitionToastData
+  // When set, a plain toast can show a neutral project header - but the renderer
+  // only draws it while a DIFFERENT project is in view (see ToastProjectContext).
+  projectContext?: ToastProjectContext
 }
 
 // How long the leave animation runs before the toast is removed from the list.
@@ -122,6 +141,7 @@ interface ToastState {
     key?: string
     approval?: ApprovalToastData
     agentTransition?: AgentTransitionToastData
+    projectContext?: ToastProjectContext
   }) => number
   // silent: skip the toast's onDismiss callback. Used when the toast is being
   // torn down because its action already resolved the underlying request (e.g.
@@ -172,7 +192,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition }) => {
+  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -181,7 +201,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, type, duration, actions, onDismiss, approval, agentTransition, createdAt: Date.now() }
+              ? { ...t, message, type, duration, actions, onDismiss, approval, agentTransition, projectContext, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -193,7 +213,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition },
+        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition, projectContext },
       ],
     }))
     if (duration > 0) {

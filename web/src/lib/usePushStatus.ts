@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from 'react'
 import { ApiError } from '../api'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
-import { useToastStore } from '../stores/toastStore'
+import { useToastStore, type ToastProjectContext } from '../stores/toastStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useServerData } from './useServerData'
 import { EVENT_FALLBACK_MS } from './visibilityPolling'
 import type { RepositoryPushStatus } from '../api'
@@ -51,8 +52,17 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     if (!currentProjectId || syncingProjects.has(currentProjectId)) return
     const projectId = currentProjectId
     const toast = useToastStore.getState()
+    // Carry the project so its toasts show a header once the user switches away
+    // to another project (the Toaster hides the header while this project is in
+    // view). The icon matches the project switcher's glyph.
+    const project = useProjectStore.getState().projects.find((p) => p.id === projectId)
+    const projectContext: ToastProjectContext = {
+      projectId,
+      projectName: project?.name || project?.path || projectId,
+      icon: project?.icon,
+    }
     setSyncingProjects((prev) => new Set(prev).add(projectId))
-    const toastId = toast.show({ message: 'Syncing with remote...', type: 'info', duration: 0 })
+    const toastId = toast.show({ message: 'Syncing with remote...', type: 'info', duration: 0, projectContext })
     try {
       const result = await api.default.syncRepository(projectId)
       // Only paint the result if the user is still looking at this project;
@@ -61,7 +71,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
       toast.dismiss(toastId)
       // The backticks render the remote branch as a mono pill in the toast.
       const where = result.remote && result.branch ? ` with \`${result.remote}/${result.branch}\`` : ''
-      toast.show({ message: `Synced${where}`, type: 'success' })
+      toast.show({ message: `Synced${where}`, type: 'success', projectContext })
     } catch (err) {
       toast.dismiss(toastId)
       // A 409 means the pull couldn't merge cleanly; surface it distinctly.
@@ -72,6 +82,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
           : `Sync failed: ${formatError(err)}`,
         type: 'error',
         duration: 6000,
+        projectContext,
       })
     } finally {
       setSyncingProjects((prev) => {

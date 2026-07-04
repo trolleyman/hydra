@@ -333,7 +333,7 @@ export function useAgentNotifications(
             duration: NEEDS_INPUT_TOAST_MS,
             // Cross-project: the label still links through (its onClick selects the
             // project first), and projectName draws the cross-project banner.
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName },
+            agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName, projectIcon: p.icon },
           })
           if (!pageActive) {
             fireNotification({
@@ -369,7 +369,7 @@ export function useAgentNotifications(
             message: `Agent "${agentName}" in project "${projectName}" transitioned to ${status === 'finished' ? 'finished' : 'waiting'}`,
             type: status === 'finished' ? 'success' : 'info',
             duration: FINISHED_TOAST_MS,
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName },
+            agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon },
           })
           // Desktop notification for finished only (waiting is a soft idle nudge
           // the user opted out of).

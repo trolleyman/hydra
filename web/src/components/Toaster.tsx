@@ -47,6 +47,12 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   // Only auto-expiring toasts (duration > 0) get a countdown bar, and it's hidden
   // once the toast starts leaving so it doesn't redraw during the exit animation.
   const showCountdown = toast.duration > 0 && !toast.exiting
+  // The project a plain toast belongs to shows as a neutral header, but only once
+  // a DIFFERENT project is in view (e.g. a sync started for project A, read after
+  // switching to B). Subscribed so switching projects re-evaluates it live.
+  const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
+  const pc = toast.projectContext
+  const showProjectHeader = pc != null && pc.projectId !== selectedProjectId
 
   // Security-gate approvals render the rich card instead of the plain message row.
   if (toast.approval) {
@@ -90,7 +96,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
         }`}
       >
-        {t.projectName && <CrossProjectBanner project={t.projectName} tone="neutral" />}
+        {t.projectName && <CrossProjectBanner project={t.projectName} tone="neutral" projectId={t.projectId} icon={t.projectIcon} />}
         <div className="p-4">
           <div className="flex items-start gap-3">
             <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${tile.wrap}`}>
@@ -134,6 +140,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
         toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
       }`}
     >
+      {showProjectHeader && (
+        <CrossProjectBanner project={pc!.projectName} tone="neutral" projectId={pc!.projectId} icon={pc!.icon} />
+      )}
       <div className="p-4">
         <div className="flex items-start gap-3">
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
