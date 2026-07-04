@@ -71,7 +71,7 @@ type seedResult struct {
 // the host user already has.
 func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy) (*seedResult, error) {
 	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
-	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -81,7 +81,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	// writable so the agent writes them directly (the poller reads the same
 	// files). HYDRA_STATUS_PATH/LOG tell trigger-hook where to write.
 	statusJSONHost := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
-	if err := paths.CreateGitignoreAllInDir(filepath.Dir(statusJSONHost)); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(statusJSONHost)); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if err := os.WriteFile(statusJSONHost, []byte("{}"), 0644); err != nil {

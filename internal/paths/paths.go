@@ -94,10 +94,11 @@ func GetNgrokConfigPath(projectRoot string) string {
 
 // GetHydraLocalDirFromProjectRoot returns .hydra/local, the single parent holding
 // every generated, never-committed thing (worktrees, the SQLite DB, caches, COW
-// layers, ...). Only .hydra/config.toml lives at the .hydra top level. Each
-// subdirectory self-ignores via a "*" .gitignore, so the whole tree stays out of
-// the project's git status. See MigrateHydraLayout for the one-time move of
-// projects created under the old flat layout.
+// layers, the per-head tmp dir, ...). Only .hydra/config.toml lives at the .hydra
+// top level. A single "*" .gitignore at this .hydra/local root ignores the whole
+// subtree, so no individual subdirectory carries its own .gitignore. See
+// MigrateHydraLayout for the one-time move of projects created under the old flat
+// layout.
 func GetHydraLocalDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "local")
 }
@@ -195,19 +196,53 @@ func WriteFileIfChanged(path, content string, perm os.FileMode) error {
 	return errtrace.Wrap(os.WriteFile(path, []byte(content), perm))
 }
 
-// CreateGitignoreAllInDir adds a .gitignore in the specified directory that ignores all files in that directory
-func CreateGitignoreAllInDir(dir string) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+// EnsureHydraLocalIgnored creates dir (a generated directory under .hydra/local)
+// and guarantees the enclosing .hydra/local carries a single "*" .gitignore. That
+// one top-level ignore covers the whole generated subtree - worktrees, state,
+// caches, COW layers, the per-head tmp dir, ... - so individual subdirectories no
+// longer need their own .gitignore. When dir is not under a .hydra/local ancestor
+// (only happens in tests), the .gitignore is written into dir itself as a fallback.
+func EnsureHydraLocalIgnored(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create dir: %w: %s", err, dir))
 	}
+	target := hydraLocalDirOf(dir)
+	if target == "" {
+		target = dir
+	}
+	return errtrace.Wrap(writeGitignoreAll(target))
+}
 
+// writeGitignoreAll creates dir and drops a "*" .gitignore in it if one is not
+// already present (idempotent), so the whole subtree stays out of git status.
+func writeGitignoreAll(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return errtrace.Wrap(fmt.Errorf("create dir: %w: %s", err, dir))
+	}
 	gitignorePath := filepath.Join(dir, ".gitignore")
 	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
+		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0o644); err != nil {
 			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w: %s", err, gitignorePath))
 		}
 	}
 	return nil
+}
+
+// hydraLocalDirOf returns the ".hydra/local" ancestor of dir (inclusive), or ""
+// if dir is not nested under one. The match is purely textual: a path element
+// named "local" whose parent element is named ".hydra".
+func hydraLocalDirOf(dir string) string {
+	d := filepath.Clean(dir)
+	for {
+		if filepath.Base(d) == "local" && filepath.Base(filepath.Dir(d)) == ".hydra" {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "" // reached the filesystem root without a match
+		}
+		d = parent
+	}
 }
 
 // hydraLocalSubdirs are the generated .hydra subdirectories that used to sit at
@@ -275,14 +310,44 @@ func MigrateHydraLayout(projectRoot string) error {
 		}
 	}
 
-	// Belt-and-suspenders: ensure .hydra/local itself self-ignores once it exists,
-	// so the parent never surfaces even if a future subdir forgets its .gitignore.
-	if _, err := os.Stat(local); err == nil {
-		if err := CreateGitignoreAllInDir(local); err != nil {
-			return errtrace.Wrap(err)
+	// Consolidate ignoring at the .hydra/local root: a single "*" .gitignore there
+	// covers the whole generated subtree (worktrees, state, caches, tmp, ...). Make
+	// sure it exists, then drop any now-redundant per-subdir .gitignore files that
+	// older builds left behind.
+	if err := writeGitignoreAll(local); err != nil {
+		return errtrace.Wrap(err)
+	}
+	removeRedundantSubdirGitignores(local)
+	return nil
+}
+
+// removeRedundantSubdirGitignores deletes the per-subdirectory "*" .gitignore
+// files that older builds dropped in each generated dir under .hydra/local. The
+// single .gitignore at the .hydra/local root now ignores the whole subtree, so
+// these are redundant. Best-effort and conservative: it only removes a direct
+// child directory's .gitignore whose content is exactly "*" (never one a user or
+// tool wrote with other rules).
+func removeRedundantSubdirGitignores(local string) {
+	entries, err := os.ReadDir(local)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		gi := filepath.Join(local, e.Name(), ".gitignore")
+		content, err := os.ReadFile(gi)
+		if err != nil {
+			continue // no .gitignore (or unreadable) - nothing to remove
+		}
+		if strings.TrimSpace(string(content)) != "*" {
+			continue // a real ignore file, leave it alone
+		}
+		if err := os.Remove(gi); err != nil {
+			log.Printf("warn: hydra layout: remove redundant %s: %v", gi, err)
 		}
 	}
-	return nil
 }
 
 // repairMovedWorktrees re-points the git worktree registrations after their

@@ -65,9 +65,9 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	dir := paths.GetUploadsDirFromProjectRoot(projectRoot)
-	// CreateGitignoreAllInDir makes the dir and drops a "*" .gitignore so pasted
-	// files never pollute the repo's status.
-	if err := paths.CreateGitignoreAllInDir(dir); err != nil {
+	// EnsureHydraLocalIgnored makes the dir and ensures the .hydra/local root's
+	// "*" .gitignore covers it, so pasted files never pollute the repo's status.
+	if err := paths.EnsureHydraLocalIgnored(dir); err != nil {
 		http.Error(w, "failed to prepare upload dir", http.StatusInternalServerError)
 		return
 	}

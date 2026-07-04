@@ -95,7 +95,7 @@ func NewManager(projectRoot string) *Manager {
 		sched:       artifacts.NewGenScheduler(concurrency),
 	}
 	m.pool = artifacts.NewSlotPool(projectRoot, m.slotsDir(), artifacts.SlotsForConcurrency(concurrency))
-	_ = paths.CreateGitignoreAllInDir(m.root())
+	_ = paths.EnsureHydraLocalIgnored(m.root())
 	return m
 }
 
@@ -708,7 +708,7 @@ func (m *Manager) liveCases(dir string) []TestCase {
 func (m *Manager) generate(parent context.Context, spec config.TestScript, v Version, key, ref string) Report {
 	rep := Report{Runner: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
 
-	_ = paths.CreateGitignoreAllInDir(m.root())
+	_ = paths.EnsureHydraLocalIgnored(m.root())
 	dir := m.entryDir(spec.Name, key)
 	outputDir := filepath.Join(dir, "output")
 	if err := os.RemoveAll(dir); err != nil {

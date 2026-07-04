@@ -638,7 +638,7 @@ func NewManager(projectRoot string) *Manager {
 		sched:       newGenScheduler(concurrency),
 	}
 	m.pool = newSlotPool(m.projectRoot, m.slotsDir(), slotsForConcurrency(concurrency))
-	_ = paths.CreateGitignoreAllInDir(m.root())
+	_ = paths.EnsureHydraLocalIgnored(m.root())
 	return m
 }
 
@@ -987,7 +987,7 @@ func (m *Manager) setProgressLocked(dir, text string) {
 func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v Version, key, ref string) Meta {
 	meta := Meta{Script: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
 
-	_ = paths.CreateGitignoreAllInDir(m.root())
+	_ = paths.EnsureHydraLocalIgnored(m.root())
 	dir := m.entryDir(spec.Name, key)
 	if err := os.RemoveAll(dir); err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()

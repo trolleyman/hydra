@@ -136,6 +136,58 @@ func TestMigrateHydraLayout_RepairsWorktrees(t *testing.T) {
 	}
 }
 
+func TestEnsureHydraLocalIgnored_WritesAtLocalRoot(t *testing.T) {
+	root := t.TempDir()
+	sub := GetStateDirFromProjectRoot(root) // .hydra/local/state
+
+	if err := EnsureHydraLocalIgnored(sub); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	// The subdir is created...
+	if info, err := os.Stat(sub); err != nil || !info.IsDir() {
+		t.Fatalf("subdir not created: %v", err)
+	}
+	// ...but the "*" .gitignore lives at the .hydra/local root, not in the subdir.
+	local := GetHydraLocalDirFromProjectRoot(root)
+	if got, err := os.ReadFile(filepath.Join(local, ".gitignore")); err != nil || strings.TrimSpace(string(got)) != "*" {
+		t.Fatalf("local/.gitignore = %q err=%v, want %q", got, err, "*")
+	}
+	if _, err := os.Stat(filepath.Join(sub, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("subdir should not carry its own .gitignore, got err=%v", err)
+	}
+}
+
+func TestMigrateHydraLayout_RemovesRedundantSubdirGitignores(t *testing.T) {
+	root := t.TempDir()
+	local := GetHydraLocalDirFromProjectRoot(root)
+
+	// Simulate an older layout where each subdir dropped its own "*" .gitignore.
+	writeFile(t, filepath.Join(local, "state", ".gitignore"), "*\n")
+	writeFile(t, filepath.Join(local, "cache", ".gitignore"), "*\n")
+	// A subdir with a real ignore file (not just "*") must be left untouched.
+	writeFile(t, filepath.Join(local, "keep", ".gitignore"), "!important\n*\n")
+
+	if err := MigrateHydraLayout(root); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// The single root ignore exists...
+	if got, err := os.ReadFile(filepath.Join(local, ".gitignore")); err != nil || strings.TrimSpace(string(got)) != "*" {
+		t.Fatalf("local/.gitignore = %q err=%v, want %q", got, err, "*")
+	}
+	// ...and the redundant per-subdir "*" ignores are gone.
+	for _, name := range []string{"state", "cache"} {
+		if _, err := os.Stat(filepath.Join(local, name, ".gitignore")); !os.IsNotExist(err) {
+			t.Fatalf("%s/.gitignore should have been removed, got err=%v", name, err)
+		}
+	}
+	// The non-trivial ignore is preserved.
+	if _, err := os.Stat(filepath.Join(local, "keep", ".gitignore")); err != nil {
+		t.Fatalf("keep/.gitignore should be preserved: %v", err)
+	}
+}
+
 func TestClaudeProjectsSlug(t *testing.T) {
 	// Mirrors Claude Code's ~/.claude/projects/<slug> encoding: every
 	// non-alphanumeric character becomes '-', with no collapsing of runs (so the

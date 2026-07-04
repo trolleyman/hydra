@@ -56,7 +56,7 @@ func Open(projectRoot string) (*Store, error) {
 	}
 
 	stateDir := paths.GetStateDirFromProjectRoot(projectRoot)
-	if err := paths.CreateGitignoreAllInDir(stateDir); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(stateDir); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create state dir: %w", err))
 	}
 

@@ -44,7 +44,7 @@ func buildCowMounts(projectRoot, worktreePath, id string, cowPaths []string, wri
 	// (which live inside the project root) never show up in the project's git status.
 	// Best-effort; matches how worktrees/artifacts/uploads self-ignore.
 	if len(cowPaths) > 0 {
-		if err := paths.CreateGitignoreAllInDir(filepath.Dir(base)); err != nil {
+		if err := paths.EnsureHydraLocalIgnored(filepath.Dir(base)); err != nil {
 			log.Printf("warn: cow_paths: create .gitignore in %s: %v", filepath.Dir(base), err)
 		}
 	}

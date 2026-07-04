@@ -75,7 +75,7 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 		return errtrace.Wrap(fmt.Errorf("base branch: %w", err))
 	}
 	worktreesDir := filepath.Dir(worktreePath)
-	if err := paths.CreateGitignoreAllInDir(worktreesDir); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(worktreesDir); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -179,7 +179,7 @@ func AddDetachedWorktree(projectRoot, worktreePath, ref string) error {
 	if err := ValidateRef(ref); err != nil {
 		return errtrace.Wrap(fmt.Errorf("ref: %w", err))
 	}
-	if err := paths.CreateGitignoreAllInDir(filepath.Dir(worktreePath)); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(worktreePath)); err != nil {
 		return errtrace.Wrap(err)
 	}
 	cmd := exec.Command("git", "-C", projectRoot,
@@ -202,7 +202,7 @@ func AddWorktreeForBranch(projectRoot, worktreePath, branch string) error {
 	if err := ValidateRef(branch); err != nil {
 		return errtrace.Wrap(fmt.Errorf("branch: %w", err))
 	}
-	if err := paths.CreateGitignoreAllInDir(filepath.Dir(worktreePath)); err != nil {
+	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(worktreePath)); err != nil {
 		return errtrace.Wrap(err)
 	}
 	cmd := exec.Command("git", "-C", projectRoot,
