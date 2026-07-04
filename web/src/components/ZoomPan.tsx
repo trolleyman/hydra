@@ -10,6 +10,23 @@ const MAX_SCALE = 8
 // aspect ratio, that same cap bounds its height to a quarter of the frame's too.
 const MM_W = 140
 
+// Measure an element's rendered (layout) size and keep it fresh across image load
+// + window resize. A CSS transform doesn't change layout size, so a transformed
+// element still reports its untransformed (fit) size here.
+function useMeasure(ref: React.RefObject<HTMLElement | null>) {
+  const [d, setD] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setD({ w: el.clientWidth, h: el.clientHeight })
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [ref])
+  return d
+}
+
 // ZoomPan wraps a piece of lightbox content - a plain image OR a before/after
 // comparator - and layers magnify + pan on top of it, mode-agnostically:
 //
@@ -24,21 +41,36 @@ const MM_W = 140
 // rest (inline-block) and clips the magnified content to that box, so the
 // surrounding lightbox chrome (caption, mode controls) is unaffected. Remounting
 // it (the lightbox keys its content by index) resets the zoom on navigation.
-export function ZoomPan({ children, minimapSrc, className, style }: {
+//
+// GROW MODE (maxWidth + maxHeight given): the frame no longer stays locked to the
+// content's fit size - as you zoom, it expands into the empty lightbox space up to
+// maxWidth × maxHeight. This matters for off-square images: a very vertical shot
+// fits tall-and-narrow, wasting the horizontal space, so a plain scale-in-place
+// would only ever show a thin sliver. Letting the frame widen with zoom reveals the
+// image's full width at magnification instead. The content's own fit size (cw × ch)
+// and the growing viewport (vp) are tracked separately so the pan clamp + minimap
+// stay correct; at fit the frame still hugs the content exactly (shadow/rounding
+// unchanged). Without the props the frame stays content-sized (the diff comparator,
+// whose width is externally driven, opts out this way).
+export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight }: {
   children: React.ReactNode
   // The image shown inside the minimap (a representative side for a diff pair).
   // Omitted → the minimap shows just the viewport rectangle on a neutral panel.
   minimapSrc?: string | null
   className?: string
   style?: React.CSSProperties
+  // CSS caps the frame may grow to while zoomed (e.g. '90vw' / '85vh'). Both must be
+  // set to enable grow mode; omit to keep the frame locked to the content's fit size.
+  maxWidth?: string
+  maxHeight?: string
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const availRef = useRef<HTMLDivElement>(null)
   const mmRef = useRef<HTMLDivElement>(null)
   // scale + translation (px, content top-left relative to the frame) as one unit
   // so a wheel zoom can move all three together (keep the cursor point fixed).
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
-  // The frame's rendered (fit) size - the bounds the clamp + minimap math need.
-  const [dims, setDims] = useState({ w: 0, h: 0 })
   const [panning, setPanning] = useState(false)
   // How the next transform change should move: 'none' tracks the pointer 1:1
   // (drag-pan must stay glued to the cursor), 'zoom' is a very short ease so each
@@ -49,26 +81,37 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   // shouldn't also flip the A/B view or open anything).
   const movedRef = useRef(false)
 
-  // Track the frame's fit size (covers image load + window resize) for clamping
-  // and the minimap. A CSS transform doesn't change layout size, so this stays the
-  // fit size even while magnified.
-  useEffect(() => {
-    const el = viewportRef.current
-    if (!el) return
-    const measure = () => setDims({ w: el.clientWidth, h: el.clientHeight })
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    measure()
-    return () => ro.disconnect()
-  }, [])
+  const grow = !!(maxWidth && maxHeight)
+  // The content's fit size (cw × ch). In grow mode we measure the (inline-block)
+  // content wrapper directly, since the frame is now a different, growing box; in
+  // the locked mode the frame hugs the content so measuring the frame is equivalent
+  // (and matches the pre-grow behaviour exactly).
+  const frameDims = useMeasure(viewportRef)
+  const contentDims = useMeasure(contentRef)
+  const availDims = useMeasure(availRef)
+  const content = grow ? contentDims : frameDims
+  // The box the frame may grow into. Locked mode never grows, so it equals content.
+  const avail = grow ? availDims : content
+
+  // The visible viewport (frame) size at scale s: the scaled content, capped by the
+  // available box. Never below the content's fit size at s = 1, so at rest the frame
+  // hugs the content. Content always covers it (vp ≤ content*s), so the cover clamp
+  // below has a valid range.
+  const vpAt = useCallback((s: number) => ({
+    w: Math.min(content.w * s, avail.w),
+    h: Math.min(content.h * s, avail.h),
+  }), [content.w, content.h, avail.w, avail.h])
+  const vp = vpAt(view.scale)
 
   // Clamp a translation so the scaled content always covers the frame - no empty
-  // gutter from over-panning. At scale 1 both bounds collapse to 0.
+  // gutter from over-panning. At scale 1 (frame == content) both bounds collapse to 0.
   const clampT = useCallback((nx: number, ny: number, s: number): [number, number] => {
-    const minX = dims.w * (1 - s)
-    const minY = dims.h * (1 - s)
+    if (!content.w || !content.h) return [0, 0]
+    const { w: vw, h: vh } = vpAt(s)
+    const minX = vw - content.w * s
+    const minY = vh - content.h * s
     return [Math.min(0, Math.max(minX, nx)), Math.min(0, Math.max(minY, ny))]
-  }, [dims])
+  }, [content.w, content.h, vpAt])
 
   // Zoom by `factor` keeping the content point under (cx, cy) - coords relative to
   // the frame's top-left - fixed, so the image grows toward the cursor.
@@ -76,10 +119,13 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     setView((v) => {
       const ns = Math.min(MAX_SCALE, Math.max(1, v.scale * factor))
       if (ns === v.scale) return v
-      const px = (cx - v.tx) / v.scale
-      const py = (cy - v.ty) / v.scale
-      const [tx, ty] = clampT(cx - px * ns, cy - py * ns, ns)
-      return { scale: ns, tx, ty }
+      // Clamp the base first so the kept-fixed point is measured from where the
+      // content actually sits (matters right after a resize).
+      const [bx, by] = clampT(v.tx, v.ty, v.scale)
+      const px = (cx - bx) / v.scale
+      const py = (cy - by) / v.scale
+      const [ntx, nty] = clampT(cx - px * ns, cy - py * ns, ns)
+      return { scale: ns, tx: ntx, ty: nty }
     })
   }, [clampT])
 
@@ -97,6 +143,12 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [zoomAt])
+
+  // The stored translation, re-clamped for the CURRENT content/available size, so a
+  // window resize (which changes the cover bounds) can't leave a stale gutter. Pure
+  // derivation - used for the transform, the minimap, and as the base for gestures -
+  // rather than a resize effect that writes state back.
+  const [tx, ty] = clampT(view.tx, view.ty, view.scale)
 
   const zoomed = view.scale > 1.001
 
@@ -116,13 +168,13 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     setPanning(true)
     setTransition('none')
     const startX = e.clientX, startY = e.clientY
-    const base = { tx: view.tx, ty: view.ty }
+    const base = { tx, ty }
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX, dy = ev.clientY - startY
       if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true
       setView((v) => {
-        const [tx, ty] = clampT(base.tx + dx, base.ty + dy, v.scale)
-        return { ...v, tx, ty }
+        const [ntx, nty] = clampT(base.tx + dx, base.ty + dy, v.scale)
+        return { ...v, tx: ntx, ty: nty }
       })
     }
     const onUp = () => {
@@ -153,8 +205,9 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
       const fx = (clientX - r.left) / r.width
       const fy = (clientY - r.top) / r.height
       setView((v) => {
-        const [tx, ty] = clampT(dims.w / 2 - fx * dims.w * v.scale, dims.h / 2 - fy * dims.h * v.scale, v.scale)
-        return { ...v, tx, ty }
+        const { w: vw, h: vh } = vpAt(v.scale)
+        const [ntx, nty] = clampT(vw / 2 - fx * content.w * v.scale, vh / 2 - fy * content.h * v.scale, v.scale)
+        return { ...v, tx: ntx, ty: nty }
       })
     }
     recenter(e.clientX, e.clientY)
@@ -174,63 +227,83 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   const transitionMs = transition === 'zoom' ? 120 : transition === 'glide' ? 200 : 0
   const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined
 
-  const mmW = dims.w > 0 ? Math.min(MM_W, Math.round(dims.w / 4)) : MM_W
-  const mmH = dims.w > 0 ? Math.round(mmW * dims.h / dims.w) : 0
+  const mmW = content.w > 0 ? Math.min(MM_W, Math.round(content.w / 4)) : MM_W
+  const mmH = content.w > 0 ? Math.round(mmW * content.h / content.w) : 0
   // The fraction of the content currently visible, mapped into minimap px.
   const mmRect = {
-    left: (-view.tx / (dims.w * view.scale)) * mmW,
-    top: (-view.ty / (dims.h * view.scale)) * mmH,
-    width: mmW / view.scale,
-    height: mmH / view.scale,
+    left: (-tx / (content.w * view.scale)) * mmW,
+    top: (-ty / (content.h * view.scale)) * mmH,
+    width: (vp.w / (content.w * view.scale)) * mmW,
+    height: (vp.h / (content.h * view.scale)) * mmH,
   }
 
-  return (
-    <div
-      ref={viewportRef}
-      className={`relative inline-block overflow-hidden ${className ?? ''}`}
-      style={{ ...style, touchAction: 'none', cursor: zoomed ? (panning ? 'grabbing' : 'grab') : undefined }}
-      onPointerDownCapture={onPointerDownCapture}
-      onClickCapture={onClickCapture}
-    >
-      <div
-        style={{
-          transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
-          transformOrigin: '0 0',
-          transition: transitionCss && `transform ${transitionCss}`,
-        }}
-      >
-        {children}
-      </div>
+  // In grow mode the frame is a sized, block-level box the content overflows and is
+  // clipped by; its size eases along with the zoom so growing feels of a piece with
+  // the magnification. In locked mode it stays inline-block, hugging the content.
+  const frameSizeStyle: React.CSSProperties = grow && content.w > 0
+    ? { width: vp.w, height: vp.h, transition: transitionCss && `width ${transitionCss}, height ${transitionCss}` }
+    : {}
 
-      {zoomed && dims.w > 0 && (
-        // Minimap + reset, bottom-right. data-zoompan-ui so the pan handler above
-        // ignores pointer-downs here and lets these drive themselves.
-        <div data-zoompan-ui className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-1.5 select-none">
-          <button
-            type="button"
-            onClick={reset}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-[10px] font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
-          >
-            <Maximize className="w-3 h-3" />
-            Reset view ({view.scale.toFixed(1)}×)
-          </button>
-          <div
-            ref={mmRef}
-            data-zoompan-minimap
-            onPointerDown={onMinimapDown}
-            className="relative rounded border border-white/40 bg-black/40 overflow-hidden cursor-pointer shadow-lg"
-            style={{ width: mmW, height: mmH }}
-          >
-            {minimapSrc && (
-              <img src={minimapSrc} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill opacity-70" />
-            )}
-            <div
-              className="absolute border-2 border-white/90 bg-white/10 pointer-events-none"
-              style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height, transition: transitionCss && `all ${transitionCss}` }}
-            />
-          </div>
-        </div>
+  return (
+    <>
+      {/* An invisible probe sized to the caps, so we can read the grow ceiling in px
+          (it tracks vw/vh + window resize). Fixed + hidden → no layout footprint. */}
+      {grow && (
+        <div
+          ref={availRef}
+          aria-hidden
+          style={{ position: 'fixed', top: 0, left: 0, width: maxWidth, height: maxHeight, visibility: 'hidden', pointerEvents: 'none' }}
+        />
       )}
-    </div>
+      <div
+        ref={viewportRef}
+        className={`relative overflow-hidden ${grow ? 'block' : 'inline-block'} ${className ?? ''}`}
+        style={{ ...style, ...frameSizeStyle, touchAction: 'none', cursor: zoomed ? (panning ? 'grabbing' : 'grab') : undefined }}
+        onPointerDownCapture={onPointerDownCapture}
+        onClickCapture={onClickCapture}
+      >
+        <div
+          ref={contentRef}
+          className={grow ? 'inline-block' : undefined}
+          style={{
+            transform: `translate(${tx}px, ${ty}px) scale(${view.scale})`,
+            transformOrigin: '0 0',
+            transition: transitionCss && `transform ${transitionCss}`,
+          }}
+        >
+          {children}
+        </div>
+
+        {zoomed && content.w > 0 && (
+          // Minimap + reset, bottom-right. data-zoompan-ui so the pan handler above
+          // ignores pointer-downs here and lets these drive themselves.
+          <div data-zoompan-ui className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-1.5 select-none">
+            <button
+              type="button"
+              onClick={reset}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-[10px] font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
+            >
+              <Maximize className="w-3 h-3" />
+              Reset view ({view.scale.toFixed(1)}×)
+            </button>
+            <div
+              ref={mmRef}
+              data-zoompan-minimap
+              onPointerDown={onMinimapDown}
+              className="relative rounded border border-white/40 bg-black/40 overflow-hidden cursor-pointer shadow-lg"
+              style={{ width: mmW, height: mmH }}
+            >
+              {minimapSrc && (
+                <img src={minimapSrc} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill opacity-70" />
+              )}
+              <div
+                className="absolute border-2 border-white/90 bg-white/10 pointer-events-none"
+                style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height, transition: transitionCss && `all ${transitionCss}` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   )
 }
