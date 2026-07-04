@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { TestSummary } from '../api/models/TestSummary'
+import { closeWebSocket } from './ws'
 
 export interface EventStreamHandlers {
   onAgentsChanged?: () => void
@@ -62,11 +63,7 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       if (ws) {
         const c = ws
         ws = null
-        try {
-          c.close()
-        } catch {
-          // ignore
-        }
+        closeWebSocket(c)
       }
     }
 

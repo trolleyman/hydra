@@ -15,6 +15,7 @@ import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
+import { closeWebSocket } from '../lib/ws'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -154,8 +155,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
     }
     return () => {
       cancelled = true
-      ws.onclose = null
-      ws.close()
+      closeWebSocket(ws)
       if (wsRef.current === ws) wsRef.current = null
     }
   }, [projectId, agentId, headRef, includeUncommitted, refreshKey, applyMessage])

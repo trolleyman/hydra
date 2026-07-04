@@ -50,12 +50,21 @@ export function splitHighlightedLines(html: string): string[] {
 // block comments, template strings - colourise correctly) and returns the
 // per-line HTML. On any failure it falls back to plain, HTML-escaped lines.
 export function highlightLines(code: string, language: string): string[] {
+  // A grammar that isn't registered ('plaintext' is never bundled; a lazy
+  // language may not have loaded yet) goes straight to the escaped fallback:
+  // hljs.highlight would console.error before throwing, so the catch below
+  // isn't enough to keep the console clean.
+  if (!hljs.getLanguage(language)) return escapeLines(code)
   try {
     const result = hljs.highlight(code, { language, ignoreIllegals: true })
     return splitHighlightedLines(result.value)
   } catch {
-    return code.split('\n').map((l) =>
-      l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    )
+    return escapeLines(code)
   }
+}
+
+function escapeLines(code: string): string[] {
+  return code.split('\n').map((l) =>
+    l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  )
 }

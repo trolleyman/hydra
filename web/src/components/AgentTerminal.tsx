@@ -13,6 +13,7 @@ import { useDialogStore } from '../stores/dialogStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { loadLastGeometry, saveLastGeometry } from '../lib/terminalGeometry'
+import { closeWebSocket } from '../lib/ws'
 
 const DEFAULT_TERMINAL_HEIGHT = 450
 
@@ -560,7 +561,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)
       inputDisposable.dispose()
       textarea?.removeEventListener('paste', onPaste, true)
-      ws.close()
+      closeWebSocket(ws)
       term.dispose()
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
