@@ -32,6 +32,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,14 +92,22 @@ type inflightApproval struct {
 	result bool
 }
 
-// Start binds a filtering proxy on a free loopback port and begins serving. id
-// is the head ID (for log lines); allowed is the effective host allow-list and
-// blocked is the block-list that overrides it (both exact or "*.suffix"). approve,
-// when non-nil, is consulted for a host on neither list - it can park the
-// connection for user approval (and, if granted, the host is allowed for the rest
-// of the session). Close it when the head ends.
-func Start(id string, allowed, blocked []string, approve ApproveFunc) (*Proxy, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+// Start binds a filtering proxy on a loopback port and begins serving. id is the
+// head ID (for log lines); port is the loopback port to bind (0 = pick a free
+// ephemeral one), allowed is the effective host allow-list and blocked is the
+// block-list that overrides it (both exact or "*.suffix"). approve, when non-nil,
+// is consulted for a host on neither list - it can park the connection for user
+// approval (and, if granted, the host is allowed for the rest of the session).
+// Close it when the head ends.
+//
+// A non-zero port matters for hard mode: a head's pasta/nft netns hard-codes the
+// single allowed proxy port when its supervisor is first launched and never
+// rebuilds it, so a proxy that restarts (resume, restart) MUST come back on the
+// same port - otherwise the netns firewall drops its traffic and the agent sees a
+// permanent ConnectionRefused. The caller passes the head's already-bound port on
+// any relaunch (see heads.startEgress).
+func Start(id string, port int, allowed, blocked []string, approve ApproveFunc) (*Proxy, error) {
+	ln, err := listenLoopback(port)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -121,6 +130,28 @@ func Start(id string, allowed, blocked []string, approve ApproveFunc) (*Proxy, e
 		}
 	}()
 	return p, nil
+}
+
+// listenLoopback binds a TCP listener on host loopback. port 0 picks a free
+// ephemeral port; a non-zero port binds that exact port, retrying briefly so an
+// immediate re-bind right after a previous proxy's Close (as happens on resume)
+// rides out a transient "address already in use" while the old listener finishes
+// closing. (Go sets SO_REUSEADDR on Linux listeners, so this is belt-and-braces.)
+func listenLoopback(port int) (net.Listener, error) {
+	if port == 0 {
+		return errtrace.Wrap2(net.Listen("tcp", "127.0.0.1:0"))
+	}
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, errtrace.Wrap(lastErr)
 }
 
 // Addr is the host:port the proxy listens on (e.g. 127.0.0.1:54321).

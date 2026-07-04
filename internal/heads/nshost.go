@@ -165,6 +165,10 @@ func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
 		delete(nsHosts.m, id)
 	}
 	nsHosts.mu.Unlock()
+	// The netns (and its baked-in nft egress-port rule) is gone with the supervisor,
+	// so drop the remembered egress port: a later relaunch must allocate a fresh one
+	// and bake it into the fresh supervisor, not try to reclaim the dead port.
+	forgetEgressPort(id)
 	if h.cleanup != nil {
 		h.cleanup()
 	}
@@ -176,6 +180,10 @@ func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
 // process and waits for the watcher to reclaim everything. Best-effort; safe to
 // call for heads that never had one.
 func removeNamespaceHost(id string) {
+	// Covers the aborted-spawn path where the supervisor launch failed (no watcher
+	// ever runs to clear it) as well as a supervisor that never started; the normal
+	// teardown below also clears it via watchNamespaceHost. Idempotent.
+	forgetEgressPort(id)
 	nsHosts.mu.Lock()
 	e, ok := nsHosts.m[id]
 	nsHosts.mu.Unlock()
