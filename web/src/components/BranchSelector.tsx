@@ -117,6 +117,7 @@ export function BranchSelector({
 
   const Row = ({ b }: { b: RepositoryBranch }) => (
     <button
+      type="button"
       onClick={() => { onSelect(b.name); setOpen(false) }}
       className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
     >
@@ -131,6 +132,7 @@ export function BranchSelector({
     <div ref={ref} className={`relative ${flexible ? 'min-w-0 flex-1' : 'shrink-0'}`}>
       {TriggerIcon ? (
         <button
+          type="button"
           title={title}
           onClick={() => setOpen((o) => !o)}
           className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
@@ -142,6 +144,7 @@ export function BranchSelector({
         </button>
       ) : (
         <button
+          type="button"
           title={title}
           onClick={() => setOpen((o) => !o)}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${flexible ? 'w-full min-w-0' : 'max-w-[14rem]'} ${open
