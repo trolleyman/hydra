@@ -9,12 +9,13 @@ import { fireNotification } from './notifyPrefs'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
-// "Needs input" toasts linger noticeably longer than the 3s default - they ask
-// the user to act, so they should stay put while you finish the current thought.
-const NEEDS_INPUT_TOAST_MS = 12_000
+// "Needs input" toasts linger well beyond the 3s default - they ask the user to
+// act, so they should stay put while you finish the current thought and give you
+// ample time to notice and hit "View" before they slide away.
+const NEEDS_INPUT_TOAST_MS = 20_000
 // "Finished" is informational rather than blocking, so it auto-dismisses sooner
-// than a needs-input nudge but still slower than the generic 3s toast.
-const FINISHED_TOAST_MS = 8_000
+// than a needs-input nudge but still lingers well past the generic 3s toast.
+const FINISHED_TOAST_MS = 14_000
 
 // useAgentNotifications watches the live agent list for the current project and
 // surfaces three kinds of toasts:
