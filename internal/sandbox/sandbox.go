@@ -370,14 +370,52 @@ func interpIsBash(interp []string) bool {
 // image, so a script that falls through never triggers it.
 const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) - agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
 
-// preSpawnEnvSetup points $HYDRA_ENV at a fresh, writable temp file before the
-// user's script runs, so the script can persist environment variables into the
-// launched agent by appending `KEY=value` lines to it (the GitHub Actions
-// $GITHUB_ENV model) - e.g. `echo "GRADLE_USER_HOME=/tmp/gradle-iso" >>
-// "$HYDRA_ENV"`. This gives an explicit, no-surprises channel that does not rely
-// on the script's own `export`s surviving into the agent. The template lives in
-// $TMPDIR (the per-head private /tmp), so the file is reclaimed with the head.
-const preSpawnEnvSetup = `export HYDRA_ENV="$(mktemp "${TMPDIR:-/tmp}/hydra-env.XXXXXX")"`
+// PreSpawnEnvFileName is the basename of the file the pre-spawn wrapper persists
+// the resolved $HYDRA_ENV to, inside the per-head /tmp (Options.TmpDir, mounted at
+// /tmp in the sandbox). When a launch persists it, the daemon reads it back from
+// the host side of that same dir to inject the identical vars into the head's
+// sibling sandboxed bash shells - so a "+"-tab shell sees the same environment the
+// pre_spawn_script set up for the agent, without re-running the script.
+const PreSpawnEnvFileName = "hydra-pre-spawn.env"
+
+// SandboxPreSpawnEnvFile returns the sandbox-visible path the pre-spawn wrapper
+// persists resolved env vars to (the per-head TmpDir is bind-mounted at /tmp), or
+// "" when there is no host-backed TmpDir to persist into - in which case the
+// wrapper falls back to an ephemeral temp file and nothing is shared with shells.
+func SandboxPreSpawnEnvFile(tmpDir string) string {
+	if tmpDir == "" {
+		return ""
+	}
+	return "/tmp/" + PreSpawnEnvFileName
+}
+
+// HostPreSpawnEnvFile returns the host path of that same persisted file, for the
+// daemon to read back. "" when tmpDir is empty (nothing was persisted).
+func HostPreSpawnEnvFile(tmpDir string) string {
+	if tmpDir == "" {
+		return ""
+	}
+	return filepath.Join(tmpDir, PreSpawnEnvFileName)
+}
+
+// preSpawnEnvSetup points $HYDRA_ENV at a writable file before the user's script
+// runs, so the script can persist environment variables into the launched agent
+// by appending `KEY=value` lines to it (the GitHub Actions $GITHUB_ENV model) -
+// e.g. `echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"`. This is an
+// explicit, no-surprises channel that does not rely on the script's own `export`s
+// surviving into the agent. When envFile is set it is a fixed per-head path
+// (truncated fresh each launch) that survives for the daemon to read back and
+// share with sibling shells; when empty it is an ephemeral temp file in $TMPDIR
+// (the per-head /tmp), reclaimed with the head.
+func preSpawnEnvSetup(envFile string) string {
+	if envFile == "" {
+		return `export HYDRA_ENV="$(mktemp "${TMPDIR:-/tmp}/hydra-env.XXXXXX")"`
+	}
+	// envFile is a trusted internal constant path (no single quotes), so a
+	// single-quoted assignment is safe; truncate it so a prior launch's vars do
+	// not linger.
+	return "export HYDRA_ENV='" + envFile + "'\n: > \"$HYDRA_ENV\""
+}
 
 // preSpawnEnvApply runs after the user's script and before `exec`s the agent: it
 // reads back every `KEY=value` line the script wrote to $HYDRA_ENV and exports it
@@ -385,18 +423,25 @@ const preSpawnEnvSetup = `export HYDRA_ENV="$(mktemp "${TMPDIR:-/tmp}/hydra-env.
 // Each line is exported literally - no shell evaluation of the value - so spaces
 // and metacharacters are preserved and there is no accidental command
 // substitution; blank lines and `#` comments are skipped. These vars OVERRIDE any
-// existing value in the agent's environment. The temp file is then removed and
-// HYDRA_ENV unset so it does not leak to the agent (appending to it post-spawn has
-// no effect). A malformed line (bad identifier) fails under strict mode and gates
-// the launch with the pre_spawn_script diagnostic, same as any other script error.
-const preSpawnEnvApply = `if [ -n "$HYDRA_ENV" ] && [ -f "$HYDRA_ENV" ]; then
+// existing value in the agent's environment. HYDRA_ENV is then unset so it does
+// not leak to the agent (appending to it post-spawn has no effect). An ephemeral
+// file is also removed; a persisted one (persist=true) is kept so the daemon can
+// read it back for the head's sibling shells. A malformed line (bad identifier)
+// fails under strict mode and gates the launch with the pre_spawn_script
+// diagnostic, same as any other script error.
+func preSpawnEnvApply(persist bool) string {
+	remove := "\n\trm -f \"$HYDRA_ENV\""
+	if persist {
+		remove = ""
+	}
+	return `if [ -n "$HYDRA_ENV" ] && [ -f "$HYDRA_ENV" ]; then
 	while IFS= read -r hydra_env_line || [ -n "$hydra_env_line" ]; do
 		case "$hydra_env_line" in ''|'#'*) continue ;; esac
 		export "$hydra_env_line"
-	done < "$HYDRA_ENV"
-	rm -f "$HYDRA_ENV"
+	done < "$HYDRA_ENV"` + remove + `
 fi
 unset HYDRA_ENV`
+}
 
 // withPreSpawn wraps argv so that script runs inside the sandbox before the real
 // command. The script shares the agent's shell: falling through it execs argv,
@@ -414,7 +459,7 @@ unset HYDRA_ENV`
 // script also runs under StrictShellPreamble so a failing setup step aborts the
 // launch (the EXIT trap reports it) instead of being swallowed; a non-bash
 // interpreter is left as-is. Lead the script with `set +e` to opt out.
-func withPreSpawn(script string, argv []string) []string {
+func withPreSpawn(script, envFile string, argv []string) []string {
 	if strings.TrimSpace(script) == "" || len(argv) == 0 {
 		return argv
 	}
@@ -428,12 +473,13 @@ func withPreSpawn(script string, argv []string) []string {
 	// the wrapper name; $@ is the original argv, exec'd once the script falls
 	// through (the trap is cleared first so exec-failure isn't misreported).
 	// preSpawnEnvSetup exposes $HYDRA_ENV to the script; preSpawnEnvApply exports
-	// what it wrote there into the agent's environment just before exec.
+	// what it wrote there into the agent's environment just before exec. When
+	// envFile is set the file is persisted (not removed) for the daemon to read.
 	wrapper := strings.Join([]string{
 		preSpawnExitTrap,
-		preSpawnEnvSetup,
+		preSpawnEnvSetup(envFile),
 		body,
-		preSpawnEnvApply,
+		preSpawnEnvApply(envFile != ""),
 		"trap - EXIT",
 		`exec "$@"`,
 	}, "\n")
@@ -443,10 +489,11 @@ func withPreSpawn(script string, argv []string) []string {
 
 // WrapPreSpawn exposes withPreSpawn for callers that spawn sandboxed children
 // outside BuildSpec (the namespace host supervisor), so a configured pre-spawn
-// script still runs in-sandbox before the agent. Returns argv unchanged when the
-// script is empty.
-func WrapPreSpawn(script string, argv []string) []string {
-	return withPreSpawn(script, argv)
+// script still runs in-sandbox before the agent. envFile is the sandbox-visible
+// path to persist resolved $HYDRA_ENV vars to (see SandboxPreSpawnEnvFile), or ""
+// for an ephemeral file. Returns argv unchanged when the script is empty.
+func WrapPreSpawn(script, envFile string, argv []string) []string {
+	return withPreSpawn(script, envFile, argv)
 }
 
 // preSpawnInterp returns the interpreter command line for a pre-spawn script: the

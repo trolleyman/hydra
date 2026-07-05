@@ -101,7 +101,10 @@ func BuildSpec(opts Options) (*Spec, error) {
 	}
 	// Optionally run the configured pre-spawn script first; it execs into Argv
 	// when it falls through.
-	args = append(args, withPreSpawn(opts.PreSpawnScript, opts.Argv)...)
+	// Ephemeral $HYDRA_ENV (no persist path): the agent still gets its vars
+	// in-shell, but sharing them with sibling bash shells rides on the Linux
+	// namespace host and its /tmp-mapped per-head TmpDir, which darwin lacks.
+	args = append(args, withPreSpawn(opts.PreSpawnScript, "", opts.Argv)...)
 
 	return &Spec{
 		Path:    sandboxExec,

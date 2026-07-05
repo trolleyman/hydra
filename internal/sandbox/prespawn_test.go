@@ -38,7 +38,7 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 		return errtrace.Wrap(err)
 	}
 
-	wrapped := WrapPreSpawn(script, argv)
+	wrapped := WrapPreSpawn(script, "", argv)
 	if err := run(t, wrapped); err != nil {
 		t.Fatalf("run wrapped pre-spawn: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 	// aborts resume too, so it must be visible.
 	gate := filepath.Join(dir, "should-not-exist")
 	gateArgv := []string{"/bin/sh", "-c", "echo leaked > " + q(gate)}
-	gateWrapped := WrapPreSpawn("exit 3", gateArgv)
+	gateWrapped := WrapPreSpawn("exit 3", "", gateArgv)
 	gateOut, gateErr := exec.Command(gateWrapped[0], gateWrapped[1:]...).CombinedOutput()
 	if gateErr == nil {
 		t.Fatalf("expected non-zero exit from a failing pre-spawn script; output: %s", gateOut)
@@ -105,7 +105,7 @@ func TestWrapPreSpawnHydraEnv(t *testing.T) {
 	// The "real" command dumps the three vars it should see from its environment.
 	argv := []string{"/bin/sh", "-c", "printf '%s\\n' \"$FROM_ENV\" \"$WITH_SPACES\" \"$LITERAL\" \"$PRESET\" > " + q(out)}
 
-	wrapped := WrapPreSpawn(script, argv)
+	wrapped := WrapPreSpawn(script, "", argv)
 	cmd := exec.Command(wrapped[0], wrapped[1:]...)
 	cmd.Env = append(os.Environ(), "PRESET=original")
 	if b, err := cmd.CombinedOutput(); err != nil {
@@ -121,33 +121,71 @@ func TestWrapPreSpawnHydraEnv(t *testing.T) {
 	}
 }
 
+// TestWrapPreSpawnPersist verifies the persist mode (non-empty envFile): the
+// resolved env is written to that fixed path and left there (not removed) for the
+// daemon to read back and share with sibling shells, and it is truncated fresh on
+// each launch (a prior run's vars do not accumulate).
+func TestWrapPreSpawnPersist(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "hydra-pre-spawn.env")
+	q := func(p string) string { return "'" + p + "'" }
+	argv := []string{"/bin/sh", "-c", "true"}
+
+	run := func(varLine string) {
+		t.Helper()
+		wrapped := WrapPreSpawn("printf '%s\\n' "+q(varLine)+` >> "$HYDRA_ENV"`, envFile, argv)
+		if b, err := exec.Command(wrapped[0], wrapped[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("run: %v\noutput: %s", err, b)
+		}
+	}
+
+	run("FOO=1")
+	got, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("persisted env file missing (should be kept, not removed): %v", err)
+	}
+	if string(got) != "FOO=1\n" {
+		t.Fatalf("persisted content: got %q, want %q", got, "FOO=1\n")
+	}
+
+	// A second launch truncates fresh - the file holds only the new run's vars.
+	run("BAR=2")
+	got, err = os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read persisted env file after second run: %v", err)
+	}
+	if string(got) != "BAR=2\n" {
+		t.Fatalf("second launch did not truncate: got %q, want %q", got, "BAR=2\n")
+	}
+}
+
 func TestWithPreSpawn(t *testing.T) {
 	argv := []string{"claude", "--dangerously-skip-permissions"}
 
 	// No script: argv is returned unchanged.
-	if got := withPreSpawn("", argv); !reflect.DeepEqual(got, argv) {
+	if got := withPreSpawn("", "", argv); !reflect.DeepEqual(got, argv) {
 		t.Errorf("empty script: got %v, want %v", got, argv)
 	}
-	if got := withPreSpawn("   \n\t ", argv); !reflect.DeepEqual(got, argv) {
+	if got := withPreSpawn("   \n\t ", "", argv); !reflect.DeepEqual(got, argv) {
 		t.Errorf("blank script: got %v, want %v", got, argv)
 	}
 
 	// Empty argv: nothing to wrap.
-	if got := withPreSpawn("echo hi", nil); got != nil {
+	if got := withPreSpawn("echo hi", "", nil); got != nil {
 		t.Errorf("empty argv: got %v, want nil", got)
 	}
 
 	// wrap builds the expected `-c` body for a given (already interpreter-adjusted)
 	// script body: the EXIT trap, the $HYDRA_ENV setup, the body, the env apply-back,
-	// then the trap clear and exec.
+	// then the trap clear and exec. Here envFile is "" (ephemeral).
 	wrap := func(body string) string {
-		return strings.Join([]string{preSpawnExitTrap, preSpawnEnvSetup, body, preSpawnEnvApply, "trap - EXIT", `exec "$@"`}, "\n")
+		return strings.Join([]string{preSpawnExitTrap, preSpawnEnvSetup(""), body, preSpawnEnvApply(false), "trap - EXIT", `exec "$@"`}, "\n")
 	}
 
 	// Script set, no shebang: defaults to /bin/bash -c, exec'ing argv via "$@"
 	// after an EXIT trap that reports a gating failure. Being bash, the body also
 	// runs under the strict preamble (set -eo pipefail).
-	got := withPreSpawn("mise trust", argv)
+	got := withPreSpawn("mise trust", "", argv)
 	want := []string{"/bin/bash", "-c", wrap(StrictShellPreamble + "mise trust"), "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapped argv:\n got %#v\nwant %#v", got, want)
@@ -157,14 +195,28 @@ func TestWithPreSpawn(t *testing.T) {
 	// included, is passed verbatim to `-c` - and a non-bash interpreter gets NO
 	// strict preamble (set -o pipefail is a bashism).
 	body := "#!/bin/zsh\nset -o pipefail\nmise trust"
-	got = withPreSpawn(body, argv)
+	got = withPreSpawn(body, "", argv)
 	want = []string{"/bin/zsh", "-c", wrap(body), "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("zsh shebang:\n got %#v\nwant %#v", got, want)
 	}
 
+	// Persist mode (non-empty envFile): the setup assigns the fixed path and
+	// truncates it, and the apply-back keeps the file rather than rm-ing it.
+	gotPersist := withPreSpawn("mise trust", "/tmp/x.env", argv)
+	wantBody := strings.Join([]string{preSpawnExitTrap, preSpawnEnvSetup("/tmp/x.env"), StrictShellPreamble + "mise trust", preSpawnEnvApply(true), "trap - EXIT", `exec "$@"`}, "\n")
+	if len(gotPersist) < 3 || gotPersist[2] != wantBody {
+		t.Errorf("persist body:\n got %#v\nwant %#v", gotPersist, wantBody)
+	}
+	if strings.Contains(preSpawnEnvApply(true), "rm -f") {
+		t.Errorf("persist apply must not rm the env file: %q", preSpawnEnvApply(true))
+	}
+	if !strings.Contains(preSpawnEnvApply(false), "rm -f") {
+		t.Errorf("ephemeral apply must rm the env file: %q", preSpawnEnvApply(false))
+	}
+
 	// `#!/usr/bin/env bash` keeps both fields, so it runs as `env bash -c ...`.
-	got = withPreSpawn("#!/usr/bin/env bash\necho hi", argv)
+	got = withPreSpawn("#!/usr/bin/env bash\necho hi", "", argv)
 	if len(got) < 3 || got[0] != "/usr/bin/env" || got[1] != "bash" || got[2] != "-c" {
 		t.Errorf("env shebang: got %#v", got)
 	}
@@ -176,7 +228,7 @@ func TestWithPreSpawn(t *testing.T) {
 func TestWithPreSpawnStrict(t *testing.T) {
 	argv := []string{"claude"}
 	body := func(script string) string {
-		got := withPreSpawn(script, argv)
+		got := withPreSpawn(script, "", argv)
 		// The script body is the argument right after `-c` (its index shifts with
 		// the interpreter, e.g. `env bash -c <body>` vs `/bin/bash -c <body>`).
 		for i, a := range got {

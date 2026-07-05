@@ -494,6 +494,7 @@ export function ConfigForm({
               <p className="mt-1.5">To set <strong>environment variables for the agent</strong>, append <code className="text-blue-300">KEY=value</code> lines to the file at <code className="text-blue-300">$HYDRA_ENV</code> (the GitHub Actions <code className="text-blue-300">$GITHUB_ENV</code> model):</p>
               <pre className="mt-1 text-[11px] whitespace-pre-wrap"><code className="text-blue-300">{'echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"'}</code></pre>
               <p className="mt-1.5">Each line is exported into the agent and every command it runs, overriding any inherited value. It re-applies on resume (the script re-runs). Values are taken literally - no shell evaluation - and one <code className="text-blue-300">KEY=value</code> per line.</p>
+              <p className="mt-1.5">These vars are also injected into the head's <strong>sandboxed</strong> bash shells (the terminal <code className="text-blue-300">+</code> tabs), so a shell shares the agent's environment - the script itself is not re-run there. The non-sandboxed "Regular shell" is left out (its paths differ from the sandbox's).</p>
             </InfoTooltip>
           </div>
           {inheritedSandbox?.pre_spawn_script && (

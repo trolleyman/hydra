@@ -503,6 +503,32 @@ func headContextEnv(id string, agentType sandbox.AgentType, projectRoot, worktre
 	}
 }
 
+// readPreSpawnEnv reads back the KEY=value lines a head's pre_spawn_script wrote to
+// $HYDRA_ENV (persisted by the pre-spawn wrapper - see sandbox.preSpawnEnvSetup) and
+// returns them as environment entries to inject into the head's sibling sandboxed
+// bash shells, so a shell sees the same env the agent does without re-running the
+// script. It mirrors the wrapper's literal parse: blank lines and `#` comments are
+// skipped and each remaining line is taken verbatim (no shell evaluation), so only
+// well-formed `KEY=value` lines are kept. Returns nil when path is empty or the file
+// is absent (the agent has not spawned yet, or its script set nothing).
+func readPreSpawnEnv(path string) []string {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // claudeRenderingEnv pins Claude Code's renderer for an agent launch (spawn and
 // resume alike). Claude's fullscreen rendering draws on the terminal's alternate
 // screen buffer and captures the mouse - which, in Hydra's web (xterm.js)

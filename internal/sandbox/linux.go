@@ -323,7 +323,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// The command to run inside the sandbox (optionally preceded by the
 	// configured pre-spawn script, which execs into Argv when it falls through).
 	args = append(args, "--")
-	args = append(args, withPreSpawn(opts.PreSpawnScript, opts.Argv)...)
+	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	// Hard egress boundary: wrap the bwrap argv in a pasta netns + nft lock. The
 	// wrapper returns a new argv (argv[0] = pasta) that ultimately execs this

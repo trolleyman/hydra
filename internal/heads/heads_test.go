@@ -3,6 +3,7 @@ package heads
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,6 +78,36 @@ func TestHeadContextEnv(t *testing.T) {
 		// Every variable must be owned by Hydra so it can't leak from the host.
 		if !envKeysHydraOwns[k] {
 			t.Errorf("%s missing from envKeysHydraOwns", k)
+		}
+	}
+}
+
+func TestReadPreSpawnEnv(t *testing.T) {
+	// Empty path (no persisted file / no TmpDir): nil, no read.
+	if got := readPreSpawnEnv(""); got != nil {
+		t.Errorf("empty path: got %v, want nil", got)
+	}
+	// Missing file (agent not spawned yet): nil, not an error.
+	if got := readPreSpawnEnv(filepath.Join(t.TempDir(), "absent")); got != nil {
+		t.Errorf("missing file: got %v, want nil", got)
+	}
+
+	// Parse mirrors the wrapper: skip blank lines and `#` comments, require `=`,
+	// keep values (incl. spaces and literal `$(...)`) verbatim.
+	dir := t.TempDir()
+	f := filepath.Join(dir, "env")
+	content := "FOO=1\n# comment\n\nWITH_SPACES=a b c\nLITERAL=$(echo x)\nNOEQUALS\n"
+	if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := readPreSpawnEnv(f)
+	want := []string{"FOO=1", "WITH_SPACES=a b c", "LITERAL=$(echo x)"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d: got %q, want %q", i, got[i], want[i])
 		}
 	}
 }

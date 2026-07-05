@@ -693,6 +693,14 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	// The shell shares the head's worktree; report it as a bash session since
 	// the pre-spawn config it runs is the bash agent's.
 	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	// Env vars the head's pre_spawn_script set for the agent (via $HYDRA_ENV, see
+	// nshost.startAgentSession) - injected here so a sandboxed shell sharing the
+	// head's worktree sees the same environment the agent works in, WITHOUT
+	// re-running the script. Appended last so it overrides. Only for sandboxed
+	// shells: the values are computed against the sandbox's view (e.g. its per-head
+	// /tmp), so they must not leak into the no-confinement host shell, whose paths
+	// differ. Empty (nil) when the agent has not spawned yet or set no vars.
+	preSpawnEnv := readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, head.ID)))
 
 	// If the head's agent is running inside a supervisor, spawn this bash terminal
 	// as a sibling child of that one bwrap. It then shares the agent's single
@@ -703,7 +711,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		if host, ok := namespaceHostFor(head.ID); ok {
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
-				Env:  env,
+				Env:  append(env, preSpawnEnv...),
 				Cwd:  worktreePath,
 				Rows: rows,
 				Cols: cols,
@@ -721,11 +729,12 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
-		// The pre-spawn script is intentionally NOT run for bash shells: it is a
+		// The pre-spawn script is intentionally NOT re-run for bash shells: it is a
 		// once-per-head agent-spawn hook, and these interactive shells open
 		// repeatedly over a head's life. Running it here also made a failing
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
-		// exec'd, closing the terminal instantly.
+		// exec'd, closing the terminal instantly. Its resolved env vars are still
+		// shared with the shell though (preSpawnEnv, below), just not by re-running it.
 		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
@@ -750,7 +759,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			Network:       net,
 			Binds:         seed.Binds,
 			CowMounts:     cowMounts,
-			Env:           append(env, seed.Env...),
+			Env:           append(append(env, seed.Env...), preSpawnEnv...),
 			Argv:          []string{"/bin/bash"},
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -830,6 +839,14 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// reaches that head. It must therefore be idempotent - it runs on every launch
 	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// If the pre_spawn_script was removed since this head last launched, drop any
+	// env it previously persisted so stale vars stop leaking into its shells (a
+	// script that still runs re-truncates the file itself on every launch).
+	if strings.TrimSpace(preSpawn) == "" {
+		if p := sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, head.ID)); p != "" {
+			_ = os.Remove(p)
+		}
+	}
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
 	if err != nil {
 		return errtrace.Wrap(err)
