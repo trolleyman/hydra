@@ -214,7 +214,10 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	// supervisor's bwrap (the same one the agent and bash terminals share), exactly
 	// as withPreSpawn does for a standalone sandbox - its writes land in the shared
 	// COW overlay and are visible to every sibling terminal.
-	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sb.Argv)
+	// Persist the resolved $HYDRA_ENV to the per-head /tmp so the daemon can read
+	// it back and inject the same vars into this head's sibling sandboxed shells
+	// (StartShellSession), which do not re-run the script.
+	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sandbox.SandboxPreSpawnEnvFile(sb.TmpDir), sb.Argv)
 	sp, err := host.client.Spawn(nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("spawn agent in namespace host: %w", err))

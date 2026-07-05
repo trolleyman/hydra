@@ -477,10 +477,13 @@ var envKeysHydraOwns = map[string]bool{
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
 // branch on the head's identity, agent type and git layout - e.g. seeding only
-// for a given agent, or copying files into the worktree.
+// for a given agent, or copying files into the worktree. The pre-spawn script is
+// additionally given $HYDRA_ENV (a file it appends KEY=value lines to, exported
+// into the agent - see sandbox.preSpawnEnvSetup); that one is set by the wrapper,
+// not here, so it is not listed below or in envKeysHydraOwns.
 //
 // Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
-// web/src/components/SettingsComponents.tsx in sync.
+// web/src/components/settings/ConfigForm.tsx in sync.
 // derefStr returns the pointed-to string, or "" when the pointer is nil.
 func derefStr(s *string) string {
 	if s == nil {
@@ -498,6 +501,32 @@ func headContextEnv(id string, agentType sandbox.AgentType, projectRoot, worktre
 		"HYDRA_BRANCH=" + branch,
 		"HYDRA_BASE_BRANCH=" + baseBranch,
 	}
+}
+
+// readPreSpawnEnv reads back the KEY=value lines a head's pre_spawn_script wrote to
+// $HYDRA_ENV (persisted by the pre-spawn wrapper - see sandbox.preSpawnEnvSetup) and
+// returns them as environment entries to inject into the head's sibling sandboxed
+// bash shells, so a shell sees the same env the agent does without re-running the
+// script. It mirrors the wrapper's literal parse: blank lines and `#` comments are
+// skipped and each remaining line is taken verbatim (no shell evaluation), so only
+// well-formed `KEY=value` lines are kept. Returns nil when path is empty or the file
+// is absent (the agent has not spawned yet, or its script set nothing).
+func readPreSpawnEnv(path string) []string {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // claudeRenderingEnv pins Claude Code's renderer for an agent launch (spawn and
