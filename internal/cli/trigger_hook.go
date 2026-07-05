@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -182,6 +183,52 @@ func activeSubagentCount() int {
 		n++
 	}
 	return n
+}
+
+// pendingBackgroundShell reports whether the Stop hook payload lists a still-
+// active background shell task. Claude Code (v2.1.145+) includes a
+// `background_tasks` array on the Stop event; each entry carries a `type`
+// ("shell", "subagent", "monitor", ...) and a `status`. A pending shell means
+// the turn ended while a command the agent launched with run_in_background is
+// still running (e.g. a compile it paused for), so the head isn't finished.
+// Sub-agents are tracked separately (the marker dir), so only shells count here.
+// An absent array (older Claude, Gemini, Copilot) yields false, preserving the
+// prior finished-on-Stop behavior.
+func pendingBackgroundShell(input map[string]interface{}) bool {
+	tasks, ok := input["background_tasks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, t := range tasks {
+		tm, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if stringField(tm, "type") != "shell" {
+			continue
+		}
+		if !isTerminalTaskStatus(stringField(tm, "status")) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTerminalTaskStatus reports whether a background-task status string means the
+// task has finished (so it no longer holds the head back from "finished"). The
+// exact status vocabulary isn't documented, so this matches the known terminal
+// words and treats anything else - running, pending, in_progress, an empty
+// status, or an unrecognised value - as still active, erring toward "still
+// working" so a genuine pause is never mistaken for a finish.
+func isTerminalTaskStatus(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "completed", "complete", "done", "success", "succeeded", "failed",
+		"failure", "error", "errored", "killed", "cancelled", "canceled",
+		"exited", "stopped", "timeout", "timed_out":
+		return true
+	default:
+		return false
+	}
 }
 
 // statusLogFilePath returns the per-head status_log.jsonl path, honoring
@@ -380,11 +427,23 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		// But if sub-agents this head launched are still running, the turn ending
 		// doesn't mean the head is done - its background sub-agents are, and it
 		// will resume when they report back. Report running so the head isn't
-		// treated (or auto-merged) as finished. finished thus means "main turn
-		// ended AND no live sub-agents".
-		if activeSubagentCount() > 0 {
+		// treated (or auto-merged) as finished.
+		//
+		// Likewise, if the agent left a background shell running (Claude's Stop
+		// payload lists it in background_tasks - e.g. it launched a compile with
+		// run_in_background and paused for the result), the turn ended but real
+		// work is still pending. A shell, unlike a sub-agent, may not wake the
+		// agent on its own, so this isn't "running" - it's the soft "paused on
+		// background work" wait. Report waiting: it reads accurately and, unlike
+		// finished, holds auto-merge (which gates on finished) until the shell
+		// drains. finished thus means "main turn ended AND no live sub-agents AND
+		// no pending background shell".
+		switch {
+		case activeSubagentCount() > 0:
 			status = api.Running
-		} else {
+		case pendingBackgroundShell(input):
+			status = api.Waiting
+		default:
 			status = api.Finished
 		}
 	case "SessionEnd", "sessionEnd":
