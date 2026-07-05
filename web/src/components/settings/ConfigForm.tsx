@@ -459,16 +459,17 @@ export function ConfigForm({
           tooltipTitle="Copy-on-Write Paths"
           tooltip={
             <>
-              <p>Worktree-relative paths mounted copy-on-write from the project root. The agent sees the real files at the same path under its worktree and may <strong>overwrite</strong> them, but writes are kept in a per-head layer and <strong>never touch the source</strong>.</p>
-              <p className="mt-1.5">Ideal for large gitignored build inputs/outputs (e.g. <code className="text-blue-300">pipeline/out</code>) that are too big to copy. Nothing is copied up front - reads come straight from the source; only files the agent modifies cost space.</p>
-              <p className="mt-1.5 text-gray-400 italic">Linux uses overlayfs, macOS an APFS clone. Bash shells get read-only access to the same paths.</p>
+              <p>Paths mounted copy-on-write. The agent sees the real files and may <strong>overwrite</strong> them, but writes are kept in a per-head layer and <strong>never touch the source</strong>.</p>
+              <p className="mt-1.5">Entries follow the same convention as the other path lists. A <strong>worktree-relative</strong> path (e.g. <code className="text-blue-300">pipeline/out</code>) is mirrored from the project root into the worktree - ideal for large gitignored build inputs/outputs too big to copy. A <strong>home or absolute</strong> path (e.g. <code className="text-blue-300">~/.gradle</code>, <code className="text-blue-300">/opt/cache</code>) is overlaid in place and supersedes any default writable bind on it, so per-head builds share the real cache read-only but keep their writes and lock files private (no cross-head lock contention).</p>
+              <p className="mt-1.5">Nothing is copied up front - reads come straight from the source; only files the agent modifies cost space.</p>
+              <p className="mt-1.5 text-gray-400 italic">Linux uses overlayfs, macOS an APFS clone (home/absolute overlays are a Linux feature; on macOS such paths keep their shared-writable behavior). Bash shells get read-only access to the same paths.</p>
               <p className="mt-1.5 text-gray-400 italic">Overlay needs an overlay-capable bwrap; some distros (e.g. Ubuntu) ship it without. Point the daemon at one with <code className="text-blue-300">HYDRA_BWRAP=/path/to/bwrap</code> - otherwise COW falls back to read-only.</p>
             </>
           }
           paths={sandbox.cow_paths ?? []}
           inheritedPaths={inheritedSandbox?.cow_paths ?? undefined}
           onChange={(cow_paths) => updateSandbox({ cow_paths })}
-          placeholder="e.g. pipeline/out"
+          placeholder="e.g. pipeline/out or ~/.gradle"
         />
 
         {/* Pre-spawn script */}

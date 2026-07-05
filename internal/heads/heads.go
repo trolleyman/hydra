@@ -497,7 +497,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// COW mounts are re-applied on every launch (they are mount-time, not
 	// persistent), with a per-head writable upper so the agent's overwrites
 	// persist across resumes but never touch the real source.
-	cowMounts := buildCowMounts(projectRoot, worktreePath, opts.ID, cowPaths, true)
+	cowMounts := buildCowMounts(projectRoot, worktreePath, home, opts.ID, cowPaths, true)
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)))
 	if err != nil {
@@ -737,7 +737,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// head's worktree, and a live agent may already own a writable overlay on
 		// the same upperdir - two overlays must never share one, so the shell only
 		// gets to read.
-		cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, false)
+		cowMounts := buildCowMounts(projectRoot, worktreePath, home, head.ID, cowPaths, false)
 		sb = sandbox.Options{
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
@@ -836,7 +836,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 	// Re-apply the writable COW mounts; the per-head upper persists the agent's
 	// earlier overwrites across this resume.
-	cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, true)
+	cowMounts := buildCowMounts(projectRoot, worktreePath, home, head.ID, cowPaths, true)
 	// Resume passes no model: the agent restores the model its transcript was
 	// saved with (and any in-session change), avoiding a cache-missing re-read.
 	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "")

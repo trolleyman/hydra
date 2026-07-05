@@ -457,6 +457,13 @@ type Spec struct {
 	Cleanup func()
 }
 
+// ExpandPath expands a leading "~" (to home) and any $VARS in p against the
+// given HOME, exactly as the sandbox path lists (writable/masked/restore) are
+// expanded. Exported so callers building mounts (see heads) can resolve
+// home/absolute config entries the same way. A result that is still relative is
+// returned unchanged.
+func ExpandPath(p, home string) string { return expandPath(p, home) }
+
 // expandPath expands a leading "~" (to home) and any $VARS in p. A trailing
 // result that is still relative is returned unchanged.
 func expandPath(p, home string) string {

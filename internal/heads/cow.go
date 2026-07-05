@@ -24,20 +24,39 @@ func cowDirName(rel string) string {
 	return strings.ReplaceAll(filepath.Clean(rel), string(os.PathSeparator), "_")
 }
 
-// buildCowMounts resolves the configured cow_paths (each worktree-relative) into
-// sandbox.CowMount specs and creates the host directories they need.
+// isHomeOrAbs reports whether a cow_paths entry is home-anchored or absolute
+// (rather than worktree-relative): a leading "~", an absolute path, or a
+// "$VAR"-prefixed path. These are expanded against HOME/the environment exactly
+// like the other sandbox path lists (writable/masked/restore) and overlaid at
+// that same path (lower == dest), instead of being mirrored from the project
+// root into the worktree.
+func isHomeOrAbs(p string) bool {
+	return p == "~" || strings.HasPrefix(p, "~/") || filepath.IsAbs(p) || strings.HasPrefix(p, "$")
+}
+
+// buildCowMounts resolves the configured cow_paths into sandbox.CowMount specs
+// and creates the host directories they need.
 //
-// The read-only source (Lower) is the same path under the project root; the
-// mountpoint (Dest) is that path inside the worktree. When writable, each mount
-// also gets a persistent per-head Upper/Work pair so the agent can overwrite the
-// files with the writes kept out of the real tree. When not writable (bash
-// shells, which share the worktree with a possibly-live agent - two overlays
-// must never share one upperdir), Upper/Work are left empty so the sandbox layer
-// exposes the source read-only instead.
+// An entry is interpreted by the same path convention the other sandbox lists
+// use (see isHomeOrAbs):
+//   - Worktree-relative (e.g. "pipeline/out"): the read-only source (Lower) is
+//     the same path under the project root and the mountpoint (Dest) is that path
+//     inside the worktree.
+//   - Home/absolute (e.g. "~/.gradle", "/opt/cache"): expanded against HOME and
+//     overlaid in place, so Lower == Dest == the resolved path. Reads hit the
+//     shared real dir; per-head writes copy up to the upper. On Linux this
+//     overlay supersedes any default writable --bind on the same target (see
+//     linux.go) - the two cannot coexist.
 //
-// Entries whose source is missing, or that escape the project root via an
-// absolute path or "..", are skipped with a warning.
-func buildCowMounts(projectRoot, worktreePath, id string, cowPaths []string, writable bool) []sandbox.CowMount {
+// When writable, each mount also gets a persistent per-head Upper/Work pair so
+// the agent can overwrite the files with the writes kept out of the real tree.
+// When not writable (bash shells, which share the worktree with a possibly-live
+// agent - two overlays must never share one upperdir), Upper/Work are left empty
+// so the sandbox layer exposes the source read-only instead.
+//
+// Entries whose source is missing, or a worktree-relative entry that escapes the
+// project root via "..", are skipped with a warning.
+func buildCowMounts(projectRoot, worktreePath, home, id string, cowPaths []string, writable bool) []sandbox.CowMount {
 	var mounts []sandbox.CowMount
 	base := cowBaseDir(projectRoot, id)
 	// Drop a "*" .gitignore in .hydra/local/cow so the per-head upper/work layers
@@ -49,27 +68,46 @@ func buildCowMounts(projectRoot, worktreePath, id string, cowPaths []string, wri
 		}
 	}
 	for _, p := range cowPaths {
-		rel := filepath.Clean(strings.TrimSpace(p))
-		if rel == "" || rel == "." {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" || trimmed == "." {
 			continue
 		}
-		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			log.Printf("warn: cow_paths: skipping %q (must be a relative path inside the worktree)", p)
-			continue
+		var lower, dest, layerName string
+		if isHomeOrAbs(trimmed) {
+			// Home/absolute overlay: lower == dest == the resolved path itself.
+			abs := sandbox.ExpandPath(trimmed, home)
+			if !filepath.IsAbs(abs) {
+				log.Printf("warn: cow_paths: skipping %q (does not resolve to an absolute path)", p)
+				continue
+			}
+			lower, dest = abs, abs
+			layerName = cowDirName(abs)
+		} else {
+			rel := filepath.Clean(trimmed)
+			if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				log.Printf("warn: cow_paths: skipping %q (relative path must stay inside the worktree)", p)
+				continue
+			}
+			lower = filepath.Join(projectRoot, rel)
+			dest = filepath.Join(worktreePath, rel)
+			layerName = cowDirName(rel)
 		}
-		lower := filepath.Join(projectRoot, rel)
 		if _, err := os.Stat(lower); err != nil {
 			log.Printf("warn: cow_paths: skipping %q (source %s does not exist)", p, lower)
 			continue
 		}
-		dest := filepath.Join(worktreePath, rel)
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			log.Printf("warn: cow_paths: skipping %q (create mountpoint %s: %v)", p, dest, err)
-			continue
+		// A worktree-relative mountpoint may not exist yet, so create it. For a
+		// home/absolute mount dest == lower, which we just confirmed exists - never
+		// mkdir the real home path.
+		if dest != lower {
+			if err := os.MkdirAll(dest, 0o755); err != nil {
+				log.Printf("warn: cow_paths: skipping %q (create mountpoint %s: %v)", p, dest, err)
+				continue
+			}
 		}
 		m := sandbox.CowMount{Lower: lower, Dest: dest}
 		if writable {
-			layer := filepath.Join(base, cowDirName(rel))
+			layer := filepath.Join(base, layerName)
 			upper := filepath.Join(layer, "upper")
 			work := filepath.Join(layer, "work")
 			if err := os.MkdirAll(upper, 0o755); err != nil {

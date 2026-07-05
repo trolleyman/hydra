@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,7 +149,20 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// The worktree's git metadata lives in the main repo's common dir; bind it
 	// writable so the agent can commit (index.lock, refs, objects, logs).
 	addRWDir(opts.GitCommonDir)
+	// A copy-on-write overlay (below) and a plain writable --bind cannot coexist on
+	// the same target, and the overlay is what the user asked for. So skip any
+	// writable path that a CowMount already covers - e.g. a home-anchored
+	// cow_paths entry like "~/.gradle" supersedes the default writable bind on it.
+	cowDests := make(map[string]struct{}, len(opts.CowMounts))
+	for _, m := range opts.CowMounts {
+		if m.Dest != "" {
+			cowDests[filepath.Clean(m.Dest)] = struct{}{}
+		}
+	}
 	for _, p := range expandAll(opts.WritablePaths, home) {
+		if _, ok := cowDests[filepath.Clean(p)]; ok {
+			continue
+		}
 		addRWDir(p)
 	}
 

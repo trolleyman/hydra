@@ -192,6 +192,48 @@ func TestBuildSpecLinuxCowMount(t *testing.T) {
 	}
 }
 
+// TestBuildSpecLinuxCowSupersedesWritableBind checks that a CowMount whose Dest
+// equals a configured writable path (e.g. a home-anchored cow_paths entry like
+// "~/.gradle") suppresses the plain writable --bind on that target: the overlay
+// and a writable --bind cannot coexist, so only the overlay (or its read-only
+// fallback) is emitted.
+func TestBuildSpecLinuxCowSupersedesWritableBind(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	gradle := filepath.Join(home, ".gradle") // lower == dest for a home overlay
+	upper := filepath.Join(home, "cow", "upper")
+	cowWork := filepath.Join(home, "cow", "work")
+	for _, d := range []string{work, gradle, upper, cowWork} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := Options{
+		AgentType:     AgentTypeClaude,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: []string{"~/.gradle"},
+		CowMounts:     []CowMount{{Lower: gradle, Upper: upper, Work: cowWork, Dest: gradle}},
+		Argv:          []string{"claude"},
+	}
+	spec, err := BuildSpec(opts)
+	if err != nil {
+		t.Fatalf("BuildSpec: %v", err)
+	}
+	defer spec.Cleanup()
+
+	// The writable --bind on the overlaid target must be suppressed.
+	if hasPair(spec.Args, "--bind", gradle, gradle) {
+		t.Errorf("writable --bind %s should be superseded by the overlay, got %v", gradle, spec.Args)
+	}
+	// The overlay (or its read-only bind fallback) must still be present.
+	overlaid := pairIndex(spec.Args, "--overlay-src", gradle) != -1 || hasPair(spec.Args, "--ro-bind", gradle, gradle)
+	if !overlaid {
+		t.Errorf("expected an overlay or ro-bind on %s, got %v", gradle, spec.Args)
+	}
+}
+
 // hasPair2 reports whether args contains flag immediately followed by a.
 func hasPair2(args []string, flag, a string) bool {
 	return pairIndex(args, flag, a) != -1
