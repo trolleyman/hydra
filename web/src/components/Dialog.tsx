@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X, Clock, LoaderCircle } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, FolderSync, X, Clock, LoaderCircle } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
@@ -66,11 +66,11 @@ export const Dialog: React.FC = () => {
       {variant === 'merge' ? (
         <RichConfirmPanel
           tone="emerald"
-          icon={<Merge className="w-5 h-5" />}
+          icon={<GitPullRequestArrow className="w-5 h-5" />}
           title={title}
           description={message}
           confirmLabel={confirmLabel ?? 'Merge branch'}
-          confirmIcon={<Merge className="w-4 h-4" />}
+          confirmIcon={<GitPullRequestArrow className="w-4 h-4" />}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
         >
@@ -289,7 +289,7 @@ function MergeGatePanel({
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
         <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
-        <DialogConfirmButton tone="amber" icon={<Merge className="w-4 h-4" />} onClick={onSecondary}>
+        <DialogConfirmButton tone="amber" icon={<GitPullRequestArrow className="w-4 h-4" />} onClick={onSecondary}>
           {secondaryLabel}
         </DialogConfirmButton>
         <DialogConfirmButton tone="emerald" icon={<Clock className="w-4 h-4" />} onClick={onConfirm}>

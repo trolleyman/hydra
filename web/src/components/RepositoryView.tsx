@@ -10,7 +10,7 @@ import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompare, MoveRight, PanelLeftOpen, Menu,
+  GitBranch, GitCompareArrows, MoveRight, PanelLeftOpen, Menu,
   LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -1532,7 +1532,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 isKnownBranch={false}
                 onSelect={onDiffSelect}
                 title="Compare with another branch"
-                triggerIcon={GitCompare}
+                triggerIcon={GitCompareArrows}
               />
             )}
             <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
@@ -1748,7 +1748,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <div className="flex-1 flex items-center justify-center text-sm text-red-500 px-4 text-center">{diffError}</div>
             ) : diff && diff.files.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500 px-4 text-center">
-                <GitCompare className="w-8 h-8" />
+                <GitCompareArrows className="w-8 h-8" />
                 <span className="text-sm">No differences between <span className="font-mono">{activeRef}</span> and <span className="font-mono">{compareRef}</span></span>
               </div>
             ) : diff ? (
