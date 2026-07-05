@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import { ZoomPan } from './ZoomPan'
 
-// Covers the zoom/pan interaction layer: wheel zoom eases briefly (a fast glide
-// instead of a jump), drag-pan tracks the pointer 1:1 (no ease), and the corner
-// minimap scales down on small (phone-sized) frames instead of crowding the image.
+// Covers the zoom/pan interaction layer: wheel zoom tracks the wheel directly (no
+// ease, like drag-pan - an ease made fast scrolls wobble), drag-pan tracks the
+// pointer 1:1, and the minimap (portaled to <body>, screen-fixed) scales down on
+// small (phone-sized) frames instead of crowding the image.
 //
 // jsdom computes no layout, so the frame size ZoomPan measures (clientWidth/Height)
 // is mocked per render; ResizeObserver (absent in jsdom) is stubbed - ZoomPan also
@@ -52,11 +53,11 @@ function currentScale(content: HTMLElement): number {
 }
 
 describe('ZoomPan wheel zoom', () => {
-  it('magnifies with a short ease so the step glides rather than jumps', () => {
+  it('magnifies directly with no ease (so a fast scroll cannot wobble)', () => {
     const { viewport, content } = renderZoomPan()
     zoomIn(viewport)
     expect(currentScale(content)).toBeGreaterThan(1)
-    expect(content.style.transition).toBe('transform 120ms ease-out')
+    expect(content.style.transition).toBe('')
   })
 
   it('never zooms out past fit (scale 1)', () => {
@@ -121,21 +122,23 @@ describe('ZoomPan drag-pan', () => {
 })
 
 describe('ZoomPan minimap', () => {
-  const minimap = (container: HTMLElement) =>
-    container.querySelector<HTMLElement>('[data-zoompan-minimap]')
+  // The minimap is portaled to <body> (pinned to the screen, not the growing frame),
+  // so it lives outside the render container - look for it document-wide.
+  const minimap = () =>
+    document.body.querySelector<HTMLElement>('[data-zoompan-minimap]')
 
   it('keeps its full 140px width on a roomy frame', () => {
-    const { viewport, container } = renderZoomPan(1200, 800)
+    const { viewport } = renderZoomPan(1200, 800)
     zoomIn(viewport)
-    const mm = minimap(container)!
+    const mm = minimap()!
     expect(mm.style.width).toBe('140px')
     expect(mm.style.height).toBe(`${Math.round(140 * 800 / 1200)}px`)
   })
 
   it('shrinks to a quarter of a phone-sized frame (height follows the aspect)', () => {
-    const { viewport, container } = renderZoomPan(360, 740)
+    const { viewport } = renderZoomPan(360, 740)
     zoomIn(viewport)
-    const mm = minimap(container)!
+    const mm = minimap()!
     expect(mm.style.width).toBe('90px') // 360 / 4
     expect(mm.style.height).toBe(`${Math.round(90 * 740 / 360)}px`)
   })
