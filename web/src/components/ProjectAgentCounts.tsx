@@ -12,13 +12,13 @@ const STATUS_CHIPS = [
   { key: 'finished_count', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', label: 'finished' },
 ] as const
 
-// ProjectAgentCounts renders a project's agent tally: the total count followed by
-// a colored dot+number per non-zero status (needs_input / running / waiting /
-// finished). A leading sky dot marks unread changes (agents you haven't opened
-// since they last updated) - the same "updates waiting" signal that used to be
-// the row's lone dot, kept as its own marker because "unread" is orthogonal to
-// status (a finished agent can still be unreviewed). Renders nothing when the
-// project has no active agents and nothing unread.
+// ProjectAgentCounts renders a project's agent tally: a colored dot+number per
+// non-zero status (needs_input / running / waiting / finished). A leading sky dot
+// marks unread changes (agents you haven't opened since they last updated) - the
+// same "updates waiting" signal that used to be the row's lone dot, kept as its
+// own marker because "unread" is orthogonal to status (a finished agent can still
+// be unreviewed). Renders nothing when the project has no per-status chips to show
+// and nothing unread.
 export function ProjectAgentCounts({ project, className = '' }: { project: ProjectInfo; className?: string }) {
   const total = project.agent_count ?? 0
   const unread = project.unread_count ?? 0
@@ -26,7 +26,7 @@ export function ProjectAgentCounts({ project, className = '' }: { project: Proje
     .map((c) => ({ ...c, n: project[c.key] ?? 0 }))
     .filter((c) => c.n > 0)
 
-  if (total <= 0 && unread <= 0) return null
+  if (chips.length === 0 && unread <= 0) return null
 
   // A spoken summary for screen readers (the visual dots/numbers are aria-hidden).
   const parts: string[] = []
@@ -38,11 +38,6 @@ export function ProjectAgentCounts({ project, className = '' }: { project: Proje
   return (
     <div className={`flex items-center gap-1.5 ${className}`} aria-label={summary} title={summary}>
       {unread > 0 && <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0" aria-hidden />}
-      {total > 0 && (
-        <span className="text-xs font-semibold tabular-nums text-gray-500 dark:text-gray-400" aria-hidden>
-          {total}
-        </span>
-      )}
       {chips.map((c) => (
         <span key={c.key} className="inline-flex items-center gap-1 tabular-nums" aria-hidden>
           <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />

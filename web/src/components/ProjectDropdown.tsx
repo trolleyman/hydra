@@ -238,7 +238,7 @@ export function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                  {/* Per-project agent tally (total + running/waiting/finished/
+                  {/* Per-project agent tally (running/waiting/finished/
                       needs_input + an unread marker). Fixed to the trailing edge,
                       centered against the two-line name/path - nothing here
                       appears on hover, so the counts never shift. Removal moved to

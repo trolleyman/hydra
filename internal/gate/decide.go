@@ -74,6 +74,65 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // by the caller.
 var gitPushRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*push\b`)
 
+// procKillRe matches a `pkill` or `killall` INVOCATION at a command boundary
+// (start, or right after a `;`, `&`, `|`, `(`, or newline), tolerating a leading
+// `sudo`. These kill processes by NAME/command-line pattern, and every agent runs
+// as `claude --append-system-prompt "<the whole system prompt>"`, so that argv
+// contains most words an agent might pkill on (e.g. a leftover dev server whose
+// name also appears in the prompt) - a generic pattern silently matches the
+// agent's own process and any co-tenant sessions sharing the head's PID namespace,
+// killing the session mid-command. Anchoring to the command position (like
+// gitPushRe) keeps a bare mention in an argument, echo, or grep pattern from
+// tripping. Kill-by-PID (`kill "$PID"`) and job specs are unaffected.
+var procKillRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*(?:sudo\s+)?(?:pkill|killall)\b`)
+
+// gitCommitRe matches a `git commit` invocation at a command boundary (same shape
+// as gitPushRe). Used to scope commit-message scrubbing to real commits.
+var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*commit\b`)
+
+// heredocStartRe matches the start of a heredoc and captures its delimiter word
+// (tolerating <<- and a quoted delimiter). RE2 has no backreferences, so the
+// closing delimiter is matched line-by-line in stripCommitHeredocs.
+var heredocStartRe = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)`)
+
+// commitMessageFlagRe matches a -m/--message flag and its value (quoted or a
+// single bare token) so a commit message's TEXT isn't scanned by the tripwires.
+var commitMessageFlagRe = regexp.MustCompile(`(?i)(?:-m|--message)(?:=|\s+)('[^']*'|"[^"]*"|\S+)`)
+
+// scrubCommitText removes text that is documentation, not executed shell - a git
+// commit's -m/--message value and the heredoc body feeding `git commit ... -F -`.
+// The Bash tripwires (settings-tamper, global-install, git push, pkill) then don't
+// fire on a word that merely appears IN a commit message (e.g. "disableAllHooks"
+// plus a stray ">"). A redirect that actually writes a file stays on the command
+// line and is unaffected; a non-commit heredoc (`bash <<EOF`) may be executed, so
+// its body is deliberately NOT stripped - no detection is weakened.
+func scrubCommitText(cmd string) string {
+	return commitMessageFlagRe.ReplaceAllString(stripCommitHeredocs(cmd), " ")
+}
+
+// stripCommitHeredocs drops the body of any heredoc whose opening line is a
+// `git commit` (i.e. a `-F -` commit message). Other heredocs are left intact.
+func stripCommitHeredocs(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	kept := lines[:0]
+	delim := ""
+	for _, ln := range lines {
+		if delim != "" {
+			if strings.TrimSpace(ln) == delim {
+				delim = ""
+			}
+			continue // inside a git-commit heredoc body: drop the line
+		}
+		kept = append(kept, ln)
+		if gitCommitRe.MatchString(ln) {
+			if m := heredocStartRe.FindStringSubmatch(ln); m != nil {
+				delim = m[1]
+			}
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 // settingsTamperIntentRe matches the hook-disabling settings keys. On its own a
 // mention is not enough to deny (it shows up in commit messages, an echo, a grep);
 // it only trips when the command also writes (settingsWriteIndicatorRe), i.e. is
@@ -205,6 +264,9 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 
 	case "Bash":
 		cmd := stringArg(toolInput, "command")
+		// Scan a copy with commit-message / commit-heredoc TEXT removed, so a word
+		// that merely appears in a commit message doesn't trip a tripwire below.
+		cmd = scrubCommitText(cmd)
 		if globalInstallRe.MatchString(cmd) {
 			return Result{
 				Decision: Deny,
@@ -218,6 +280,12 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			return Result{
 				Decision: Deny,
 				Reason:   "modifying Claude settings/hooks from the shell is not allowed (it would let the agent disable its own gate)",
+			}
+		}
+		if procKillRe.MatchString(cmd) {
+			return Result{
+				Decision: Deny,
+				Reason:   "pkill/killall are not allowed - they match processes by name/command-line and will also match this agent's own process (its whole system prompt rides in the `--append-system-prompt` argv) and co-tenant sessions in the same sandbox, killing your session. Kill a background process by its captured PID (`kill \"$PID\"`) or by port (`fuser -k <port>/tcp`) instead.",
 			}
 		}
 		if gitPushRe.MatchString(cmd) && !strings.Contains(cmd, "--dry-run") {
