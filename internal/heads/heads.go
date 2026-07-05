@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -663,6 +664,48 @@ func sanitizeShellToken(token string) string {
 	return b.String()
 }
 
+// shellStartGate serializes concurrent StartShellSession calls for one shell ID.
+// refs tracks the callers holding (or waiting on) it so the entry can be dropped
+// once idle, keeping shellStartGates bounded rather than accumulating one mutex
+// per distinct shell tab for the daemon's lifetime.
+type shellStartGate struct {
+	mu   sync.Mutex
+	refs int
+}
+
+var shellStartGates = struct {
+	mu sync.Mutex
+	m  map[string]*shellStartGate
+}{m: map[string]*shellStartGate{}}
+
+// acquireShellStart returns the gate for a shell ID, registering a reference so a
+// concurrent releaser does not delete it out from under this caller. The caller
+// must Lock/Unlock the returned gate's mu and then call releaseShellStart.
+func acquireShellStart(id string) *shellStartGate {
+	shellStartGates.mu.Lock()
+	defer shellStartGates.mu.Unlock()
+	g, ok := shellStartGates.m[id]
+	if !ok {
+		g = &shellStartGate{}
+		shellStartGates.m[id] = g
+	}
+	g.refs++
+	return g
+}
+
+// releaseShellStart drops one reference to a shell ID's gate, removing it once no
+// caller holds it.
+func releaseShellStart(id string) {
+	shellStartGates.mu.Lock()
+	defer shellStartGates.mu.Unlock()
+	if g, ok := shellStartGates.m[id]; ok {
+		g.refs--
+		if g.refs == 0 {
+			delete(shellStartGates.m, id)
+		}
+	}
+}
+
 // StartShellSession opens an interactive bash session sharing the head's
 // worktree. When sandboxed is true the shell runs inside the same OS sandbox as
 // the agent; when false it runs directly on the host with no confinement (an
@@ -674,6 +717,25 @@ func sanitizeShellToken(token string) string {
 // ephemeral: closing the tab terminates the process after a short grace period.
 func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool, token string) (string, error) {
 	shellID := ShellSessionID(head.ID, sandboxed, token)
+	if reg.IsLive(shellID) {
+		return shellID, nil
+	}
+
+	// Serialize concurrent starts of the same shell. Two WebSocket connections for
+	// one terminal tab can race here - e.g. a pane remounting on a fast navigate-
+	// away-and-back opens a second socket (reusing the persisted tab id, hence the
+	// same shell ID) before the first has registered its session. Without this the
+	// loser's reg.Start finds the winner's freshly-registered session and returns
+	// session.ErrExists ("session already exists"), which the terminal handler
+	// shows the user as a fatal error; in the reserve/register gap both could even
+	// launch a process, orphaning one. Holding the per-id gate and re-checking
+	// IsLive makes the loser simply reattach to the shell the winner started.
+	startGate := acquireShellStart(shellID)
+	startGate.mu.Lock()
+	defer func() {
+		startGate.mu.Unlock()
+		releaseShellStart(shellID)
+	}()
 	if reg.IsLive(shellID) {
 		return shellID, nil
 	}
@@ -693,6 +755,14 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	// The shell shares the head's worktree; report it as a bash session since
 	// the pre-spawn config it runs is the bash agent's.
 	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	// Env vars the head's pre_spawn_script set for the agent (via $HYDRA_ENV, see
+	// nshost.startAgentSession) - injected here so a sandboxed shell sharing the
+	// head's worktree sees the same environment the agent works in, WITHOUT
+	// re-running the script. Appended last so it overrides. Only for sandboxed
+	// shells: the values are computed against the sandbox's view (e.g. its per-head
+	// /tmp), so they must not leak into the no-confinement host shell, whose paths
+	// differ. Empty (nil) when the agent has not spawned yet or set no vars.
+	preSpawnEnv := readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, head.ID)))
 
 	// If the head's agent is running inside a supervisor, spawn this bash terminal
 	// as a sibling child of that one bwrap. It then shares the agent's single
@@ -703,7 +773,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		if host, ok := namespaceHostFor(head.ID); ok {
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
-				Env:  env,
+				Env:  append(env, preSpawnEnv...),
 				Cwd:  worktreePath,
 				Rows: rows,
 				Cols: cols,
@@ -721,11 +791,12 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
-		// The pre-spawn script is intentionally NOT run for bash shells: it is a
+		// The pre-spawn script is intentionally NOT re-run for bash shells: it is a
 		// once-per-head agent-spawn hook, and these interactive shells open
 		// repeatedly over a head's life. Running it here also made a failing
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
-		// exec'd, closing the terminal instantly.
+		// exec'd, closing the terminal instantly. Its resolved env vars are still
+		// shared with the shell though (preSpawnEnv, below), just not by re-running it.
 		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
@@ -750,7 +821,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			Network:       net,
 			Binds:         seed.Binds,
 			CowMounts:     cowMounts,
-			Env:           append(env, seed.Env...),
+			Env:           append(append(env, seed.Env...), preSpawnEnv...),
 			Argv:          []string{"/bin/bash"},
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -830,6 +901,14 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// reaches that head. It must therefore be idempotent - it runs on every launch
 	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// If the pre_spawn_script was removed since this head last launched, drop any
+	// env it previously persisted so stale vars stop leaking into its shells (a
+	// script that still runs re-truncates the file itself on every launch).
+	if strings.TrimSpace(preSpawn) == "" {
+		if p := sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, head.ID)); p != "" {
+			_ = os.Remove(p)
+		}
+	}
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
 	if err != nil {
 		return errtrace.Wrap(err)

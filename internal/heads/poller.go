@@ -90,8 +90,8 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 	}
 }
 
-// graceUnread is how long a running→finished (or idle running→waiting)
-// transition must persist before the poller raises the unread-changes flag.
+// graceUnread is how long a running-to-finished transition must persist
+// before the poller raises the unread-changes flag.
 // It exists because a head that ends its turn to await a *background subagent*
 // briefly writes "finished" to the shared per-head status.json (its Stop hook),
 // and the subagent - which runs in the same sandbox and writes the same file -
@@ -141,7 +141,7 @@ func RunJSONStatusPollerOnce(store *db.Store, projectRoot string) {
 	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer(), nil, nil)
 }
 
-// pendingUnread records a running→finished/waiting transition whose unread flag
+// pendingUnread records a running-to-finished transition whose unread flag
 // is being deferred, along with the status it is waiting to confirm.
 type pendingUnread struct {
 	status string
@@ -150,13 +150,16 @@ type pendingUnread struct {
 
 // unreadDebouncer defers the unread-changes flag for transitions that can be a
 // transient delegation blip (see graceUnread). It is keyed by agent id and
-// owned by the single poller goroutine, so it needs no locking.
+// owned by the single poller goroutine, so it needs no locking. now is the clock
+// the poller reads for arm/ready timing; it is time.Now in production and
+// overridable in tests so the grace window can be advanced deterministically.
 type unreadDebouncer struct {
 	pending map[string]pendingUnread
+	now     func() time.Time
 }
 
 func newUnreadDebouncer() *unreadDebouncer {
-	return &unreadDebouncer{pending: make(map[string]pendingUnread)}
+	return &unreadDebouncer{pending: make(map[string]pendingUnread), now: time.Now}
 }
 
 // arm starts (or keeps) deferring the unread flag for id in the given status.
@@ -224,7 +227,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 		return
 	}
 
-	now := time.Now()
+	now := deb.now()
 	changed := false
 	// Tracks whether an unread flag actually went up this tick (distinct from any
 	// status churn). A raised flag moves this project's cross-project unread total,
@@ -266,9 +269,13 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// drawn back to. The needs_input status is the explicit "the agent is
 			// blocked on you" signal (AskUserQuestion/ExitPlanMode/permission), so
 			// it's flagged the moment it appears, whatever the prior state. A
-			// running→finished and the idle running→waiting nudge are deferred
-			// (graceUnread) because they also fire when a head pauses to await a
-			// background subagent that resumes on its own.
+			// running-to-finished transition is deferred (graceUnread) because a
+			// finished blip also fires when a head pauses to await a background
+			// subagent that resumes on its own. The idle running-to-waiting nudge
+			// raises no unread flag at all: waiting is never an explicit "needs
+			// you" wait (those are needs_input) - it means the head has gone quiet
+			// or is awaiting a background subagent, neither a moment to pull the
+			// user back to - so it advances the status but arms no unread flag.
 			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
 			statusChanged := a.AgentStatus == nil || *a.AgentStatus != agentStatus
 			immediate := statusChanged && agentStatus == "needs_input"
@@ -293,7 +300,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			switch {
 			case immediate:
 				deb.forget(a.ID)
-			case prevRunning && (agentStatus == "finished" || agentStatus == "waiting"):
+			case prevRunning && agentStatus == "finished":
 				deb.arm(a.ID, agentStatus, now)
 			case agentStatus == "running" || agentStatus == "starting":
 				// Activity resumed (e.g. the subagent's next tool hook) - cancel

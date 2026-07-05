@@ -295,20 +295,26 @@ func TestPollerBroadcastsProjectsChangedOnlyOnUnread(t *testing.T) {
 	}
 }
 
-// TestPollerNeedsInputUnreadImmediacy covers the AskUserQuestion fix: a
-// running→needs_input transition (the explicit "the agent needs you now" state)
-// raises has_unread_changes on the very next poll, whereas the idle "gone quiet"
-// nudge (running→waiting) is deferred - it flips the status but does NOT raise
-// the unread flag immediately (the debouncer holds it for graceUnread first).
+// TestPollerNeedsInputUnreadImmediacy pins how each wait feeds the unread flag:
+//   - running→needs_input (the explicit "the agent needs you now" state) raises
+//     has_unread_changes on the very next poll.
+//   - running→finished defers - it does not raise on the next poll, but matures
+//     into an unread flag once it has outlasted graceUnread.
+//   - running→waiting raises the flag NEVER - neither immediately nor after the
+//     grace window. Waiting is the soft "gone quiet" / awaiting-a-background-
+//     subagent nudge, not a moment to pull the user back to, so it only flips the
+//     status and is never armed for an unread flag.
 func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 	cases := []struct {
-		name       string
-		status     api.AgentStatus
-		wantStatus string
-		wantUnread bool
+		name            string
+		status          api.AgentStatus
+		wantStatus      string
+		wantUnreadNext  bool // unread on the poll right after the transition
+		wantUnreadGrace bool // unread on a later poll, after graceUnread has elapsed
 	}{
-		{"needs_input immediate", api.NeedsInput, "needs_input", true},
-		{"waiting deferred", api.Waiting, "waiting", false},
+		{"needs_input immediate", api.NeedsInput, "needs_input", true, true},
+		{"finished deferred", api.Finished, "finished", false, true},
+		{"waiting never", api.Waiting, "waiting", false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -327,6 +333,10 @@ func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 			hub := events.NewHub()
 			deb := newUnreadDebouncer()
 			base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+			// Drive the debouncer's grace timing off a deterministic clock so the
+			// second poll can be placed past graceUnread without real sleeps.
+			clock := base
+			deb.now = func() time.Time { return clock }
 
 			// Establish the running baseline so the next poll sees a transition off
 			// "running" (the unread flag only fires on that edge).
@@ -334,7 +344,8 @@ func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 			pollJSONStatusOnce(store, root, deb, hub, nil)
 
 			// The wait arrives.
-			writeAgentStatusJSON(t, root, id, c.status, "Notification", base.Add(time.Second).Format(time.RFC3339Nano))
+			clock = base.Add(time.Second)
+			writeAgentStatusJSON(t, root, id, c.status, "Notification", clock.Format(time.RFC3339Nano))
 			pollJSONStatusOnce(store, root, deb, hub, nil)
 
 			agents, err := store.ListAgents(root)
@@ -344,8 +355,21 @@ func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 			if got := agents[0].AgentStatus; got == nil || *got != c.wantStatus {
 				t.Fatalf("status = %v, want %s", got, c.wantStatus)
 			}
-			if got := agents[0].HasUnreadChanges; got != c.wantUnread {
-				t.Errorf("has_unread_changes = %v, want %v for status %q", got, c.wantUnread, c.wantStatus)
+			if got := agents[0].HasUnreadChanges; got != c.wantUnreadNext {
+				t.Errorf("has_unread_changes (next poll) = %v, want %v for status %q", got, c.wantUnreadNext, c.wantStatus)
+			}
+
+			// A later poll, still in the same status, past the grace window: a
+			// deferred flag (finished) matures here; waiting must still be unset
+			// because it was never armed.
+			clock = base.Add(time.Second).Add(2 * graceUnread)
+			pollJSONStatusOnce(store, root, deb, hub, nil)
+			agents, err = store.ListAgents(root)
+			if err != nil {
+				t.Fatalf("list agents: %v", err)
+			}
+			if got := agents[0].HasUnreadChanges; got != c.wantUnreadGrace {
+				t.Errorf("has_unread_changes (after grace) = %v, want %v for status %q", got, c.wantUnreadGrace, c.wantStatus)
 			}
 		})
 	}
