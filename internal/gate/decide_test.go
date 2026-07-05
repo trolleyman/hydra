@@ -69,6 +69,15 @@ func TestDecide(t *testing.T) {
 		// legitimate command (the anchor to a command boundary is what saves them).
 		{"bash grep for git push allowed", "Bash", map[string]any{"command": "grep -rn 'git push' internal/"}, Allow},
 		{"bash commit msg mentioning git push allowed", "Bash", map[string]any{"command": "git commit -m 'document the git push flow'"}, Allow},
+		{"bash pkill denied", "Bash", map[string]any{"command": "pkill -f simulation"}, Deny},
+		{"bash killall denied", "Bash", map[string]any{"command": "killall node"}, Deny},
+		{"bash chained pkill denied", "Bash", map[string]any{"command": "rm -f x && pkill -f 'go run'"}, Deny},
+		{"bash sudo pkill denied", "Bash", map[string]any{"command": "sudo pkill claude"}, Deny},
+		// A bare mention of pkill in an argument / echo / grep must NOT trip the wire
+		// (the command-boundary anchor is what saves them), and kill-by-PID is fine.
+		{"bash echo mentioning pkill allowed", "Bash", map[string]any{"command": "echo 'do not use pkill here'"}, Allow},
+		{"bash grep for pkill allowed", "Bash", map[string]any{"command": "grep -rn pkill internal/"}, Allow},
+		{"bash kill by pid allowed", "Bash", map[string]any{"command": "kill \"$SRV\""}, Allow},
 		{"bash normal allowed", "Bash", map[string]any{"command": "go test ./..."}, Allow},
 		{"unrecognized tool parked", "SomeNewTool", map[string]any{"x": "y"}, Ask},
 		{"websearch allowed", "WebSearch", map[string]any{"query": "x"}, Allow},

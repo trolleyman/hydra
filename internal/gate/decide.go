@@ -74,6 +74,18 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // by the caller.
 var gitPushRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*push\b`)
 
+// procKillRe matches a `pkill` or `killall` INVOCATION at a command boundary
+// (start, or right after a `;`, `&`, `|`, `(`, or newline), tolerating a leading
+// `sudo`. These kill processes by NAME/command-line pattern, and every agent runs
+// as `claude --append-system-prompt "<the whole system prompt>"`, so that argv
+// contains most words an agent might pkill on (e.g. a leftover dev server whose
+// name also appears in the prompt) - a generic pattern silently matches the
+// agent's own process and any co-tenant sessions sharing the head's PID namespace,
+// killing the session mid-command. Anchoring to the command position (like
+// gitPushRe) keeps a bare mention in an argument, echo, or grep pattern from
+// tripping. Kill-by-PID (`kill "$PID"`) and job specs are unaffected.
+var procKillRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*(?:sudo\s+)?(?:pkill|killall)\b`)
+
 // settingsTamperIntentRe matches the hook-disabling settings keys. On its own a
 // mention is not enough to deny (it shows up in commit messages, an echo, a grep);
 // it only trips when the command also writes (settingsWriteIndicatorRe), i.e. is
@@ -218,6 +230,12 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			return Result{
 				Decision: Deny,
 				Reason:   "modifying Claude settings/hooks from the shell is not allowed (it would let the agent disable its own gate)",
+			}
+		}
+		if procKillRe.MatchString(cmd) {
+			return Result{
+				Decision: Deny,
+				Reason:   "pkill/killall are not allowed - they match processes by name/command-line and will also match this agent's own process (its whole system prompt rides in the `--append-system-prompt` argv) and co-tenant sessions in the same sandbox, killing your session. Kill a background process by its captured PID (`kill \"$PID\"`) or by port (`fuser -k <port>/tcp`) instead.",
 			}
 		}
 		if gitPushRe.MatchString(cmd) && !strings.Contains(cmd, "--dry-run") {
