@@ -613,9 +613,10 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: Tes
               {/* Badge counts the status's FULL tally, like every tree node. */}
               <NodeBadges counts={{ [status]: all.length }} />
             </button>
-            {/* Hard open/close - the section snaps between shown and hidden (no
-                grid-row slide) to match the cards' instant expand. */}
-            <div className={`grid ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            {/* Animated open/close, matching the tree's grid-row slide. A
+                default-open section renders at grid-rows-[1fr] from its first paint,
+                so it appears open with no glide; only a user toggle animates. */}
+            <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
               <div className="overflow-hidden min-h-0">
                 <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} />
               </div>
