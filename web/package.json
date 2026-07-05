@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "generate-tanstack-router": "tsr generate",
-    "generate-openapi": "npx openapi-typescript-codegen --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
+    "generate-openapi": "bun x openapi-typescript-codegen --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
     "generate-routes-regex": "bun scripts/generate-routes-regex.ts",
     "prebuild": "bun run generate-openapi && bun run generate-tanstack-router",
     "build": "tsc -b && vite build",
