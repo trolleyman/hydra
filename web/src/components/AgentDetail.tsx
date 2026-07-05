@@ -15,7 +15,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, GitMerge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -950,7 +950,7 @@ export function AgentDetail({
           disabled: busy,
           shortcut: SHORTCUT_MERGE,
           menu: ([
-            { label: 'Merge and continue', description: `Merge into ${toBranch} but keep the agent running.`, icon: <GitMerge className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
+            { label: 'Merge and continue', description: `Merge into ${toBranch} but keep the agent running.`, icon: <GitPullRequestArrow className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
             { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
             { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
           ] as AgentTopBarMenuItem[]),
