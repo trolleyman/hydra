@@ -19,7 +19,20 @@ const STATUS_CHIPS = [
 // own marker because "unread" is orthogonal to status (a finished agent can still
 // be unreviewed). Renders nothing when the project has no per-status chips to show
 // and nothing unread.
-export function ProjectAgentCounts({ project, className = '' }: { project: ProjectInfo; className?: string }) {
+//
+// `onAccent` styles the chips for a solid accent background (the Ctrl+` project
+// switcher's highlighted row is `bg-blue-500 text-white`): the status dots stay
+// their signal colors - they read fine on blue - but the numbers and unread dot
+// go white so they don't sit at low contrast the way `text-green-600` etc. would.
+export function ProjectAgentCounts({
+  project,
+  className = '',
+  onAccent = false,
+}: {
+  project: ProjectInfo
+  className?: string
+  onAccent?: boolean
+}) {
   const total = project.agent_count ?? 0
   const unread = project.unread_count ?? 0
   const chips = STATUS_CHIPS
@@ -37,11 +50,13 @@ export function ProjectAgentCounts({ project, className = '' }: { project: Proje
 
   return (
     <div className={`flex items-center gap-1.5 ${className}`} aria-label={summary} title={summary}>
-      {unread > 0 && <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0" aria-hidden />}
+      {unread > 0 && (
+        <span className={`w-2 h-2 rounded-full shrink-0 ${onAccent ? 'bg-white' : 'bg-sky-500'}`} aria-hidden />
+      )}
       {chips.map((c) => (
         <span key={c.key} className="inline-flex items-center gap-1 tabular-nums" aria-hidden>
           <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
-          <span className={`text-xs font-medium ${c.text}`}>{c.n}</span>
+          <span className={`text-xs font-medium ${onAccent ? 'text-white' : c.text}`}>{c.n}</span>
         </span>
       ))}
     </div>

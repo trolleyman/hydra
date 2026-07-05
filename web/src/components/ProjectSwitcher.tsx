@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { SwitcherState } from '../lib/useGlobalShortcuts'
 import { ProjectIcon } from '../lib/projectIcon'
+import { ProjectAgentCounts } from './ProjectAgentCounts'
 
 // The centered alt-tab-style project switcher overlay. Rendered by RootLayout
 // while Ctrl+` is held (state owned by useGlobalShortcuts): it lists projects in
@@ -62,11 +63,11 @@ export function ProjectSwitcher({
                     {p.path}
                   </div>
                 </div>
-                {(p.needs_input_count ?? 0) > 0 ? (
-                  <span className={`shrink-0 w-2 h-2 rounded-full ${active ? 'bg-white' : 'bg-red-500'}`} />
-                ) : (p.unread_count ?? 0) > 0 ? (
-                  <span className={`shrink-0 w-2 h-2 rounded-full ${active ? 'bg-white' : 'bg-sky-500'}`} />
-                ) : null}
+                {/* Per-project agent tally, matching the sidebar project
+                    dropdown: an unread dot plus a colored dot+count per non-zero
+                    status. onAccent keeps the numbers readable on the highlighted
+                    row's blue fill. */}
+                <ProjectAgentCounts project={p} onAccent={active} className="shrink-0" />
               </div>
             )
           })}
