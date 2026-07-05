@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -663,6 +664,48 @@ func sanitizeShellToken(token string) string {
 	return b.String()
 }
 
+// shellStartGate serializes concurrent StartShellSession calls for one shell ID.
+// refs tracks the callers holding (or waiting on) it so the entry can be dropped
+// once idle, keeping shellStartGates bounded rather than accumulating one mutex
+// per distinct shell tab for the daemon's lifetime.
+type shellStartGate struct {
+	mu   sync.Mutex
+	refs int
+}
+
+var shellStartGates = struct {
+	mu sync.Mutex
+	m  map[string]*shellStartGate
+}{m: map[string]*shellStartGate{}}
+
+// acquireShellStart returns the gate for a shell ID, registering a reference so a
+// concurrent releaser does not delete it out from under this caller. The caller
+// must Lock/Unlock the returned gate's mu and then call releaseShellStart.
+func acquireShellStart(id string) *shellStartGate {
+	shellStartGates.mu.Lock()
+	defer shellStartGates.mu.Unlock()
+	g, ok := shellStartGates.m[id]
+	if !ok {
+		g = &shellStartGate{}
+		shellStartGates.m[id] = g
+	}
+	g.refs++
+	return g
+}
+
+// releaseShellStart drops one reference to a shell ID's gate, removing it once no
+// caller holds it.
+func releaseShellStart(id string) {
+	shellStartGates.mu.Lock()
+	defer shellStartGates.mu.Unlock()
+	if g, ok := shellStartGates.m[id]; ok {
+		g.refs--
+		if g.refs == 0 {
+			delete(shellStartGates.m, id)
+		}
+	}
+}
+
 // StartShellSession opens an interactive bash session sharing the head's
 // worktree. When sandboxed is true the shell runs inside the same OS sandbox as
 // the agent; when false it runs directly on the host with no confinement (an
@@ -674,6 +717,25 @@ func sanitizeShellToken(token string) string {
 // ephemeral: closing the tab terminates the process after a short grace period.
 func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool, token string) (string, error) {
 	shellID := ShellSessionID(head.ID, sandboxed, token)
+	if reg.IsLive(shellID) {
+		return shellID, nil
+	}
+
+	// Serialize concurrent starts of the same shell. Two WebSocket connections for
+	// one terminal tab can race here - e.g. a pane remounting on a fast navigate-
+	// away-and-back opens a second socket (reusing the persisted tab id, hence the
+	// same shell ID) before the first has registered its session. Without this the
+	// loser's reg.Start finds the winner's freshly-registered session and returns
+	// session.ErrExists ("session already exists"), which the terminal handler
+	// shows the user as a fatal error; in the reserve/register gap both could even
+	// launch a process, orphaning one. Holding the per-id gate and re-checking
+	// IsLive makes the loser simply reattach to the shell the winner started.
+	startGate := acquireShellStart(shellID)
+	startGate.mu.Lock()
+	defer func() {
+		startGate.mu.Unlock()
+		releaseShellStart(shellID)
+	}()
 	if reg.IsLive(shellID) {
 		return shellID, nil
 	}
