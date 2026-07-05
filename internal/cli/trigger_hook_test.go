@@ -647,20 +647,64 @@ func TestTriggerHookStopPendingBackgroundShell(t *testing.T) {
 	if got := fireHook(t, statusPath, subagents, "", shellTask("completed")); got != api.Finished {
 		t.Errorf("Stop with a completed background shell = %q, want finished", got)
 	}
-	// A non-shell background task (e.g. a monitor) is not a shell -> finished.
+	// A non-shell, non-subagent background task (e.g. a monitor) holds nothing
+	// back -> finished.
 	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
 		"hook_event_name": "Stop",
 		"background_tasks": []interface{}{
 			map[string]interface{}{"id": "m1", "type": "monitor", "status": "running"},
 		},
 	}); got != api.Finished {
-		t.Errorf("Stop with only a non-shell background task = %q, want finished", got)
+		t.Errorf("Stop with only a monitor background task = %q, want finished", got)
 	}
 	// No background_tasks at all (older Claude / other agents) -> finished.
 	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
 		"hook_event_name": "Stop",
 	}); got != api.Finished {
 		t.Errorf("Stop with no background_tasks = %q, want finished", got)
+	}
+}
+
+// TestTriggerHookStopBackgroundSubagentFallback covers the marker fallback: even
+// with no live marker in HYDRA_SUBAGENTS_DIR (e.g. a SubagentStart hook was
+// missed), a still-running "subagent" listed in the Stop payload's
+// background_tasks keeps the head running - not finished - so a genuinely
+// delegating head is never auto-merged as done. A subagent still outranks a
+// pending shell (running wins over waiting).
+func TestTriggerHookStopBackgroundSubagentFallback(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	subagents := filepath.Join(dir, "subagents") // stays empty: no markers
+
+	// A running subagent in background_tasks, no marker -> running (fallback).
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "Stop",
+		"background_tasks": []interface{}{
+			map[string]interface{}{"id": "s1", "type": "subagent", "status": "running"},
+		},
+	}); got != api.Running {
+		t.Errorf("Stop with a background_tasks subagent and no marker = %q, want running", got)
+	}
+
+	// A pending subagent AND a pending shell: running wins over waiting.
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "Stop",
+		"background_tasks": []interface{}{
+			map[string]interface{}{"id": "sh1", "type": "shell", "status": "running"},
+			map[string]interface{}{"id": "s1", "type": "subagent", "status": "running"},
+		},
+	}); got != api.Running {
+		t.Errorf("Stop with both a pending shell and subagent = %q, want running", got)
+	}
+
+	// A completed subagent no longer holds the head back -> finished.
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "Stop",
+		"background_tasks": []interface{}{
+			map[string]interface{}{"id": "s1", "type": "subagent", "status": "completed"},
+		},
+	}); got != api.Finished {
+		t.Errorf("Stop with a completed background_tasks subagent = %q, want finished", got)
 	}
 }
 

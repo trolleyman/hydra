@@ -185,16 +185,17 @@ func activeSubagentCount() int {
 	return n
 }
 
-// pendingBackgroundShell reports whether the Stop hook payload lists a still-
-// active background shell task. Claude Code (v2.1.145+) includes a
+// pendingBackgroundTask reports whether the Stop hook payload lists a still-
+// active background task of the given type. Claude Code (v2.1.145+) includes a
 // `background_tasks` array on the Stop event; each entry carries a `type`
-// ("shell", "subagent", "monitor", ...) and a `status`. A pending shell means
-// the turn ended while a command the agent launched with run_in_background is
-// still running (e.g. a compile it paused for), so the head isn't finished.
-// Sub-agents are tracked separately (the marker dir), so only shells count here.
-// An absent array (older Claude, Gemini, Copilot) yields false, preserving the
-// prior finished-on-Stop behavior.
-func pendingBackgroundShell(input map[string]interface{}) bool {
+// ("shell", "subagent", "monitor", ...) and a `status`. A pending task means the
+// turn ended while background work is still outstanding, so the head isn't
+// finished: a "shell" is a command the agent launched with run_in_background
+// (e.g. a compile it paused for), and a "subagent" is a Task-tool child - reading
+// it here is a fallback for the marker dir (`activeSubagentCount`) that catches a
+// missed SubagentStart/Stop hook. An absent array (older Claude, Gemini, Copilot)
+// yields false, preserving the prior finished-on-Stop behavior.
+func pendingBackgroundTask(input map[string]interface{}, taskType string) bool {
 	tasks, ok := input["background_tasks"].([]interface{})
 	if !ok {
 		return false
@@ -204,7 +205,7 @@ func pendingBackgroundShell(input map[string]interface{}) bool {
 		if !ok {
 			continue
 		}
-		if stringField(tm, "type") != "shell" {
+		if stringField(tm, "type") != taskType {
 			continue
 		}
 		if !isTerminalTaskStatus(stringField(tm, "status")) {
@@ -427,21 +428,23 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		// But if sub-agents this head launched are still running, the turn ending
 		// doesn't mean the head is done - its background sub-agents are, and it
 		// will resume when they report back. Report running so the head isn't
-		// treated (or auto-merged) as finished.
+		// treated (or auto-merged) as finished. Liveness comes from our own marker
+		// dir (activeSubagentCount), with the Stop payload's background_tasks as a
+		// fallback: if a SubagentStart/Stop hook was ever missed and the markers
+		// disagree, a "subagent" task still listed there keeps the head running.
 		//
-		// Likewise, if the agent left a background shell running (Claude's Stop
-		// payload lists it in background_tasks - e.g. it launched a compile with
-		// run_in_background and paused for the result), the turn ended but real
-		// work is still pending. A shell, unlike a sub-agent, may not wake the
-		// agent on its own, so this isn't "running" - it's the soft "paused on
-		// background work" wait. Report waiting: it reads accurately and, unlike
-		// finished, holds auto-merge (which gates on finished) until the shell
-		// drains. finished thus means "main turn ended AND no live sub-agents AND
-		// no pending background shell".
+		// Likewise, if the agent left a background shell running (background_tasks
+		// lists it too - e.g. it launched a compile with run_in_background and
+		// paused for the result), the turn ended but real work is still pending. A
+		// shell, unlike a sub-agent, may not wake the agent on its own, so this
+		// isn't "running" - it's the soft "paused on background work" wait. Report
+		// waiting: it reads accurately and, unlike finished, holds auto-merge
+		// (which gates on finished) until the shell drains. finished thus means
+		// "main turn ended AND no live sub-agents AND no pending background shell".
 		switch {
-		case activeSubagentCount() > 0:
+		case activeSubagentCount() > 0 || pendingBackgroundTask(input, "subagent"):
 			status = api.Running
-		case pendingBackgroundShell(input):
+		case pendingBackgroundTask(input, "shell"):
 			status = api.Waiting
 		default:
 			status = api.Finished
