@@ -34,13 +34,13 @@ const COLLAPSE_MS = 200
 // overflow-hidden, which would otherwise trap the sticky header inside the card),
 // and an opaque resting tint so the scrolling body doesn't show through.
 //
-// Expand/collapse is animated: the chevron rotates a quarter-turn and the body
-// glides between 0 and its measured height. Because the height tracks the live
-// content height (a ResizeObserver via useMeasuredHeight), in-place content swaps
-// while open - toggling the build log, a grid collapsing to "No files match ..." -
-// glide too instead of snapping. The body stays MOUNTED only while open (plus the
-// brief collapse animation), so a collapsed card never pays to render its heavy
-// children (xterm logs, image grids); see `mounted` below.
+// Opening is a HARD open: the body appears at its full measured height in the same
+// paint, with no collapsed->expanded glide (by request - a restored-expanded card
+// should read as already-open, not animate itself open on every mount). Only
+// COLLAPSING is animated - the body glides from its measured height back down to 0
+// (and the chevron rotates its quarter-turn both ways). The body stays MOUNTED only
+// while open (plus the brief collapse animation), so a collapsed card never pays to
+// render its heavy children (xterm logs, image grids); see `mounted` below.
 export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false }: {
   icon: ReactNode
   name: ReactNode
@@ -56,20 +56,18 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
 }) {
   const [bodyRef, bodyH] = useMeasuredHeight(0)
   // `mounted` keeps the body in the tree while open and for the length of a collapse
-  // animation, then drops it so a collapsed card stays cheap. Expanding mounts at
-  // once (in an effect, after a paint at height 0) so the 0→height glide can play.
+  // animation, then drops it so a collapsed card stays cheap. Expanding mounts the
+  // body SYNCHRONOUSLY (adjusted during render - React's sanctioned pattern) so it
+  // paints at its full measured height at once: a hard open with no glide. The ref's
+  // ResizeObserver measures the height in-commit (before paint), so the snap lands on
+  // the real height, not a flash at 0.
   const [mounted, setMounted] = useState(!collapsed)
+  if (!collapsed && !mounted) setMounted(true)
   useEffect(() => {
-    if (!collapsed) {
-      // Mount deliberately in an effect (after a paint at height 0), NOT during
-      // render, so the 0→height glide can play; mounting synchronously would jump
-      // straight to the measured height. This post-paint setState is intentional.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMounted(true)
-      return
+    if (collapsed) {
+      const t = setTimeout(() => setMounted(false), COLLAPSE_MS)
+      return () => clearTimeout(t)
     }
-    const t = setTimeout(() => setMounted(false), COLLAPSE_MS)
-    return () => clearTimeout(t)
   }, [collapsed])
   const open = !collapsed && mounted
   return (
@@ -95,8 +93,10 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
             Each brightens only on its own hover (see MELT_BTN). */}
         {actions && <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">{actions}</div>}
       </div>
-      {/* Height tracks the measured content so both expand/collapse and in-place
-          content swaps glide; overflow-hidden clips the body as it grows/shrinks.
+      {/* Height snaps to the measured content when open (hard open, no glide) and
+          animates back to 0 on collapse - the height transition is applied only
+          while `!open`, so it's live for the measured-height->0 close but absent for
+          the 0->measured-height open. overflow-hidden clips the body as it shrinks.
           `isolate` traps the body's positioned content (artifact tiles render the
           images as `absolute inset-0`, and the compare slider has an `absolute
           z-10` handle) in its own stacking context, so it can never paint over the
@@ -104,7 +104,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
           mis-order those leaked positioned layers against `position: sticky`
           during image-decode repaints. */}
       <div
-        className="isolate overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+        className={`isolate overflow-hidden ${open ? '' : 'transition-[height] duration-200 ease-out motion-reduce:transition-none'}`}
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >
