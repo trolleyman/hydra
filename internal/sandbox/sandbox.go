@@ -282,6 +282,11 @@ type Options struct {
 	// real command execs after it returns; an explicit non-zero `exit` (or a
 	// `set -e` failure) aborts the launch and prints a diagnostic to the terminal
 	// (see preSpawnExitTrap). Empty to skip. Ignored when NoSandbox is set.
+	//
+	// The script is given $HYDRA_ENV, a path it can append `KEY=value` lines to;
+	// each is exported into the environment the agent (and every command it runs)
+	// inherits, so a pre-spawn script can set static env vars for the whole head
+	// (see preSpawnEnvSetup / preSpawnEnvApply).
 	PreSpawnScript string
 
 	// EgressWrap, when set, transforms the assembled bwrap argv into a final argv
@@ -365,6 +370,34 @@ func interpIsBash(interp []string) bool {
 // image, so a script that falls through never triggers it.
 const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) - agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
 
+// preSpawnEnvSetup points $HYDRA_ENV at a fresh, writable temp file before the
+// user's script runs, so the script can persist environment variables into the
+// launched agent by appending `KEY=value` lines to it (the GitHub Actions
+// $GITHUB_ENV model) - e.g. `echo "GRADLE_USER_HOME=/tmp/gradle-iso" >>
+// "$HYDRA_ENV"`. This gives an explicit, no-surprises channel that does not rely
+// on the script's own `export`s surviving into the agent. The template lives in
+// $TMPDIR (the per-head private /tmp), so the file is reclaimed with the head.
+const preSpawnEnvSetup = `export HYDRA_ENV="$(mktemp "${TMPDIR:-/tmp}/hydra-env.XXXXXX")"`
+
+// preSpawnEnvApply runs after the user's script and before `exec`s the agent: it
+// reads back every `KEY=value` line the script wrote to $HYDRA_ENV and exports it
+// into the environment the agent (and every command it later runs) inherits.
+// Each line is exported literally - no shell evaluation of the value - so spaces
+// and metacharacters are preserved and there is no accidental command
+// substitution; blank lines and `#` comments are skipped. These vars OVERRIDE any
+// existing value in the agent's environment. The temp file is then removed and
+// HYDRA_ENV unset so it does not leak to the agent (appending to it post-spawn has
+// no effect). A malformed line (bad identifier) fails under strict mode and gates
+// the launch with the pre_spawn_script diagnostic, same as any other script error.
+const preSpawnEnvApply = `if [ -n "$HYDRA_ENV" ] && [ -f "$HYDRA_ENV" ]; then
+	while IFS= read -r hydra_env_line || [ -n "$hydra_env_line" ]; do
+		case "$hydra_env_line" in ''|'#'*) continue ;; esac
+		export "$hydra_env_line"
+	done < "$HYDRA_ENV"
+	rm -f "$HYDRA_ENV"
+fi
+unset HYDRA_ENV`
+
 // withPreSpawn wraps argv so that script runs inside the sandbox before the real
 // command. The script shares the agent's shell: falling through it execs argv,
 // while an explicit `exit N` (or a `set -e` failure) aborts the launch and prints
@@ -394,7 +427,16 @@ func withPreSpawn(script string, argv []string) []string {
 	// exec'd agent), guarded by an EXIT trap that reports a gating failure. $0 is
 	// the wrapper name; $@ is the original argv, exec'd once the script falls
 	// through (the trap is cleared first so exec-failure isn't misreported).
-	wrapper := preSpawnExitTrap + "\n" + body + "\ntrap - EXIT\nexec \"$@\""
+	// preSpawnEnvSetup exposes $HYDRA_ENV to the script; preSpawnEnvApply exports
+	// what it wrote there into the agent's environment just before exec.
+	wrapper := strings.Join([]string{
+		preSpawnExitTrap,
+		preSpawnEnvSetup,
+		body,
+		preSpawnEnvApply,
+		"trap - EXIT",
+		`exec "$@"`,
+	}, "\n")
 	cmd := append(interp, "-c", wrapper, "hydra-pre-spawn")
 	return append(cmd, argv...)
 }

@@ -81,6 +81,46 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 	}
 }
 
+// TestWrapPreSpawnHydraEnv runs the production wrapper as a real process to verify
+// the $HYDRA_ENV contract end-to-end: a pre-spawn script that appends KEY=value
+// lines to $HYDRA_ENV has those vars exported into the exec'd command's
+// environment, values are taken literally (no shell evaluation), blanks/comments
+// are skipped, and an injected var overrides one already present in the base env.
+func TestWrapPreSpawnHydraEnv(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "env-dump")
+	q := func(p string) string { return "'" + p + "'" }
+
+	// The script writes several vars via $HYDRA_ENV, including a comment, a blank
+	// line, a value with spaces, a literal that must NOT be command-substituted,
+	// and an override of PRESET (exported into the base env below).
+	script := strings.Join([]string{
+		`printf '%s\n' 'FROM_ENV=hello' >> "$HYDRA_ENV"`,
+		`printf '%s\n' '# a comment' >> "$HYDRA_ENV"`,
+		`printf '%s\n' '' >> "$HYDRA_ENV"`,
+		`printf '%s\n' 'WITH_SPACES=a b c' >> "$HYDRA_ENV"`,
+		`printf '%s\n' 'LITERAL=$(echo pwned)' >> "$HYDRA_ENV"`,
+		`printf '%s\n' 'PRESET=overridden' >> "$HYDRA_ENV"`,
+	}, "\n")
+	// The "real" command dumps the three vars it should see from its environment.
+	argv := []string{"/bin/sh", "-c", "printf '%s\\n' \"$FROM_ENV\" \"$WITH_SPACES\" \"$LITERAL\" \"$PRESET\" > " + q(out)}
+
+	wrapped := WrapPreSpawn(script, argv)
+	cmd := exec.Command(wrapped[0], wrapped[1:]...)
+	cmd.Env = append(os.Environ(), "PRESET=original")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run wrapped pre-spawn: %v\noutput: %s", err, b)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read env dump: %v", err)
+	}
+	want := "hello\na b c\n$(echo pwned)\noverridden\n"
+	if string(got) != want {
+		t.Fatalf("injected env:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestWithPreSpawn(t *testing.T) {
 	argv := []string{"claude", "--dangerously-skip-permissions"}
 
@@ -97,11 +137,18 @@ func TestWithPreSpawn(t *testing.T) {
 		t.Errorf("empty argv: got %v, want nil", got)
 	}
 
+	// wrap builds the expected `-c` body for a given (already interpreter-adjusted)
+	// script body: the EXIT trap, the $HYDRA_ENV setup, the body, the env apply-back,
+	// then the trap clear and exec.
+	wrap := func(body string) string {
+		return strings.Join([]string{preSpawnExitTrap, preSpawnEnvSetup, body, preSpawnEnvApply, "trap - EXIT", `exec "$@"`}, "\n")
+	}
+
 	// Script set, no shebang: defaults to /bin/bash -c, exec'ing argv via "$@"
 	// after an EXIT trap that reports a gating failure. Being bash, the body also
 	// runs under the strict preamble (set -eo pipefail).
 	got := withPreSpawn("mise trust", argv)
-	want := []string{"/bin/bash", "-c", preSpawnExitTrap + "\n" + StrictShellPreamble + "mise trust\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want := []string{"/bin/bash", "-c", wrap(StrictShellPreamble + "mise trust"), "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapped argv:\n got %#v\nwant %#v", got, want)
 	}
@@ -111,7 +158,7 @@ func TestWithPreSpawn(t *testing.T) {
 	// strict preamble (set -o pipefail is a bashism).
 	body := "#!/bin/zsh\nset -o pipefail\nmise trust"
 	got = withPreSpawn(body, argv)
-	want = []string{"/bin/zsh", "-c", preSpawnExitTrap + "\n" + body + "\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want = []string{"/bin/zsh", "-c", wrap(body), "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("zsh shebang:\n got %#v\nwant %#v", got, want)
 	}

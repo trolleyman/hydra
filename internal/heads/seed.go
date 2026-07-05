@@ -477,10 +477,13 @@ var envKeysHydraOwns = map[string]bool{
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
 // branch on the head's identity, agent type and git layout - e.g. seeding only
-// for a given agent, or copying files into the worktree.
+// for a given agent, or copying files into the worktree. The pre-spawn script is
+// additionally given $HYDRA_ENV (a file it appends KEY=value lines to, exported
+// into the agent - see sandbox.preSpawnEnvSetup); that one is set by the wrapper,
+// not here, so it is not listed below or in envKeysHydraOwns.
 //
 // Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
-// web/src/components/SettingsComponents.tsx in sync.
+// web/src/components/settings/ConfigForm.tsx in sync.
 // derefStr returns the pointed-to string, or "" when the pointer is nil.
 func derefStr(s *string) string {
 	if s == nil {
