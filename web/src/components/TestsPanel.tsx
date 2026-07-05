@@ -578,14 +578,20 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 // (worst first), styled as a ROOT TREE NODE - chevron + status icon + label
 // with the everything-counted badge on the right, its CaseTree indented one
 // level beneath it under a guide line - so the view reads as one tree whose
-// first level is the result. Failing/warning sections open by default;
-// skipped/passing start collapsed (folded away rather than filtered out).
+// first level is the result. Failing/warning/skipped sections open by default;
+// only passing starts collapsed (folded away rather than filtered out), since a
+// green run can be huge - and a folded section mounts no rows at all (see
+// ResultSection), so leaving it shut costs nothing until it is opened.
 const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
   { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
   { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
-  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: false },
+  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: true },
   { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
 ]
+
+// How long a section's grid-row slide runs (matches the duration-200 below);
+// kept in JS so the unmount-after-collapse timer lines up with the CSS glide.
+const SECTION_COLLAPSE_MS = 200
 
 function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean; onOpenInRepo?: OpenInRepo }) {
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
@@ -596,35 +602,79 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: Tes
         const vis = visible.filter((c) => c.status === status)
         if (vis.length === 0) return null
         const open = openOverride[status] ?? defaultOpen
-        const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
-          : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-            : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
-              : <Check className="w-3.5 h-3.5 text-green-600 shrink-0" strokeWidth={3} />
         return (
-          <div key={status}>
-            <button
-              onClick={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
-              className="flex w-full items-center gap-1.5 py-1 pl-2 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
-            >
-              {/* One chevron, rotated 90° when open, so the twist animates. */}
-              <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-              {icon}
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">{label}</span>
-              {/* Badge counts the status's FULL tally, like every tree node. */}
-              <NodeBadges counts={{ [status]: all.length }} />
-            </button>
-            {/* Animated open/close, matching the tree's grid-row slide. A
-                default-open section renders at grid-rows-[1fr] from its first paint,
-                so it appears open with no glide; only a user toggle animates. */}
-            <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-              <div className="overflow-hidden min-h-0">
-                <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} />
-              </div>
-            </div>
-          </div>
+          <ResultSection
+            key={status}
+            status={status}
+            label={label}
+            all={all}
+            vis={vis}
+            open={open}
+            onToggle={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
+            useScope={useScope}
+            onOpenInRepo={onOpenInRepo}
+          />
         )
       })}
     </>
+  )
+}
+
+// ResultSection is one status section. Its CaseTree body mounts on open and
+// unmounts a beat after collapse (SECTION_COLLAPSE_MS, matching the grid slide),
+// so a folded section - a wall of passing cases, say - builds no rows until it
+// is opened. Same mount-on-open/unmount-after-glide idiom CollapsibleCard and
+// the diff viewer's file bodies use for their heavy children. `showBody` renders
+// the instant `open` flips true (not an effect-frame later) so the [0fr]->[1fr]
+// slide has real content to grow into; `mounted` only keeps the body alive
+// through the closing glide before it is dropped.
+function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOpenInRepo }: {
+  status: TestCaseStatus
+  label: string
+  all: TestCase[]
+  vis: TestCase[]
+  open: boolean
+  onToggle: () => void
+  useScope: boolean
+  onOpenInRepo?: OpenInRepo
+}) {
+  const [mounted, setMounted] = useState(open)
+  useEffect(() => {
+    if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMounted(true)
+      return
+    }
+    const t = setTimeout(() => setMounted(false), SECTION_COLLAPSE_MS)
+    return () => clearTimeout(t)
+  }, [open])
+  const showBody = open || mounted
+  const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
+    : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+      : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
+        : <Check className="w-3.5 h-3.5 text-green-600 shrink-0" strokeWidth={3} />
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center gap-1.5 py-1 pl-2 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
+      >
+        {/* One chevron, rotated 90° when open, so the twist animates. */}
+        <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        {icon}
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">{label}</span>
+        {/* Badge counts the status's FULL tally, like every tree node. */}
+        <NodeBadges counts={{ [status]: all.length }} />
+      </button>
+      {/* Animated open/close, matching the tree's grid-row slide. A
+          default-open section renders at grid-rows-[1fr] from its first paint,
+          so it appears open with no glide; only a user toggle animates. */}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden min-h-0">
+          {showBody && <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} />}
+        </div>
+      </div>
+    </div>
   )
 }
 
