@@ -63,7 +63,7 @@ export function AgentSidebarItem({
         ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
           // never overlaps the type/status/created-time row below. Set when the
-          // agent goes running→waiting/finished, cleared when it's opened.
+          // agent settles into finished (or reaches needs_input), cleared when it's opened.
           <span
             aria-label="unread changes"
             className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"

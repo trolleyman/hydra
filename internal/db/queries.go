@@ -185,10 +185,10 @@ func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string, markUnread 
 }
 
 // RaiseUnread sets the has_unread_changes flag without touching the status or
-// its timestamp. The poller uses this to confirm a deferred running→finished
-// (or idle running→waiting) transition once the agent has held that state past
-// the debounce window - separating "raise the flag" from "update the status"
-// that UpdateAgentStatus does on the original transition.
+// its timestamp. The poller uses this to confirm a deferred running-to-finished
+// transition once the agent has held that state past the debounce window -
+// separating "raise the flag" from "update the status" that UpdateAgentStatus
+// does on the original transition.
 func (s *Store) RaiseUnread(id string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("has_unread_changes", true)
 	return errtrace.Wrap(result.Error)

@@ -76,13 +76,13 @@ export function useAgentNotifications(
   // so an on-demand refetch only toasts agents that newly entered the wait.
   const bgBlocked = useRef<Map<string, Set<string>>>(new Map())
   // projectId → set of unread agent ids last seen for a background project -
-  // the finished/waiting analogue of bgBlocked. The daemon raises an agent's
-  // unread flag when it settles into a state worth telling the user about
-  // (finished/waiting ride out a grace window first, so subagent blips don't
-  // count), which makes "newly unread" the transition signal.
+  // the finished analogue of bgBlocked. The daemon raises an agent's unread
+  // flag when it settles into finished (which rides out a grace window first,
+  // so subagent blips don't count); the soft waiting status never raises it.
+  // "newly unread" is thus the finished-transition signal.
   const bgUnread = useRef<Map<string, Set<string>>>(new Map())
   // When this hook first observed the project list (set on the effect's first
-  // run - render must stay pure). An unread finished/waiting agent only toasts
+  // run - render must stay pure). An unread finished agent only toasts
   // if its status transition happened while the UI was open (small slack for
   // the unread grace window) - the first count change for a project toasts
   // every not-yet-seen unread agent, which would otherwise include agents that
@@ -295,7 +295,7 @@ export function useAgentNotifications(
   // project's needs_input_count and unread_count. So we diff each *background*
   // project's counts and, when either changes, fetch that project's agents on
   // demand to learn which ones moved - popping one toast per newly-blocked
-  // agent (needs_input) and one per newly-unread finished/waiting agent. A
+  // agent (needs_input) and one per newly-unread finished agent. A
   // first-seen count pair is recorded silently (no toast / fetch on load).
   useEffect(() => {
     mountedAt.current ??= Date.now()
@@ -349,15 +349,17 @@ export function useAgentNotifications(
         // again later re-toasts, while still-blocked agents don't.
         bgBlocked.current.set(pid, blockedIds)
 
-        // Finished/waiting: toast agents whose unread flag newly appeared.
-        // needs_input also raises unread but is covered (immediately, without
-        // the grace delay) by the blocked diff above, so it's skipped here.
+        // Finished: toast agents whose unread flag newly appeared. Only finished
+        // raises the deferred unread flag - the soft waiting status never does (it
+        // means gone-quiet or awaiting a background subagent, not a user wait), and
+        // needs_input is covered immediately by the blocked diff above - so this is
+        // a finished-only toast.
         const unread = projectAgents.filter((a) => a.has_unread_changes)
         const seenUnread = bgUnread.current.get(pid) ?? new Set<string>()
         for (const a of unread) {
           if (seenUnread.has(a.id)) continue // already toasted (or pre-dates us).
           const status = a.agent_status?.status
-          if (status !== 'finished' && status !== 'waiting') continue
+          if (status !== 'finished') continue
           // Only transitions that happened while this UI was open (60s slack
           // covers the daemon's grace window between the transition timestamp
           // and the unread flag being raised).
@@ -366,14 +368,13 @@ export function useAgentNotifications(
           const agentName = a.title || a.id
           toast.show({
             key: `bg-${status}:${a.id}`,
-            message: `Agent "${agentName}" in project "${projectName}" transitioned to ${status === 'finished' ? 'finished' : 'waiting'}`,
-            type: status === 'finished' ? 'success' : 'info',
+            message: `Agent "${agentName}" in project "${projectName}" transitioned to finished`,
+            type: 'success',
             duration: FINISHED_TOAST_MS,
             agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon },
           })
-          // Desktop notification for finished only (waiting is a soft idle nudge
-          // the user opted out of).
-          if (status === 'finished' && !pageActive) {
+          // Desktop notification for finished only.
+          if (!pageActive) {
             fireNotification({
               title: `${agentName} finished`,
               body: `In project "${projectName}" - the agent has completed its task.`,
