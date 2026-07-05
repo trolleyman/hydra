@@ -62,6 +62,75 @@ func TestStartEgressMode(t *testing.T) {
 	})
 }
 
+// TestEgressProxyEnvFor covers the co-tenant proxy env a sandboxed bash shell
+// inherits from the head's already-running proxy: present (with HTTP_PROXY) in a
+// filtered mode, empty for off/unrestricted/unknown.
+func TestEgressProxyEnvFor(t *testing.T) {
+	hasHTTPProxy := func(env []string) bool {
+		for _, e := range env {
+			if len(e) >= 11 && e[:11] == "HTTP_PROXY=" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("unknown head: nil", func(t *testing.T) {
+		if env := EgressProxyEnvFor("test-proxyenv-unknown"); env != nil {
+			t.Errorf("expected nil for unknown head, got %v", env)
+		}
+	})
+
+	t.Run("unrestricted: nil (no proxy to route through)", func(t *testing.T) {
+		id := "test-proxyenv-unrestricted"
+		defer stopEgressProxy(id)
+		startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetUnrestricted, Enabled: true, FilterHosts: false})
+		if env := EgressProxyEnvFor(id); env != nil {
+			t.Errorf("expected nil for unrestricted, got %v", env)
+		}
+	})
+
+	t.Run("filtered: routes through the running proxy", func(t *testing.T) {
+		id := "test-proxyenv-filtered"
+		defer stopEgressProxy(id)
+		startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+		env := EgressProxyEnvFor(id)
+		if !hasHTTPProxy(env) {
+			t.Errorf("expected HTTP_PROXY in co-tenant env for a filtered head, got %v", env)
+		}
+	})
+}
+
+// TestStartEgressKeyedSeparatesProxyFromApproval verifies a standalone sandboxed
+// shell's own egress is keyed by the shell id (its proxy/mode/port), independent of
+// the head id, and that StopShellEgress tears it down.
+func TestStartEgressKeyedSeparatesProxyFromApproval(t *testing.T) {
+	shellID, headID := "h1-shell-tab1", "h1"
+	startEgressKeyed("", shellID, headID, sandbox.AgentTypeBash, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+
+	// The proxy/mode live under the shell id, not the head id.
+	switch EgressModeFor(shellID) {
+	case EgressHard, EgressAdvisory: // either, per pasta/nft availability
+	default:
+		t.Errorf("shell mode = %q, want a filtered mode", EgressModeFor(shellID))
+	}
+	if got := EgressModeFor(headID); got != EgressNone {
+		t.Errorf("head id must not carry the shell's proxy, got mode %q", got)
+	}
+	if rememberedEgressPort(shellID) == 0 {
+		t.Error("expected a remembered proxy port for the shell")
+	}
+
+	// StopShellEgress (the ephemeral-exit hook) clears both proxy and port.
+	StopShellEgress(shellID)
+	if got := EgressModeFor(shellID); got != EgressNone {
+		t.Errorf("after StopShellEgress: mode = %q, want cleared", got)
+	}
+	if rememberedEgressPort(shellID) != 0 {
+		t.Error("after StopShellEgress: remembered port should be cleared")
+	}
+}
+
 // TestEgressLiveAllowedHost verifies the approver re-reads the on-disk config
 // allow-list so a host added to config.toml AFTER a head launched is allowed
 // without a respawn or a prompt. It also checks the built-in defaults are unioned

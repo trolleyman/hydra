@@ -256,6 +256,7 @@ type Info struct {
 	PID       int
 	Status    Status
 	StartedAt time.Time
+	Ephemeral bool
 }
 
 // PID returns the sandbox process PID (0 if not started).
@@ -304,5 +305,6 @@ func (s *Session) info() Info {
 		PID:       s.proc.Pid(),
 		Status:    status,
 		StartedAt: s.StartedAt,
+		Ephemeral: s.ephemeral,
 	}
 }

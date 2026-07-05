@@ -55,6 +55,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if err := store.UpdateSessionInfo(info.ID, 0, "stopped"); err != nil {
 			log.Printf("warn: mark session %s stopped: %v", info.ID, err)
 		}
+		// An ephemeral session is a web bash shell; a standalone sandboxed one may
+		// have built its own egress boundary (StartShellSession, agent-not-live path),
+		// so tear that proxy down with the tab. A no-op for shells that share the
+		// agent's netns or run unfiltered.
+		if info.Ephemeral {
+			heads.StopShellEgress(info.ID)
+		}
 	})
 
 	pm, err := projects.NewManager()

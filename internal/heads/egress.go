@@ -63,6 +63,17 @@ var egressProxies = struct {
 // The proxy enforces the effective allow-list - the built-in DefaultAllowedHosts
 // unioned with net.AllowedHosts - minus net.BlockedHosts, which overrides it.
 func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
+	return startEgressKeyed(projectRoot, id, id, agentType, net)
+}
+
+// startEgressKeyed is startEgress with the proxy lifecycle keyed by `id` but the
+// user-approval channel (the needs-input status toast and the approvals dir a
+// parked host waits on) keyed by `approvalID`. For an agent the two are the same
+// head id. They differ for a head's standalone sandboxed bash shell: the proxy is
+// keyed by the ephemeral shell id (its own netns, own port, torn down with the tab
+// via StopShellEgress) while approvals still surface on the head's agent card
+// (approvalID = head id), since the shell has no card of its own.
+func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.AgentType, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled || net.Mode == sandbox.NetOff {
 		setEgressMode(id, EgressOff)
@@ -74,7 +85,7 @@ func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandb
 	}
 
 	allowed := append(sandbox.DefaultAllowedHosts(agentType), net.AllowedHosts...)
-	approver := &egressApprover{projectRoot: projectRoot, id: id, agentType: agentType}
+	approver := &egressApprover{projectRoot: projectRoot, id: approvalID, agentType: agentType}
 	// Pin the proxy to the port the head's netns already allows. If a supervisor is
 	// already live for this head (a resume/restart, not a first spawn), its nft rule
 	// hard-codes the port baked at first launch and is never rebuilt, so the proxy
@@ -206,6 +217,17 @@ func setEgressMode(id string, mode EgressMode) {
 	egressProxies.mu.Lock()
 	egressProxies.m[id] = &egressEntry{mode: mode}
 	egressProxies.mu.Unlock()
+}
+
+// StopShellEgress tears down the egress boundary a standalone sandboxed bash shell
+// built for itself (its own proxy plus remembered port), called when the ephemeral
+// shell process exits. Only these shells own an egress keyed by their shell id;
+// agents route teardown through KillHead / removeNamespaceHost instead, so this is
+// safe to call for any exiting session and is a no-op unless the id had a
+// shell-owned proxy.
+func StopShellEgress(id string) {
+	stopEgressProxy(id)
+	forgetEgressPort(id)
 }
 
 // stopEgressProxy closes and forgets a head's egress proxy, if any.

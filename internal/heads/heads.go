@@ -818,6 +818,16 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// the same upperdir - two overlays must never share one, so the shell only
 		// gets to read.
 		cowMounts := buildCowMounts(projectRoot, worktreePath, home, head.ID, cowPaths, false)
+		// We only reach this standalone branch when the head's agent supervisor is
+		// NOT live (otherwise the shell is spawned as a sibling in the agent's netns
+		// above). Build the shell its OWN egress boundary so hard mode stays hard here
+		// too, instead of degrading to an unfiltered host-net shell: keyed by the
+		// ephemeral shell id (its own pasta+nft netns, own proxy port, torn down with
+		// the tab via StopShellEgress on exit), with egress-approval prompts routed to
+		// the head's agent card (head.ID). startEgressKeyed may flip net to disabled
+		// under strict hard when the boundary can't be built - the shell then gets no
+		// network, matching the agent's fail-closed behaviour.
+		egressEnv, egressWrap := startEgressKeyed(projectRoot, shellID, head.ID, sandbox.AgentTypeBash, &net)
 		sb = sandbox.Options{
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
@@ -830,8 +840,9 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			Network:       net,
 			Binds:         seed.Binds,
 			CowMounts:     cowMounts,
-			Env:           append(append(env, seed.Env...), preSpawnEnv...),
+			Env:           append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
 			Argv:          []string{"/bin/bash"},
+			EgressWrap:    egressWrap,
 			HardenGUI:     true,
 			Seccomp:       true,
 		}
