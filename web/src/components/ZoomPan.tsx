@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Maximize } from 'lucide-react'
 
 // How far past fit you can magnify (8× the fit size). Enough to read individual
@@ -70,13 +71,19 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   const mmRef = useRef<HTMLDivElement>(null)
   // scale + translation (px, content top-left relative to the frame) as one unit
   // so a wheel zoom can move all three together (keep the cursor point fixed).
-  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
+  // fx/fy is a separate GROW-phase offset that slides the (still-hugging) frame
+  // within its available slack so the cursor point stays fixed before there is any
+  // room to pan - see clampF / zoomAt. In locked mode fx/fy stay 0.
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0, fx: 0, fy: 0 })
   const [panning, setPanning] = useState(false)
-  // How the next transform change should move: 'none' tracks the pointer 1:1
-  // (drag-pan must stay glued to the cursor), 'zoom' is a very short ease so each
-  // wheel step glides to its new magnification rather than jumping, and 'glide' is
-  // a longer ease for go-there jumps (minimap click, Reset view).
-  const [transition, setTransition] = useState<'none' | 'zoom' | 'glide'>('none')
+  // How the next transform change should move: 'none' tracks the pointer 1:1 - used
+  // for both drag-pan (must stay glued to the cursor) AND wheel-zoom, which is direct
+  // manipulation too: an eased wheel step looks smooth on a single notch but on a
+  // fast scroll the overlapping eases fight the frame's grow/pan and read as a
+  // "drifts right then back left" wobble, so the zoom tracks the wheel exactly
+  // instead. 'glide' is a longer ease reserved for go-there jumps (minimap click,
+  // Reset view), where a single deliberate move benefits from easing.
+  const [transition, setTransition] = useState<'none' | 'glide'>('none')
   // Set while a drag actually moved, so the trailing click is swallowed (a pan
   // shouldn't also flip the A/B view or open anything).
   const movedRef = useRef(false)
@@ -113,6 +120,19 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     return [Math.min(0, Math.max(minX, nx)), Math.min(0, Math.max(minY, ny))]
   }, [content.w, content.h, vpAt])
 
+  // Clamp the GROW-phase frame offset to the slack between the frame and the box it
+  // may grow into (avail - vp), split evenly either side of centre. While an axis is
+  // still growing there is slack, so the frame can slide toward the cursor; once it
+  // caps (vp == avail) the slack is 0, fx/fy collapse to 0, and the pan (tx/ty) takes
+  // over. Locked mode (no grow) never slides.
+  const clampF = useCallback((fx: number, fy: number, s: number): [number, number] => {
+    if (!grow || !content.w || !content.h) return [0, 0]
+    const { w: vw, h: vh } = vpAt(s)
+    const sx = Math.max(0, avail.w - vw) / 2
+    const sy = Math.max(0, avail.h - vh) / 2
+    return [Math.max(-sx, Math.min(sx, fx)), Math.max(-sy, Math.min(sy, fy))]
+  }, [grow, content.w, content.h, avail.w, avail.h, vpAt])
+
   // Zoom by `factor` keeping the content point under (cx, cy) - coords relative to
   // the frame's top-left - fixed, so the image grows toward the cursor.
   const zoomAt = useCallback((cx: number, cy: number, factor: number) => {
@@ -125,9 +145,20 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
       const px = (cx - bx) / v.scale
       const py = (cy - by) / v.scale
       const [ntx, nty] = clampT(cx - px * ns, cy - py * ns, ns)
-      return { scale: ns, tx: ntx, ty: nty }
+      // Grow phase: the pan can't move (content still fills the frame, so tx/ty are
+      // pinned to 0), so instead slide the frame toward the cursor to keep (px, py)
+      // fixed. Without this the image zooms toward its centre while growing and only
+      // snaps to the cursor once it caps - the little "drifts one way then back"
+      // wobble. Screen-x of a content point is C + fx + (px - w/2)*scale, so holding
+      // it fixed across scale -> ns gives dfx = (px - w/2)*(scale - ns) (same for y).
+      const [nfx, nfy] = clampF(
+        v.fx + (px - content.w / 2) * (v.scale - ns),
+        v.fy + (py - content.h / 2) * (v.scale - ns),
+        ns,
+      )
+      return { scale: ns, tx: ntx, ty: nty, fx: nfx, fy: nfy }
     })
-  }, [clampT])
+  }, [clampT, clampF, content.w, content.h])
 
   // Wheel must be a non-passive native listener so preventDefault can stop the
   // page/scroll from also reacting; React's synthetic onWheel can't guarantee that.
@@ -136,7 +167,7 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      setTransition('zoom')
+      setTransition('none')
       const r = el.getBoundingClientRect()
       zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015))
     }
@@ -149,6 +180,9 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // derivation - used for the transform, the minimap, and as the base for gestures -
   // rather than a resize effect that writes state back.
   const [tx, ty] = clampT(view.tx, view.ty, view.scale)
+  // Same re-clamp for the grow-phase frame offset, so a window resize (which changes
+  // the slack) can't leave the frame parked off-centre with no room for it.
+  const [fx, fy] = clampF(view.fx, view.fy, view.scale)
 
   const zoomed = view.scale > 1.001
 
@@ -220,11 +254,11 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     window.addEventListener('pointerup', onUp)
   }
 
-  const reset = () => { setTransition('glide'); setView({ scale: 1, tx: 0, ty: 0 }) }
+  const reset = () => { setTransition('glide'); setView({ scale: 1, tx: 0, ty: 0, fx: 0, fy: 0 }) }
 
   // The CSS ease matching the current movement kind - applied to the content
   // transform and mirrored onto the minimap's viewport rect so they move together.
-  const transitionMs = transition === 'zoom' ? 120 : transition === 'glide' ? 200 : 0
+  const transitionMs = transition === 'glide' ? 200 : 0
   const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined
 
   const mmW = content.w > 0 ? Math.min(MM_W, Math.round(content.w / 4)) : MM_W
@@ -241,7 +275,14 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // clipped by; its size eases along with the zoom so growing feels of a piece with
   // the magnification. In locked mode it stays inline-block, hugging the content.
   const frameSizeStyle: React.CSSProperties = grow && content.w > 0
-    ? { width: vp.w, height: vp.h, transition: transitionCss && `width ${transitionCss}, height ${transitionCss}` }
+    ? {
+        width: vp.w,
+        height: vp.h,
+        // Slide toward the cursor during the grow phase (fx/fy). Eased with the same
+        // timing as the size + the content transform so the whole zoom moves as one.
+        transform: `translate(${fx}px, ${fy}px)`,
+        transition: transitionCss && `width ${transitionCss}, height ${transitionCss}, transform ${transitionCss}`,
+      }
     : {}
 
   return (
@@ -274,36 +315,45 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
           {children}
         </div>
 
-        {zoomed && content.w > 0 && (
-          // Minimap + reset, bottom-right. data-zoompan-ui so the pan handler above
-          // ignores pointer-downs here and lets these drive themselves.
-          <div data-zoompan-ui className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-1.5 select-none">
-            <button
-              type="button"
-              onClick={reset}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-[10px] font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
-            >
-              <Maximize className="w-3 h-3" />
-              Reset view ({view.scale.toFixed(1)}×)
-            </button>
-            <div
-              ref={mmRef}
-              data-zoompan-minimap
-              onPointerDown={onMinimapDown}
-              className="relative rounded border border-white/40 bg-black/40 overflow-hidden cursor-pointer shadow-lg"
-              style={{ width: mmW, height: mmH }}
-            >
-              {minimapSrc && (
-                <img src={minimapSrc} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill opacity-70" />
-              )}
-              <div
-                className="absolute border-2 border-white/90 bg-white/10 pointer-events-none"
-                style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height, transition: transitionCss && `all ${transitionCss}` }}
-              />
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Minimap + reset, pinned to the bottom-right of the SCREEN (portaled to
+          <body>) rather than to the frame. The frame grows as you zoom, so anchoring
+          the controls to it made them drift outward with each notch - jarring. Fixed
+          screen placement keeps them put. It has to be a portal, not just position:
+          fixed here: the lightbox's animate-in leaves a transform on an ancestor,
+          which would capture a fixed descendant and reintroduce the drift. Living
+          outside the frame also means the frame's capture-phase pan handler never
+          sees these pointer-downs, so they drive themselves cleanly (the
+          data-zoompan-ui marker is kept as a belt-and-braces guard). */}
+      {zoomed && content.w > 0 && createPortal(
+        <div data-zoompan-ui className="fixed bottom-4 right-4 z-[101] flex flex-col items-end gap-1.5 select-none">
+          <button
+            type="button"
+            onClick={reset}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-[10px] font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
+          >
+            <Maximize className="w-3 h-3" />
+            Reset view ({view.scale.toFixed(1)}×)
+          </button>
+          <div
+            ref={mmRef}
+            data-zoompan-minimap
+            onPointerDown={onMinimapDown}
+            className="relative rounded border border-white/40 bg-black/40 overflow-hidden cursor-pointer shadow-lg"
+            style={{ width: mmW, height: mmH }}
+          >
+            {minimapSrc && (
+              <img src={minimapSrc} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill opacity-70" />
+            )}
+            <div
+              className="absolute border-2 border-white/90 bg-white/10 pointer-events-none"
+              style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height, transition: transitionCss && `all ${transitionCss}` }}
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
     </>
   )
 }
