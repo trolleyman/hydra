@@ -17,8 +17,8 @@ export type TestCaseStatusValue = (typeof TEST_STATUS_ORDER)[number]
 
 // The default hidden statuses depend on the view mode: the unified tree hides
 // the boring outcomes (passed + skipped); the group-by-result view hides
-// nothing - its skipped/passing sections start collapsed, which already folds
-// them away without a filter.
+// nothing - it keeps every status as its own section (passing folded shut by
+// default, and a folded section mounts no rows), so a filter would be redundant.
 export function defaultHiddenStatuses(groupResult: boolean): string[] {
   return groupResult ? [] : ['passed', 'skipped']
 }
