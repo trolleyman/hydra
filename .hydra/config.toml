@@ -52,6 +52,9 @@ artifact_concurrency = 4
 # even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
 # checksum-db tree head there when fetching a new module, so without it fetching a
 # tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
+# The web build's `generate-openapi` uses `bun x openapi-typescript-codegen`, whose
+# fetch cache lands under the already-writable ~/.bun/install/cache - so no ~/.npm
+# entry is needed here (npm/npx moved out of the built-in defaults).
 ## extra paths made writable in the sandbox (added to the built-in defaults).
 writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", ""]
 

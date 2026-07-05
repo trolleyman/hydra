@@ -16,17 +16,15 @@ type DefaultConfig struct {
 // These mirror sandbox-demo/{linux/claude-sandboxed,macos/sandbox.sb}.
 func Defaults() DefaultConfig {
 	return DefaultConfig{
-		// Writable: developer caches + agent state. The worktree itself is
-		// always writable and added separately.
+		// Writable: broad tool cache/state + toolchain + agent config. The
+		// worktree itself is always writable and added separately. This list is
+		// deliberately lean - ecosystem-specific build caches (Rust, Gradle,
+		// Node, ...) are NOT here; a project adds the ones it uses to
+		// [<agent>.sandbox] writable_paths (or cow_paths for per-head isolation).
+		// See SuggestedWritablePaths, surfaced as hints in the generated config.
 		WritablePaths: []string{
-			"~/.cache",                  // global tool cache
-			"~/.npm",                    // node package manager cache
-			"~/.cargo",                  // rust toolchain registry cache
-			"~/.gradle",                 // gradle build cache
-			"~/.local/share/mise",       // mise version manager
-			"~/.local/share/JetBrains",  // JetBrains toolbox
-			"~/.local/share/kotlin",     // kotlin compiler cache
-			"~/.local/state",            // XDG state (logs, history)
+			"~/.cache",                  // broad XDG cache shared by many tools
+			"~/.local/share/mise",       // mise version manager (resolves the toolchain)
 			"~/.local/share/hydra/logs", // hydra's own log file (trigger-hook writes here)
 			"~/.claude",                 // claude config + conversation logs
 			"~/.claude.json",            // claude top-level config
@@ -66,5 +64,28 @@ func Defaults() DefaultConfig {
 			"~/.config/gh",               // GitHub CLI config
 			"~/.config/mise/config.toml", // mise global tool versions (config.local.toml secrets stay masked)
 		},
+	}
+}
+
+// SuggestedPath is a per-project writable-path suggestion: a tool cache that is
+// NOT writable by default, plus a one-line note on what uses it.
+type SuggestedPath struct {
+	Path    string
+	Purpose string
+}
+
+// SuggestedWritablePaths lists common ecosystem build caches kept OUT of the
+// baked-in defaults (see Defaults) so the default policy stays lean. A project
+// adds the ones it actually uses to [<agent>.sandbox] writable_paths - or, for
+// per-head isolation without cross-head lock contention, cow_paths. This is
+// purely documentation surfaced in the generated config; nothing enforces it.
+func SuggestedWritablePaths() []SuggestedPath {
+	return []SuggestedPath{
+		{"~/.cargo", "Rust registry + toolchain cache"},
+		{"~/.gradle", "Gradle / Android / Kotlin build cache (cow_paths gives per-head isolation)"},
+		{"~/.npm", "Node / npm (npx) package cache"},
+		{"~/.local/share/kotlin", "Kotlin compiler cache"},
+		{"~/.local/share/JetBrains", "JetBrains toolbox"},
+		{"~/.local/state", "XDG state (some tools persist logs/history here)"},
 	}
 }

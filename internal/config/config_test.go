@@ -979,3 +979,32 @@ func splitLines(s string) []string {
 	}
 	return lines
 }
+
+// TestSandboxConfigMergeUnionsPathLists verifies the path lists union across
+// config layers (like the network host lists) instead of a later layer replacing
+// an earlier one - so machine-wide caches in the user config survive a project
+// that sets its own list. Duplicates are dropped, order preserved.
+func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
+	base := SandboxConfig{
+		WritablePaths: []string{"~/.cache", "~/.npm"},
+		MaskedPaths:   []string{"~/.ssh"},
+		RestoreRO:     []string{"~/.config/git"},
+		CowPaths:      []string{"pipeline/out"},
+	}
+	base.Merge(SandboxConfig{
+		WritablePaths: []string{"~/.npm", "~/.gradle"}, // ~/.npm is a duplicate
+		MaskedPaths:   []string{"~/.aws"},
+		RestoreRO:     []string{"~/.config/gh"},
+		CowPaths:      []string{"~/.gradle"},
+	})
+
+	eq := func(name string, got, want []string) {
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	eq("WritablePaths", base.WritablePaths, []string{"~/.cache", "~/.npm", "~/.gradle"})
+	eq("MaskedPaths", base.MaskedPaths, []string{"~/.ssh", "~/.aws"})
+	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
+	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
+}

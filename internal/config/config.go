@@ -901,20 +901,26 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 	}
 }
 
-// Merge merges another SandboxConfig into this one (path lists are replaced,
-// not concatenated, when set; nil leaves the existing value).
+// Merge merges another SandboxConfig into this one. The path lists UNION across
+// config layers (internal defaults -> user -> project -> per-agent) rather than
+// replacing, mirroring the network host lists (see unionStrings): a project's
+// writable_paths adds to whatever the user config declared instead of shadowing
+// it, so machine-wide caches in ~/.config/hydra/config.toml apply everywhere.
+// You cannot subtract a path this way (masks already can't be un-masked, and a
+// writable default can't be dropped); narrowing is not a goal here. nil leaves
+// the existing value.
 func (s *SandboxConfig) Merge(other SandboxConfig) {
 	if other.WritablePaths != nil {
-		s.WritablePaths = other.WritablePaths
+		s.WritablePaths = unionStrings(s.WritablePaths, other.WritablePaths)
 	}
 	if other.MaskedPaths != nil {
-		s.MaskedPaths = other.MaskedPaths
+		s.MaskedPaths = unionStrings(s.MaskedPaths, other.MaskedPaths)
 	}
 	if other.RestoreRO != nil {
-		s.RestoreRO = other.RestoreRO
+		s.RestoreRO = unionStrings(s.RestoreRO, other.RestoreRO)
 	}
 	if other.CowPaths != nil {
-		s.CowPaths = other.CowPaths
+		s.CowPaths = unionStrings(s.CowPaths, other.CowPaths)
 	}
 	if other.Network != nil {
 		if s.Network == nil {
@@ -941,10 +947,10 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		// returns a fresh slice, so it never mutates the shared backing array that
 		// clone() leaves aliased on s.Network.
 		if other.Network.AllowedHosts != nil {
-			s.Network.AllowedHosts = unionHosts(s.Network.AllowedHosts, other.Network.AllowedHosts)
+			s.Network.AllowedHosts = unionStrings(s.Network.AllowedHosts, other.Network.AllowedHosts)
 		}
 		if other.Network.BlockedHosts != nil {
-			s.Network.BlockedHosts = unionHosts(s.Network.BlockedHosts, other.Network.BlockedHosts)
+			s.Network.BlockedHosts = unionStrings(s.Network.BlockedHosts, other.Network.BlockedHosts)
 		}
 		if other.Network.AllowedLoopbackPorts != nil {
 			s.Network.AllowedLoopbackPorts = unionPorts(s.Network.AllowedLoopbackPorts, other.Network.AllowedLoopbackPorts)
@@ -958,11 +964,13 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	}
 }
 
-// unionHosts returns a fresh slice containing the elements of a followed by any
+// unionStrings returns a fresh slice containing the elements of a followed by any
 // elements of b not already present, preserving order and dropping duplicates. It
 // never aliases or mutates either input, so it is safe to use on the shallowly
-// cloned slices that AgentConfig.clone leaves sharing a backing array.
-func unionHosts(a, b []string) []string {
+// cloned slices that AgentConfig.clone leaves sharing a backing array. Used for
+// the network host/block lists and the sandbox path lists, which all union across
+// config layers rather than replacing.
+func unionStrings(a, b []string) []string {
 	out := make([]string, 0, len(a)+len(b))
 	seen := make(map[string]bool, len(a)+len(b))
 	for _, list := range [][]string{a, b} {
@@ -1358,6 +1366,37 @@ func allowedHostsDoc() string {
 	return b.String()
 }
 
+// writablePathsDoc builds the documentation for the writable_paths setting,
+// mirroring allowedHostsDoc: it enumerates the built-in default writable paths
+// (already writable before the user adds anything) and lists the common
+// ecosystem caches kept OUT of the defaults, so the written config is
+// self-documenting and points at the per-project additions people usually want.
+// Both lists are sourced from the sandbox package so the docs can't drift from
+// the policy. Like the host lists, writable_paths unions across config layers
+// (defaults, user config, project) - see SandboxConfig.Merge.
+func writablePathsDoc() string {
+	var b strings.Builder
+	b.WriteString("extra paths made writable in the sandbox, unioned on top of the built-in\n")
+	b.WriteString("defaults below AND across config layers (this list in ~/.config/hydra/\n")
+	b.WriteString("config.toml applies to every project; a project's own list adds to it).\n")
+	b.WriteString("A path can be ~ (HOME), absolute, or a $VAR. Secrets are hidden separately\n")
+	b.WriteString("via masked_paths, so nothing here holds credentials.\n")
+	b.WriteString("Built-in defaults, always writable (broad caches + toolchain + agent state):")
+	for _, line := range wrapHosts(sandbox.Defaults().WritablePaths) {
+		b.WriteString("\n    ")
+		b.WriteString(line)
+	}
+	b.WriteString("\nCommon per-project additions (NOT writable by default - add the ones you use\n")
+	b.WriteString("here, or to cow_paths for per-head copy-on-write isolation):")
+	for _, s := range sandbox.SuggestedWritablePaths() {
+		b.WriteString("\n    ")
+		b.WriteString(s.Path)
+		b.WriteString(" - ")
+		b.WriteString(s.Purpose)
+	}
+	return b.String()
+}
+
 // wrapHosts groups host patterns into comma-separated lines of a readable width
 // so an enumerated default list stays legible inside a doc comment.
 func wrapHosts(hosts []string) []string {
@@ -1400,7 +1439,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "writable_paths",
-			doc: "extra paths made writable in the sandbox (added to the built-in defaults).",
+			doc: writablePathsDoc(),
 			def: func() string { return tomlStringArray(sandbox.Defaults().WritablePaths) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.WritablePaths }),
 		},
