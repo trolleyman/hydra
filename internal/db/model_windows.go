@@ -41,9 +41,10 @@ type Agent struct {
 	AgentStatus     *string // starting|running|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
 
-	// HasUnreadChanges is set when the agent transitions running→waiting/finished
-	// (the JSON poller) and cleared when the user opens the agent. Drives the
-	// "unread changes" dot in the UI.
+	// HasUnreadChanges is set when the agent settles into finished (deferred) or
+	// reaches needs_input (at once); the soft waiting status does not raise it. The
+	// JSON poller sets it, and it is cleared when the user opens the agent. Drives
+	// the "unread changes" dot in the UI.
 	HasUnreadChanges bool `gorm:"default:false"`
 
 	// Operation - set atomically before long operations
