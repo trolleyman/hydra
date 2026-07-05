@@ -145,6 +145,45 @@ func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandb
 	return egress.ProxyEnv("http://" + p.Addr()), nil
 }
 
+// EgressProxyEnvFor returns the HTTP(S)_PROXY environment a co-tenant process -
+// e.g. an interactive bash shell sharing the head's sandbox - must set to reach
+// the network through the head's ALREADY-RUNNING egress proxy. It does NOT start,
+// stop, or rebuild anything (unlike startEgress); it only reflects the proxy the
+// agent's spawn/resume put in place.
+//
+// This matters most in hard mode: the shell is spawned as a sibling inside the
+// agent's pasta+nft netns, where the nft rule drops all egress except TCP to the
+// proxy - including port 53 - so a process without HTTP_PROXY can't even resolve
+// DNS ("Could not resolve host") and never touches the proxy (so no approval
+// prompt fires either). The agent survives only because it has this proxy env; a
+// bash tab needs the same.
+//
+// Returns nil when the head has no filtering proxy running (off / unrestricted /
+// none live), where a co-tenant either needs no proxy or has no network at all.
+func EgressProxyEnvFor(id string) []string {
+	egressProxies.mu.Lock()
+	e := egressProxies.m[id]
+	egressProxies.mu.Unlock()
+	if e == nil || e.proxy == nil {
+		return nil
+	}
+	switch e.mode {
+	case EgressHard:
+		// Hard mode: reach the host proxy at the mapped address baked into the
+		// netns, on the port pinned for the supervisor's lifetime.
+		port := rememberedEgressPort(id)
+		if port == 0 {
+			return nil
+		}
+		return egress.ProxyEnv("http://" + egress.MapAddr + ":" + itoa(port))
+	case EgressAdvisory:
+		// Advisory mode: shared host net, proxy reachable directly on loopback.
+		return egress.ProxyEnv("http://" + e.proxy.Addr())
+	default:
+		return nil
+	}
+}
+
 // EgressModeFor returns the enforcement mode currently recorded for a head (used
 // by the API/UI). Unknown heads report EgressNone.
 func EgressModeFor(id string) EgressMode {

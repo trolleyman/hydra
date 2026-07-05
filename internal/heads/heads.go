@@ -771,9 +771,18 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	// has not started yet), we fall through to a standalone read-only-COW sandbox.
 	if sandboxed {
 		if host, ok := namespaceHostFor(head.ID); ok {
+			// The shell is a sibling child of the agent's supervisor, so it shares the
+			// agent's pasta+nft netns. In hard mode that netns drops all egress except
+			// TCP to the CONNECT proxy (port 53 included), so without the agent's proxy
+			// env the shell can't even resolve DNS - it fails "Could not resolve host"
+			// and never reaches the proxy (so no approval prompt fires). Inject the
+			// same HTTP_PROXY the agent got. The supervisor is live here, so its proxy
+			// is running; nil in unrestricted/off modes, where the shell needs none.
+			shellEnv := append(append([]string(nil), env...), preSpawnEnv...)
+			shellEnv = append(shellEnv, EgressProxyEnvFor(head.ID)...)
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
-				Env:  append(env, preSpawnEnv...),
+				Env:  shellEnv,
 				Cwd:  worktreePath,
 				Rows: rows,
 				Cols: cols,
