@@ -15,7 +15,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, Merge, GitMerge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, GitMerge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -944,7 +944,7 @@ export function AgentDetail({
         }
       : {
           label: 'Merge',
-          icon: <Merge className="w-4 h-4" />,
+          icon: <GitPullRequestArrow className="w-4 h-4" />,
           onClick: handleMerge,
           variant: 'primary',
           disabled: busy,
