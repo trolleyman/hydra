@@ -481,8 +481,17 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, mi
   const pathMissing = !isDir && node.kind === 'path' && missingPaths.has(copyPath)
   return (
     <div>
-      <button
+      {/* Rendered as a div-with-role rather than a real <button> because the row
+          embeds its own interactive affordances (the copy <button> and the
+          open-in-repo <a>), which can't legally nest inside a <button>. The
+          role/tabIndex/keydown restore the button semantics we lose. */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => onToggle(node.key)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(node.key) }
+        }}
         className="group flex w-full items-center gap-1.5 py-1 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
         style={{ paddingLeft: `${depth * INDENT_STEP + NODE_PAD}px` }}
       >
@@ -492,7 +501,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, mi
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
         {onOpenInRepo && copyPath && !pathMissing ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
-      </button>
+      </div>
       {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
           children open/closed (they stay mounted so the height can tween and the
           collapse state persists). */}
