@@ -248,3 +248,85 @@ func pairIndex(args []string, flag, a string) int {
 	}
 	return -1
 }
+
+// writeFakeBwrap creates an executable fake "bwrap" at dir/bwrap whose --help
+// output does (overlay) or doesn't advertise --overlay-src, so the bwrap-selection
+// logic can be exercised without a real bubblewrap.
+func writeFakeBwrap(t *testing.T, dir string, overlay bool) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "#!/bin/sh\necho 'usage: bwrap [OPTIONS]'\n"
+	if overlay {
+		body += "echo '    --overlay-src SRC   Read files from SRC in the following overlay'\n"
+	}
+	p := filepath.Join(dir, "bwrap")
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestBwrapPathPrefersOverlay: with a non-overlay bwrap earlier on PATH and an
+// overlay-capable one later, bwrapPath must pick the overlay-capable one.
+func TestBwrapPathPrefersOverlay(t *testing.T) {
+	noOverlayDir := filepath.Join(t.TempDir(), "sys")
+	overlayDir := filepath.Join(t.TempDir(), "local")
+	writeFakeBwrap(t, noOverlayDir, false)
+	overlayBin := writeFakeBwrap(t, overlayDir, true)
+
+	t.Setenv("HYDRA_BWRAP", "")
+	t.Setenv("HOME", t.TempDir()) // no ~/.local/bin/bwrap to interfere
+	t.Setenv("PATH", noOverlayDir+string(os.PathListSeparator)+overlayDir)
+
+	got, err := bwrapPath()
+	if err != nil {
+		t.Fatalf("bwrapPath: %v", err)
+	}
+	if got != overlayBin {
+		t.Fatalf("bwrapPath = %q, want overlay-capable %q", got, overlayBin)
+	}
+}
+
+// TestBwrapPathHonoursOverride: an explicit HYDRA_BWRAP wins verbatim, even when it
+// lacks overlay and an overlay-capable bwrap is on PATH.
+func TestBwrapPathHonoursOverride(t *testing.T) {
+	noOverlayDir := filepath.Join(t.TempDir(), "sys")
+	overlayDir := filepath.Join(t.TempDir(), "local")
+	noOverlayBin := writeFakeBwrap(t, noOverlayDir, false)
+	writeFakeBwrap(t, overlayDir, true)
+
+	t.Setenv("PATH", overlayDir)
+	t.Setenv("HYDRA_BWRAP", noOverlayBin)
+
+	got, err := bwrapPath()
+	if err != nil {
+		t.Fatalf("bwrapPath: %v", err)
+	}
+	if got != noOverlayBin {
+		t.Fatalf("bwrapPath = %q, want override %q", got, noOverlayBin)
+	}
+	// And Available's overlay requirement is skipped for an explicit override.
+	if !bwrapOverrideActive() {
+		t.Fatal("bwrapOverrideActive() = false, want true for a valid HYDRA_BWRAP")
+	}
+}
+
+// TestBwrapPathFallsBackWhenNoOverlay: when nothing overlay-capable exists,
+// bwrapPath still returns a usable bwrap (Available separately rejects it).
+func TestBwrapPathFallsBackWhenNoOverlay(t *testing.T) {
+	noOverlayDir := filepath.Join(t.TempDir(), "sys")
+	bin := writeFakeBwrap(t, noOverlayDir, false)
+	t.Setenv("HYDRA_BWRAP", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", noOverlayDir)
+
+	got, err := bwrapPath()
+	if err != nil {
+		t.Fatalf("bwrapPath: %v", err)
+	}
+	if got != bin {
+		t.Fatalf("bwrapPath = %q, want %q (only candidate)", got, bin)
+	}
+}

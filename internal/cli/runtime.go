@@ -120,9 +120,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Manager is created until the first request/prefetch, so nothing races it.
 	testReg.SetOnProgress(server.NotifyTestsProgress)
 
+	// A working sandbox is load-bearing: without it agents would either fail to
+	// launch or (worse) run with cow_paths silently degraded to read-only binds,
+	// producing confusing EROFS build failures. Refuse to start rather than serve a
+	// broken sandbox. An operator who deliberately needs a specific bwrap can point
+	// HYDRA_BWRAP at it (which also skips the overlay-capability requirement).
 	if ok, reason := sandbox.Available(); !ok {
-		log.Printf("warn: sandbox unavailable: %s", reason)
-		server.SetSandboxError(errtrace.Errorf("%s", reason))
+		return nil, errtrace.Errorf("sandbox unavailable: %s", reason)
 	}
 
 	// Archived agents (killed/merged heads) are kept indefinitely so they stay
