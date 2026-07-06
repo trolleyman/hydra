@@ -19,6 +19,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -580,22 +581,31 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 		Argv:         []string{"bash", "-c", command},
 		NoSandbox:    sv.spec.Host,
 	}
+	var egressSess *egress.Session
 	if !sv.spec.Host {
 		cfg, _ := config.Load(root)
-		writable, masked, restore, _, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, _, netPol, _ := cfg.ResolveSandboxOptions("")
 		if gcd, err := git.GetCommonDir(root); err == nil {
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
 		opts.MaskedPaths = masked
 		opts.RestoreRO = restore
-		opts.Network = sandbox.NetworkPolicy{Enabled: true}
+		// Sandboxed services honor the project's network mode like agent heads do
+		// (hard = pasta netns + nft + CONNECT proxy); the session lives as long as
+		// the service process (closed via the returned cleanup). Unknown hosts are
+		// silently denied - a supervised service has no approval UI.
+		egressSess = egress.StartCommandEgress("service:"+sv.spec.Name, sandbox.AgentTypeBash, &netPol, 0, nil)
+		opts.Env = append(opts.Env, egressSess.Env...)
+		opts.EgressWrap = egressSess.Wrap
+		opts.Network = netPol
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
 
 	spec, err := sandbox.BuildSpec(opts)
 	if err != nil {
+		egressSess.Close()
 		return nil, func() {}, errtrace.Wrap(err)
 	}
 
@@ -609,7 +619,13 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	// killer so our done-goroutine can signal the whole group on ctx cancel; on
 	// other platforms it's a no-op and the default leader-kill stays in effect.
 	configureProc(cmd)
-	return cmd, spec.Cleanup, nil
+	cleanup := func() {
+		if spec.Cleanup != nil {
+			spec.Cleanup()
+		}
+		egressSess.Close()
+	}
+	return cmd, cleanup, nil
 }
 
 // maxRestarts resolves the restart cap for a service (default when unset).

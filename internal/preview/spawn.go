@@ -19,6 +19,7 @@ import (
 	"braces.dev/errtrace"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -380,9 +381,10 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 	}
 
 	var cowLayerDir string
+	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(in.root)
-		writable, masked, restore, cow, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		if gcd, err := git.GetCommonDir(in.root); err == nil {
 			opts.GitCommonDir = gcd // ephemeral checkout git metadata lives here
 		}
@@ -399,7 +401,16 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 				opts.CowMounts = sandbox.ResolveCowMounts(in.root, in.runDir, home, base, cow, true)
 			}
 		}
-		opts.Network = previewNetworkPolicy()
+		// Preview servers honor the project's network mode like agent heads do
+		// (hard = pasta netns + nft + CONNECT proxy). Under hard mode the child's
+		// port is forwarded INTO the netns (pasta -t) so the daemon's reverse
+		// proxy and readiness prober can still reach 127.0.0.1:childPort from the
+		// host. The session lives as long as the child (closed via launch.Cleanup,
+		// which fires after cmd.Wait). Unknown hosts are silently denied.
+		egressSess = egress.StartCommandEgress("preview:"+spec.Name, sandbox.AgentTypeBash, &netPol, childPort, nil)
+		opts.Env = append(opts.Env, egressSess.Env...)
+		opts.EgressWrap = egressSess.Wrap
+		opts.Network = netPol
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
@@ -409,25 +420,22 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 		if cowLayerDir != "" {
 			_ = os.RemoveAll(cowLayerDir)
 		}
+		egressSess.Close()
 		return nil, errtrace.Wrap(err)
 	}
-	if cowLayerDir != "" {
+	if cowLayerDir != "" || egressSess != nil {
 		inner := launch.Cleanup
 		launch.Cleanup = func() {
 			if inner != nil {
 				inner()
 			}
-			_ = os.RemoveAll(cowLayerDir)
+			if cowLayerDir != "" {
+				_ = os.RemoveAll(cowLayerDir)
+			}
+			egressSess.Close()
 		}
 	}
 	return launch, nil
-}
-
-// previewNetworkPolicy is the child's network posture, isolated here so the
-// planned hard-egress unification (filtering runner commands like agent heads,
-// with a pasta -t inbound forward for the child port) is a drop-in change.
-func previewNetworkPolicy() sandbox.NetworkPolicy {
-	return sandbox.NetworkPolicy{Enabled: true}
 }
 
 // freePort asks the OS for an unused loopback TCP port. The listen/close/reuse

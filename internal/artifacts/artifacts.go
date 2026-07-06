@@ -59,6 +59,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -1243,11 +1244,12 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	}
 
 	var cowLayerDir string
+	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
 		// The pre-spawn script is intentionally ignored: artifact generation is a
 		// plain command, not an agent spawn.
-		writable, masked, restore, cow, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		// The artifact output dir lives outside the checkout, so make it writable
 		// explicitly (the checkout itself is covered by WorktreePath).
 		writable = append(writable, outputDir)
@@ -1275,7 +1277,14 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 				opts.CowMounts = sandbox.ResolveCowMounts(m.projectRoot, runDir, home, base, cow, true)
 			}
 		}
-		opts.Network = sandbox.NetworkPolicy{Enabled: true}
+		// Artifact renders honor the project's network mode like agent heads do
+		// (hard = pasta netns + nft + CONNECT proxy); the session dies with the
+		// launch cleanup below. Unknown hosts are silently denied - a render must
+		// not park waiting for a human approval.
+		egressSess = egress.StartCommandEgress("artifacts:"+spec.Name, sandbox.AgentTypeBash, &netPol, 0, nil)
+		opts.Env = append(opts.Env, egressSess.Env...)
+		opts.EgressWrap = egressSess.Wrap
+		opts.Network = netPol
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
@@ -1285,18 +1294,22 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		if cowLayerDir != "" {
 			_ = os.RemoveAll(cowLayerDir)
 		}
+		egressSess.Close()
 		return nil, errtrace.Wrap(err)
 	}
-	if cowLayerDir != "" {
-		// Chain the ephemeral cow-layer cleanup onto the launch's own cleanup so the
-		// per-generation upper/work dirs are removed once the command has finished
-		// (generate defers launch.Cleanup()).
+	if cowLayerDir != "" || egressSess != nil {
+		// Chain the ephemeral cow-layer + egress-session cleanup onto the launch's
+		// own cleanup so both are released once the command has finished (generate
+		// defers launch.Cleanup()).
 		inner := launch.Cleanup
 		launch.Cleanup = func() {
 			if inner != nil {
 				inner()
 			}
-			_ = os.RemoveAll(cowLayerDir)
+			if cowLayerDir != "" {
+				_ = os.RemoveAll(cowLayerDir)
+			}
+			egressSess.Close()
 		}
 	}
 	return launch, nil

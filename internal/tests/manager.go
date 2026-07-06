@@ -21,6 +21,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -944,9 +945,10 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	}
 
 	var cowLayerDir string
+	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
-		writable, masked, restore, cow, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {
 			opts.GitCommonDir = gcd
@@ -967,7 +969,14 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 				opts.CowMounts = sandbox.ResolveCowMounts(m.projectRoot, runDir, home, base, cow, true)
 			}
 		}
-		opts.Network = sandbox.NetworkPolicy{Enabled: true}
+		// Test runs honor the project's network mode like agent heads do (hard =
+		// pasta netns + nft + CONNECT proxy); the session dies with the launch
+		// cleanup below. Unknown hosts are silently denied - a suite must not
+		// park waiting for a human approval.
+		egressSess = egress.StartCommandEgress("tests:"+spec.Name, sandbox.AgentTypeBash, &netPol, 0, nil)
+		opts.Env = append(opts.Env, egressSess.Env...)
+		opts.EgressWrap = egressSess.Wrap
+		opts.Network = netPol
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
@@ -977,15 +986,19 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 		if cowLayerDir != "" {
 			_ = os.RemoveAll(cowLayerDir)
 		}
+		egressSess.Close()
 		return nil, errtrace.Wrap(err)
 	}
-	if cowLayerDir != "" {
+	if cowLayerDir != "" || egressSess != nil {
 		inner := launch.Cleanup
 		launch.Cleanup = func() {
 			if inner != nil {
 				inner()
 			}
-			_ = os.RemoveAll(cowLayerDir)
+			if cowLayerDir != "" {
+				_ = os.RemoveAll(cowLayerDir)
+			}
+			egressSess.Close()
 		}
 	}
 	return launch, nil

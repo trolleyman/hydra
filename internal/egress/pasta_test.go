@@ -8,7 +8,7 @@ import (
 func TestHardWrapArgvShape(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--ro-bind", "/", "/", "--", "claude"}
-	argv := HardWrapArgv(hm, 54321, nil, bwrap, "")
+	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, "")
 
 	if argv[0] != "/usr/bin/pasta" {
 		t.Fatalf("argv[0] should be pasta, got %q", argv[0])
@@ -41,7 +41,7 @@ func TestHardWrapArgvInjectsPreExec(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--seccomp", "3", "--", "claude"}
 	pre := "exec 3<\"/tmp/hydra-seccomp-x\"\nrm -f \"/tmp/hydra-seccomp-x\"\n"
-	argv := HardWrapArgv(hm, 54321, nil, bwrap, pre)
+	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, pre)
 
 	// The script pasta runs is the -c argument (index after "bash", "-c").
 	var script string
@@ -74,7 +74,7 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	if strings.HasPrefix(MapAddr, "169.254.") {
 		t.Fatalf("MapAddr %q is link-local - unroutable via a gateway in the netns", MapAddr)
 	}
-	args := PastaArgs("/usr/bin/pasta", MapAddr, nil)
+	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0)
 	// mapAddr must be handed to pasta as the gateway, so pasta installs a default
 	// route via it and it becomes on-link for the guest.
 	if !argHasValue(args, "-g", MapAddr) {
@@ -120,12 +120,12 @@ func TestLoopbackPortSpec(t *testing.T) {
 
 func TestPastaArgsLoopbackPorts(t *testing.T) {
 	// Without an allow-list, outbound TCP splicing must be off entirely.
-	if args := PastaArgs("/usr/bin/pasta", MapAddr, nil); !argHasValue(args, "-T", "none") {
+	if args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0); !argHasValue(args, "-T", "none") {
 		t.Errorf("PastaArgs without ports must pass -T none: %v", args)
 	}
 	// With an allow-list, only those ports are spliced (-T), and everything else
 	// stays off - inbound (-t/-u) and outbound UDP (-U) in particular.
-	args := PastaArgs("/usr/bin/pasta", MapAddr, []int{5037})
+	args := PastaArgs("/usr/bin/pasta", MapAddr, []int{5037}, 0)
 	if !argHasValue(args, "-T", "5037") {
 		t.Errorf("PastaArgs must splice the allow-listed loopback port via -T: %v", args)
 	}
@@ -140,7 +140,7 @@ func TestHardWrapArgvLoopbackPorts(t *testing.T) {
 	// The port allow-list must reach pasta's argv through the wrap used at launch.
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--", "claude"}
-	argv := HardWrapArgv(hm, 54321, []int{5037, 5555}, bwrap, "")
+	argv := HardWrapArgv(hm, 54321, []int{5037, 5555}, 0, bwrap, "")
 	if !argHasValue(argv, "-T", "5037,5555") {
 		t.Errorf("HardWrapArgv must forward the loopback-port allow-list to pasta -T: %v", argv)
 	}

@@ -134,7 +134,7 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s); loopback ports spliced: %s", id, len(allowed), proxyURL, p.Addr(), egress.LoopbackPortSpec(loopbackPorts))
 			env = egress.ProxyEnv(proxyURL)
 			wrap = func(bwrapArgv []string, preExec string) []string {
-				return egress.HardWrapArgv(hm, port, loopbackPorts, bwrapArgv, preExec)
+				return egress.HardWrapArgv(hm, port, loopbackPorts, 0, bwrapArgv, preExec)
 			}
 			return env, wrap
 		}
