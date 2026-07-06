@@ -12,6 +12,7 @@ import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loa
 import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
+import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
@@ -1170,27 +1171,46 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     return () => window.removeEventListener('keydown', onKey)
   }, [imageDiffMode, artifactView, artifactHighlight, onArtifactViewChange, onArtifactHighlightChange])
 
+  // Coalesce streamed log lines: a chatty generator emits many `log` frames per
+  // tick, and appending each on its own would re-copy the whole growing log
+  // array per line (O(n^2)). Queue them by script+side and apply one batch per
+  // ~frame. The key packs both axes so left/right stay separate.
+  const { enqueue: enqueueLog, flushNow: flushLogs } = useLogCoalescer<ArtifactLogLine>((batches) => {
+    setSets((prev) => prev?.map((s) => {
+      const left = batches.get(`${s.name} left`)
+      const right = batches.get(`${s.name} right`)
+      if (!left && !right) return s
+      return {
+        ...s,
+        ...(left ? { left_log: [...(s.left_log ?? []), ...left] } : {}),
+        ...(right ? { right_log: [...(s.right_log ?? []), ...right] } : {}),
+      }
+    }) ?? prev)
+  })
+
   // Apply a server→client WS message to local state.
   const applyMessage = useCallback((msg: ArtifactWSMessage) => {
+    // setError(null) bails out (no re-render) when already null, so this stays
+    // cheap even on a burst of log frames.
     setError(null)
+    if (msg.type === 'log') {
+      enqueueLog(`${msg.script} ${msg.side}`, msg.line)
+      return
+    }
+    // Any other message may replace/modify a set - apply queued log lines first
+    // so they land in order on the current set before it changes.
+    flushLogs()
     if (msg.type === 'snapshot') {
       setSets(msg.scripts ?? [])
     } else if (msg.type === 'set') {
       setSets((prev) => (prev ? prev.map((s) => (s.name === msg.set.name ? msg.set : s)) : [msg.set]))
-    } else if (msg.type === 'log') {
-      setSets((prev) => prev?.map((s) => {
-        if (s.name !== msg.script) return s
-        return msg.side === 'left'
-          ? { ...s, left_log: [...(s.left_log ?? []), msg.line] }
-          : { ...s, right_log: [...(s.right_log ?? []), msg.line] }
-      }) ?? prev)
     } else if (msg.type === 'progress') {
       setSets((prev) => prev?.map((s) => {
         if (s.name !== msg.script) return s
         return msg.side === 'left' ? { ...s, left_progress: msg.progress } : { ...s, right_progress: msg.progress }
       }) ?? prev)
     }
-  }, [])
+  }, [enqueueLog, flushLogs])
 
   // Primary path: stream updates over a WebSocket so progress/log update instantly.
   // Falls back to polling (below) if the socket fails to open or later drops.

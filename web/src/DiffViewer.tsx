@@ -18,6 +18,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
+import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
@@ -790,7 +791,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // recompute on every refresh. The string signature is stable across no-op
   // refreshes, so we only recompute when content truly changes. Skipped (along
   // with everything derived from it) while the body is still a lazy placeholder.
-  const hunksSig = useMemo(() => (near ? JSON.stringify(file.hunks) : ''), [file.hunks, near])
+  const hunksSig = useMemo(() => (near ? hashHunks(file.hunks) : ''), [file.hunks, near])
 
   // Whole-file content for the reveal/collapse model. The server returns each
   // eligible file's entire content in the main diff response (full_context) and
@@ -2122,7 +2123,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     const nextFiles = new Map<string, DiffFile>()
     let changed = newFiles.length !== prevFiles.size
     const files = newFiles.map((f) => {
-      const sig = JSON.stringify(f)
+      const sig = hashDiffFile(f)
       nextSig.set(f.path, sig)
       if (prevSig.get(f.path) === sig) {
         // Identical content - reuse the existing object so its FileDiff (memo)

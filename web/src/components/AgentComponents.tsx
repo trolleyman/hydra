@@ -5,9 +5,10 @@ import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { Badge } from './Badge'
 import { TestVerdictChip } from './TestVerdict'
+import { RelativeTime } from './LiveTime'
 import {
   agentDotClass, agentDotAnimate, agentTypeColor,
-  agentStatusBadge, agentStatusDetail, archivedEndStateBadge, formatStartedAgo,
+  agentStatusBadge, agentStatusDetail, archivedEndStateBadge,
 } from '../lib/agentDisplay'
 
 export function AgentSidebarItem({
@@ -125,7 +126,7 @@ export function AgentSidebarItem({
               className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
               title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}
             >
-              {formatStartedAgo(agent.created_at)}
+              <RelativeTime createdAt={agent.created_at} />
             </span>
           ) : null}
         </div>

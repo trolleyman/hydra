@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useRef, useState, type MutableRefObject } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import { useServerData } from './useServerData'
@@ -19,24 +19,21 @@ export interface SystemStatus {
 // System status + project list: refreshed by the events stream, with a slow
 // visibility-gated fallback poll. The fetch lands the status in the store and,
 // chained off it, refreshes the project list + auto-selects a project on a cold
-// load. A once-armed uptime ticker re-renders every second so the "up N minutes"
-// label advances.
+// load. The "up N minutes" label advances itself via an isolated <Uptime> leaf
+// (see LiveTime / useNowTick) - we only force ONE render here, the moment the
+// server first reports an uptime, so that label mounts.
 export function useSystemStatus(): SystemStatus {
   const spawnedAt = useRef<number | null>(null)
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
-  const [uptimeTracking, setUptimeTracking] = useState(false)
 
   const handleStatus = useCallback((status: StatusResponse) => {
     const { setSystemStatus, setProjects, setSelectedProjectId } = useProjectStore.getState()
     setSystemStatus(status)
     setDevelopment(status.development ?? false)
-    if (status.uptime_seconds != null) {
-      if (spawnedAt.current === null) {
-        spawnedAt.current = Date.now() - status.uptime_seconds * 1000
-        setTick((n) => n + 1)
-      }
-      setUptimeTracking(true)
+    if (status.uptime_seconds != null && spawnedAt.current === null) {
+      spawnedAt.current = Date.now() - status.uptime_seconds * 1000
+      setTick((n) => n + 1) // one render to mount the self-ticking <Uptime> label
     }
     api.default.listProjects().then((ps) => {
       setProjects(ps)
@@ -62,14 +59,6 @@ export function useSystemStatus(): SystemStatus {
     () => api.default.getStatus(),
     { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus },
   )
-
-  // Uptime ticker: once the server reports an uptime, re-render every second so
-  // the "up N minutes" label advances. Armed once and runs until unmount.
-  useEffect(() => {
-    if (!uptimeTracking) return
-    const ticker = setInterval(() => setTick((n) => n + 1), 1000)
-    return () => clearInterval(ticker)
-  }, [uptimeTracking])
 
   return { refetchStatus, development, spawnedAt }
 }

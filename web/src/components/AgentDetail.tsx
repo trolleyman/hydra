@@ -157,7 +157,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row */}
-          <SeparatedRow className="flex items-center gap-3 flex-wrap">
+          <SeparatedRow live className="flex items-center gap-3 flex-wrap">
             <Badge
               variant="pill"
               className={agentTypeClass}
@@ -336,7 +336,6 @@ export function AgentDetail({
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
-  const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
   // Bumped only when the refresh was a new commit (HEAD moved), so the diff
   // viewer re-snapshots the per-commit artifacts (screenshots) on commit - not
@@ -344,11 +343,10 @@ export function AgentDetail({
   const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (agent.created_at == null) return
-    const id = setInterval(() => setTick((n) => n + 1), 1000)
-    return () => clearInterval(id)
-  }, [agent.created_at])
+  // The relative "created Xs ago" labels update via the two `live` SeparatedRows
+  // in the header (see SeparatedRow / useNowTick) - each re-renders only itself
+  // once a second, instead of a page-wide setInterval re-rendering the whole
+  // agent view (diff viewer, terminal, panels) every second.
 
   // Load the repo's branch list for the base-branch selector. Cheap (`git
   // branch`); failures just leave the selector showing the current base as
@@ -989,7 +987,7 @@ export function AgentDetail({
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row */}
-          <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+          <SeparatedRow live className="flex items-center gap-x-3 gap-y-1 flex-wrap">
             <Badge
               variant="pill"
               className={agentTypeClass}
