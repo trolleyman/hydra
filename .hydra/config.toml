@@ -192,6 +192,19 @@ name = "screenshots"
 command = "cd web && bun install && bun scripts/screenshots/take-screenshots.ts"
 timeout_sec = 900
 
+[[artifacts]]
+# Live preview (type = "server"): builds the checkout's frontend and boots the
+# simulation server (mock data, no daemon) on the port Hydra hands it, so a
+# head's UI changes can be clicked through at a real rendered app via the
+# Previews row on the agent page. Hydra proxies a dedicated port to it, shows
+# the build log while it starts, and tears it down when idle; the first visit
+# after that transparently respawns it. The frontend build dominates spawn
+# time, hence the generous ready timeout.
+name = "demo"
+type = "server"
+command = "cd web && bun install && bun run build && cd .. && HYDRA_API_ADDR=localhost:$HYDRA_PREVIEW_PORT go run ./ server --simulation"
+ready_timeout_sec = 900
+
 ## [[services]]: per-project long-running commands the daemon supervises while the
 ## project is registered. Each is started on daemon boot (and when the project is
 ## added), restarted with capped backoff if it exits unexpectedly, and
