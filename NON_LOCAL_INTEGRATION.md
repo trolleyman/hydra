@@ -207,6 +207,16 @@ target_branch = "main"          # default MR target; per-head editable
 # config); "token" uses the REST API with a token from the secrets file
 # (section 3.1) or the HYDRA_FORGE_TOKEN env var. Never a token inline.
 auth = "cli"                    # cli | token
+# Which action is front-and-center on a head: "merge" (local, as today)
+# or "create_mr". This ONLY picks the primary button - the other action
+# stays one click away, and once linked the spot is View MR regardless.
+# Teams set create_mr in the committed config; local-first repos keep
+# merge and never notice any of this exists.
+default_action = "merge"        # merge | create_mr
+# Arm new heads with "publish when green": auto-create/update a DRAFT MR
+# once local tests pass and the agent has finished (the publish analog
+# of merge-when-green). Per-head overridable in the spawn form.
+# publish_when_green = true
 # Optional: warn before a DIRECT LOCAL merge into these branches (they
 # are protected on the server; the push would bounce anyway).
 # protected_branches = ["main"]
@@ -253,8 +263,10 @@ Button lifecycle on the head page:
 
 1. **Unlinked** (default): `Create MR` (next to Merge, not replacing it).
    Opens a dialog prefilled from config + the head: downstream branch
-   name (3.3a), target branch, title/description (seeded from the head's
-   task and commit log), draft toggle. Confirming runs the publish below.
+   name (3.3a), remote (a dropdown only when the repo has more than one
+   remote, defaulting to `review.remote` - i.e. `origin`), target branch,
+   title/description (seeded from the head's task and commit log), draft
+   toggle. Confirming runs the publish below.
 2. **Linked**: the button becomes `View MR` (deep link to the forge) with
    an MR state chip (draft / open / CI / approvals / merged), plus,
    contextually:
@@ -329,6 +341,20 @@ same machinery as the existing behind-base count and `maybeFetchRemote`):
   exactly this) - foreign commits on the remote always win a pull-first,
   never a force-push.
 
+#### 3.3c Kill / local merge on a linked head
+
+The remote branch and MR live on the server and outlive the head, so both
+teardown paths grow one step when `ReviewID` is set:
+
+- **Kill**: the confirm dialog offers "close the MR and delete the
+  remote branch" (default) or "detach - leave the MR open" (for when a
+  colleague has taken the branch over). Never silently either.
+- **Local merge**: locally merging a linked head while its MR is open is
+  almost always a mistake (the MR would land the same commits a second
+  time). Treat it like the failing-tests gate: blocked with an
+  explanation, `force` overrides, and a forced merge ends with the same
+  close-or-detach choice as kill.
+
 ### 3.4 Authentication - does this need OAuth?
 
 Short answer: **no OAuth implementation in Hydra.** Hydra's daemon is a
@@ -382,17 +408,30 @@ mounted into a sandbox by default (section 2.2).
 TODAY: sandbox masks are home-relative (`~/.ssh`, `~/.config`, ...,
 `internal/sandbox/defaults.go`), but heads also get read access to the
 host, including the project root - and `.hydra/deploy.toml` (which
-already holds the web `AuthKey` + ngrok config) is not masked. Fix as
-part of Phase 1: when building a head's sandbox options, always append
-project-relative masks for `.hydra/deploy.toml` and any future secrets
-file (`integrations.toml`), plus `.hydra/config.local.toml` (not secret
-by rule, but personal - a head has no business reading another layer's
-overrides, and masking it keeps the temptation to put a token there
-inert). These cannot live in the static defaults list (the project root
-varies per project), so they are appended at spawn/resume where the
-options are resolved (`internal/heads/heads.go` around
-`ResolveSandboxOptions`). The gate's `credentialRels` deny-list gets the
-same entries as defense in depth.
+already holds the web `AuthKey` + ngrok config) is not masked. Three
+layers of fix, in order:
+
+1. **Hardcoded always-masks for Hydra's own files**: `.hydra/deploy.toml`,
+   the future secrets file, and `.hydra/config.local.toml` (not secret by
+   rule, but personal - and masking it keeps the temptation to put a
+   token there inert). No config needed - Hydra knows its own secret
+   paths. They cannot live in the static defaults list (the project root
+   varies per project), so they are appended where a head's sandbox
+   options are resolved (`internal/heads/heads.go` around
+   `ResolveSandboxOptions`), mirrored in the gate's `credentialRels` as
+   defense in depth.
+2. **Project-relative `masked_paths`**: today's mask entries are
+   home/absolute-anchored; let `[sandbox] masked_paths` also take
+   project-relative entries (and simple globs) - the same dual
+   convention `cow_paths` already has. Covers user-owned secrets like
+   `.env*` or `secrets/`.
+3. **A `.hydraignore` file** (name TBD: `.hydramask`?) - one
+   .gitignore-style glob per line at the project root, sugar feeding the
+   same union as (2). Worth adding if (2) feels buried in config.toml;
+   the muscle memory of .gitignore is real. Trust is easy: masks only
+   ever ADD restriction, so reading the file from a head's own branch
+   copy (union with root's) lets a branch restrict itself but never
+   unmask anything.
 
 Why daemon-side and not in-sandbox: credentials never enter the sandbox,
 the audit trail is "the user's daemon pushed", and it works for every agent
@@ -409,6 +448,14 @@ MR via the forge API (unlinked heads cost nothing):
 
 - **Status surfaced in UI**: CI pipeline state, approval count, unresolved
   discussion count, mergeability. The sidebar chip gains an MR state.
+- **"Publish when green"** - the publish analog of merge-when-green,
+  reusing the same watcher pattern (`RunAutoMergeWatcher` + the 10s
+  finished-dwell): an armed unlinked head auto-publishes as a DRAFT MR
+  when local tests are green and the agent has finished; an armed linked
+  head auto-`Push to MR`s (plain push only - never auto-force). Heads
+  that finish overnight become draft MRs waiting for you in the morning.
+  Armed per-head via a spawn-form checkbox, default from
+  `review.publish_when_green`.
 - **"Merge when approved"** - the remote analog of merge-when-green: arm a
   head so that when the forge reports approvals satisfied + CI green,
   Hydra calls the forge's merge API (or just enables the forge's own
@@ -428,6 +475,12 @@ MR via the forge API (unlinked heads cost nothing):
   the head as a new prompt ("Address this review feedback: ..."). Later,
   optionally automatic: new unresolved discussion on an idle MR-linked
   head -> notify, or (opt-in) auto-prompt.
+- **Stacked MRs** (settled direction): a child head's MR targets its
+  parent's *downstream* branch; when the parent's MR merges, retarget
+  the child's MR at the trunk - the remote analog of the existing local
+  reparenting (`AgentsByBaseBranch` -> `UpdateAgentBaseBranch`).
+  Anything fancier waits for real demand; forges handle MR stacks
+  poorly.
 
 ### 3.6 Spawn-side changes (Phase 3)
 
@@ -444,6 +497,20 @@ MR via the forge API (unlinked heads cost nothing):
   `{ticket}` feeds the push-branch template and MR title
   (`PROJ-1234: <title>` - which is usually all the "JIRA integration" a
   team actually needs, since forge-JIRA linking does the rest).
+- **JIRA depth ladder** - how far to take it, ranked; stop climbing when
+  satisfied:
+  1. *Free*: `{ticket}` in branch names and MR titles. Corporate
+     JIRA<->forge integrations auto-link and often auto-transition off
+     exactly this - zero Hydra code beyond the templating already
+     planned.
+  2. *Cheap*: spawn-from-ticket fetch (the bullet above) - REST with the
+     token from the secrets file, or let the agent do it via MCP.
+  3. *Medium*: a ticket picker in the spawn form - "my open tickets" via
+     JIRA REST, select one -> prompt + `{ticket}` prefilled. First rung
+     that adds real UI; build only once 1+2 feel limiting.
+  4. *Skip*: transitions/comments pushed from Hydra (server-side
+     integrations already do this off MR events), time tracking, any
+     two-way sync.
 
 ### 3.7 What NOT to build
 
@@ -457,9 +524,23 @@ MR via the forge API (unlinked heads cost nothing):
 - **No git-credential handling inside the sandbox.** Publishing stays a
   host-side daemon action.
 
----
+### 3.8 Small UI wins alongside (not gated on any phase)
 
-## 4. The target workflow (day in the life, after Phase 3)
+- **Forge web link on the project**: derive the browse URL from the
+  remote URL (`git@github.com:org/repo.git` /
+  `https://gitlab.corp.com/org/repo.git` -> the https repo page) and
+  show a small external-link icon (provider logo when detected) next to
+  the sidebar's Repository button. Read-only, no auth, no forge API -
+  can ship immediately. The same derivation later powers "View MR" URL
+  building for the token-auth path.
+- **Sidebar order: Repository row above the spawn box**. Current order
+  in `web/src/routes/__root.tsx` is spawn form -> Repository+Sync ->
+  agents list. Moving Repository up gives the sidebar a clean
+  context -> action -> results reading: which repo/branch (+ its remote
+  link and sync state) -> spawn -> running heads. It also keeps the
+  repo row adjacent to the project selector it describes. Cost: the
+  spawn box - the most-used control - drops ~40px; acceptable, it
+  remains fully visible. Verdict: do it, as a standalone tweak. (day in the life, after Phase 3)
 
 1. `hydra spawn "PROJ-1234: rate-limit the webhook endpoint"` - base is a
    fresh `origin/main`; the ticket body is in the prompt context.
@@ -499,10 +580,10 @@ changing steps 1-3 at all.
   (`internal/config/config.go:1004`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.
 - **Mask project-level secret/personal files from head sandboxes**
-  (pre-existing gap, see 3.4): append project-relative masks for
-  `.hydra/deploy.toml`, the future secrets file, and
-  `.hydra/config.local.toml` where sandbox options are resolved; mirror
-  them in the gate's `credentialRels`.
+  (pre-existing gap, see 3.4): hardcoded always-masks for Hydra's own
+  files (`deploy.toml`, secrets, `config.local.toml`) + gate
+  `credentialRels` mirror; project-relative `masked_paths` (and the
+  optional `.hydraignore` sugar) can follow separately.
 - Add the `[review]` + `[jira]` sections (parsing + validation only),
   including provider auto-detection from the remote URL.
 - Forge credentials stay OUT of sandbox defaults (done: `~/.config/gh`
@@ -526,16 +607,21 @@ changing steps 1-3 at all.
 - `performPublish` in `internal/http` (claim, local test gate, host-side
   non-interactive push with actionable auth errors, EnsureMR, store the
   link).
-- API + web: Create MR dialog -> View MR + state chip, `Push to MR` /
-  `Pull from MR` buttons with ahead/behind tracking (3.3b), optional
-  `protected_branches` warning on direct local merge.
+- API + web: Create MR dialog (incl. multi-remote dropdown) -> View MR +
+  state chip, `Push to MR` / `Pull from MR` buttons with ahead/behind
+  tracking (3.3b), `default_action` button ordering, linked-head
+  kill/local-merge dialogs (3.3c), optional `protected_branches` warning.
 - Settings page: Review section with detected provider, auth status,
   test-connection (3.2).
+- Anytime alongside: forge web link next to the Repository button +
+  sidebar reorder (3.8).
 
 ### Phase 3 - lifecycle automation
 
 - MR watcher: poll MR-linked heads; surface CI/approval state; detect
   remote merge -> fetch, ff local target, archive + teardown.
+- "Publish when green" arming (spawn-form checkbox +
+  `review.publish_when_green` default).
 - "Merge when approved" (prefer arming the forge's own auto-merge).
 - Fetch-fresh spawn base (`<remote>/<target>`); remote-aware behind-count
   and update-from-base.
@@ -544,7 +630,8 @@ changing steps 1-3 at all.
 ### Phase 4 - polish / tracker depth
 
 - Spawn-from-ticket (JIRA fetch or MCP-assisted), `{ticket}` templating
-  end-to-end, MR title conventions.
+  end-to-end, MR title conventions; the "my open tickets" spawn-form
+  picker only if paste-a-key proves limiting (JIRA ladder, 3.6).
 - Notifications on MR events (approval, CI fail, new comments).
 - Optional: self-hosted GitLab/GHE base-URL support in the provider
   config (mostly free via `glab`/`gh` host config).
@@ -564,20 +651,10 @@ changing steps 1-3 at all.
 - **CLI-first fragility**: `glab`/`gh` output formats change; pin to
   `--json`/`-F json` output modes. REST clients are the eventual stable
   path.
-- **Killing or locally merging a head with an open MR**: the remote
-  branch and MR outlive the head (they live on the server), but nothing
-  would track them afterwards. Kill/merge on an MR-linked head should
-  warn and offer: close the MR + delete the remote branch, or detach and
-  leave them be. Never silently either.
-- **Stacked heads -> stacked MRs**: a child head's natural MR target is
-  its parent's *downstream* branch, and the merge-close reparenting
-  (`AgentsByBaseBranch` retarget) has a remote analog (retarget the MR
-  when the parent's MR merges). Forges handle stacked MRs poorly in
-  general; punt beyond "target the parent's downstream branch" until real
-  demand.
-- **Forks / multiple remotes**: GitHub-style fork PRs need push-to-fork
-  with MR-targets-upstream (`push remote != MR repo`). `review.remote`
-  covers the simple case; a `push_remote`/`target_repo` split is a
+- **Forks**: same-repo multiple remotes are handled (the Create MR
+  dialog's remote dropdown, default `review.remote`), but GitHub-style
+  fork PRs need push-to-fork with MR-targets-upstream
+  (`push remote != MR repo`). A `push_remote`/`target_repo` split is a
   known-shape extension, not designed here.
 - **Local tests vs remote CI drift**: the pre-push gate uses local
   `[[tests]]`; the forge gate uses CI. Keeping them aligned is a config
