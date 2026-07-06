@@ -8,6 +8,10 @@ export type RepositoryArtifactFile = {
      */
     name: string;
     /**
+     * File size in bytes; labels download-class tiles (an .apk, a .zip)
+     */
+    size?: number | null;
+    /**
      * URL to fetch the file's bytes (an artifacts blob URL); null while still generating
      */
     url?: string | null;

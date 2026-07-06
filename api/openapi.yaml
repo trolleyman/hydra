@@ -2702,6 +2702,11 @@ components:
         name:
           type: string
           description: Output file's relative path (forward-slashed)
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: File size in bytes; labels download-class tiles (an .apk, a .zip)
         url:
           type: string
           nullable: true
@@ -3610,6 +3615,14 @@ components:
             frame-by-frame - so the change may be spurious (e.g. only container
             metadata differs). Absent/false for images and for frame-verified
             video. The UI shows a caveat badge when set.
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            File size in bytes (head side preferred). Labels download-class
+            tiles (an .apk, a .zip); may be absent for entries written before
+            the field existed.
         change_ratio:
           type: number
           format: double

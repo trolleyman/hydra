@@ -139,6 +139,33 @@ var mediaExts = map[string]string{
 	".webm": "video/webm",
 }
 
+// downloadExts maps collectible non-media output extensions (packages and
+// archives, e.g. an Android build's .apk) to their content types. These
+// surface as download tiles (name + size + change chip) rather than rendered
+// media, are compared by byte hash only, and are served with a
+// Content-Disposition: attachment header so a click saves the file.
+var downloadExts = map[string]string{
+	".apk": "application/vnd.android.package-archive",
+	".aab": "application/octet-stream",
+	".ipa": "application/octet-stream",
+	".zip": "application/zip",
+	".jar": "application/java-archive",
+	".tar": "application/x-tar",
+	".gz":  "application/gzip",
+	".tgz": "application/gzip",
+	".whl": "application/octet-stream",
+	".deb": "application/vnd.debian.binary-package",
+}
+
+// IsDownloadName reports whether name is a download-class artifact (see
+// downloadExts) rather than rendered media. Exported for the HTTP layer, which
+// serves these as attachments; the web UI mirrors the same extension list in
+// isDownloadArtifact (web/src/lib/artifactFilter.ts).
+func IsDownloadName(name string) bool {
+	_, ok := downloadExts[strings.ToLower(filepath.Ext(name))]
+	return ok
+}
+
 // Status is the generation state of a cache entry.
 type Status string
 
@@ -250,6 +277,9 @@ type FileDelta struct {
 	// Dpi is the media's pixel density (device-scale factor), head-preferred like
 	// Width/Height. Zero when neither side declares it (treated as 1). See FileMeta.Dpi.
 	Dpi float64
+	// Size is the file's byte size, head-preferred like Width/Height. The UI
+	// labels download tiles (an .apk, a .zip) with it.
+	Size int64
 }
 
 // Compare matches files by name across two versions' file lists and classifies
@@ -300,6 +330,12 @@ func Compare(left, right []FileMeta) []FileDelta {
 			d.Dpi = rf.Dpi
 		} else {
 			d.Dpi = lf.Dpi
+		}
+		// Byte size: head-preferred, falling back to the base side.
+		if rf.Size > 0 {
+			d.Size = rf.Size
+		} else {
+			d.Size = lf.Size
 		}
 		switch {
 		case inLeft && !inRight:
@@ -354,6 +390,9 @@ func (m *Manager) Compare(left, right Meta) []FileDelta {
 		d := &deltas[i]
 		if d.Change != ChangeModified {
 			continue
+		}
+		if IsDownloadName(d.Name) {
+			continue // downloads (an .apk, a .zip) keep the byte-hash verdict
 		}
 		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
 		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
@@ -1279,6 +1318,9 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 	ext := strings.ToLower(filepath.Ext(file))
 	ct, ok := mediaExts[ext]
 	if !ok {
+		ct, ok = downloadExts[ext]
+	}
+	if !ok {
 		return "", "", errtrace.Wrap(fmt.Errorf("unsupported artifact type %q", ext))
 	}
 	base := m.entryDir(script, key)
@@ -1547,8 +1589,11 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		if d.IsDir() || d.Name() == metaFile {
 			return nil
 		}
-		if _, ok := mediaExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
-			return nil // skips .meta sidecars too (not a known media extension)
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		_, media := mediaExts[ext]
+		_, download := downloadExts[ext]
+		if !media && !download {
+			return nil // skips .meta sidecars too (not a known extension)
 		}
 		hash, size, err := hashFile(p)
 		if err != nil {
@@ -1560,7 +1605,11 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		for _, w := range warns {
 			warnings = append(warnings, name+": "+w)
 		}
-		width, height := mediaPixelSize(p, name)
+		// Download-class files (an .apk, a .zip) have no pixel size to measure.
+		width, height := 0, 0
+		if media {
+			width, height = mediaPixelSize(p, name)
+		}
 		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height, Dpi: dpi})
 		return nil
 	})

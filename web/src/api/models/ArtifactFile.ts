@@ -25,6 +25,10 @@ export type ArtifactFile = {
      */
     unverified?: boolean | null;
     /**
+     * File size in bytes (head side preferred). Labels download-class tiles (an .apk, a .zip); may be absent for entries written before the field existed.
+     */
+    size?: number | null;
+    /**
      * Fraction (0..1) of the media that differs between the two versions, for a "modified" file. For images it is the share of pixels whose RGBA differs; for video the share of frames whose content hash differs (per-frame granularity, since ffmpeg hashes whole frames). 0 means pixel/frame-identical (such a file is reported "unchanged" instead), 1 a wholesale change (e.g. differing dimensions). Lets the UI apply a "% changed" threshold below which a change is treated as identical. Absent for added/removed/unchanged files and for video left byte-compared (see unverified).
      */
     change_ratio?: number | null;

@@ -455,6 +455,9 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		if d.Dpi > 0 {
 			f.Dpi = ptr(d.Dpi)
 		}
+		if d.Size > 0 {
+			f.Size = ptr(d.Size)
+		}
 		set.Files = append(set.Files, f)
 	}
 	return set
@@ -590,6 +593,11 @@ func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=300")
+	if artifacts.IsDownloadName(path) {
+		// Download-class artifacts (an .apk, a .zip) save to disk on click
+		// instead of rendering inline.
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
+	}
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
 }
 

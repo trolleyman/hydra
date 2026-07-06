@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Download, FileArchive } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
@@ -7,7 +7,8 @@ import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { isVideoArtifact } from '../lib/artifactFilter'
+import { isVideoArtifact, isDownloadArtifact } from '../lib/artifactFilter'
+import { formatBytes } from '../lib/formatBytes'
 import { ElapsedTime, MasonryGrid } from './ArtifactsPanel'
 import { useMediaDims } from '../lib/artifactDims'
 import { LogView } from './ArtifactLogView'
@@ -55,6 +56,21 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             <ImageOff className="w-5 h-5" />
             <span className="text-[11px] font-medium">No file</span>
           </div>
+        ) : isDownloadArtifact(file.name) ? (
+          // Download-class file (an .apk, a .zip): no media to render, just a
+          // save link. The blob endpoint serves it as an attachment.
+          <a
+            href={url}
+            download
+            title="Download"
+            className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
+            <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
+              {file.size != null ? formatBytes(file.size) : 'download'}
+            </span>
+            <Download className="w-4 h-4 shrink-0" />
+          </a>
         ) : isVideoArtifact(file.name) ? (
           <video
             src={url}
@@ -176,7 +192,7 @@ export function RepositoryArtifactsView({
   // server supplies width/height when it could measure them; useMediaDims only
   // downloads the rest to measure client-side.
   const dimSources = useMemo(
-    () => (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height, dpi: f.dpi })),
+    () => (data?.files ?? []).filter((f) => !isDownloadArtifact(f.name)).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height, dpi: f.dpi })),
     [data?.files],
   )
   const dims = useMediaDims(dimSources)
@@ -190,7 +206,7 @@ export function RepositoryArtifactsView({
   // shared by every MediaCell, which opens it at its own image's index.
   const gallery = useMemo<LightboxImage[]>(
     () => visibleFiles
-      .filter((f) => f.url && !isVideoArtifact(f.name))
+      .filter((f) => f.url && !isVideoArtifact(f.name) && !isDownloadArtifact(f.name))
       .map((f) => ({ url: f.url as string, filename: f.name, size: 0, dpi: f.dpi ?? undefined })),
     [visibleFiles],
   )
@@ -311,14 +327,16 @@ export function RepositoryArtifactsView({
               items={visibleFiles.map((f) => ({
                 key: f.name,
                 node: <MediaCell file={f} gallery={gallery} />,
-                aspect: dims[f.name]?.aspect,
+                // Downloads have no media dimensions; a flat wide aspect keeps
+                // their compact tile from being placed as a tall column.
+                aspect: isDownloadArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
                 pxWidth: dims[f.name]?.pxWidth,
                 dpi: dims[f.name]?.dpi,
                 // Videos need a minimum tile width for their transport controls.
                 minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
                 // Video uses horizontal drag for scrubbing, so it resizes via the edge
                 // handle only; images resize by dragging the media (see MasonryGrid).
-                bodyResizable: !isVideoArtifact(f.name),
+                bodyResizable: !isVideoArtifact(f.name) && !isDownloadArtifact(f.name),
               }))}
               spans={spans}
               onSpanChange={setSpanOverride}

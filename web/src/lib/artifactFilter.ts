@@ -17,6 +17,14 @@ export function isVideoArtifact(name: string): boolean {
   return /\.webm$/i.test(name)
 }
 
+// Extensions rendered as download tiles (name + size + save link) instead of
+// media - packages and archives an artifact script may emit (e.g. an Android
+// build's .apk). Mirrors the backend's downloadExts allowlist
+// (internal/artifacts), which serves these with Content-Disposition: attachment.
+export function isDownloadArtifact(name: string): boolean {
+  return /\.(apk|aab|ipa|zip|jar|tar|gz|tgz|whl|deb)$/i.test(name)
+}
+
 // The minimal shape the filter/search needs from a file: its name (for the built-in
 // type filter and search), its tags, and - for before/after sets - its change_type
 // (plus change_ratio, how much of it differs, for the "% changed" threshold). Both
@@ -66,10 +74,13 @@ export const TYPE_CATEGORY = 'type'
 // lives in lib/artifactPrefs, which also seeds 'unchanged' hidden by default).
 export const CHANGE_TYPE_ORDER = ['added', 'removed', 'modified', 'unchanged']
 
-// fileMediaType classifies a file as 'video' or 'image' for the built-in type
-// filter, matching how the viewers route it (isVideoArtifact → the video viewer).
+// fileMediaType classifies a file as 'video', 'download' or 'image' for the
+// built-in type filter, matching how the viewers route it (isVideoArtifact →
+// the video viewer, isDownloadArtifact → a download tile).
 export function fileMediaType(file: FilterableArtifact): string {
-  return isVideoArtifact(file.name) ? 'video' : 'image'
+  if (isVideoArtifact(file.name)) return 'video'
+  if (isDownloadArtifact(file.name)) return 'download'
+  return 'image'
 }
 
 export type CollectedTags = {

@@ -911,6 +911,9 @@ func (s *Server) buildRepositoryArtifact(projectID, name string, mgr *artifacts.
 		if f.Dpi > 0 {
 			af.Dpi = ptr(f.Dpi)
 		}
+		if f.Size > 0 {
+			af.Size = ptr(f.Size)
+		}
 		resp.Files = append(resp.Files, af)
 	}
 	return resp

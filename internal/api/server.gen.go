@@ -384,6 +384,9 @@ type ArtifactFile struct {
 	// RightUrl URL of the file for the right version (null if absent on the right)
 	RightUrl *string `json:"right_url"`
 
+	// Size File size in bytes (head side preferred). Labels download-class tiles (an .apk, a .zip); may be absent for entries written before the field existed.
+	Size *int64 `json:"size"`
+
 	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label - only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
 	Tags *[]string `json:"tags"`
 
@@ -858,6 +861,9 @@ type RepositoryArtifactFile struct {
 
 	// Name Output file's relative path (forward-slashed)
 	Name string `json:"name"`
+
+	// Size File size in bytes; labels download-class tiles (an .apk, a .zip)
+	Size *int64 `json:"size"`
 
 	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label. Null/absent when the file has no tags.
 	Tags *[]string `json:"tags"`

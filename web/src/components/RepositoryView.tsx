@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useLocation, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
+import { formatBytes } from '../lib/formatBytes'
 import { ensureLanguage } from '../lib/hljsLazy'
 import { getLanguage } from '../lib/language'
 import { api } from '../stores/apiClient'
@@ -362,13 +363,8 @@ function renderMarkdown(src: string, ctx: MarkdownContext): string {
   return out.join('\n')
 }
 
-// formatBytes renders a human size. Bytes are spelled out ("123 bytes") per
-// PLAN.md #41j; larger sizes use KB/MB.
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} ${n === 1 ? 'byte' : 'bytes'}`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
+// formatBytes now lives in ../lib/formatBytes, shared with the artifact
+// download tiles.
 
 // File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
 // with the diff viewer so both render files identically.

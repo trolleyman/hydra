@@ -1772,6 +1772,18 @@ func simReadyChangedSet() api.ArtifactSet {
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
 				Width:      ptr(1440), Height: ptr(880),
 			},
+			// A download-class artifact (an Android build): the frontend renders a
+			// download tile (icon + size + change chip) instead of media, and the
+			// real blob endpoint serves such files with Content-Disposition:
+			// attachment. The URLs 404 in simulation; only the tile matters here.
+			{
+				Name:       "app-debug.apk",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("variant::debug"),
+				LeftUrl:    ptr("/artifacts/projects/sim-project/blob?script=screenshots&key=commit/aaaa&file=app-debug.apk"),
+				RightUrl:   ptr("/artifacts/projects/sim-project/blob?script=screenshots&key=commit/bbbb&file=app-debug.apk"),
+				Size:       ptr(int64(48522619)),
+			},
 		},
 	}
 }

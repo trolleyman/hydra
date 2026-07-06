@@ -354,6 +354,51 @@ func hasDotDotPrefix(rel string) bool {
 	return rel == ".." || (len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator))
 }
 
+// TestDownloadArtifacts covers the download-class path (an .apk, a .zip):
+// collected by scanOutputs with a byte size but no pixel probe, admitted by
+// BlobPath with its package content type, byte-hash compared (never
+// image-refined), and carrying Size through Compare head-preferred.
+func TestDownloadArtifacts(t *testing.T) {
+	if !IsDownloadName("app-debug.apk") || IsDownloadName("home.png") || IsDownloadName("notes.txt") {
+		t.Fatal("IsDownloadName misclassifies")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "app-debug.apk"), []byte("not really an apk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, _, err := scanOutputs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name != "app-debug.apk" {
+		t.Fatalf("scanOutputs = %+v, want just the apk", files)
+	}
+	if files[0].Size != int64(len("not really an apk")) || files[0].Width != 0 {
+		t.Fatalf("apk meta = %+v", files[0])
+	}
+
+	m := NewManager(t.TempDir())
+	_, ct, err := m.BlobPath("build", "commit/abc123", "app-debug.apk")
+	if err != nil {
+		t.Fatalf("BlobPath rejected download: %v", err)
+	}
+	if ct != "application/vnd.android.package-archive" {
+		t.Errorf("content type = %q", ct)
+	}
+
+	deltas := Compare(
+		[]FileMeta{{Name: "app-debug.apk", Hash: "aa", Size: 10}},
+		[]FileMeta{{Name: "app-debug.apk", Hash: "bb", Size: 20}},
+	)
+	if len(deltas) != 1 || deltas[0].Change != ChangeModified || deltas[0].Size != 20 {
+		t.Fatalf("deltas = %+v", deltas)
+	}
+}
+
 func TestMigrateLegacyLayout(t *testing.T) {
 	m := NewManager(t.TempDir())
 	const sha = "a6a44867d80c2401f8a3648cd06c5c7c005db467"

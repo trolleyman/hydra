@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isDownloadArtifact } from '../lib/artifactFilter'
+import { formatBytes } from '../lib/formatBytes'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
@@ -152,11 +153,48 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
           here grows the tile (see MasonryGrid.startBodyResize), so dragging on the
           header above just selects the file name. */}
       <div data-tile-drag>
-        {isVideoArtifact(file.name) ? (
+        {isDownloadArtifact(file.name) ? (
+          <DownloadTile file={file} />
+        ) : isVideoArtifact(file.name) ? (
           <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} aspect={mediaAspect(file)} />
         ) : (
           <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} aspect={mediaAspect(file)} gallery={gallery} index={index} />
         )}
+      </div>
+    </div>
+  )
+}
+
+// DownloadTile renders a download-class artifact (an .apk, a .zip - see
+// isDownloadArtifact): no media to show, so it's an icon, the byte size, and a
+// save link per side. The blob endpoint serves these with
+// Content-Disposition: attachment, so a click downloads rather than renders.
+function DownloadTile({ file }: { file: ArtifactFile }) {
+  const sides = [
+    { label: 'before', url: file.left_url },
+    { label: 'after', url: file.right_url },
+  ].filter((s): s is { label: string; url: string } => !!s.url)
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5">
+      <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-gray-400 dark:text-gray-500">
+          {file.size != null ? formatBytes(file.size) : 'download'}
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          {sides.map((side) => (
+            <a
+              key={side.label}
+              href={side.url}
+              download
+              title={`Download the ${side.label} version`}
+              className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+            >
+              <Download className="w-3 h-3" />
+              {side.label}
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -660,7 +698,9 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
   const sources = useMemo(
-    () => files.map((f) => ({
+    // Download-class files have no loadable media, so they're excluded from
+    // dimension probing (their tile uses a fixed flat aspect below).
+    () => files.filter((f) => !isDownloadArtifact(f.name)).map((f) => ({
       key: f.name,
       url: f.right_url ?? f.left_url ?? null,
       video: isVideoArtifact(f.name),
@@ -678,7 +718,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
   // it has no index and falls back to opening the single clicked image. `url` is the
   // representative side, used for the lightbox's edge previews.
   const imageFiles = useMemo(
-    () => files.filter((f) => !isVideoArtifact(f.name) && (f.left_url || f.right_url)),
+    () => files.filter((f) => !isVideoArtifact(f.name) && !isDownloadArtifact(f.name) && (f.left_url || f.right_url)),
     [files],
   )
   const diffGallery = useMemo<LightboxImage[]>(
@@ -707,7 +747,9 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
     () => files.map((f) => ({
       key: f.name,
       node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
-      aspect: dims[f.name]?.aspect,
+      // Downloads have no media dimensions; a flat wide aspect keeps their
+      // compact tile from being placed as a tall column.
+      aspect: isDownloadArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       dpi: dims[f.name]?.dpi,
       // Videos need a minimum tile width for their transport controls (see
@@ -718,7 +760,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       // including the slider, whose drag now lives solely on the divider line - resizes
       // by dragging the media (data-tile-drag); the slider divider and onion opacity
       // control opt out with data-no-tile-drag so they're never hijacked.
-      bodyResizable: !isVideoArtifact(f.name),
+      bodyResizable: !isVideoArtifact(f.name) && !isDownloadArtifact(f.name),
     })),
     [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
   )
