@@ -132,6 +132,34 @@ describe('ZoomPan drag-pan', () => {
   })
 })
 
+describe('ZoomPan pinch zoom', () => {
+  it('two touch pointers pinch-zoom by their distance ratio (works from fit)', () => {
+    const { viewport, content } = renderZoomPan()
+    // Two fingers land 100px apart...
+    fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(viewport, { pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 100 })
+    // ...and spread to 200px apart: 2× the distance → 2× the scale.
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 300, clientY: 100 })
+    expect(currentScale(content)).toBeCloseTo(2, 1)
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' })
+    fireEvent.pointerUp(window, { pointerId: 1, pointerType: 'touch' })
+  })
+
+  it('never pinches out below fit and stops zooming once a finger lifts', () => {
+    const { viewport, content } = renderZoomPan()
+    fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(viewport, { pointerId: 2, pointerType: 'touch', clientX: 300, clientY: 100 })
+    // Pinch IN below fit: clamped at scale 1.
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 150, clientY: 100 })
+    expect(content.style.transform).toContain('scale(1)')
+    // One finger lifts - the survivor's moves are no longer a pinch.
+    fireEvent.pointerUp(window, { pointerId: 1, pointerType: 'touch' })
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 400, clientY: 100 })
+    expect(content.style.transform).toContain('scale(1)')
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' })
+  })
+})
+
 describe('ZoomPan minimap', () => {
   // The minimap is portaled to <body> (pinned to the screen, not the growing frame),
   // so it lives outside the render container - look for it document-wide.

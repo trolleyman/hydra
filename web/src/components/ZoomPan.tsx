@@ -87,6 +87,14 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // Set while a drag actually moved, so the trailing click is swallowed (a pan
   // shouldn't also flip the A/B view or open anything).
   const movedRef = useRef(false)
+  // Active touch points (pointerId → position) + the live pinch, if two fingers
+  // are down: the previous frame's finger distance and midpoint, which each move
+  // diffs against to zoom toward / pan with the fingers. See the pinch effect.
+  const touchesRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchRef = useRef<{ dist: number; mx: number; my: number } | null>(null)
+  // Cancels an in-flight single-finger pan (set by the pan handler below) - the
+  // second finger of a pinch must kill it, or the two gestures fight over tx/ty.
+  const cancelPanRef = useRef<(() => void) | null>(null)
 
   const grow = !!(maxWidth && maxHeight)
   // The content's fit size (cw × ch). In grow mode we measure the (inline-block)
@@ -175,6 +183,57 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     return () => el.removeEventListener('wheel', onWheel)
   }, [zoomAt])
 
+  // Two-finger pinch: the touch counterpart of the wheel (which has no touch
+  // equivalent - touchAction: 'none' on the frame also disables the browser's own
+  // pinch there). Touch points are collected in the capture-phase pointerdown
+  // below; once two are down, each move zooms by the finger-distance ratio toward
+  // the midpoint (zoomAt handles the clamps + grow mode) and pans with the
+  // midpoint's travel, so the image tracks the fingers like any native viewer.
+  // Listeners live on window for the whole mount: they no-op unless a tracked
+  // touch moves, and gestures must survive fingers wandering off the frame.
+  useEffect(() => {
+    const onMove = (ev: PointerEvent) => {
+      const touches = touchesRef.current
+      if (ev.pointerType !== 'touch' || !touches.has(ev.pointerId)) return
+      touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY })
+      const p = pinchRef.current
+      const el = viewportRef.current
+      if (!p || touches.size < 2 || !el) return
+      const [a, b] = [...touches.values()]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y)
+      const mx = (a.x + b.x) / 2
+      const my = (a.y + b.y) / 2
+      const r = el.getBoundingClientRect()
+      if (p.dist > 0 && dist > 0) zoomAt(mx - r.left, my - r.top, dist / p.dist)
+      // Follow the midpoint: functional update, so it composes with the zoomAt
+      // update above in the same batch (v is already the zoomed view).
+      const dmx = mx - p.mx
+      const dmy = my - p.my
+      if (dmx || dmy) {
+        setView((v) => {
+          const [ntx, nty] = clampT(v.tx + dmx, v.ty + dmy, v.scale)
+          return { ...v, tx: ntx, ty: nty }
+        })
+      }
+      pinchRef.current = { dist, mx, my }
+    }
+    // A lifted or cancelled finger leaves the pinch; the survivor doesn't resume
+    // a pan (its start state is long stale) - a fresh touch starts one cleanly.
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerType !== 'touch') return
+      touchesRef.current.delete(ev.pointerId)
+      if (touchesRef.current.size < 2) pinchRef.current = null
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [zoomAt, clampT])
+
   // The stored translation, re-clamped for the CURRENT content/available size, so a
   // window resize (which changes the cover bounds) can't leave a stale gutter. Pure
   // derivation - used for the transform, the minimap, and as the base for gestures -
@@ -189,8 +248,24 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // Drag-to-pan, intercepted in the capture phase so that - once zoomed - it runs
   // BEFORE the wrapped content's own gesture (slider drag, A/B flip) and suspends
   // it. At fit (scale 1) it bails immediately, leaving those gestures intact. The
-  // minimap / reset chrome (data-zoompan-ui) keep their own handlers.
+  // minimap / reset chrome (data-zoompan-ui) keep their own handlers. Touch points
+  // are ALSO tracked here (before the zoomed gate, so a pinch can start at fit);
+  // the second finger forms a pinch, kills any single-finger pan, and suspends the
+  // inner gestures itself.
   const onPointerDownCapture = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      touchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (touchesRef.current.size === 2) {
+        const [a, b] = [...touchesRef.current.values()]
+        pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }
+        cancelPanRef.current?.()
+        movedRef.current = true // a pinch is never also a click
+        setTransition('none')
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+    }
     if (e.button !== 0 || !zoomed) return
     // Let controls that own their own horizontal drag through even while zoomed - the
     // before/after slider divider and the onion opacity range (both data-no-tile-drag /
@@ -202,8 +277,12 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     setPanning(true)
     setTransition('none')
     const startX = e.clientX, startY = e.clientY
+    const id = e.pointerId
     const base = { tx, ty }
     const onMove = (ev: PointerEvent) => {
+      // Only this pan's own pointer drives it - another finger landing elsewhere
+      // (or forming a pinch) must not yank the view around.
+      if (ev.pointerId !== id) return
       const dx = ev.clientX - startX, dy = ev.clientY - startY
       if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true
       setView((v) => {
@@ -213,12 +292,18 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     }
     // pointercancel too: if the browser takes the pointer away mid-pan the drag
     // must still end, or the listeners leak and the view sticks in panning mode.
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      stop()
+    }
+    const stop = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      cancelPanRef.current = null
       setPanning(false)
     }
+    cancelPanRef.current = stop
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
@@ -254,7 +339,9 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     }
     recenter(e.clientX, e.clientY)
     const startX = e.clientX, startY = e.clientY
+    const id = e.pointerId
     const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return // another finger's moves aren't this drag
       // Ignore the sub-pixel jitter a plain click can emit - a real drag switches
       // to 1:1 tracking, a click keeps its glide.
       if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) <= 2) return
@@ -262,7 +349,8 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
       recenter(ev.clientX, ev.clientY)
     }
     // pointercancel too, so an interrupted pointer never leaks the listeners.
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)

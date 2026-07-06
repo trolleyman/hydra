@@ -484,11 +484,15 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     e.stopPropagation()
     const ctl = startResize(key, startSpan, e.clientX)
     if (!ctl) return
-    const onMove = (ev: PointerEvent) => ctl.move(ev.clientX)
+    // Only this drag's own pointer drives it (a second finger elsewhere must not
+    // steer this tile's width).
+    const id = e.pointerId
+    const onMove = (ev: PointerEvent) => { if (ev.pointerId === id) ctl.move(ev.clientX) }
     // pointercancel too: if the browser takes the pointer away mid-drag (touch
     // scroll takeover, window losing the device) the drag must still end - without
     // it the listeners leak and the tile stays wedged in its dragging state.
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -519,8 +523,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     draggedKeyRef.current = null // reset any stale value from a drag that produced no click
     const startX = e.clientX
     const startY = e.clientY
+    const id = e.pointerId // only this drag's own pointer drives it (multi-touch)
     let ctl: ReturnType<typeof startResize> = null
     const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
       const dx = ev.clientX - startX
       if (!ctl) {
         // Require a decisive horizontal move so taps and vertical scrolls pass through.
@@ -537,7 +543,8 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     // pointercancel too (see startEdgeResize): a vertical touch drag starts here,
     // pans the page (touch-action: pan-y) and CANCELS the pointer - pointerup never
     // fires, so without this the listeners leaked on every scroll over a tile.
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -722,6 +729,10 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
         size: 0,
         diff: { left: f.left_url, right: f.right_url, mode },
         dpi: f.dpi ?? undefined,
+        // Known pixel size seeds the lightbox caption + comparator aspect on
+        // navigation, so neither collapses and re-measures per image.
+        width: f.width ?? undefined,
+        height: f.height ?? undefined,
         changeType: ct === 'added' || ct === 'removed' || ct === 'modified' ? ct : undefined,
       }
     }),

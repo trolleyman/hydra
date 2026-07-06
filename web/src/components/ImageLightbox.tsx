@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
-import { LightboxDiff } from './LightboxDiff'
+import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
@@ -20,6 +20,12 @@ export interface LightboxImage {
   /** Pixel density (device-scale factor) the media was captured at, surfaced in the
    *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
   dpi?: number
+  /** Natural pixel size, when known ahead of load (artifact entries carry it in
+   *  their metadata). Seeds the caption's "W × H" and the diff comparator's aspect
+   *  ratio immediately on navigation, so neither collapses and re-measures per
+   *  image (which made the caption jump around). Omit → measured on load. */
+  width?: number
+  height?: number
   /** How this artifact changed vs its counterpart (added/removed/modified), when
    *  known - shown as a small +/−/• glyph right after the filename in the caption,
    *  mirroring the diff grid's per-file badge. Omit for plain images with no diff
@@ -78,13 +84,20 @@ export function ImageLightbox({
   const [dir, setDir] = useState(0)
   const prev = useCallback(() => { if (index > 0) { setDir(-1); onIndexChange(index - 1) } }, [index, onIndexChange])
   const next = useCallback(() => { if (index < count - 1) { setDir(1); onIndexChange(index + 1) } }, [index, count, onIndexChange])
-  // Natural pixel dimensions of the current image, read once it loads. Cleared
-  // on navigation so a stale size never flashes against the next image.
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-  // Clear the measured size the moment the shown image changes (adjust-during-
-  // render rather than in an effect, so no stale size survives to the next paint).
+  // Natural pixel dimensions of the current image: seeded from the entry's own
+  // metadata when it carries one (artifact entries do), refined by the measured
+  // size once the image loads. Seeding means the caption's "W × H" doesn't blink
+  // out and back on every navigation - which recentred the whole caption row and
+  // made the filename jump around.
+  const seedDims = useCallback((i: number) => {
+    const img = images[i]
+    return img?.width && img?.height ? { w: img.width, h: img.height } : null
+  }, [images])
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(() => seedDims(index))
+  // Re-seed the moment the shown image changes (adjust-during-render rather than
+  // in an effect, so a stale size never survives to the next paint).
   const [dimsIndex, setDimsIndex] = useState(index)
-  if (dimsIndex !== index) { setDimsIndex(index); setDims(null) }
+  if (dimsIndex !== index) { setDimsIndex(index); setDims(seedDims(index)) }
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
@@ -250,18 +263,18 @@ export function ImageLightbox({
           style={{ ['--lb-from' as string]: dir < 0 ? '-2rem' : dir > 0 ? '2rem' : '0rem' }}
         >
           {current.diff ? (
-            // A before/after pair: render the fullscreen comparator (its own mode
-            // controls live inside). The wrapper key already remounts it per entry.
+            // A before/after pair: render the fullscreen comparator. Its control
+            // row (mode selector, A/B toggle, Highlight) is rendered BELOW,
+            // outside this keyed wrapper, so it doesn't fade/remount per entry.
             <LightboxDiff
               left={current.diff.left}
               right={current.diff.right}
               name={current.filename}
               mode={diffMode}
-              onModeChange={setDiffMode}
               view={abView}
               onViewChange={setAbView}
               highlight={highlight}
-              onHighlightChange={setHighlight}
+              aspect={current.width && current.height ? current.width / current.height : undefined}
               onDims={setDims}
             />
           ) : (
@@ -297,6 +310,21 @@ export function ImageLightbox({
             </ZoomPan>
           )}
         </div>
+        {/* The diff control row lives OUTSIDE the keyed slide wrapper above, so it
+            persists across ←/→ - no fade/remount per image, and the caption below
+            doesn't get shoved as it re-appears. State is held up here anyway (it
+            survives navigation); only the picture slides. */}
+        {current.diff && (
+          <LightboxDiffControls
+            mode={diffMode}
+            onModeChange={setDiffMode}
+            view={abView}
+            onViewChange={setAbView}
+            highlight={highlight}
+            onHighlightChange={setHighlight}
+            canDiff={!!current.diff.left && !!current.diff.right}
+          />
+        )}
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
             <span key="name" className="flex items-center gap-1.5 text-white/70">
