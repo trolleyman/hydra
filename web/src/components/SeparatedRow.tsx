@@ -1,4 +1,5 @@
 import { Children, Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { useNowTick } from '../lib/useNowTick'
 
 // SeparatedRow lays out its children on a wrapping flex row with an interpunct
 // "·" between each pair - but hides any separator that lands at the start or end
@@ -12,8 +13,16 @@ import { Children, Fragment, useCallback, useEffect, useLayoutEffect, useRef, ty
 // resetting leftward (robust to items of differing heights, unlike offsetTop).
 // We re-measure on every render (content like "created Xs ago" ticks) and on
 // width changes (which is the only thing that changes wrapping).
-export function SeparatedRow({ children, className }: { children: ReactNode; className?: string }) {
+//
+// `live` rows contain a self-updating time label ("created Xs ago"); they
+// subscribe to the shared 1s clock so THIS row re-renders (and re-measures) each
+// second, keeping the dangling-separator cleanup correct as the label's width
+// changes - without re-rendering the rest of the page. The label's width can
+// shift wrapping, and our ResizeObserver only catches the row's own width, so a
+// tick has to drive a re-measure. Non-live rows never tick.
+export function SeparatedRow({ children, className, live = false }: { children: ReactNode; className?: string; live?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
+  useNowTick(live)
   const items = Children.toArray(children) // drops null/undefined/false (the conditional children)
 
   const measure = useCallback(() => {

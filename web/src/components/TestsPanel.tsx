@@ -15,6 +15,7 @@ import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
+import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import {
   TEST_STATUS_ORDER, type TestFilter,
@@ -92,14 +93,29 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshRunnerRef = useRef<string | null>(null)
 
+  // Coalesce streamed log lines: a chatty runner emits many `log` frames per
+  // tick, and appending each on its own would re-copy the whole growing log
+  // array per line (O(n^2)). Queue them and apply one batch per ~frame.
+  const { enqueue: enqueueLog, flushNow: flushLogs } = useLogCoalescer<ArtifactLogLine>((batches) => {
+    setRunners((prev) => prev?.map((r) => {
+      const add = batches.get(r.name)
+      return add ? { ...r, log: [...(r.log ?? []), ...add] } : r
+    }) ?? prev)
+  })
+
   // Apply a server→client WS message to local state.
   const applyMessage = useCallback((msg: TestWSMessage) => {
+    if (msg.type === 'log') {
+      enqueueLog(msg.name, msg.line)
+      return
+    }
+    // Any other message may replace/modify a runner - apply queued log lines
+    // first so they land in order on the current runner before it changes.
+    flushLogs()
     if (msg.type === 'snapshot') {
       setRunners(msg.runners ?? [])
     } else if (msg.type === 'runner') {
       setRunners((prev) => (prev ? prev.map((r) => (r.name === msg.runner.name ? msg.runner : r)) : [msg.runner]))
-    } else if (msg.type === 'log') {
-      setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, log: [...(r.log ?? []), msg.line] } : r)) ?? prev)
     } else if (msg.type === 'progress') {
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, progress: msg.progress } : r)) ?? prev)
     } else if (msg.type === 'counts') {
@@ -119,7 +135,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
         }
         : r)) ?? prev)
     }
-  }, [])
+  }, [enqueueLog, flushLogs])
 
   // Reset to "connecting" whenever the connection parameters change (during
   // render, before the socket effect below reopens), rather than inside that effect.

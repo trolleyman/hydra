@@ -20,6 +20,7 @@ import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLef
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { AgentSidebarItem } from '../components/AgentComponents'
+import { Uptime } from '../components/LiveTime'
 import { UncommittedChip } from '../components/UncommittedChip'
 import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
@@ -821,7 +822,7 @@ function RootLayout() {
             {spawnedAt.current !== null && (
               <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
                 <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
-                  {formatUptime(Date.now() - spawnedAt.current)}
+                  <Uptime spawnedAt={spawnedAt.current} format={formatUptime} />
                 </span>
               </Tooltip>
             )}
