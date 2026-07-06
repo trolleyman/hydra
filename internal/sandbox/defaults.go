@@ -59,9 +59,15 @@ func Defaults() DefaultConfig {
 		},
 		// RestoreRO: re-expose specific tool configs read-only after masking
 		// the parent (~/.config). Order matters: restores apply after masks.
+		//
+		// Deliberately NOT restored: ~/.config/gh (and other forge CLI configs
+		// like ~/.config/glab-cli). They hold live API tokens, and `gh auth
+		// token` from Bash would hand a head the user's forge identity with no
+		// approval step - the gate's Read-tool deny on credential paths can't
+		// cover a CLI that reads its own config. A project that accepts heads
+		// acting as the user can opt in via [<agent>.sandbox] restore_ro.
 		RestoreRO: []string{
 			"~/.config/git",              // git global config
-			"~/.config/gh",               // GitHub CLI config
 			"~/.config/mise/config.toml", // mise global tool versions (config.local.toml secrets stay masked)
 		},
 	}

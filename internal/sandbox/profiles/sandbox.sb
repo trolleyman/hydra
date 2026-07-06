@@ -54,9 +54,10 @@
 ;; Allow modifications within your immediate workspace root
 (allow file-write* (subpath (param "WORK_DIR")))
 
-;; Allow dev tools to read their configs from ~/.config (overrides the subpath denial above)
+;; Allow dev tools to read their configs from ~/.config (overrides the subpath denial above).
+;; ~/.config/gh is deliberately absent: it holds the gh CLI's live token (see
+;; sandbox.Defaults RestoreRO); opt back in per-project via restore_ro.
 (allow file-read* (subpath (string-append (param "HOME_DIR") "/.config/git")))
-(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config/gh")))
 
 ;; Allow Claude to preserve its configuration, credentials, and conversation logs
 (allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))

@@ -48,11 +48,16 @@ The merge/lifecycle path, end to end:
   read-only re-exposure of `~/.config/gh` inside the sandbox
   (`internal/sandbox/defaults.go:62-66`). Everything below is greenfield.
 - **Credentials:** the sandbox masks `~/.ssh`, `~/.git-credentials`,
-  `~/.netrc`, etc. - a head cannot `git push` over SSH. But the `gh` CLI's
-  token IS readable (read-only) in-sandbox, and the daemon itself runs
-  host-side with full host credentials. `unsafe_host = true` on
-  `[[tests]]`/`[[artifacts]]` (root-config-gated) is the existing precedent
-  for a credentialed host-side action.
+  `~/.netrc`, etc., the gate denies `git push` from Bash outright, and the
+  Read tool is denied on credential paths. `~/.config/gh` *used to be*
+  restored read-only by default - which quietly handed every head the
+  user's GitHub identity (`gh auth token` from Bash is not gated, so the
+  Read-tool deny was moot). That default is now removed
+  (`internal/sandbox/defaults.go`); forge credentials in-sandbox are
+  opt-in via `restore_ro`. The daemon itself runs host-side with full host
+  credentials; `unsafe_host = true` on `[[tests]]`/`[[artifacts]]`
+  (root-config-gated) is the existing precedent for a credentialed
+  host-side action.
 - **Config layering:** internal defaults -> `~/.config/hydra/config.toml`
   (user/machine) -> `<root>/.hydra/config.toml` (project, committed), merged
   in `config.Load` (`internal/config/config.go:1004`). There is **no
@@ -108,21 +113,31 @@ requires touching Hydra's source.
    via the remote merge). The head is archived as `killed` rather than
    `merged` - cosmetic inaccuracy, fixed in Phase 3.
 
-### 2.2 Let the agent do the forge legwork
+### 2.2 Head-side forge access: gated MCP, not an ambient token
 
-Because `~/.config/gh` is restored read-only in the sandbox and
-`github.com`/`gitlab.com` are on the default allow-list, a Claude head can
-already run `gh pr create`, `gh pr view --comments`, `gh pr checks` itself.
-Caveats:
+By default heads now have NO forge credentials: `~/.config/gh` is no longer
+restored into the sandbox (an ambient token means any head can run
+`gh auth token` and act as you with zero approval - Bash is not gated for
+`gh`, only for `git push`). Two ways to give a head forge access, in order
+of preference:
 
-- It still cannot `git push` (SSH keys and git credentials are masked) - but
-  `gh` can push over HTTPS with its token, and you can also ask the agent to
-  prepare everything and do the push yourself.
-- For GitLab, `glab` config (`~/.config/glab-cli`) is NOT restored today;
-  until Phase 1 adds it, add it yourself via `[claude.sandbox] restore_ro`.
-- Pushing from inside a head means the *agent's* token acts on your forge.
-  At work, think before granting this; the daemon-side publish flow
-  (Phase 2) is the better trust model.
+- **MCP with per-tool gating (recommended).** Configure a GitHub/GitLab MCP
+  server and allow it via `[policy] mcp_tools_allowed`. The security gate
+  already does exactly the right thing here (`internal/gate/decide.go`):
+  allow-listed tools pass, `mcp_auto_allow_read` can wave through
+  read-only tools, and every other tool call is PARKED for your approval -
+  even under `--dangerously-skip-permissions`. So "head may read MRs and
+  post a comment, but creating/merging an MR pings me" is expressible
+  today with config only. Prefer an HTTP/hosted MCP server (token stays
+  out of in-sandbox files) over a stdio one whose config rides into the
+  sandbox.
+- **Opt-in ambient CLI (`restore_ro = ["~/.config/gh"]`).** Simple and
+  unrestricted: the head IS you on the forge, no approval step. Reasonable
+  on a personal repo; at work, don't.
+
+Either way a head still cannot `git push` (gate-denied + no SSH keys); you
+can ask it to prepare branches/descriptions and do the push yourself, until
+the daemon-side publish flow (Phase 2) exists.
 
 ### 2.3 JIRA via MCP, today
 
@@ -178,8 +193,11 @@ mode = "mr"
 provider = "gitlab"            # gitlab | github (extensible)
 remote = "origin"
 target_branch = "main"          # MR target; also the spawn-base default
-# Branch name used when pushing (head branch stays hydra/<id> locally).
-# Placeholders: {id}, {ticket} (extracted from prompt/title, see [jira])
+# Default DOWNSTREAM branch name: what the head branch is pushed AS (the
+# local branch stays hydra/<id>). This is only the template; each head
+# carries its own editable downstream_branch seeded from it - see 3.3a.
+# Placeholders: {id}, {ticket} (extracted from prompt/title, see [jira]),
+# {base} (the head's base branch).
 push_branch_template = "feat/{ticket}-{id}"
 draft = true                    # open MRs as draft by default
 squash = true                   # request squash-on-merge
@@ -215,7 +233,7 @@ Daemon-side (`performPublish`, parallel to `performClaimedMerge`):
 4. Create the MR/PR if none exists (via `glab`/`gh` or REST), targeting
    `review.target_branch`; title/description seeded from the head's task
    and commit log; store the MR URL + IID on the head (new DB fields:
-   `ReviewURL`, `ReviewID`, `PushBranch`).
+   `ReviewURL`, `ReviewID`, `DownstreamBranch`).
 5. Head status -> `in_review`. **Do not delete anything.** Worktree,
    branch, and session all survive - review iteration is the normal case.
 6. Re-publish is idempotent: push again, the existing MR updates.
@@ -225,6 +243,65 @@ CI-red/merged) linking to the forge. The agent header's merge button
 becomes a split Publish button ("Publish", "Publish as ready", "Merge
 locally...").
 
+#### 3.3a Per-head downstream branch name
+
+Each head gets a **`downstream_branch`** field: the name its work is pushed
+AS (the local branch always stays `hydra/<id>` - teardown and branch
+listing rely on that prefix). Semantics:
+
+- **Seeded, not fixed**: at spawn (or lazily at first publish) it is
+  expanded from `review.push_branch_template` - `{id}`, `{ticket}`,
+  `{base}` - but it is just a per-head string after that. Set it at spawn
+  (`hydra spawn --downstream-branch ...`, spawn form field) or edit it
+  later in the UI, exactly like the existing base-branch editor in
+  `AgentDetail.tsx` (same pattern: a metadata-only field with an inline
+  editor).
+- **Empty template -> mirror**: with no template configured, the
+  downstream name defaults to the local name (`hydra/<id>`), which is the
+  degenerate local-ish behavior.
+- **Soft-locked after first publish**: on GitLab/GitHub the source branch
+  IS the MR's identity - renaming it orphans the MR (GitLab closes it;
+  GitHub retargets at best). After `ReviewID` is set, editing
+  `downstream_branch` warns and offers "push under new name and open a
+  fresh MR (closes the old one)" rather than silently forking.
+- **Collision handling**: publish fails cleanly if the downstream name
+  exists on the remote and does not fast-forward from a previous publish
+  of this head (someone else's branch) - never force-push a branch this
+  head did not create.
+
+### 3.4 Authentication - does this need OAuth?
+
+Short answer: **no OAuth implementation in Hydra.** Hydra's daemon is a
+single-user, local process acting as you; every auth need is covered by
+credentials you already provision once on the host:
+
+- **`git push` (daemon-side)** uses your normal host git auth - SSH agent
+  or credential helper - identically to the existing sidebar Push button,
+  which already works today with zero Hydra auth code.
+- **MR creation via `gh`/`glab` (CLI-first)**: these CLIs implement OAuth
+  *themselves* (device flow). You run `gh auth login` /
+  `glab auth login --hostname gitlab.mycorp.com` once on the host; the
+  daemon just shells out and inherits working auth. Self-hosted GitLab and
+  GHE are handled by the CLIs' multi-host config.
+- **REST fallback (no CLI available)**: a personal access token - on
+  corporate GitLab typically a project/group access token with `api`
+  scope - stored in the uncommitted 0600 secrets file
+  (`deploy.toml` precedent, section 3.1) or read from an env var. PATs
+  are the workplace norm; no OAuth dance needed.
+- **JIRA**: cloud = API token (basic auth email+token); server/DC = PAT.
+  If you go the MCP route instead, Atlassian's hosted MCP server does its
+  OAuth in the MCP client, not in Hydra.
+- **When WOULD real OAuth be needed?** Only if Hydra became a hosted,
+  multi-user service that must act as *each* reviewer (OAuth app
+  registration, redirect URI, refresh tokens). That contradicts Hydra's
+  one-daemon-one-user trust model and is explicitly out of scope; the doc
+  notes it only so nobody reinvents it by accident.
+
+Placement rule regardless of method: tokens live **host-side only**
+(CLI credential stores or the 0600 secrets file). Nothing under
+`.hydra/config*.toml` ever holds a secret, and nothing token-bearing is
+mounted into a sandbox by default (section 2.2).
+
 Why daemon-side and not in-sandbox: credentials never enter the sandbox,
 the audit trail is "the user's daemon pushed", and it works for every agent
 type including bash heads. This follows the `unsafe_host` trust precedent:
@@ -233,7 +310,7 @@ arbitrary credentialed commands, so provider/remote/command resolution
 reads from the trusted root + local config only, never the head's branch
 copy.
 
-### 3.4 MR lifecycle tracking (Phase 3)
+### 3.5 MR lifecycle tracking (Phase 3)
 
 A watcher (sibling of `RunAutoMergeWatcher`) polls each `in_review` head's
 MR via the forge API:
@@ -260,7 +337,7 @@ MR via the forge API:
   optionally automatic: new unresolved discussion on an idle `in_review`
   head -> notify, or (opt-in) auto-prompt.
 
-### 3.5 Spawn-side changes (Phase 3)
+### 3.6 Spawn-side changes (Phase 3)
 
 - **Fetch-fresh base**: in review mode, default spawn base to
   `<remote>/<target_branch>` after a (throttled) fetch, instead of the
@@ -276,7 +353,7 @@ MR via the forge API:
   (`PROJ-1234: <title>` - which is usually all the "JIRA integration" a
   team actually needs, since forge-JIRA linking does the rest).
 
-### 3.6 What NOT to build
+### 3.7 What NOT to build
 
 - **No review UI inside Hydra.** Reviews happen on the forge; Hydra links
   out. Replicating comment threads is a tarpit.
@@ -317,8 +394,9 @@ changing steps 1-3 at all.
 ### Phase 0 - no code (do now)
 
 - Document the manual-publish workflow (section 2.1) in the README.
-- Add corporate hosts to the network allow-list; add `~/.config/glab-cli`
-  to `restore_ro` where wanted; set up a JIRA MCP server.
+- Add corporate hosts to the network allow-list; set up JIRA/forge MCP
+  servers with per-tool allow-lists (section 2.2/2.3). Only grant
+  `restore_ro` forge-CLI configs where you accept the head acting as you.
 
 ### Phase 1 - config groundwork (small)
 
@@ -326,15 +404,20 @@ changing steps 1-3 at all.
   (`internal/config/config.go:1004`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.
 - Add the `[review]` + `[jira]` sections (parsing + validation only).
-- Add `~/.config/glab-cli` to `RestoreRO` defaults
-  (`internal/sandbox/defaults.go`).
+- Forge credentials stay OUT of sandbox defaults (done: `~/.config/gh`
+  removed from `RestoreRO` in `internal/sandbox/defaults.go` +
+  `profiles/sandbox.sb`; `glab-cli` config was never in). Document the
+  two opt-in routes instead: per-project `restore_ro`, or MCP with
+  per-tool gating (section 2.2).
 - Settings UI: surface which layer each effective value came from (this
   becomes important once four layers exist).
 
 ### Phase 2 - publish (the core feature)
 
-- DB: head fields `ReviewURL`, `ReviewID`, `PushBranch`; head status
-  `publishing`; archive end state for remote merges.
+- DB: head fields `ReviewURL`, `ReviewID`, `DownstreamBranch`; head
+  status `publishing`; archive end state for remote merges. Downstream
+  branch: template expansion at spawn, inline editor in the UI
+  (base-branch-editor pattern), soft-lock after first publish (3.3a).
 - `internal/forge`: a small provider interface -
   `EnsureMR(branch, target, opts) (url, id)`, `MRStatus(id)`, `Merge(id)`,
   `Discussions(id)` - with `gitlab` and `github` implementations
