@@ -65,6 +65,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: [modLabel, 'M'], label: 'Merge agent' },
       { keys: [modLabel, 'U'], label: 'Mark as unread' },
       { keys: ['F2'], label: 'Rename agent' },
+      { keys: ['B'], label: 'Copy branch name' },
       { keys: [modLabel, 'K'], label: 'Kill agent' },
     ],
   },
