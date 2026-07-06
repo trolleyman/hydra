@@ -211,13 +211,17 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
         return { ...v, tx: ntx, ty: nty }
       })
     }
+    // pointercancel too: if the browser takes the pointer away mid-pan the drag
+    // must still end, or the listeners leak and the view sticks in panning mode.
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
       setPanning(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   // Swallow the click a pan would otherwise become (so it doesn't flip the A/B
@@ -227,7 +231,11 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   }
 
   // Recenter the view on the point clicked in the minimap, and keep recentring as
-  // it's dragged - a click-anywhere + drag pan that mirrors the main image.
+  // it's dragged - a click-anywhere + drag pan that mirrors the main image. The
+  // initial press GLIDES to the clicked spot (a deliberate go-there jump), but the
+  // moment the pointer starts dragging the ease switches off: an eased recenter
+  // restarted on every move would trail the pointer by its whole 200ms curve, so
+  // the view would chase where the cursor used to be instead of tracking it.
   const onMinimapDown = (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -245,13 +253,23 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
       })
     }
     recenter(e.clientX, e.clientY)
-    const onMove = (ev: PointerEvent) => recenter(ev.clientX, ev.clientY)
+    const startX = e.clientX, startY = e.clientY
+    const onMove = (ev: PointerEvent) => {
+      // Ignore the sub-pixel jitter a plain click can emit - a real drag switches
+      // to 1:1 tracking, a click keeps its glide.
+      if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) <= 2) return
+      setTransition('none') // dragging now - track the pointer 1:1
+      recenter(ev.clientX, ev.clientY)
+    }
+    // pointercancel too, so an interrupted pointer never leaks the listeners.
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   const reset = () => { setTransition('glide'); setView({ scale: 1, tx: 0, ty: 0, fx: 0, fy: 0 }) }

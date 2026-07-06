@@ -258,12 +258,15 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
   useEffect(() => {
     if (!dragging) return
     const onMove = (e: PointerEvent) => update(e.clientX)
+    // pointercancel too, so an interrupted pointer can't leave the slider dragging.
     const onUp = () => setDragging(false)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
   }, [dragging, update])
 

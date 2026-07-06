@@ -135,11 +135,13 @@ describe('MasonryGrid body-drag resize', () => {
   })
 })
 
-// Regression tests for the live-drag mechanics: the rubber-band pull feedback, the
-// snap hysteresis, the measurement ghost being truly hidden, and the tile's measured
-// height being refreshed when the drag ends (its ResizeObserver readings are frozen
-// during the drag, so without the refresh the stale pre-drag height left a permanent
-// gap below a shrunk tile).
+// Regression tests for the live-drag mechanics: the dragged tile tracking the
+// pointer 1:1 with its transition suppressed (an animated width restarted on every
+// move would trail the pointer - the tile crawled toward where the cursor USED to
+// be and only caught up on pause), the span-snap hysteresis, the measurement ghost
+// being truly hidden, and the tile's measured height being refreshed when the drag
+// ends (its ResizeObserver readings are frozen during the drag, so without the
+// refresh the stale pre-drag height left a permanent gap below a shrunk tile).
 //
 // Layout arithmetic in jsdom: the container measures 0px wide, so the grid renders
 // BASE_ARTIFACT_COLUMNS (6) columns of colW=0 and every width is a multiple of the
@@ -163,18 +165,23 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     return container
   }
 
-  it('stretches the tile with a rubber-band pull inside the deadband (feedback before the snap)', () => {
+  it('tracks the pointer 1:1 with the transition suppressed while dragging', () => {
     const onSpanChange = vi.fn()
     const { container } = renderGrid(onSpanChange)
     startPull(container)
-    // No snap yet...
+    // Inside the deadband the span hasn't snapped (siblings hold still)...
     expect(onSpanChange).not.toHaveBeenCalled()
-    // ...but the tile visibly stretches: snapped 24px + RESIZE_PULL(0.35) * 8px pull.
-    const w = parseFloat(tileEl(container).style.width)
-    expect(w).toBeCloseTo(24 + 8 * 0.35)
-    expect(w).toBeGreaterThan(24) // more than frozen-at-snap
-    expect(w).toBeLessThan(24 + 8) // less than 1:1 pointer tracking
+    // ...but the tile itself is glued to the cursor: the full 8px, not a fraction,
+    // and with NO width transition (an ease restarted per move would trail the
+    // pointer and read as lag).
+    const tile = tileEl(container)
+    expect(parseFloat(tile.style.width)).toBeCloseTo(24 + 8)
+    expect(tile.style.transition).toBe('')
     fireEvent.pointerUp(window, { clientX: 8, clientY: 0 })
+    // On release the tile settles to its snapped span width. (The transition that
+    // eases this back on release is gated behind the grid's mount-settle timer, so
+    // it isn't observable here.)
+    expect(parseFloat(tile.style.width)).toBeCloseTo(24)
   })
 
   it('snaps the span only once the pointer commits past the halfway+stick threshold', () => {
@@ -185,10 +192,25 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     // 12px: spanFloat = 4.0 ≥ 3.8 - commits to span 4 mid-drag.
     fireEvent.pointerMove(window, { clientX: 12, clientY: 0 })
     expect(onSpanChange).toHaveBeenCalledWith('screenshot.png', 4)
-    // The tile now renders the new snapped width (4*0 + 3*12 = 36) with no residual
-    // pull (the pointer sits exactly on the new width).
+    // The tile still tracks the pointer (raw 24 + 12 = 36px, which here coincides
+    // with the new snapped width 4*0 + 3*12).
     expect(parseFloat(tileEl(container).style.width)).toBeCloseTo(36)
     fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
+  })
+
+  it('ends the drag on pointercancel (no wedged drag state)', () => {
+    // A vertical touch drag that starts on a tile pans the page (touch-action:
+    // pan-y) and CANCELS the pointer - pointerup never fires. The drag must still
+    // finish, or its listeners leak and the tile sticks in dragging mode.
+    const onSpanChange = vi.fn()
+    const { container } = renderGrid(onSpanChange)
+    startPull(container)
+    expect(ghostEl(container)).not.toBeNull() // drag is live
+    fireEvent.pointerCancel(window)
+    expect(ghostEl(container)).toBeNull() // drag ended
+    // Further pointer moves are ignored - the listeners are gone.
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 0 })
+    expect(parseFloat(tileEl(container).style.width)).toBeCloseTo(24)
   })
 
   it('keeps the measurement ghost fully hidden even when the tile forces visibility:visible', () => {
@@ -216,8 +238,8 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     const ghost = ghostEl(container)
     expect(ghost).not.toBeNull()
     expect(ghost!.style.opacity).toBe('0')
-    // The ghost renders at the *snapped* width (24px), not the rubber-band width -
-    // it measures the height the tile will settle to.
+    // The ghost renders at the *snapped* width (24px), not the live pointer-tracked
+    // width - it measures the height the tile will settle to.
     expect(ghost!.style.width).toBe('24px')
     fireEvent.pointerUp(window, { clientX: 8, clientY: 0 })
     expect(ghostEl(container)).toBeNull() // gone once the drag ends
