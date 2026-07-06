@@ -198,6 +198,25 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
   })
 
+  it('shows a snap-preview outline at the snapped span width while dragging', () => {
+    // The dragged tile tracks the pointer 1:1, so the outline is what communicates
+    // where it will settle: it renders at the SNAPPED span width (not the pointer
+    // width) and disappears the moment the drag ends.
+    const onSpanChange = vi.fn()
+    const { container } = renderGrid(onSpanChange)
+    const preview = () => container.querySelector('[data-masonry-snap-preview]') as HTMLElement | null
+    expect(preview()).toBeNull() // nothing at rest
+    startPull(container) // 8px: tile is at 32px, span still 3 (snapped width 24)
+    expect(preview()).not.toBeNull()
+    expect(preview()!.style.width).toBe('24px')
+    // Crossing the boundary snaps the preview to the next column width...
+    fireEvent.pointerMove(window, { clientX: 12, clientY: 0 })
+    expect(preview()!.style.width).toBe('36px')
+    // ...and release removes it.
+    fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
+    expect(preview()).toBeNull()
+  })
+
   it('ends the drag on pointercancel (no wedged drag state)', () => {
     // A vertical touch drag that starts on a tile pans the page (touch-action:
     // pan-y) and CANCELS the pointer - pointerup never fires. The drag must still

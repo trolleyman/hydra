@@ -413,10 +413,12 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // column SPAN is quantised with stickiness (see RESIZE_STICK) and committed the
   // instant it crosses a boundary - live, as you drag, not deferred to release - so
   // the siblings reflow (animated) at each snap while nothing rearranges between
-  // them (the dragged tile's height is frozen too; see resizeKeyRef). On release the
-  // tile eases from the pointer width into the snapped span width. Returns
-  // move/finish, or null if the grid can't resize right now. `key` is the tile's
-  // file name; the override persists under its scoped key (see spanKey).
+  // them (the dragged tile's height is frozen too; see resizeKeyRef). A snap-preview
+  // outline (see the render) shows the column box the tile will settle into,
+  // flipping a column at a time with the eased tile transition; on release the tile
+  // eases from the pointer width into that box. Returns move/finish, or null if the
+  // grid can't resize right now. `key` is the tile's file name; the override
+  // persists under its scoped key (see spanKey).
   const startResize = (key: string, startSpan: number, startX: number) => {
     const unit = layout.colW + layout.gap
     if (unit <= 0 || !onSpanChange) return null
@@ -591,6 +593,32 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         >
           {draggedItem.node}
         </div>
+      )}
+      {/* Snap preview: the dragged tile tracks the pointer 1:1, so this outline
+          shows the column box it will SETTLE into on release - the tile's pinned
+          left/top, the snapped span width, and the ghost-measured settled height
+          (the exact space the siblings are reserving). It carries the tile
+          transition, so the "sticky" snap feel lives HERE, where it can't lag the
+          pointer: the outline holds through the hysteresis deadband, then flips a
+          whole column at a time - resisting, then boinging to the next slot - as
+          the span commits. Drawn above the lifted tile (z-30 > 20) so it reads
+          whether the pointer is ahead of or behind the snap; pointer-events-none
+          so it never intercepts the drag. */}
+      {drag && (
+        <div
+          aria-hidden
+          data-masonry-snap-preview
+          className="absolute z-30 pointer-events-none rounded-lg border-2 border-blue-400/70"
+          style={{
+            left: placement.pos[drag.key]?.left ?? 0,
+            top: placement.pos[drag.key]?.top ?? 0,
+            width: drag.snapW,
+            height: ghostH ?? heights[drag.key] ?? MASONRY_FALLBACK_H,
+            // TILE_TRANSITION covers left/top/width; height (the ghost re-measure
+            // at each snap) eases in step with the width flip.
+            transition: ready ? `${TILE_TRANSITION}, height 280ms ${TILE_EASE}` : undefined,
+          }}
+        />
       )}
       {items.map((it) => {
         const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0, span: 1 }
