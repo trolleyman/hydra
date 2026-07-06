@@ -47,6 +47,9 @@ artifact_concurrency = 4
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
 
+## inclusive "min-max" TCP port range that live server previews ([[artifacts]] type = "server") allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default 26601-26699).
+# preview_ports = "26601-26699"
+
 [sandbox]
 # ~/.local/share/go/pkg/sumdb is GOPATH/pkg/sumdb (GOPATH stays ~/.local/share/go
 # even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
@@ -176,6 +179,19 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ##                and propagates instead of being swallowed (default true; set false
 ##                to run the command exactly as written).
 ##   enabled      set false to skip this script in the diff viewer (default true).
+##   type         "server" makes this a live preview instead of diffed media: the
+##                command must start an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT.
+##                Hydra proxies a per-instance port to it, spinning it up when the
+##                preview link is opened and tearing it down when idle. Server scripts
+##                get HYDRA_PREVIEW_PORT + HYDRA_PREVIEW_SOURCE (the checkout dir) and
+##                may print ::hydra:server:ready:: on stdout to declare readiness
+##                early (otherwise the first successful port dial counts). They never
+##                appear in the diff grid. Default "" = diffed media.
+##   idle_timeout_sec   (server) teardown after this long with zero in-flight
+##                requests; open WebSocket/long-poll connections count as in-flight
+##                (0 = default 300). The link respawns it on the next visit.
+##   ready_timeout_sec  (server) max seconds from spawn to ready - builds included
+##                (0 = default 900).
 ## Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed
 ## frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types
 ## (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and
