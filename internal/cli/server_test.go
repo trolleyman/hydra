@@ -48,7 +48,7 @@ func TestResolveWebAddrDefaultsToLocalhost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if addr != "localhost:8080" {
-		t.Errorf("addr = %q, want localhost:8080", addr)
+	if addr != defaultWebAddr {
+		t.Errorf("addr = %q, want localhost:26600", addr)
 	}
 }

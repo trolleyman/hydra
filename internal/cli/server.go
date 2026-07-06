@@ -86,7 +86,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	go func() { serveErr <- srv.Serve(tcpLn) }()
 
 	// Wait for a signal or a fatal serve error, then shut down cleanly so the
-	// port + control socket are released (avoids orphaned servers holding :8080).
+	// port + control socket are released (avoids orphaned servers holding the web port).
 	select {
 	case <-ctx.Done():
 		log.Printf("server: shutting down")
@@ -105,15 +105,21 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 }
 
+// defaultWebAddr is the web UI/API bind address when HYDRA_API_ADDR is unset.
+const defaultWebAddr = "localhost:26600"
+
 // resolveWebAddr returns the web UI's bind address and refuses an unsafe one.
-// The default is localhost:8080 (reachable only from this machine); a normal
+// The default is localhost:26600 (reachable only from this machine; the
+// distinctive registered-range port keeps clear of the heavily-squatted 8080,
+// and sits directly below the preview_ports range 26601-26699 so Hydra's whole
+// footprint is one contiguous, firewall-friendly block); a normal
 // `hydra server` or the CLI-auto-started daemon never exposes the port. Exposing
 // it is a deliberate, separate action: `mage prod` / `mage devExpose` set
 // HYDRA_API_ADDR=0.0.0.0:<port>, which this honours. Binding any non-loopback
 // address with no auth key configured is refused outright, so the port can never
 // be opened to the network without a password.
 func resolveWebAddr(deploy config.DeployConfig) (string, error) {
-	addr := "localhost:8080"
+	addr := defaultWebAddr
 	if env := os.Getenv("HYDRA_API_ADDR"); env != "" {
 		addr = env
 	}
@@ -126,7 +132,7 @@ func resolveWebAddr(deploy config.DeployConfig) (string, error) {
 }
 
 // isLoopbackBind reports whether addr binds only the local loopback interface.
-// An empty host (e.g. ":8080") or 0.0.0.0/:: binds every interface, so it is not
+// An empty host (e.g. ":26600") or 0.0.0.0/:: binds every interface, so it is not
 // loopback.
 func isLoopbackBind(addr string) bool {
 	host := addr
@@ -178,7 +184,7 @@ func runSimulationServer() error {
 
 	registerFrontend(mux)
 
-	addr := "localhost:8080"
+	addr := defaultWebAddr
 	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
 		addr = envAddr
 	}

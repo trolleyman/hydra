@@ -60,7 +60,7 @@ func style(codes ...string) string {
 const devRestartExitCode = 42
 
 // devFastAPIPort is the port the Go API server listens on in DevFast mode.
-// Vite dev server runs on 8080 and proxies /api, /health, /ws to this port.
+// Vite dev server runs on 26600 and proxies /api, /health, /ws to this port.
 const devFastAPIPort = "17842"
 
 var (
@@ -1115,7 +1115,7 @@ func devServerLoop(extraEnv []string) error {
 }
 
 // DevFast builds the Go backend and runs it in API-only mode on a background port,
-// while running the Vite dev server on http://localhost:8080 for hot-module-replacement.
+// while running the Vite dev server on http://localhost:26600 for hot-module-replacement.
 // Vite proxies /api, /health, and /ws to the Go backend automatically.
 // Clicking the UI restart button rebuilds the backend and restarts both servers.
 // The frontend is never embedded into the binary (hydra_no_frontend build tag).
@@ -1147,7 +1147,7 @@ func DevFast() error {
 		cmd.Stderr = os.Stderr
 		cmd.Env = append(os.Environ(),
 			"API_PORT="+devFastAPIPort,
-			"DEV_PORT=8080",
+			"DEV_PORT=26600",
 		)
 		if err := cmd.Start(); err != nil {
 			return nil, errtrace.Wrap(fmt.Errorf("start Vite dev server: %w", err))
@@ -1207,7 +1207,7 @@ func DevFast() error {
 
 // DevAutoReload runs the Go API server (restarting on Go source changes) and the Vite
 // frontend dev server in parallel for fast UI iteration with hot module replacement.
-// Access the frontend at http://localhost:5173; API calls are proxied to http://localhost:8080.
+// Access the frontend at http://localhost:5173; API calls are proxied to the dev backend.
 // The /api/dev/restart UI button is also available alongside auto-reload.
 func DevAutoReload() error {
 	os.Setenv("HYDRA_DEV_BUILD", "1")
@@ -1425,8 +1425,7 @@ func Demo() error {
 	serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
 	serverCmd.Stdout = os.Stdout
 	serverCmd.Stderr = os.Stderr
-	// Use a different port if needed, but 8080 is default.
-	// Vite dev server proxies to 8080 by default.
+	// Serves on the default web port (localhost:26600); HYDRA_API_ADDR overrides.
 
 	if err := serverCmd.Run(); err != nil {
 		return errtrace.Wrap(err)

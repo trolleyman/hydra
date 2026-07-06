@@ -45,9 +45,9 @@ function keepDistGitkeep(): Plugin {
   }
 }
 
-// API_PORT: port the Go backend listens on (default 8080).
+// API_PORT: port the Go backend listens on (default 26600, hydra's web port).
 // DEV_PORT: port the Vite dev server listens on (default: Vite default of 5173).
-const apiPort = process.env.API_PORT ?? '8080'
+const apiPort = process.env.API_PORT ?? '26600'
 const devPort = process.env.DEV_PORT ? parseInt(process.env.DEV_PORT) : undefined
 const apiBase = `http://localhost:${apiPort}`
 
