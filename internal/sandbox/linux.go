@@ -15,16 +15,69 @@ import (
 	"braces.dev/errtrace"
 )
 
-// bwrapPath resolves the bwrap binary. HYDRA_BWRAP overrides PATH lookup so the
-// daemon can be pointed at a specific build (e.g. an overlay-capable bwrap in
-// ~/.local/bin when the distro's packaged bwrap has overlay support stripped).
+// bwrapPath resolves the bwrap binary to use for sandboxing.
+//
+// HYDRA_BWRAP is an explicit operator override: when it points at an existing file
+// it is used verbatim, capability unchecked - deliberately pointing Hydra at a
+// specific build is honoured even if that build lacks overlay support (cow_paths
+// then degrade to read-only binds; see BuildSpec).
+//
+// Otherwise every "bwrap" on PATH plus a couple of well-known install dirs is
+// considered and the first that supports overlay mounts wins, since cow_paths need
+// a real overlay to isolate per-head writes. Only if none is overlay-capable is the
+// first bwrap found returned (so plain, non-cow sandboxing still works); Available()
+// escalates that case to a hard error unless the operator overrode via HYDRA_BWRAP.
 func bwrapPath() (string, error) {
 	if p := os.Getenv("HYDRA_BWRAP"); p != "" {
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
 			return p, nil
 		}
+		log.Printf("sandbox: HYDRA_BWRAP=%q is not a file; ignoring it and searching for a bwrap binary", p)
 	}
-	return errtrace.Wrap2(exec.LookPath("bwrap"))
+	candidates := bwrapCandidates()
+	if len(candidates) == 0 {
+		return "", errtrace.Wrap(fmt.Errorf("bwrap not found on PATH or in ~/.local/bin; install bubblewrap (e.g. `sudo apt install bubblewrap`) or run `mage tools:ensure`"))
+	}
+	for _, c := range candidates {
+		if bwrapSupportsOverlay(c) {
+			return c, nil
+		}
+	}
+	// No overlay-capable bwrap: return the first found so plain sandboxing works.
+	// Available() turns this into a hard startup error (cow_paths would silently
+	// become read-only) unless HYDRA_BWRAP explicitly opted into this binary.
+	return candidates[0], nil
+}
+
+// bwrapCandidates lists candidate bwrap binaries in preference order: every
+// "bwrap" on PATH, then ~/.local/bin/bwrap - where a manually built, overlay-capable
+// bwrap commonly lands when the distro's packaged one has overlay support stripped.
+// Deduplicated; only existing regular files are returned.
+func bwrapCandidates() []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if info, err := os.Stat(p); err != nil || info.IsDir() {
+			return
+		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir != "" {
+			add(filepath.Join(dir, "bwrap"))
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		add(filepath.Join(home, ".local", "bin", "bwrap"))
+	}
+	return out
 }
 
 // overlayCache memoises whether a given bwrap binary supports overlay mounts.
@@ -36,7 +89,10 @@ var (
 )
 
 // bwrapSupportsOverlay reports whether the bwrap at the given path accepts the
-// --overlay-src family of options (parsed once from its --help output).
+// --overlay-src family of options (parsed once from its --help output). Quiet by
+// design so bwrapPath can probe several candidates without noise; the loud
+// "cow_paths would degrade" message is emitted at the decision points that care
+// (Available, BuildSpec).
 func bwrapSupportsOverlay(bwrap string) bool {
 	overlayMu.Lock()
 	defer overlayMu.Unlock()
@@ -46,10 +102,6 @@ func bwrapSupportsOverlay(bwrap string) bool {
 	out, _ := exec.Command(bwrap, "--help").CombinedOutput()
 	ok := strings.Contains(string(out), "--overlay-src")
 	overlayCache[bwrap] = ok
-	if !ok {
-		log.Printf("sandbox: %s lacks overlay support; copy-on-write mounts will fall back to read-only binds. "+
-			"Install an overlay-capable bwrap and point HYDRA_BWRAP at it for true COW.", bwrap)
-	}
 	return ok
 }
 
@@ -59,14 +111,36 @@ func bwrapSupportsOverlay(bwrap string) bool {
 func Available() (bool, string) {
 	path, err := bwrapPath()
 	if err != nil {
-		return false, "bubblewrap (bwrap) is not installed or not on PATH; install it (e.g. `sudo apt install bubblewrap` / `brew install bubblewrap`)"
+		return false, "bubblewrap (bwrap) is not installed or not on PATH; run `mage tools:ensure` to build a bundled one, or install it (e.g. `sudo apt install bubblewrap` - note the distro build may lack overlay support)"
 	}
 	// Probe: a no-op bwrap that still needs a user namespace.
 	cmd := exec.Command(path, "--ro-bind", "/", "/", "--", "true")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return false, fmt.Sprintf("bwrap cannot create a sandbox (unprivileged user namespaces may be disabled): %s", trimOutput(out))
 	}
+	// Require overlay support so cow_paths never silently degrade to read-only
+	// binds (a read-only ~/.gradle etc. breaks builds with confusing EROFS errors).
+	// Skipped only when HYDRA_BWRAP explicitly selects this binary: an operator
+	// pointing Hydra at a specific bwrap is a deliberate choice, even if it means
+	// giving up copy-on-write.
+	if !bwrapOverrideActive() && !bwrapSupportsOverlay(path) {
+		return false, fmt.Sprintf("the bwrap on this host (%s) was built without overlay support (no --overlay-src), "+
+			"so cow_paths would silently become read-only. Build an overlay-capable bubblewrap with `mage tools:ensure`, "+
+			"or install one into ~/.local/bin, or point HYDRA_BWRAP at one to override this check.", path)
+	}
 	return true, ""
+}
+
+// bwrapOverrideActive reports whether HYDRA_BWRAP is set to an existing file, i.e.
+// bwrapPath will honour it verbatim rather than auto-resolving. Used to skip the
+// overlay requirement when the operator has explicitly chosen a bwrap.
+func bwrapOverrideActive() bool {
+	p := os.Getenv("HYDRA_BWRAP")
+	if p == "" {
+		return false
+	}
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 func trimOutput(b []byte) string {
@@ -182,6 +256,13 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// support, fall back to a read-only bind (reads work; writes fail with EROFS
 	// instead of corrupting the source).
 	overlayOK := bwrapSupportsOverlay(bwrap)
+	if !overlayOK && len(opts.CowMounts) > 0 {
+		// Only reachable when HYDRA_BWRAP explicitly selects a non-overlay bwrap
+		// (Available() otherwise hard-fails startup). Make the degradation loud so a
+		// read-only cow_path isn't a silent mystery.
+		log.Printf("sandbox: bwrap %s lacks overlay support; %d cow_paths mount(s) fall back to READ-ONLY binds - writes under them will fail with EROFS. "+
+			"Unset HYDRA_BWRAP or point it at an overlay-capable bwrap (`mage tools:ensure`).", bwrap, len(opts.CowMounts))
+	}
 	for _, m := range opts.CowMounts {
 		if m.Lower == "" || m.Dest == "" {
 			continue
