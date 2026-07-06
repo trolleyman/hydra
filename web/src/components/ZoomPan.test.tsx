@@ -84,6 +84,17 @@ describe('ZoomPan drag-pan', () => {
     fireEvent.pointerUp(window)
   })
 
+  it('ends the pan on pointercancel (no stuck grabbing state)', () => {
+    const { viewport } = renderZoomPan()
+    zoomIn(viewport)
+    fireEvent.pointerDown(viewport, { button: 0, clientX: 200, clientY: 200 })
+    expect(viewport.style.cursor).toBe('grabbing')
+    // The browser takes the pointer away (e.g. a touch gesture) - the pan must
+    // still end rather than leaking its listeners and sticking in grabbing mode.
+    fireEvent.pointerCancel(window)
+    expect(viewport.style.cursor).toBe('grab')
+  })
+
   it('clamps the pan so the content always covers the frame', () => {
     const { viewport, content } = renderZoomPan(800, 600)
     zoomIn(viewport) // scale ≈ 1.822 at the top-left corner → tx/ty stay 0
@@ -121,6 +132,34 @@ describe('ZoomPan drag-pan', () => {
   })
 })
 
+describe('ZoomPan pinch zoom', () => {
+  it('two touch pointers pinch-zoom by their distance ratio (works from fit)', () => {
+    const { viewport, content } = renderZoomPan()
+    // Two fingers land 100px apart...
+    fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(viewport, { pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 100 })
+    // ...and spread to 200px apart: 2× the distance → 2× the scale.
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 300, clientY: 100 })
+    expect(currentScale(content)).toBeCloseTo(2, 1)
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' })
+    fireEvent.pointerUp(window, { pointerId: 1, pointerType: 'touch' })
+  })
+
+  it('never pinches out below fit and stops zooming once a finger lifts', () => {
+    const { viewport, content } = renderZoomPan()
+    fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(viewport, { pointerId: 2, pointerType: 'touch', clientX: 300, clientY: 100 })
+    // Pinch IN below fit: clamped at scale 1.
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 150, clientY: 100 })
+    expect(content.style.transform).toContain('scale(1)')
+    // One finger lifts - the survivor's moves are no longer a pinch.
+    fireEvent.pointerUp(window, { pointerId: 1, pointerType: 'touch' })
+    fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 400, clientY: 100 })
+    expect(content.style.transform).toContain('scale(1)')
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' })
+  })
+})
+
 describe('ZoomPan minimap', () => {
   // The minimap is portaled to <body> (pinned to the screen, not the growing frame),
   // so it lives outside the render container - look for it document-wide.
@@ -141,6 +180,20 @@ describe('ZoomPan minimap', () => {
     const mm = minimap()!
     expect(mm.style.width).toBe('90px') // 360 / 4
     expect(mm.style.height).toBe(`${Math.round(90 * 740 / 360)}px`)
+  })
+
+  it('glides on a minimap press but tracks 1:1 once the pointer drags', () => {
+    const { viewport, content } = renderZoomPan()
+    zoomIn(viewport)
+    const mm = minimap()!
+    // The press is a deliberate go-there jump: it eases.
+    fireEvent.pointerDown(mm, { button: 0, clientX: 10, clientY: 10 })
+    expect(content.style.transition).toBe('transform 200ms ease-out')
+    // A drag must NOT keep the ease - restarting a 200ms glide on every move would
+    // trail the pointer (the view chases where the cursor used to be).
+    fireEvent.pointerMove(window, { clientX: 40, clientY: 10 })
+    expect(content.style.transition).toBe('')
+    fireEvent.pointerUp(window)
   })
 
   it('Reset view returns to fit with the longer glide ease', () => {

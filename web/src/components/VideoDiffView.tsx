@@ -264,8 +264,9 @@ function VideoCell({ url, attach, label, aspect }: {
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         // A plain click opens the .webm in a new tab via the <a>; the frame fills
-        // the cell width and its height follows the aspect ratio.
-        <a href={url} target="_blank" rel="noreferrer" className="block">
+        // the cell width and its height follows the aspect ratio. draggable=false:
+        // links are natively draggable, which would hijack the tile's drag-to-resize.
+        <a href={url} target="_blank" rel="noreferrer" draggable={false} className="block">
           <VideoNode url={url} attach={attach} className={IMG_CLASS} style={{ ...checkerStyle, aspectRatio: aspect }} />
         </a>
       ) : (
@@ -401,9 +402,17 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
 
 // Before/after wipe (twin of SliderCompare): "after" is the base, "before" sits on
 // top clipped to the region left of the handle.
+//
+// Only the divider line drags the wipe - exactly like the image slider - so the rest
+// of the frame behaves like the other video modes (and, in the grid, a horizontal
+// drag on it resizes the tile). A middle click opens the side under the cursor in a
+// new tab. The cursor advertises the divider (ew-resize) against the plain frame.
 function VideoSlider({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
+  // The pointer that grabbed the divider, so another finger's moves (multi-touch)
+  // don't steer the wipe.
+  const dragIdRef = useRef<number | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const sizer = (right ?? left) as string
 
@@ -417,25 +426,24 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
 
   useEffect(() => {
     if (!dragging) return
-    const onMove = (e: PointerEvent) => update(e.clientX)
-    const onUp = () => setDragging(false)
+    const mine = (e: PointerEvent) => dragIdRef.current == null || e.pointerId === dragIdRef.current
+    const onMove = (e: PointerEvent) => { if (mine(e)) update(e.clientX) }
+    // pointercancel too, so an interrupted pointer can't leave the wipe dragging.
+    const onUp = (e: PointerEvent) => { if (mine(e)) setDragging(false) }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
   }, [dragging, update])
 
   return (
     <div
       ref={ref}
-      className="relative w-full select-none touch-none cursor-ew-resize"
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        setDragging(true)
-        update(e.clientX)
-      }}
+      className="relative w-full select-none"
       onAuxClick={makeAuxOpen((e) => {
         // Use the event target's rect (not the ref) so no ref is read at render.
         const r = e.currentTarget.getBoundingClientRect()
@@ -448,8 +456,27 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
       <VideoSizer url={sizer} aspect={aspect} />
       <VideoLayer url={right} attach={controller.attachRight} />
       <VideoLayer url={left} attach={controller.attachLeft} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
-      <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
+      {/* The divider is the sole wipe-drag target. data-no-tile-drag keeps the
+          masonry tile resize (and the lightbox zoom-pan) from hijacking it; a wider
+          invisible hit area straddles the thin line for easier grabbing - widened
+          to ~44px on coarse (touch) pointers, the recommended finger target. */}
+      <div
+        data-no-tile-drag
+        onPointerDown={(e) => {
+          if (e.button !== 0) return // leave middle/right for the new-tab handler
+          e.preventDefault()
+          e.stopPropagation()
+          dragIdRef.current = e.pointerId ?? null
+          setDragging(true)
+          update(e.clientX)
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute inset-y-0 z-10 w-4 -ml-2 pointer-coarse:w-11 pointer-coarse:-ml-5.5 cursor-ew-resize touch-none"
+        style={{ left: `${pos}%` }}
+      >
+        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
+        </div>
       </div>
     </div>
   )
@@ -470,7 +497,9 @@ function VideoOnion({ controller, left, right, aspect }: { controller: Controlle
         <VideoLayer url={left} attach={controller.attachLeft} />
         <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
       </div>
-      <div className="flex items-center gap-2 mt-1">
+      {/* data-no-tile-drag: this opacity slider owns its own horizontal drag, so the
+          masonry tile's drag-to-resize must not hijack it (see startBodyResize). */}
+      <div data-no-tile-drag className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
         <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
@@ -493,11 +522,13 @@ const RATES = [0.25, 0.5, 1, 1.5, 2]
 
 // The shared transport bar under every video comparison: play/pause, a scrubber
 // over the (longer) timeline, current/total time, a loop toggle and a speed select.
+// data-no-tile-drag: the transport owns every drag inside it (the seek slider above
+// all), so the masonry tile's drag-to-resize must never hijack it.
 function VideoTransport({ controller }: { controller: Controller }) {
   const { playing, currentTime, duration, rate, loop, togglePlay, seek, setRate, setLoop, beginScrub, endScrub, frameStep } = controller
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors'
   return (
-    <div className="flex items-center gap-2 mt-1.5 max-w-full">
+    <div data-no-tile-drag className="flex items-center gap-2 mt-1.5 max-w-full">
       <button onClick={() => frameStep(-1)} className={iconBtn} title="Previous frame">
         <StepBack className="w-3.5 h-3.5" />
       </button>

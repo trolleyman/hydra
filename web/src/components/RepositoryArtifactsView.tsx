@@ -207,7 +207,8 @@ export function RepositoryArtifactsView({
   const gallery = useMemo<LightboxImage[]>(
     () => visibleFiles
       .filter((f) => f.url && !isVideoArtifact(f.name) && !isDownloadArtifact(f.name))
-      .map((f) => ({ url: f.url as string, filename: f.name, size: 0, dpi: f.dpi ?? undefined })),
+      // width/height (when recorded) seed the lightbox caption dims on navigation.
+      .map((f) => ({ url: f.url as string, filename: f.name, size: 0, dpi: f.dpi ?? undefined, width: f.width ?? undefined, height: f.height ?? undefined })),
     [visibleFiles],
   )
 
