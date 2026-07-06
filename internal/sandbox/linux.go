@@ -111,7 +111,7 @@ func bwrapSupportsOverlay(bwrap string) bool {
 func Available() (bool, string) {
 	path, err := bwrapPath()
 	if err != nil {
-		return false, "bubblewrap (bwrap) is not installed or not on PATH; install it (e.g. `sudo apt install bubblewrap` / `brew install bubblewrap`)"
+		return false, "bubblewrap (bwrap) is not installed or not on PATH; run `mage tools:ensure` to build a bundled one, or install it (e.g. `sudo apt install bubblewrap` - note the distro build may lack overlay support)"
 	}
 	// Probe: a no-op bwrap that still needs a user namespace.
 	cmd := exec.Command(path, "--ro-bind", "/", "/", "--", "true")
