@@ -47,7 +47,7 @@ const COLLAPSE_MS = 200
 // the very content it framed. The body stays MOUNTED only while open (plus the brief
 // collapse animation), so a collapsed card never pays to render its heavy children
 // (xterm logs, image grids); see `mounted` below.
-export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false }: {
+export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false, glideKey }: {
   icon: ReactNode
   name: ReactNode
   // Inline chips/summary shown after the name, inside the collapse button.
@@ -59,6 +59,13 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
   children?: ReactNode
   // Pin the header beneath the panel's section bar while the body scrolls.
   sticky?: boolean
+  // Bump this whenever a deliberate in-place content swap changes the body height
+  // in one step (e.g. showing/hiding the build log) and you want that height change
+  // to GLIDE rather than snap. Changing it arms the height transition for one window,
+  // exactly like a card toggle does. Nested expands that animate their own height
+  // (result sections, tree nodes) must NOT touch this - leaving them to mirror the
+  // card height instantly is what keeps them from being double-animated.
+  glideKey?: string | number | boolean
 }) {
   const [bodyRef, bodyH] = useMeasuredHeight(0)
   // `mounted` keeps the body in the tree while open and for the length of a collapse
@@ -76,7 +83,8 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
   const [heightAnimated, setHeightAnimated] = useState(false)
   const firstToggle = useRef(true)
   useEffect(() => {
-    // Skip the mount fire - only a real collapse/expand toggle arms the glide.
+    // Skip the mount fire - only a real collapse/expand toggle (or a caller-signalled
+    // `glideKey` content swap) arms the glide.
     if (firstToggle.current) {
       firstToggle.current = false
       return
@@ -85,7 +93,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
     setHeightAnimated(true)
     const t = setTimeout(() => setHeightAnimated(false), COLLAPSE_MS)
     return () => clearTimeout(t)
-  }, [collapsed])
+  }, [collapsed, glideKey])
   useEffect(() => {
     if (!collapsed) {
       // Mount deliberately in an effect (after a paint at height 0), NOT during

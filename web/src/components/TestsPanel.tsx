@@ -523,6 +523,10 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       actions={actions}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
+      // Toggling the build log is a deliberate in-place swap - glide the card to
+      // its new height rather than snapping (nested case-tree/section expands
+      // deliberately don't bump this, so they keep mirroring instantly).
+      glideKey={logVisible}
     >
       {/* Running: a thin progress bar above the live log tail - determinate
           (completed cases over the declared total) when the run streams a

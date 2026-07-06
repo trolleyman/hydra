@@ -993,6 +993,9 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
       actions={actionButtons}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
+      // Toggling the build log is a deliberate in-place swap - glide the card to its
+      // new height rather than snapping.
+      glideKey={buildLogVisible}
     >
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
