@@ -523,6 +523,10 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       actions={actions}
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
+      // Toggling the build log is a deliberate in-place swap - glide the card to
+      // its new height rather than snapping (nested case-tree/section expands
+      // deliberately don't bump this, so they keep mirroring instantly).
+      glideKey={logVisible}
     >
       {/* Running: a thin progress bar above the live log tail - determinate
           (completed cases over the declared total) when the run streams a
@@ -578,14 +582,15 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 // (worst first), styled as a ROOT TREE NODE - chevron + status icon + label
 // with the everything-counted badge on the right, its CaseTree indented one
 // level beneath it under a guide line - so the view reads as one tree whose
-// first level is the result. Failing/warning/skipped sections open by default;
-// only passing starts collapsed (folded away rather than filtered out), since a
-// green run can be huge - and a folded section mounts no rows at all (see
-// ResultSection), so leaving it shut costs nothing until it is opened.
+// first level is the result. Failing/warning sections open by default; skipped
+// and passing start collapsed (folded away rather than filtered out), since
+// neither is actionable and a green run can be huge - and a folded section
+// mounts no rows at all (see ResultSection), so leaving it shut costs nothing
+// until it is opened.
 const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
   { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
   { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
-  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: false },
   { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
 ]
 
