@@ -7,6 +7,8 @@ import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
+import { BranchTag } from './BranchTag'
+import { copyBranchName } from '../lib/branch'
 import { SeparatedRow } from './SeparatedRow'
 import { AgentTopBar, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { AttachmentChips } from './AttachmentChips'
@@ -15,7 +17,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -166,12 +168,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
               {agent.agent_type}
             </Badge>
             <Badge className={endBadge.className}>{endBadge.label}</Badge>
-            {agent.branch_name && (
-              <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5" />
-                {agent.branch_name}
-              </span>
-            )}
+            {agent.branch_name && <BranchTag branch={agent.branch_name} />}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 created {formatStartedAgo(agent.created_at)}
@@ -779,7 +776,7 @@ export function AgentDetail({
   // never goes stale. It stays inert while typing (the terminal, a form field) or
   // while a dialog / help overlay is open, so it never steals a keystroke (Ctrl+M
   // is Enter in a terminal) or acts behind a modal.
-  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; kill: () => void; rename: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean }>(null!)
+  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; kill: () => void; rename: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean; branch: string }>(null!)
   shortcutRef.current = {
     merge: handleMerge,
     markUnread: handleMarkUnread,
@@ -789,6 +786,7 @@ export function AgentDetail({
     projectId,
     busy: merging || killing,
     archived: !!agent.archived,
+    branch: agent.branch_name || '',
   }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -823,6 +821,14 @@ export function AgentDetail({
         if (ctx.archived) return
         e.preventDefault()
         ctx.rename()
+        return
+      }
+      // Copy branch name - B, no modifier (GitLab convention). Works for archived
+      // agents too; their branch name is still shown even once the branch is gone.
+      if (e.key.toLowerCase() === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (!ctx.branch) return
+        e.preventDefault()
+        copyBranchName(ctx.branch)
         return
       }
       // Switch agent - Alt+↑/↓ steps through the live agents list (wrapping).
@@ -1008,12 +1014,7 @@ export function AgentDetail({
             {/* The armed "merges when tests pass" state is shown by the merge button
                 itself now (the green pill), so no separate metadata-row badge. */}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-            {agent.branch_name && (
-              <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5" />
-                {agent.branch_name}
-              </span>
-            )}
+            {agent.branch_name && <BranchTag branch={agent.branch_name} />}
             {/* Base branch. Editing it is metadata-only: it changes what
                 update-from-base merges in and what the diff compares against,
                 but does not rebase existing commits. */}
