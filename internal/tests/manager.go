@@ -108,8 +108,12 @@ func (m *Manager) SetConcurrency(n int) {
 	m.pool.SetMaxSlots(artifacts.SlotsForConcurrency(n))
 }
 
-// CleanCheckouts tears the slot pool down to empty (call on boot).
-func (m *Manager) CleanCheckouts() { m.pool.Clean() }
+// CleanCheckouts tears the slot pool down to empty (call on boot) and wipes any
+// ephemeral per-run cow_paths layers a crashed run left behind.
+func (m *Manager) CleanCheckouts() {
+	_ = os.RemoveAll(m.cowDir())
+	m.pool.Clean()
+}
 
 // Subscribe registers a generation-event listener; the returned func unsubscribes.
 func (m *Manager) Subscribe() (<-chan Event, func()) {
@@ -201,6 +205,11 @@ func (r *Registry) Snapshot() map[string]*Manager {
 func (m *Manager) root() string     { return paths.GetTestsDirFromProjectRoot(m.projectRoot) }
 func (m *Manager) outDir() string   { return filepath.Join(m.root(), "out") }
 func (m *Manager) slotsDir() string { return filepath.Join(m.root(), "slots") }
+
+// cowDir holds the per-run copy-on-write upper/work layers for cow_paths applied
+// during a test run (see buildCommandSpec), mirroring artifacts. Each run gets an
+// ephemeral subdir here, removed when its launch is cleaned up.
+func (m *Manager) cowDir() string { return filepath.Join(m.root(), "cow") }
 
 func (m *Manager) entryDir(runner, key string) string {
 	return filepath.Join(m.outDir(), sanitizeName(runner), filepath.FromSlash(key))
@@ -934,9 +943,10 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 		NoSandbox:    spec.UnsafeHost,
 	}
 
+	var cowLayerDir string
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
-		writable, masked, restore, _, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, cow, _, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {
 			opts.GitCommonDir = gcd
@@ -944,12 +954,41 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 		opts.WritablePaths = writable
 		opts.MaskedPaths = masked
 		opts.RestoreRO = restore
+		// Apply cow_paths so a shared host cache the project isolates per-head
+		// (e.g. ~/.gradle) is writable for the test run too - otherwise a
+		// Gradle-based suite runs with it READ-ONLY and can't write its lock/build
+		// outputs. Per-run ephemeral upper over the shared read-only lower (warm
+		// deps reused, no cross-run upperdir sharing), removed on launch cleanup.
+		// Mirrors artifacts.buildCommandSpec.
+		if len(cow) > 0 {
+			_ = os.MkdirAll(m.cowDir(), 0o755)
+			if base, err := os.MkdirTemp(m.cowDir(), "run-"); err == nil {
+				cowLayerDir = base
+				opts.CowMounts = sandbox.ResolveCowMounts(m.projectRoot, runDir, home, base, cow, true)
+			}
+		}
 		opts.Network = sandbox.NetworkPolicy{Enabled: true}
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
 
-	return errtrace.Wrap2(sandbox.BuildSpec(opts))
+	launch, err := sandbox.BuildSpec(opts)
+	if err != nil {
+		if cowLayerDir != "" {
+			_ = os.RemoveAll(cowLayerDir)
+		}
+		return nil, errtrace.Wrap(err)
+	}
+	if cowLayerDir != "" {
+		inner := launch.Cleanup
+		launch.Cleanup = func() {
+			if inner != nil {
+				inner()
+			}
+			_ = os.RemoveAll(cowLayerDir)
+		}
+	}
+	return launch, nil
 }
 
 // --- persistence ---
