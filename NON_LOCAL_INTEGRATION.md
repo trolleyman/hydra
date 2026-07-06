@@ -178,13 +178,17 @@ committed config and `deploy.toml`:
   - Trust note: this file is on the *host*, editable only by the user, so
     it is as trusted as the root config. It participates in the
     `unsafe_host` trusted-set the same way the root config does.
-- **Secrets stay out of both.** Forge/JIRA tokens go into either
-  `.hydra/deploy.toml`-style storage (0600, never committed - either extend
-  `DeployConfig` or add a sibling `integrations.toml`) or, better, are not
-  stored by Hydra at all: shell out to `gh` / `glab` and let their own
-  credential stores handle it. Recommendation: **CLI-first** (`gh`/`glab`
-  on the host, invoked by the daemon), token-in-file only as fallback for
-  forges without a good CLI.
+- **Secrets stay out of both - and out of the repo tree entirely.**
+  Preferred: not stored by Hydra at all - shell out to `gh`/`glab` and
+  let their credential stores handle it (**CLI-first**). Fallback for
+  forges/JIRA without a good CLI: a 0600 token file under
+  `~/.config/hydra/` (e.g. `~/.config/hydra/secrets.toml` with per-host
+  sections) - deliberately NOT a new file in `.hydra/`: the home
+  location is covered by the sandbox's existing `~/.config` mask for
+  free, needs no gitignore entry, and cannot be committed by
+  construction. (`.hydra/deploy.toml` predates this rule and is really
+  instance config, not a universal Hydra file - see 3.4 for how it gets
+  masked and where it might move.)
 
 ### 3.2 A `[review]` config section (Phase 1-2)
 
@@ -404,34 +408,45 @@ Placement rule regardless of method: tokens live **host-side only**
 `.hydra/config*.toml` ever holds a secret, and nothing token-bearing is
 mounted into a sandbox by default (section 2.2).
 
-**Masking the project-level secret files from heads** - a gap that exists
+**Masking project-level secret files from heads** - a gap that exists
 TODAY: sandbox masks are home-relative (`~/.ssh`, `~/.config`, ...,
 `internal/sandbox/defaults.go`), but heads also get read access to the
-host, including the project root - and `.hydra/deploy.toml` (which
-already holds the web `AuthKey` + ngrok config) is not masked. Three
-layers of fix, in order:
+host, including the project root - and `.hydra/deploy.toml` is not
+masked. (What deploy.toml actually is: the web `AuthKey` + ngrok config,
+loaded once at daemon boot from the boot project's root,
+`internal/cli/runtime.go:253`; a missing file just means auth disabled.
+So it is *instance* config in per-project clothing, present only in
+projects that actually deploy - not a universal Hydra file.)
 
-1. **Hardcoded always-masks for Hydra's own files**: `.hydra/deploy.toml`,
-   the future secrets file, and `.hydra/config.local.toml` (not secret by
-   rule, but personal - and masking it keeps the temptation to put a
-   token there inert). No config needed - Hydra knows its own secret
-   paths. They cannot live in the static defaults list (the project root
-   varies per project), so they are appended where a head's sandbox
-   options are resolved (`internal/heads/heads.go` around
-   `ResolveSandboxOptions`), mirrored in the gate's `credentialRels` as
-   defense in depth.
-2. **Project-relative `masked_paths`**: today's mask entries are
-   home/absolute-anchored; let `[sandbox] masked_paths` also take
-   project-relative entries (and simple globs) - the same dual
-   convention `cow_paths` already has. Covers user-owned secrets like
-   `.env*` or `secrets/`.
-3. **A `.hydraignore` file** (name TBD: `.hydramask`?) - one
-   .gitignore-style glob per line at the project root, sugar feeding the
-   same union as (2). Worth adding if (2) feels buried in config.toml;
-   the muscle memory of .gitignore is real. Trust is easy: masks only
-   ever ADD restriction, so reading the file from a head's own branch
-   copy (union with root's) lets a branch restrict itself but never
-   unmask anything.
+The fix is one general mechanism plus shipped defaults - deploy.toml is
+just an entry in it, not a special case:
+
+- **The mechanism: project-relative masks.** Let `[sandbox]
+  masked_paths` take project-relative entries (and simple globs)
+  alongside today's home/absolute ones - the dual convention `cow_paths`
+  already has - and add **`.hydraignore`** (name TBD: `.hydramask`?) as
+  the .gitignore-style spelling of the same thing: one glob per line at
+  the project root, unioned into the same mask set. Trust is easy: masks
+  only ever ADD restriction, so honoring a head's own branch copy (union
+  with root's) lets a branch restrict itself but never unmask anything.
+  Covers user secrets (`.env*`, `secrets/`) and anything else a project
+  wants heads not to see.
+- **Shipped default entries.** Hydra's built-in mask defaults grow
+  `.hydra/deploy.toml` and `.hydra/config.local.toml` - the same way
+  `~/.ssh` is a shipped default, just project-relative. Rationale for
+  defaulting rather than leaving it to each project's `.hydraignore`:
+  Hydra's own tooling *creates* deploy.toml (`SaveDeploy`, the ngrok
+  flow), so relying on every project to remember an ignore entry would
+  be insecure-by-default for a hole Hydra itself digs. Absent paths cost
+  nothing; both entries are mirrored in the gate's `credentialRels`.
+- **Longer-term simplification: move it out of the repo tree.** The
+  cleanest home for per-machine state is `~/.config/hydra/...` - already
+  covered by the default `~/.config` mask, no gitignore needed,
+  uncommittable by construction. The new secrets fallback (3.1) starts
+  there; relocating deploy.toml there too (read-old-path fallback, in
+  the spirit of `paths.MigrateHydraLayout`) matches its true
+  instance-level scope and would eventually delete the shipped default
+  entry above. Worthwhile follow-up, not a blocker.
 
 Why daemon-side and not in-sandbox: credentials never enter the sandbox,
 the audit trail is "the user's daemon pushed", and it works for every agent
@@ -580,10 +595,12 @@ changing steps 1-3 at all.
   (`internal/config/config.go:1004`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.
 - **Mask project-level secret/personal files from head sandboxes**
-  (pre-existing gap, see 3.4): hardcoded always-masks for Hydra's own
-  files (`deploy.toml`, secrets, `config.local.toml`) + gate
-  `credentialRels` mirror; project-relative `masked_paths` (and the
-  optional `.hydraignore` sugar) can follow separately.
+  (pre-existing gap, see 3.4): project-relative `masked_paths` +
+  `.hydraignore`, with `.hydra/deploy.toml` and
+  `.hydra/config.local.toml` as shipped default entries (skipped when
+  absent) + gate `credentialRels` mirror. The new secrets fallback
+  lives under `~/.config/hydra/` where the existing `~/.config` mask
+  already covers it (3.1).
 - Add the `[review]` + `[jira]` sections (parsing + validation only),
   including provider auto-detection from the remote URL.
 - Forge credentials stay OUT of sandbox defaults (done: `~/.config/gh`
