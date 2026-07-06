@@ -103,6 +103,14 @@ const (
 	Unrestricted NetworkConfigMode = "unrestricted"
 )
 
+// Defines values for PreviewState.
+const (
+	PreviewError    PreviewState = "error"
+	PreviewRunning  PreviewState = "running"
+	PreviewStarting PreviewState = "starting"
+	PreviewStopped  PreviewState = "stopped"
+)
+
 // Defines values for RepositoryArtifactResponseStatus.
 const (
 	RepositoryArtifactResponseStatusError      RepositoryArtifactResponseStatus = "error"
@@ -412,14 +420,23 @@ type ArtifactScript struct {
 	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
+	// IdleTimeoutSec (server type) Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (0 = default 300).
+	IdleTimeoutSec *int `json:"idle_timeout_sec,omitempty"`
+
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
+
+	// ReadyTimeoutSec (server type) Max seconds from spawn to ready, builds included (0 = default 900).
+	ReadyTimeoutSec *int `json:"ready_timeout_sec,omitempty"`
 
 	// Strict Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
 	Strict *bool `json:"strict"`
 
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
+
+	// Type What the script produces - absent/null/"media" is a run-to-completion generator whose outputs the diff viewer compares; "server" is a live preview whose command starts an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT, proxied by Hydra on demand and never shown in the diff grid.
+	Type *string `json:"type"`
 
 	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
@@ -748,6 +765,51 @@ type PolicyConfig struct {
 
 	// McpToolsAllowed Individual MCP tools ("<server>__<tool>") allowed even when the whole server is not. The server is kept (spawned) so those tools work; its other tools park for approval at runtime.
 	McpToolsAllowed *[]string `json:"mcp_tools_allowed"`
+}
+
+// PreviewState Preview instance lifecycle state
+type PreviewState string
+
+// PreviewStatus Snapshot of one live server-preview instance (or a configured-but-never-started script)
+type PreviewStatus struct {
+	// Connections In-flight proxied requests, including open WebSocket tunnels
+	Connections *int `json:"connections,omitempty"`
+
+	// Log Most recent captured output lines of the current/last spawn
+	Log *[]ArtifactLogLine `json:"log,omitempty"`
+
+	// Message Failure detail when state is "error"
+	Message *string `json:"message,omitempty"`
+
+	// Name The server artifact script name
+	Name string `json:"name"`
+
+	// Pid Child process PID while starting/running (0 otherwise)
+	Pid *int `json:"pid,omitempty"`
+
+	// Progress Latest ::hydra:progress:: headline while starting
+	Progress *string `json:"progress,omitempty"`
+
+	// StartedAt When the current child was spawned (null when stopped)
+	StartedAt *time.Time `json:"started_at"`
+
+	// State Preview instance lifecycle state
+	State PreviewState `json:"state"`
+
+	// Url Absolute URL of the preview (built from the request host and the instance's proxy port); null until a listener exists
+	Url *string `json:"url"`
+
+	// Version Which checkout the instance serves - "uncommitted" (the head's live worktree) or a short commit SHA
+	Version string `json:"version"`
+}
+
+// PreviewsResponse defines model for PreviewsResponse.
+type PreviewsResponse struct {
+	// Others Still-live instances of those scripts at other versions (e.g. the selection moved on)
+	Others *[]PreviewStatus `json:"others,omitempty"`
+
+	// Previews One entry per configured server script, for the requested version
+	Previews []PreviewStatus `json:"previews"`
 }
 
 // ProjectInfo defines model for ProjectInfo.
@@ -1361,6 +1423,33 @@ type MergeAgentParams struct {
 	Close *bool `form:"close,omitempty" json:"close,omitempty"`
 }
 
+// GetAgentPreviewsParams defines parameters for GetAgentPreviews.
+type GetAgentPreviewsParams struct {
+	// HeadRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IncludeUncommitted Preview the agent's uncommitted working tree (its live worktree).
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
+// StartAgentPreviewParams defines parameters for StartAgentPreview.
+type StartAgentPreviewParams struct {
+	// HeadRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IncludeUncommitted Preview the agent's uncommitted working tree (its live worktree).
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
+// StopAgentPreviewParams defines parameters for StopAgentPreview.
+type StopAgentPreviewParams struct {
+	// HeadRef Commit SHA or ref whose instance to stop. Defaults to the agent's branch tip.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IncludeUncommitted Stop the instance for the agent's uncommitted working tree.
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
 // GetAgentTestsParams defines parameters for GetAgentTests.
 type GetAgentTestsParams struct {
 	// HeadRef Commit SHA or ref to test. Defaults to the agent's branch tip.
@@ -1546,6 +1635,15 @@ type ServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// List live server previews ([[artifacts]] type = "server") for a head
+	// (GET /api/projects/{project_id}/agents/{id}/previews)
+	GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams)
+	// Start (or ensure) a live server preview instance
+	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/start)
+	StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StartAgentPreviewParams)
+	// Stop a live server preview instance
+	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
+	StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StopAgentPreviewParams)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -2447,6 +2545,183 @@ func (siw *ServerInterfaceWrapper) ArmMergeWhenGreen(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArmMergeWhenGreen(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentPreviews operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentPreviews(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentPreviewsParams
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentPreviews(w, r, projectId, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartAgentPreview operation middleware
+func (siw *ServerInterfaceWrapper) StartAgentPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartAgentPreviewParams
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartAgentPreview(w, r, projectId, id, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopAgentPreview operation middleware
+func (siw *ServerInterfaceWrapper) StopAgentPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StopAgentPreviewParams
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopAgentPreview(w, r, projectId, id, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3463,6 +3738,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.ArmMergeWhenGreen)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews", wrapper.GetAgentPreviews)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/start", wrapper.StartAgentPreview)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/stop", wrapper.StopAgentPreview)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
@@ -4300,6 +4578,118 @@ func (response ArmMergeWhenGreen404JSONResponse) VisitArmMergeWhenGreenResponse(
 type ArmMergeWhenGreen500JSONResponse ErrorResponse
 
 func (response ArmMergeWhenGreen500JSONResponse) VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentPreviewsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    GetAgentPreviewsParams
+}
+
+type GetAgentPreviewsResponseObject interface {
+	VisitGetAgentPreviewsResponse(w http.ResponseWriter) error
+}
+
+type GetAgentPreviews200JSONResponse PreviewsResponse
+
+func (response GetAgentPreviews200JSONResponse) VisitGetAgentPreviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentPreviews404JSONResponse ErrorResponse
+
+func (response GetAgentPreviews404JSONResponse) VisitGetAgentPreviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentPreviews500JSONResponse ErrorResponse
+
+func (response GetAgentPreviews500JSONResponse) VisitGetAgentPreviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StartAgentPreviewRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+	Params    StartAgentPreviewParams
+}
+
+type StartAgentPreviewResponseObject interface {
+	VisitStartAgentPreviewResponse(w http.ResponseWriter) error
+}
+
+type StartAgentPreview200JSONResponse PreviewStatus
+
+func (response StartAgentPreview200JSONResponse) VisitStartAgentPreviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StartAgentPreview404JSONResponse ErrorResponse
+
+func (response StartAgentPreview404JSONResponse) VisitStartAgentPreviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StartAgentPreview500JSONResponse ErrorResponse
+
+func (response StartAgentPreview500JSONResponse) VisitStartAgentPreviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StopAgentPreviewRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+	Params    StopAgentPreviewParams
+}
+
+type StopAgentPreviewResponseObject interface {
+	VisitStopAgentPreviewResponse(w http.ResponseWriter) error
+}
+
+type StopAgentPreview204Response struct {
+}
+
+func (response StopAgentPreview204Response) VisitStopAgentPreviewResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type StopAgentPreview404JSONResponse ErrorResponse
+
+func (response StopAgentPreview404JSONResponse) VisitStopAgentPreviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StopAgentPreview500JSONResponse ErrorResponse
+
+func (response StopAgentPreview500JSONResponse) VisitStopAgentPreviewResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -5279,6 +5669,15 @@ type StrictServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
+	// List live server previews ([[artifacts]] type = "server") for a head
+	// (GET /api/projects/{project_id}/agents/{id}/previews)
+	GetAgentPreviews(ctx context.Context, request GetAgentPreviewsRequestObject) (GetAgentPreviewsResponseObject, error)
+	// Start (or ensure) a live server preview instance
+	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/start)
+	StartAgentPreview(ctx context.Context, request StartAgentPreviewRequestObject) (StartAgentPreviewResponseObject, error)
+	// Stop a live server preview instance
+	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
+	StopAgentPreview(ctx context.Context, request StopAgentPreviewRequestObject) (StopAgentPreviewResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
@@ -5996,6 +6395,92 @@ func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArmMergeWhenGreenResponseObject); ok {
 		if err := validResponse.VisitArmMergeWhenGreenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentPreviews operation middleware
+func (sh *strictHandler) GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams) {
+	var request GetAgentPreviewsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentPreviews(ctx, request.(GetAgentPreviewsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentPreviews")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentPreviewsResponseObject); ok {
+		if err := validResponse.VisitGetAgentPreviewsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartAgentPreview operation middleware
+func (sh *strictHandler) StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StartAgentPreviewParams) {
+	var request StartAgentPreviewRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartAgentPreview(ctx, request.(StartAgentPreviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartAgentPreview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartAgentPreviewResponseObject); ok {
+		if err := validResponse.VisitStartAgentPreviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StopAgentPreview operation middleware
+func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StopAgentPreviewParams) {
+	var request StopAgentPreviewRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StopAgentPreview(ctx, request.(StopAgentPreviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StopAgentPreview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StopAgentPreviewResponseObject); ok {
+		if err := validResponse.VisitStopAgentPreviewResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

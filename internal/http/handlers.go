@@ -25,6 +25,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/preview"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/services"
@@ -79,6 +80,10 @@ type Server struct {
 	// Services supervises each project's [[services]] (long-running host/sandbox
 	// commands, e.g. an emulator pool). nil disables the feature (e.g. in tests).
 	Services *services.Manager
+
+	// Previews runs live server previews ([[artifacts]] type = "server") behind
+	// per-instance proxy ports. nil disables the feature (e.g. in tests).
+	Previews *preview.Manager
 
 	// Events fans "something changed, refetch it" signals to web clients over the
 	// events WebSocket, replacing per-tab polling (PLAN #50). nil disables push
@@ -175,7 +180,15 @@ func NewHandler(s *Server) http.Handler {
 			api.WriteErrorDetails(w, code, string(errType), details)
 		},
 	}
-	strict := api.NewStrictHandlerWithOptions(s, nil, opts)
+	// Every strict handler gets the originating *http.Request in its context
+	// (requestFromContext) for the few endpoints that need request metadata the
+	// generated signatures don't carry (e.g. the Host header for preview URLs).
+	injectRequest := func(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+			return errtrace.Wrap2(f(context.WithValue(ctx, requestCtxKey{}, r), w, r, request))
+		}
+	}
+	strict := api.NewStrictHandlerWithOptions(s, []api.StrictMiddlewareFunc{injectRequest}, opts)
 	return api.HandlerFromMux(strict, http.NewServeMux())
 }
 
@@ -783,6 +796,15 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.CleanIgnored {
 		out.CleanIgnored = &a.CleanIgnored
 	}
+	if a.Type != "" {
+		out.Type = &a.Type
+	}
+	if a.IdleTimeoutSec != 0 {
+		out.IdleTimeoutSec = &a.IdleTimeoutSec
+	}
+	if a.ReadyTimeoutSec != 0 {
+		out.ReadyTimeoutSec = &a.ReadyTimeoutSec
+	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
@@ -799,6 +821,15 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	}
 	if a.CleanIgnored != nil {
 		out.CleanIgnored = *a.CleanIgnored
+	}
+	if a.Type != nil {
+		out.Type = *a.Type
+	}
+	if a.IdleTimeoutSec != nil {
+		out.IdleTimeoutSec = *a.IdleTimeoutSec
+	}
+	if a.ReadyTimeoutSec != nil {
+		out.ReadyTimeoutSec = *a.ReadyTimeoutSec
 	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
@@ -1464,6 +1495,10 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
+	// A merged head loses its worktree; stop its live previews up front (the
+	// reaper would catch it, but this keeps the teardown prompt).
+	s.stopHeadPreviews(projectRoot, head.ID)
+
 	// Test gate (PLAN #68): soft-block the merge when the head's configured tests
 	// are failing, errored, or still running - unless force=true (which covers both
 	// "don't wait" and "override"). Checked after the CAS claim so a concurrent
@@ -1689,6 +1724,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	// Kill the existing head (container, worktree, branch). The respawn below
 	// reuses the same ID and un-archives the record, so the end state here is
 	// transient; record "killed" anyway in case the respawn fails.
+	s.stopHeadPreviews(projectRoot, head.ID)
 	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.RestartAgent409JSONResponse{
@@ -1747,6 +1783,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		}, nil
 	}
 
+	s.stopHeadPreviews(projectRoot, head.ID)
 	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.KillAgent409JSONResponse{
@@ -1793,6 +1830,7 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 		}, nil
 	}
 
+	s.stopHeadPreviews(projectRoot, head.ID)
 	if err := heads.PurgeHead(ctx, s.Sessions, s.DB, *head); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.PurgeAgent409JSONResponse{

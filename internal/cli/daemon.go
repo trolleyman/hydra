@@ -94,6 +94,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	rt.services.StopAll()
+	rt.previews.StopAll()
 	rt.reg.StopAll()
 	_ = srv.Shutdown(shutdownCtx)
 	return nil

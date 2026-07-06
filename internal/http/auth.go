@@ -112,6 +112,15 @@ func (a *Authenticator) authenticated(r *http.Request) bool {
 	return false
 }
 
+// Authorized reports whether a request may access protected content: auth
+// disabled, a trusted-local peer, or valid credentials. It is the same gate
+// Middleware applies, exported for subsystems serving on other ports (live
+// server previews) - the auth cookie is host-scoped, so a browser logged into
+// the main UI passes this check on any port of the same host.
+func (a *Authenticator) Authorized(r *http.Request) bool {
+	return !a.Enabled() || isTrustedLocal(r) || a.authenticated(r)
+}
+
 // Middleware wraps next, allowing trusted-local and unprotected requests through
 // unconditionally and requiring valid credentials for protected paths from
 // remote clients. Unauthenticated protected requests get a 401.

@@ -14,6 +14,8 @@ import type { CommitRepositoryRequest } from '../models/CommitRepositoryRequest'
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
+import type { PreviewsResponse } from '../models/PreviewsResponse';
+import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
 import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactResponse';
 import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
@@ -546,6 +548,114 @@ export class DefaultService {
                 'include_uncommitted': includeUncommitted,
                 'refresh': refresh,
                 'refresh_side': refreshSide,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List live server previews ([[artifacts]] type = "server") for a head
+     * Returns, per configured server-type artifact script, the preview instance status for the requested version (the head's uncommitted working tree or a specific commit - the same selection contract as the artifacts and tests endpoints), plus any still-running instances of those scripts at other versions. Purely a read: nothing is spawned. Returns an empty list when the project configures no server scripts.
+     *
+     * @param projectId Project ID
+     * @param id
+     * @param headRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
+     * @param includeUncommitted Preview the agent's uncommitted working tree (its live worktree).
+     * @returns PreviewsResponse OK
+     * @throws ApiError
+     */
+    public getAgentPreviews(
+        projectId: string,
+        id: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+    ): CancelablePromise<PreviewsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/previews',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            query: {
+                'head_ref': headRef,
+                'include_uncommitted': includeUncommitted,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Start (or ensure) a live server preview instance
+     * Ensures the named server-type artifact script has a proxy listener for the requested version and spawns its server if not already running. Returns the instance status including the URL to open; the server may still be "starting" (building) - opening the URL shows a live loading page until it is ready.
+     *
+     * @param projectId Project ID
+     * @param id
+     * @param name The server artifact script name
+     * @param headRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
+     * @param includeUncommitted Preview the agent's uncommitted working tree (its live worktree).
+     * @returns PreviewStatus OK
+     * @throws ApiError
+     */
+    public startAgentPreview(
+        projectId: string,
+        id: string,
+        name: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+    ): CancelablePromise<PreviewStatus> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/previews/{name}/start',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'name': name,
+            },
+            query: {
+                'head_ref': headRef,
+                'include_uncommitted': includeUncommitted,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Stop a live server preview instance
+     * Tears down the named preview's server process for the requested version (the listener persists, so a later start or visit respawns it). A no-op if nothing is running.
+     *
+     * @param projectId Project ID
+     * @param id
+     * @param name The server artifact script name
+     * @param headRef Commit SHA or ref whose instance to stop. Defaults to the agent's branch tip.
+     * @param includeUncommitted Stop the instance for the agent's uncommitted working tree.
+     * @returns void
+     * @throws ApiError
+     */
+    public stopAgentPreview(
+        projectId: string,
+        id: string,
+        name: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/previews/{name}/stop',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'name': name,
+            },
+            query: {
+                'head_ref': headRef,
+                'include_uncommitted': includeUncommitted,
             },
             errors: {
                 404: `Not Found`,

@@ -832,6 +832,175 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/previews:
+    get:
+      summary: List live server previews ([[artifacts]] type = "server") for a head
+      description: >
+        Returns, per configured server-type artifact script, the preview
+        instance status for the requested version (the head's uncommitted
+        working tree or a specific commit - the same selection contract as the
+        artifacts and tests endpoints), plus any still-running instances of
+        those scripts at other versions. Purely a read: nothing is spawned.
+        Returns an empty list when the project configures no server scripts.
+      operationId: getAgentPreviews
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: head_ref
+          required: false
+          schema:
+            type: string
+          description: Commit SHA or ref to preview. Defaults to the agent's branch tip.
+        - in: query
+          name: include_uncommitted
+          required: false
+          schema:
+            type: boolean
+          description: Preview the agent's uncommitted working tree (its live worktree).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/previews/{name}/start:
+    post:
+      summary: Start (or ensure) a live server preview instance
+      description: >
+        Ensures the named server-type artifact script has a proxy listener for
+        the requested version and spawns its server if not already running.
+        Returns the instance status including the URL to open; the server may
+        still be "starting" (building) - opening the URL shows a live loading
+        page until it is ready.
+      operationId: startAgentPreview
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The server artifact script name
+        - in: query
+          name: head_ref
+          required: false
+          schema:
+            type: string
+          description: Commit SHA or ref to preview. Defaults to the agent's branch tip.
+        - in: query
+          name: include_uncommitted
+          required: false
+          schema:
+            type: boolean
+          description: Preview the agent's uncommitted working tree (its live worktree).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewStatus'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/previews/{name}/stop:
+    post:
+      summary: Stop a live server preview instance
+      description: >
+        Tears down the named preview's server process for the requested version
+        (the listener persists, so a later start or visit respawns it). A no-op
+        if nothing is running.
+      operationId: stopAgentPreview
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The server artifact script name
+        - in: query
+          name: head_ref
+          required: false
+          schema:
+            type: string
+          description: Commit SHA or ref whose instance to stop. Defaults to the agent's branch tip.
+        - in: query
+          name: include_uncommitted
+          required: false
+          schema:
+            type: boolean
+          description: Stop the instance for the agent's uncommitted working tree.
+      responses:
+        '204':
+          description: Stopped (or nothing was running)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/tests:
     get:
       summary: Get the test-runner verdict(s) for a head's branch
@@ -2999,6 +3168,87 @@ components:
           type: boolean
           nullable: true
           description: Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
+        type:
+          type: string
+          nullable: true
+          description: >-
+            What the script produces - absent/null/"media" is a run-to-completion
+            generator whose outputs the diff viewer compares; "server" is a live
+            preview whose command starts an HTTP server on
+            127.0.0.1:$HYDRA_PREVIEW_PORT, proxied by Hydra on demand and never
+            shown in the diff grid.
+        idle_timeout_sec:
+          type: integer
+          description: >-
+            (server type) Teardown after this long with zero in-flight proxied
+            requests; open WebSocket/long-poll connections count as in-flight
+            (0 = default 300).
+        ready_timeout_sec:
+          type: integer
+          description: >-
+            (server type) Max seconds from spawn to ready, builds included
+            (0 = default 900).
+
+    PreviewState:
+      type: string
+      enum: [stopped, starting, running, error]
+      x-enum-varnames: [PreviewStopped, PreviewStarting, PreviewRunning, PreviewError]
+      description: Preview instance lifecycle state
+
+    PreviewStatus:
+      type: object
+      required: [name, state, version]
+      description: Snapshot of one live server-preview instance (or a configured-but-never-started script)
+      properties:
+        name:
+          type: string
+          description: The server artifact script name
+        state:
+          $ref: '#/components/schemas/PreviewState'
+        version:
+          type: string
+          description: Which checkout the instance serves - "uncommitted" (the head's live worktree) or a short commit SHA
+        url:
+          type: string
+          nullable: true
+          description: Absolute URL of the preview (built from the request host and the instance's proxy port); null until a listener exists
+        pid:
+          type: integer
+          description: Child process PID while starting/running (0 otherwise)
+        connections:
+          type: integer
+          description: In-flight proxied requests, including open WebSocket tunnels
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the current child was spawned (null when stopped)
+        progress:
+          type: string
+          description: "Latest ::hydra:progress:: headline while starting"
+        message:
+          type: string
+          description: Failure detail when state is "error"
+        log:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
+          description: Most recent captured output lines of the current/last spawn
+
+    PreviewsResponse:
+      type: object
+      required: [previews]
+      properties:
+        previews:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewStatus'
+          description: One entry per configured server script, for the requested version
+        others:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewStatus'
+          description: Still-live instances of those scripts at other versions (e.g. the selection moved on)
 
     ServiceScript:
       type: object

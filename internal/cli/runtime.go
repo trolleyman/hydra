@@ -18,6 +18,7 @@ import (
 	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/preview"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/services"
@@ -34,6 +35,7 @@ type daemonRuntime struct {
 	store       *db.Store
 	reg         *session.Registry
 	services    *services.Manager
+	previews    *preview.Manager
 	projectRoot string
 	deploy      config.DeployConfig
 }
@@ -263,6 +265,22 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		log.Printf("Auth: non-localhost requests require the key in %s", paths.GetDeployConfigPath(projectRoot))
 	}
 
+	// Live server previews ([[artifacts]] type = "server"): each instance's
+	// proxy listener binds the same host as the web UI (resolveWebAddr), so
+	// previews are exposed exactly when the UI is - localhost by default,
+	// every interface only under an explicit exposed deploy - and every
+	// proxied request runs through the same auth gate (the hydra_auth cookie
+	// is host-scoped, so one UI login covers the preview ports too).
+	previewBindHost := "127.0.0.1"
+	if addr, err := resolveWebAddr(deployCfg); err == nil {
+		if h, _, err := net.SplitHostPort(addr); err == nil && h != "" {
+			previewBindHost = h
+		}
+	}
+	previewMgr := preview.NewManager(previewBindHost, auth)
+	server.Previews = previewMgr
+	go previewMgr.Run(ctx)
+
 	mux := buildMux(server, auth)
 	return &daemonRuntime{
 		server:      server,
@@ -270,6 +288,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		store:       store,
 		reg:         reg,
 		services:    svcMgr,
+		previews:    previewMgr,
 		projectRoot: projectRoot,
 		deploy:      deployCfg,
 	}, nil

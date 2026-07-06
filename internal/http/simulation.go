@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,6 +17,12 @@ import (
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
 	Development bool
+
+	// previewMu/previewPolls back the mock previews endpoints: a started
+	// instance advances starting -> running by counting status polls, so the
+	// panel is drivable deterministically (no wall clock - see simNow).
+	previewMu    sync.Mutex
+	previewPolls map[string]int
 }
 
 // simNow is the fixed wall-clock instant ALL time-derived simulation values are
@@ -2406,6 +2413,87 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 
 func (s *SimulationServer) RestartServices(w http.ResponseWriter, r *http.Request, projectId string) {
 	s.GetServices(w, r, projectId)
+}
+
+// simPreviewVersion mirrors the real endpoints' version labelling: the head's
+// live worktree ("uncommitted") unless a specific ref is requested.
+func simPreviewVersion(headRef *string, includeUncommitted *bool) string {
+	if includeUncommitted != nil && *includeUncommitted {
+		return "uncommitted"
+	}
+	if headRef != nil && len(*headRef) >= 8 {
+		return (*headRef)[:8]
+	}
+	return "1a2b3c4d"
+}
+
+// simPreviewStatus renders the mock "demo" preview. A never-started instance is
+// stopped; once started, each poll advances it: three polls of "starting" (with
+// a growing build log), then "running" with a URL pointing back at this very
+// sim server (so Open shows something real).
+func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version string) api.PreviewStatus {
+	s.previewMu.Lock()
+	defer s.previewMu.Unlock()
+	polls, started := 0, false
+	if s.previewPolls != nil {
+		polls, started = s.previewPolls[agentID+"/"+version]
+		if started {
+			s.previewPolls[agentID+"/"+version] = polls + 1
+		}
+	}
+	st := api.PreviewStatus{Name: "demo", State: api.PreviewStopped, Version: version}
+	if !started {
+		return st
+	}
+	buildLog := []api.ArtifactLogLine{
+		{Text: "$ bun install --frozen-lockfile", Stream: api.Stdout},
+		{Text: "$ bun run build", Stream: api.Stdout},
+		{Text: "vite v5.4.2 building for production...", Stream: api.Stdout},
+	}
+	if polls < 3 {
+		st.State = api.PreviewStarting
+		st.Pid = ptr(40321)
+		st.StartedAt = ptr(simNow().Add(-8 * time.Second))
+		st.Progress = ptr("building frontend")
+		st.Log = &buildLog
+		return st
+	}
+	st.State = api.PreviewRunning
+	st.Pid = ptr(40321)
+	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
+	st.Connections = ptr(1)
+	st.Url = ptr("http://" + r.Host + "/")
+	return st
+}
+
+func (s *SimulationServer) GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentPreviewsParams) {
+	version := simPreviewVersion(params.HeadRef, params.IncludeUncommitted)
+	api.WriteJSON(w, http.StatusOK, api.PreviewsResponse{
+		Previews: []api.PreviewStatus{s.simPreviewStatus(r, id, version)},
+	})
+}
+
+func (s *SimulationServer) StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params api.StartAgentPreviewParams) {
+	version := simPreviewVersion(params.HeadRef, params.IncludeUncommitted)
+	s.previewMu.Lock()
+	if s.previewPolls == nil {
+		s.previewPolls = map[string]int{}
+	}
+	if _, ok := s.previewPolls[id+"/"+version]; !ok {
+		s.previewPolls[id+"/"+version] = 0
+	}
+	s.previewMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, s.simPreviewStatus(r, id, version))
+}
+
+func (s *SimulationServer) StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params api.StopAgentPreviewParams) {
+	version := simPreviewVersion(params.HeadRef, params.IncludeUncommitted)
+	s.previewMu.Lock()
+	if s.previewPolls != nil {
+		delete(s.previewPolls, id+"/"+version)
+	}
+	s.previewMu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
