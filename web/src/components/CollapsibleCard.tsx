@@ -39,7 +39,10 @@ const COLLAPSE_MS = 200
 // collapse/expand toggle (see `heightAnimated`): it is off on the first render - so
 // a card that mounts already-expanded (restored view prefs, or an agent switch
 // remounting it) snaps straight to its open height rather than animating itself open
-// - and off again once a toggle's glide has finished. That last part matters: while
+// - and off again once a toggle's glide has finished. Both the arm and the height
+// target move (see `expanded`) happen in one post-toggle commit, so the height only
+// ever changes with the transition already in place - a close otherwise snaps, since
+// `collapsed` flips a commit earlier than the glide could arm. That last part matters: while
 // the card sits open its body height MIRRORS its measured content instantly, so a
 // nested expand (a result section or a tree node running its OWN grid-row glide)
 // animates alone instead of being double-animated. With the glide always on, the
@@ -72,14 +75,23 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
   // animation, then drops it so a collapsed card stays cheap. A user expand mounts it
   // in an effect (after a paint at height 0) so the 0->height glide can play.
   const [mounted, setMounted] = useState(!collapsed)
+  // `expanded` is the body's height TARGET (bodyH when true, 0 when false). It mirrors
+  // `collapsed` but lags a toggle by one commit: the arm effect below flips it in the
+  // SAME commit that arms `heightAnimated`, so the height only ever moves while the
+  // transition class is already present. Driving the height straight off `collapsed`
+  // snapped the close - `collapsed` flips during the click's render, so the body hit 0
+  // one commit before the glide could arm and there was nothing left to ease. (Expand
+  // never had this problem: its height change is deferred by the `mounted` effect, so
+  // it already landed together with the arm.)
+  const [expanded, setExpanded] = useState(!collapsed)
   // `heightAnimated` arms the body-height glide, and ONLY the card's own collapse or
-  // expand should glide - see the block comment above. It is false on the first
-  // render (so a restored-open card snaps rather than self-glides) and is pulsed true
-  // for one COLLAPSE_MS window each time `collapsed` toggles; the rest of the time it
-  // stays false, so steady-open resizes (a nested section/tree-node expand) mirror
-  // instantly and animate alone. Because the ref measures the body height in-commit
-  // (before the first paint), the opening snap lands on the real height, not a flash
-  // at 0.
+  // expand (or a caller-signalled `glideKey` swap) should glide - see the block comment
+  // above. It is false on the first render (so a restored-open card snaps rather than
+  // self-glides) and is pulsed true for one COLLAPSE_MS window each time `collapsed`/
+  // `glideKey` changes; the rest of the time it stays false, so steady-open resizes (a
+  // nested section/tree-node expand) mirror instantly and animate alone. Because the
+  // ref measures the body height in-commit (before the first paint), the opening snap
+  // lands on the real height, not a flash at 0.
   const [heightAnimated, setHeightAnimated] = useState(false)
   const firstToggle = useRef(true)
   useEffect(() => {
@@ -89,8 +101,12 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
       firstToggle.current = false
       return
     }
+    // Arm the glide and move the height target together, in this one post-toggle
+    // commit, so the body eases toward the new height instead of jumping to it before
+    // the transition exists.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHeightAnimated(true)
+    setExpanded(!collapsed)
     const t = setTimeout(() => setHeightAnimated(false), COLLAPSE_MS)
     return () => clearTimeout(t)
   }, [collapsed, glideKey])
@@ -107,7 +123,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
     const t = setTimeout(() => setMounted(false), COLLAPSE_MS)
     return () => clearTimeout(t)
   }, [collapsed])
-  const open = !collapsed && mounted
+  const open = expanded && mounted
   return (
     <div className={`border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 ${sticky ? '' : 'overflow-hidden'}`}>
       <div
