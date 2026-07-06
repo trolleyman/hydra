@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -2408,8 +2409,25 @@ func (s *SimulationServer) RestartServices(w http.ResponseWriter, r *http.Reques
 	s.GetServices(w, r, projectId)
 }
 
+// DevRestart mirrors the real server's handler (Server.DevRestart). The reload
+// button always renders in simulation mode (GetStatus reports Development: true),
+// but the actual rebuild + restart only fires when the server runs under `mage
+// demo`'s rebuild loop, which arms it by setting HYDRA_DEV_RESTART=1. Exiting with
+// devRestartExitCode signals mage to rebuild the frontend + backend and relaunch.
+// Absent that env (a bare `hydra server --simulation`, e.g. the screenshot
+// generator) it stays a 403 so a stray click can't kill the process.
 func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
-	api.WriteError(w, http.StatusForbidden, "Not available in simulation mode")
+	if os.Getenv("HYDRA_DEV_RESTART") != "1" {
+		api.WriteError(w, http.StatusForbidden, "Not available in simulation mode")
+		return
+	}
+	// Respond 200 then exit with the restart code after a short delay to allow
+	// the response to flush (matches Server.DevRestart).
+	w.WriteHeader(http.StatusOK)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(devRestartExitCode)
+	}()
 }
 
 func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {
