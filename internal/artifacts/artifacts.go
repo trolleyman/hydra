@@ -756,6 +756,12 @@ func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") 
 func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
 func (m *Manager) slotsDir() string     { return filepath.Join(m.root(), "slots") }
 
+// cowDir holds the per-generation copy-on-write upper/work layers for cow_paths
+// applied during artifact generation (see buildCommandSpec). It lives under the
+// artifacts cache root (already gitignored via .hydra/local), and each generation
+// gets its own ephemeral subdir there, removed when its launch is cleaned up.
+func (m *Manager) cowDir() string { return filepath.Join(m.root(), "cow") }
+
 // entryDir is the on-disk cache dir for a (script, key) pair. key is a
 // "<kind>/<id>" path (see versionKey), so the entry nests as
 // out/<script>/<kind>/<id>/; filepath.Join treats the slash as a separator.
@@ -1197,11 +1203,12 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		NoSandbox:    spec.UnsafeHost,
 	}
 
+	var cowLayerDir string
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
 		// The pre-spawn script is intentionally ignored: artifact generation is a
 		// plain command, not an agent spawn.
-		writable, masked, restore, _, _, _ := cfg.ResolveSandboxOptions("")
+		writable, masked, restore, cow, _, _ := cfg.ResolveSandboxOptions("")
 		// The artifact output dir lives outside the checkout, so make it writable
 		// explicitly (the checkout itself is covered by WorktreePath).
 		writable = append(writable, outputDir)
@@ -1211,12 +1218,49 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		opts.WritablePaths = writable
 		opts.MaskedPaths = masked
 		opts.RestoreRO = restore
+		// Apply the project's cow_paths so a shared host cache configured for
+		// per-head copy-on-write isolation (e.g. ~/.gradle) is writable during
+		// generation too - reads hit the shared warm cache, writes (Gradle's lock
+		// files, build outputs) copy up to a private upper. Without this the render
+		// runs with those caches READ-ONLY: a Gradle build fails to write its wrapper
+		// lock and, under a lenient (strict = false) script, produces no images yet
+		// exits 0 - cached as a spurious "success". The upper/work layers are
+		// per-generation and ephemeral (a fresh empty upper over the shared lower, so
+		// the warm deps/transforms are still reused); they are removed when the launch
+		// is cleaned up. Concurrent generations never share an upperdir - each call
+		// gets its own layer dir - so there is no overlayfs contention.
+		if len(cow) > 0 {
+			_ = os.MkdirAll(m.cowDir(), 0o755)
+			if base, err := os.MkdirTemp(m.cowDir(), "gen-"); err == nil {
+				cowLayerDir = base
+				opts.CowMounts = sandbox.ResolveCowMounts(m.projectRoot, runDir, home, base, cow, true)
+			}
+		}
 		opts.Network = sandbox.NetworkPolicy{Enabled: true}
 		opts.HardenGUI = true
 		opts.Seccomp = true
 	}
 
-	return errtrace.Wrap2(sandbox.BuildSpec(opts))
+	launch, err := sandbox.BuildSpec(opts)
+	if err != nil {
+		if cowLayerDir != "" {
+			_ = os.RemoveAll(cowLayerDir)
+		}
+		return nil, errtrace.Wrap(err)
+	}
+	if cowLayerDir != "" {
+		// Chain the ephemeral cow-layer cleanup onto the launch's own cleanup so the
+		// per-generation upper/work dirs are removed once the command has finished
+		// (generate defers launch.Cleanup()).
+		inner := launch.Cleanup
+		launch.Cleanup = func() {
+			if inner != nil {
+				inner()
+			}
+			_ = os.RemoveAll(cowLayerDir)
+		}
+	}
+	return launch, nil
 }
 
 // keyRe matches valid cache keys produced by versionKey ("commit/<sha>" or
@@ -1253,6 +1297,7 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 // prunes so the pool starts clean and recreates slots on demand.
 func (m *Manager) CleanCheckouts() {
 	_ = os.RemoveAll(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
+	_ = os.RemoveAll(m.cowDir())       // ephemeral per-generation cow_paths layers
 	m.pool.clean()                     // slot worktrees + `git worktree prune`
 }
 
