@@ -336,7 +336,31 @@ type ArtifactScript struct {
 	// strict (the safer behavior); a script needing lenient execution sets it
 	// false or leads its command with `set +e`.
 	Strict *bool `toml:"strict"`
+	// Type selects what kind of artifact this script produces. ""/"media" (the
+	// default) is the classic run-to-completion generator whose image/video
+	// outputs the diff viewer compares. "server" is a live preview: the command
+	// starts an HTTP server that binds 127.0.0.1:$HYDRA_PREVIEW_PORT, and Hydra
+	// proxies a per-instance port to it on demand (spun up when the preview link
+	// is opened, torn down when idle). Server scripts never appear in the diff
+	// grid and produce no cached outputs.
+	Type string `toml:"type"`
+	// IdleTimeoutSec (server type only) is how long an instance may sit with zero
+	// in-flight proxied requests before its process is torn down. Open WebSocket
+	// or long-poll connections count as in-flight, so a live app tab keeps its
+	// demo running. 0 = default (see internal/preview). The next visit to the
+	// preview link transparently respawns it.
+	IdleTimeoutSec int `toml:"idle_timeout_sec"`
+	// ReadyTimeoutSec (server type only) bounds how long a spawn may take to
+	// become ready - the command may build first, so this is generous. Readiness
+	// is a successful TCP dial of the child port, or an explicit
+	// `::hydra:server:ready::` line on stdout, whichever comes first. 0 = default
+	// (see internal/preview).
+	ReadyTimeoutSec int `toml:"ready_timeout_sec"`
 }
+
+// ArtifactTypeServer is the ArtifactScript.Type value selecting the live server
+// preview behavior; "" or "media" select the classic diffed-media behavior.
+const ArtifactTypeServer = "server"
 
 // IsEnabled reports whether the artifact script should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
@@ -345,6 +369,10 @@ func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failing step surfaces rather than being swallowed.
 func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
+
+// IsServer reports whether this script is a live server preview rather than a
+// diffed-media generator.
+func (a ArtifactScript) IsServer() bool { return a.Type == ArtifactTypeServer }
 
 // TestScript describes a per-project command that runs a test suite against a
 // checkout of the repository and writes a machine-readable report. Hydra parses
@@ -455,6 +483,13 @@ type Config struct {
 	// TestConcurrency caps how many test-runner generations run at once, like
 	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
 	TestConcurrency *int `toml:"test_concurrency"`
+	// PreviewPorts is the inclusive TCP port range ("min-max", e.g. "26601-26699")
+	// the daemon allocates live server-preview listeners from (see
+	// ArtifactScript.Type = "server" and internal/preview). A fixed, contiguous
+	// range keeps firewall rules simple when the web UI is exposed beyond
+	// localhost; listeners bind the same host as the web server. Ports already in
+	// use are skipped. nil/absent = DefaultPreviewPorts.
+	PreviewPorts *string `toml:"preview_ports"`
 	// TestPrefetch toggles the daemon's proactive background re-running of a head's
 	// test suites once its branch tip has a verdict that is missing or stale (a
 	// cached result computed for an older commit). It mirrors ArtifactPrefetch (see
@@ -510,6 +545,46 @@ func (c Config) IsArtifactPrefetchEnabled() bool {
 	return c.ArtifactPrefetch == nil || *c.ArtifactPrefetch
 }
 
+// DefaultPreviewPorts is the server-preview listener port range used when the
+// config does not set preview_ports. It sits directly above the default web
+// port (26600) so Hydra's whole footprint is one contiguous block.
+const DefaultPreviewPorts = "26601-26699"
+
+// ResolvePreviewPortRange returns the effective inclusive port range previews
+// allocate listeners from. A missing or malformed preview_ports falls back to
+// DefaultPreviewPorts rather than failing: preview spin-up is interactive and a
+// typo'd range should not brick the daemon.
+func (c Config) ResolvePreviewPortRange() (min, max int) {
+	if c.PreviewPorts != nil {
+		if lo, hi, err := ParsePortRange(*c.PreviewPorts); err == nil {
+			return lo, hi
+		}
+	}
+	lo, hi, _ := ParsePortRange(DefaultPreviewPorts)
+	return lo, hi
+}
+
+// ParsePortRange parses an inclusive "min-max" TCP port range like
+// "26601-26699". A single port ("26601") is the degenerate one-port range.
+func ParsePortRange(s string) (min, max int, err error) {
+	lo, hi, found := strings.Cut(strings.TrimSpace(s), "-")
+	if !found {
+		hi = lo
+	}
+	min, err = strconv.Atoi(strings.TrimSpace(lo))
+	if err != nil {
+		return 0, 0, errtrace.Errorf("invalid port range %q: %w", s, err)
+	}
+	max, err = strconv.Atoi(strings.TrimSpace(hi))
+	if err != nil {
+		return 0, 0, errtrace.Errorf("invalid port range %q: %w", s, err)
+	}
+	if min < 1 || max > 65535 || min > max {
+		return 0, 0, errtrace.Errorf("invalid port range %q: want 1 <= min <= max <= 65535", s)
+	}
+	return min, max, nil
+}
+
 // ResumeContinueMessage returns the message to auto-send to a resumed,
 // previously-working agent. An empty string disables the nudge.
 func (c Config) ResumeContinueMessage() string {
@@ -543,6 +618,7 @@ type rawConfig struct {
 	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
 	TestConcurrency     *int             `toml:"test_concurrency"`
 	TestPrefetch        *bool            `toml:"test_prefetch"`
+	PreviewPorts        *string          `toml:"preview_ports"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -556,7 +632,7 @@ var reservedTopLevel = map[string]bool{
 	"tests":         true,
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
-	"test_prefetch": true,
+	"test_prefetch": true, "preview_ports": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -693,6 +769,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.ArtifactPrefetch = raw.ArtifactPrefetch
 	cfg.TestConcurrency = raw.TestConcurrency
 	cfg.TestPrefetch = raw.TestPrefetch
+	cfg.PreviewPorts = raw.PreviewPorts
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -850,6 +927,10 @@ func (c *Config) Merge(other Config) {
 	// here (unlimited), distinct from unset.
 	if other.ArtifactConcurrency != nil {
 		c.ArtifactConcurrency = other.ArtifactConcurrency
+	}
+	// Preview port range is overridden only when the other config sets it (non-nil).
+	if other.PreviewPorts != nil {
+		c.PreviewPorts = other.PreviewPorts
 	}
 	// Artifact prefetch toggle: overridden only when the other config sets it
 	// (non-nil); a nil pointer means "unset", so it inherits.
@@ -1632,6 +1713,9 @@ func managedKeySet() map[string]bool {
 	// test_prefetch is Config-level (emitTestPrefetch); its regenerated
 	// "# test_prefetch = true" default line is recognised and dropped too.
 	m["test_prefetch"] = true
+	// preview_ports is Config-level (emitPreviewPorts); its regenerated
+	// "# preview_ports = ..." default line is recognised and dropped too.
+	m["preview_ports"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1660,6 +1744,19 @@ func artifactsDocLines() []string {
 		docPrefix + "                and propagates instead of being swallowed (default true; set false",
 		docPrefix + "                to run the command exactly as written).",
 		docPrefix + "   enabled      set false to skip this script in the diff viewer (default true).",
+		docPrefix + "   type         \"server\" makes this a live preview instead of diffed media: the",
+		docPrefix + "                command must start an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT.",
+		docPrefix + "                Hydra proxies a per-instance port to it, spinning it up when the",
+		docPrefix + "                preview link is opened and tearing it down when idle. Server scripts",
+		docPrefix + "                get HYDRA_PREVIEW_PORT + HYDRA_PREVIEW_SOURCE (the checkout dir) and",
+		docPrefix + "                may print ::hydra:server:ready:: on stdout to declare readiness",
+		docPrefix + "                early (otherwise the first successful port dial counts). They never",
+		docPrefix + "                appear in the diff grid. Default \"\" = diffed media.",
+		docPrefix + "   idle_timeout_sec   (server) teardown after this long with zero in-flight",
+		docPrefix + "                requests; open WebSocket/long-poll connections count as in-flight",
+		docPrefix + "                (0 = default 300). The link respawns it on the next visit.",
+		docPrefix + "   ready_timeout_sec  (server) max seconds from spawn to ready - builds included",
+		docPrefix + "                (0 = default 900).",
 		docPrefix + " Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed",
 		docPrefix + " frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types",
 		docPrefix + " (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and",
@@ -1702,10 +1799,19 @@ type artifactComments struct {
 func artifactFieldLines(a ArtifactScript) []string {
 	out := []string{
 		"name = " + tomlStringValue(a.Name),
-		"command = " + tomlStringValue(a.Command),
 	}
+	if a.Type != "" {
+		out = append(out, "type = "+tomlStringValue(a.Type))
+	}
+	out = append(out, "command = "+tomlStringValue(a.Command))
 	if a.TimeoutSec > 0 {
 		out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
+	}
+	if a.IdleTimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("idle_timeout_sec = %d", a.IdleTimeoutSec))
+	}
+	if a.ReadyTimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("ready_timeout_sec = %d", a.ReadyTimeoutSec))
 	}
 	if a.UnsafeHost {
 		out = append(out, "unsafe_host = true")
@@ -2363,6 +2469,14 @@ func renderConfig(existing []byte, cfg Config) string {
 			testPrefetch = prev.TestPrefetch
 		}
 	}
+	// preview_ports isn't in the Settings editor, so (like resume_prompt) a save
+	// that doesn't carry it preserves the file's existing hand-edited value.
+	previewPorts := cfg.PreviewPorts
+	if previewPorts == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			previewPorts = prev.PreviewPorts
+		}
+	}
 
 	var out []string
 	spec := defaultsSpec()
@@ -2381,6 +2495,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
 	emitTestConcurrency(&out, testConcurrency, keyComments)
 	emitTestPrefetch(&out, testPrefetch, keyComments)
+	emitPreviewPorts(&out, previewPorts, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
@@ -2602,6 +2717,21 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 		*out = append(*out, fmt.Sprintf("test_prefetch = %t", *prefetch))
 	} else {
 		*out = append(*out, "# test_prefetch = true")
+	}
+}
+
+// emitPreviewPorts renders the top-level preview_ports key (a Config-level
+// setting, not part of the [defaults] spec table).
+func emitPreviewPorts(out *[]string, ports *string, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
+	if uc := keyComments["\x00preview_ports"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+fmt.Sprintf(` inclusive "min-max" TCP port range that live server previews ([[artifacts]] type = "server") allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default %s).`, DefaultPreviewPorts))
+	if ports != nil {
+		*out = append(*out, "preview_ports = "+tomlStringValue(*ports))
+	} else {
+		*out = append(*out, `# preview_ports = "`+DefaultPreviewPorts+`"`)
 	}
 }
 

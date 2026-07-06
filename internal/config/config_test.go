@@ -192,6 +192,61 @@ func TestArtifactsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestServerArtifactRoundTrip covers the server-preview fields: type,
+// idle_timeout_sec and ready_timeout_sec must survive a save/load cycle (a
+// dropped field would silently demote a preview to a diffed-media script).
+func TestServerArtifactRoundTrip(t *testing.T) {
+	ports := "26610-26620"
+	cfg := Config{
+		Artifacts: []ArtifactScript{
+			{Name: "demo", Type: ArtifactTypeServer, Command: "run-demo.sh", IdleTimeoutSec: 60, ReadyTimeoutSec: 120},
+			{Name: "shots", Command: "bun run shots.ts"},
+		},
+		PreviewPorts: &ports,
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	loaded, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(loaded.Artifacts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %+v", loaded.Artifacts)
+	}
+	demo := loaded.Artifacts[0]
+	if !demo.IsServer() || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
+		t.Errorf("server artifact mismatch: %+v", demo)
+	}
+	if loaded.Artifacts[1].IsServer() {
+		t.Errorf("media artifact wrongly server: %+v", loaded.Artifacts[1])
+	}
+	if lo, hi := loaded.ResolvePreviewPortRange(); lo != 26610 || hi != 26620 {
+		t.Errorf("preview port range = %d-%d, want 26610-26620", lo, hi)
+	}
+}
+
+func TestResolvePreviewPortRangeDefaults(t *testing.T) {
+	if lo, hi := (Config{}).ResolvePreviewPortRange(); lo != 26601 || hi != 26699 {
+		t.Errorf("default range = %d-%d, want 26601-26699", lo, hi)
+	}
+	bad := "9000-badport"
+	if lo, hi := (Config{PreviewPorts: &bad}).ResolvePreviewPortRange(); lo != 26601 || hi != 26699 {
+		t.Errorf("malformed range resolved to %d-%d, want default 26601-26699", lo, hi)
+	}
+	single := "9000"
+	if lo, hi := (Config{PreviewPorts: &single}).ResolvePreviewPortRange(); lo != 9000 || hi != 9000 {
+		t.Errorf("single port resolved to %d-%d, want 9000-9000", lo, hi)
+	}
+	for _, s := range []string{"0-10", "10-5", "1-70000", "", "a-b"} {
+		if _, _, err := ParsePortRange(s); err == nil {
+			t.Errorf("ParsePortRange(%q) unexpectedly succeeded", s)
+		}
+	}
+}
+
 // TestArtifactCommentSurvivesMultilineCommand guards a save round-trip where an
 // artifact's command is a multi-line string that itself contains shell "#"
 // comments and a "name=" assignment. Those must not be mistaken for the block's
