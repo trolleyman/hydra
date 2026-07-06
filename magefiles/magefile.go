@@ -1382,19 +1382,37 @@ func Preview() error {
 	}
 }
 
-// Demo runs the Hydra server in simulation mode with mock data.
+// Demo runs the Hydra server in simulation mode with mock data, serving the
+// frontend through the Vite dev server (HMR on http://localhost:5173, which
+// proxies /api + /ws to the sim server on :8080). Frontend edits hot-reload
+// through Vite without a restart; the UI reload button rebuilds the Go backend
+// and relaunches the sim server (exit code devRestartExitCode), so a change to
+// the mock data in internal/http/simulation.go goes live with one click. This is
+// the simulation twin of DevFast - a prod build swapped for --simulation.
 func Demo() error {
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	// Build the frontend once to ensure web/dist/ exists for Go compilation.
+	// Build the frontend once to ensure web/dist/ exists for Go compilation and
+	// that node_modules are installed for the Vite dev server below.
 	if err := BuildWeb(); err != nil {
 		return errtrace.Wrap(err)
 	}
 
-	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
+	hydraOutputFile := getHydraOutputFile()
+	buildBackend := func() error {
+		devBuildArgs := append([]string{"build"}, goBuildTags(true)...) // Don't embed Linux binary
+		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
+		printCmdLine(append([]string{"go"}, devBuildArgs...))
+		return errtrace.Wrap(runV("go", devBuildArgs...))
+	}
+
+	// Start the Vite dev server once (frontend with HMR on http://localhost:5173).
+	// It stays up across backend restarts - HMR handles frontend edits live, and
+	// the reload button only needs to rebuild + relaunch the Go sim server.
 	printCmdBackground("bun", "run", "dev")
 	viteCmd := exec.Command("bun", "run", "dev")
 	viteCmd.Dir = "web"
@@ -1410,28 +1428,39 @@ func Demo() error {
 		}
 	}()
 
-	hydraOutputFile := getHydraOutputFile()
-	devBuildArgs := append([]string{"build"}, goBuildTags(true)...) // Don't embed Linux binary
-	devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
-	printCmdLine(append([]string{"go"}, devBuildArgs...))
-	buildCmd := exec.Command("go", devBuildArgs...)
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
+	if err := buildBackend(); err != nil {
 		return errtrace.Wrap(fmt.Errorf("build error: %w", err))
 	}
 
-	printCmd(hydraOutputFile, "server", "--simulation")
-	serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
-	serverCmd.Stdout = os.Stdout
-	serverCmd.Stderr = os.Stderr
-	// Serves on the default web port (localhost:26600); HYDRA_API_ADDR overrides.
+	for {
+		printCmd(hydraOutputFile, "server", "--simulation")
+		serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
+		serverCmd.Stdout = os.Stdout
+		serverCmd.Stderr = os.Stderr
+		// HYDRA_DEV_RESTART=1 arms the sim server's reload button (SimulationServer.
+		// DevRestart), so a click exits with devRestartExitCode and this loop
+		// rebuilds. Vite proxies /api + /ws to :26600 (the sim server's default).
+		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
 
-	if err := serverCmd.Run(); err != nil {
-		return errtrace.Wrap(err)
+		serverErr := serverCmd.Run()
+		if serverErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(serverErr, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
+				log.Println("Restart requested via UI, rebuilding backend...")
+				time.Sleep(1 * time.Second) // Give the OS time to release the port
+				if err := GenerateGo(); err != nil {
+					fmt.Printf("GenerateGo error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				} else if err := buildBackend(); err != nil {
+					fmt.Printf("build error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				}
+				continue
+			}
+			return errtrace.Wrap(serverErr)
+		}
+		return nil // clean exit
 	}
-
-	return nil
 }
 
 // Clean removes the build cache and build files

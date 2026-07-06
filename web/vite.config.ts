@@ -80,6 +80,12 @@ export default defineConfig(({ mode }) => {
         '/folder-picker': apiBase,
         '/health': apiBase,
         '/.well-known': apiBase,
+        // Non-OpenAPI blob + log routes served by both the real and simulation
+        // servers (repository image/text bytes, the artifacts "Show build log"
+        // toggle). Needed for the diff viewer's images to load when browsing
+        // through this dev server (e.g. `mage demo`).
+        '/repository': apiBase,
+        '/artifacts': apiBase,
         '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
       },
     },
