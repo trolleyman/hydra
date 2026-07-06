@@ -87,7 +87,9 @@ func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCf
 			continue
 		}
 		seen[t.Name] = true
-		if t.UnsafeHost && !trustedHost[hostKey(t.Name, t.Command)] {
+		// TestScript.Type is the report format (junit/stdout), not a behavior
+		// change to what executes on the host, so it is not part of the trust key.
+		if t.UnsafeHost && !trustedHost[hostKey(t.Name, t.Command, "")] {
 			// A branch can't grant itself host access; force it into the sandbox.
 			t.UnsafeHost = false
 		}
@@ -114,7 +116,7 @@ func trustedHostTestCommands(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, t := range cfg.Tests {
 		if t.UnsafeHost && t.Name != "" && t.Command != "" {
-			trusted[hostKey(t.Name, t.Command)] = true
+			trusted[hostKey(t.Name, t.Command, "")] = true
 		}
 	}
 	return trusted

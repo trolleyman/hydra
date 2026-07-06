@@ -125,6 +125,11 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// Live server previews (type = "server") have no diffable outputs; they are
+	// surfaced by the previews API, never the diff grid. This is the single
+	// choke point covering the poll handler, the artifacts WS, and prefetch.
+	dropServerSpecs(leftByName)
+	dropServerSpecs(rightByName)
 	if len(leftByName) == 0 && len(rightByName) == 0 {
 		return nil, nil
 	}
@@ -273,7 +278,7 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 		if _, dup := byName[spec.Name]; dup {
 			continue
 		}
-		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command)] {
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, spec.Type)] {
 			// A version-sourced command not authorized on the host by the trusted
 			// config must run confined, regardless of what the version claims.
 			spec.UnsafeHost = false
@@ -281,6 +286,16 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 		byName[spec.Name] = spec
 	}
 	return byName, nil
+}
+
+// dropServerSpecs removes live-preview scripts (type = "server") from a spec
+// map in place; they run under internal/preview, not the diff pipeline.
+func dropServerSpecs(byName map[string]config.ArtifactScript) {
+	for n, s := range byName {
+		if s.IsServer() {
+			delete(byName, n)
+		}
+	}
 }
 
 // disabledArtifacts returns the set of script names the live config marks
@@ -302,15 +317,23 @@ func trustedHostCommands(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, s := range cfg.Artifacts {
 		if s.UnsafeHost && s.Name != "" && s.Command != "" {
-			trusted[hostKey(s.Name, s.Command)] = true
+			trusted[hostKey(s.Name, s.Command, s.Type)] = true
 		}
 	}
 	return trusted
 }
 
-// hostKey keys the trusted-host set by name and command. The NUL separator can't
-// appear in either field, so distinct (name, command) pairs never collide.
-func hostKey(name, command string) string { return name + "\x00" + command }
+// hostKey keys the trusted-host set by name, command AND type. The NUL
+// separator can't appear in the fields, so distinct tuples never collide. Type
+// is included so a branch cannot repurpose a trusted one-shot media command
+// into a persistent host-resident server (or vice versa) by flipping type
+// while keeping the authorized name+command. ""/"media" are the same type.
+func hostKey(name, command, typ string) string {
+	if typ == "media" {
+		typ = ""
+	}
+	return name + "\x00" + command + "\x00" + typ
+}
 
 // buildArtifactSet generates/loads both sides for one script (matched by name)
 // and folds them into the API representation. Either side's spec may be nil when

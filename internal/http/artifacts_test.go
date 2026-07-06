@@ -198,6 +198,61 @@ unsafe_host = true
 	}
 }
 
+// TestHostKeyTypeSensitive guards that a branch flipping the type of a trusted
+// unsafe_host entry (e.g. one-shot media command -> persistent server) loses
+// host access: the trust tuple includes type.
+func TestHostKeyTypeSensitive(t *testing.T) {
+	head := `
+[[artifacts]]
+name = "audited"
+type = "server"
+command = "trusted cmd"
+unsafe_host = true
+`
+	root, _ := artifactRepo(t, "# base\n", head)
+
+	// The live config trusts the same name+command as MEDIA, not server.
+	trusted := config.Config{Artifacts: []config.ArtifactScript{
+		{Name: "audited", Command: "trusted cmd", UnsafeHost: true},
+	}}
+	byName, err := artifactSpecsByName(root, artifacts.Version{Ref: "HEAD"}, trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byName["audited"].UnsafeHost {
+		t.Error("type flip must strip unsafe_host")
+	}
+
+	// Trusting it AS a server (and "media" aliasing "") both work.
+	trusted.Artifacts[0].Type = config.ArtifactTypeServer
+	byName, err = artifactSpecsByName(root, artifacts.Version{Ref: "HEAD"}, trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !byName["audited"].UnsafeHost {
+		t.Error("matching server type should keep unsafe_host")
+	}
+	if hostKey("n", "c", "media") != hostKey("n", "c", "") {
+		t.Error(`"media" and "" must key identically`)
+	}
+}
+
+// TestResolveArtifactPlanDropsServerSpecs checks the diff pipeline never sees
+// type = "server" scripts on either side.
+func TestResolveArtifactPlanDropsServerSpecs(t *testing.T) {
+	byName := map[string]config.ArtifactScript{
+		"shots": {Name: "shots", Command: "x"},
+		"demo":  {Name: "demo", Command: "y", Type: config.ArtifactTypeServer},
+	}
+	dropServerSpecs(byName)
+	if _, ok := byName["demo"]; ok {
+		t.Error("server spec survived dropServerSpecs")
+	}
+	if _, ok := byName["shots"]; !ok {
+		t.Error("media spec wrongly dropped")
+	}
+}
+
 func TestArtifactSpecsByName_WorktreeReadsOwnConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	wt := t.TempDir()
