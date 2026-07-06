@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { SwitcherState } from '../lib/useGlobalShortcuts'
 import { ProjectIcon } from '../lib/projectIcon'
-import { ProjectAgentCounts } from './ProjectAgentCounts'
+import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 
 // The centered alt-tab-style project switcher overlay. Rendered by RootLayout
 // while Ctrl+` is held (state owned by useGlobalShortcuts): it lists projects in
@@ -58,15 +58,20 @@ export function ProjectSwitcher({
                   <ProjectIcon icon={p.icon} projectId={p.id} size={20} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">{p.name}</div>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm font-medium truncate">{p.name}</span>
+                    {/* Needs-input/unread notification dot, right of the name
+                        so "this project wants you" reads before the tally. */}
+                    <ProjectAttentionDot project={p} onAccent={active} />
+                  </div>
                   <div className={`text-xs font-mono truncate ${active ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
                     {p.path}
                   </div>
                 </div>
                 {/* Per-project agent tally, matching the sidebar project
-                    dropdown: an unread dot plus a colored dot+count per non-zero
-                    status. onAccent keeps the numbers readable on the highlighted
-                    row's blue fill. */}
+                    dropdown: a colored dot+count per non-zero status. onAccent
+                    keeps the numbers readable on the highlighted row's blue
+                    fill. */}
                 <ProjectAgentCounts project={p} onAccent={active} className="shrink-0" />
               </div>
             )

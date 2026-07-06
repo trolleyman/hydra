@@ -12,18 +12,49 @@ const STATUS_CHIPS = [
   { key: 'finished_count', dot: 'bg-violet-500', text: 'text-violet-600 dark:text-violet-400', label: 'finished' },
 ] as const
 
+// ProjectAttentionDot is the notification dot rendered next to a project's
+// name in the switcher rows: red when an agent there is blocked on your input,
+// blue when there are unread changes (agents you haven't opened since they last
+// updated) - the same red-over-blue escalation as the dot on the top-bar folder
+// button. It lives apart from ProjectAgentCounts because it sits by the name,
+// not with the tally chips. Renders nothing when there's nothing to flag.
+export function ProjectAttentionDot({
+  project,
+  onAccent = false,
+  className = '',
+}: {
+  project: ProjectInfo
+  onAccent?: boolean
+  className?: string
+}) {
+  const unread = project.unread_count ?? 0
+  const needsInput = project.needs_input_count ?? 0
+  if (needsInput <= 0 && unread <= 0) return null
+  const label = needsInput > 0
+    ? `${needsInput} agent${needsInput === 1 ? ' needs' : 's need'} your input`
+    : `${unread} unread update${unread === 1 ? '' : 's'}`
+  // On the switcher's highlighted row (solid blue fill) the sky dot would
+  // vanish, so it goes white there; red keeps its urgency and reads fine.
+  const color = needsInput > 0 ? 'bg-red-500' : onAccent ? 'bg-white' : 'bg-sky-500'
+  return (
+    <span
+      className={`w-2 h-2 rounded-full shrink-0 ${color} ${className}`}
+      aria-label={label}
+      title={label}
+    />
+  )
+}
+
 // ProjectAgentCounts renders a project's agent tally: a colored dot+number per
-// non-zero status (needs_input / running / waiting / finished). A leading sky dot
-// marks unread changes (agents you haven't opened since they last updated) - the
-// same "updates waiting" signal that used to be the row's lone dot, kept as its
-// own marker because "unread" is orthogonal to status (a finished agent can still
-// be unreviewed). Renders nothing when the project has no per-status chips to show
-// and nothing unread.
+// non-zero status (needs_input / running / waiting / finished). Renders nothing
+// when the project has no per-status chips to show. The unread/needs-input
+// notification dot is NOT part of the tally - it renders next to the project
+// name via ProjectAttentionDot above.
 //
 // `onAccent` styles the chips for a solid accent background (the Ctrl+` project
 // switcher's highlighted row is `bg-blue-500 text-white`): the status dots stay
-// their signal colors - they read fine on blue - but the numbers and unread dot
-// go white so they don't sit at low contrast the way `text-green-600` etc. would.
+// their signal colors - they read fine on blue - but the numbers go white so
+// they don't sit at low contrast the way `text-green-600` etc. would.
 export function ProjectAgentCounts({
   project,
   className = '',
@@ -34,25 +65,20 @@ export function ProjectAgentCounts({
   onAccent?: boolean
 }) {
   const total = project.agent_count ?? 0
-  const unread = project.unread_count ?? 0
   const chips = STATUS_CHIPS
     .map((c) => ({ ...c, n: project[c.key] ?? 0 }))
     .filter((c) => c.n > 0)
 
-  if (chips.length === 0 && unread <= 0) return null
+  if (chips.length === 0) return null
 
   // A spoken summary for screen readers (the visual dots/numbers are aria-hidden).
   const parts: string[] = []
   if (total > 0) parts.push(`${total} agent${total === 1 ? '' : 's'}`)
-  if (chips.length) parts.push(chips.map((c) => `${c.n} ${c.label}`).join(', '))
-  if (unread > 0) parts.push(`${unread} unread`)
-  const summary = parts.join(' - ') || 'no active agents'
+  parts.push(chips.map((c) => `${c.n} ${c.label}`).join(', '))
+  const summary = parts.join(' - ')
 
   return (
     <div className={`flex items-center gap-1.5 ${className}`} aria-label={summary} title={summary}>
-      {unread > 0 && (
-        <span className={`w-2 h-2 rounded-full shrink-0 ${onAccent ? 'bg-white' : 'bg-sky-500'}`} aria-hidden />
-      )}
       {chips.map((c) => (
         <span key={c.key} className="inline-flex items-center gap-1 tabular-nums" aria-hidden>
           <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />

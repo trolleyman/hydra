@@ -6,7 +6,7 @@ import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useFinePointer } from '../lib/useFinePointer'
 import { ProjectIcon } from '../lib/projectIcon'
-import { ProjectAgentCounts } from './ProjectAgentCounts'
+import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
@@ -235,14 +235,19 @@ export function ProjectDropdown({
                     <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</span>
+                      {/* Needs-input/unread notification dot, right of the name
+                          so "this project wants you" reads before the tally. */}
+                      <ProjectAttentionDot project={p} />
+                    </div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
                   {/* Per-project agent tally (running/waiting/finished/
-                      needs_input + an unread marker). Fixed to the trailing edge,
-                      centered against the two-line name/path - nothing here
-                      appears on hover, so the counts never shift. Removal moved to
-                      the project's Settings page. */}
+                      needs_input). Fixed to the trailing edge, centered against
+                      the two-line name/path - nothing here appears on hover, so
+                      the counts never shift. Removal moved to the project's
+                      Settings page. */}
                   <ProjectAgentCounts project={p} className="shrink-0 self-center" />
                 </div>
               ))}
