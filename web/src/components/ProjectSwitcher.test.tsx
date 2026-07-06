@@ -34,7 +34,29 @@ describe('ProjectSwitcher - agent tally', () => {
     renderSwitcher({ items, index: 0 })
     // The tally exposes a spoken summary via aria-label/title.
     expect(screen.getByTitle('2 agents - 2 running')).toBeInTheDocument()
-    expect(screen.getByTitle('3 agents - 3 waiting - 1 unread')).toBeInTheDocument()
+    expect(screen.getByTitle('3 agents - 3 waiting')).toBeInTheDocument()
+  })
+
+  it('shows the notification dot next to the name, not in the tally', () => {
+    renderSwitcher({ items, index: 0 })
+    // Bravo has 1 unread agent: a blue dot labelled with the count. It sits in
+    // the same flex row as the project name (its direct parent contains the
+    // name text), not inside the trailing tally.
+    const dot = screen.getByTitle('1 unread update')
+    expect(dot.className).toContain('bg-sky-500')
+    expect(dot.parentElement?.textContent).toBe('Bravo')
+    // Alpha has nothing unread and nothing blocked: Bravo's is the only dot.
+    expect(screen.queryAllByTitle(/needs your input|unread update/)).toHaveLength(1)
+  })
+
+  it('escalates the dot to red when an agent needs input', () => {
+    const blocked = [
+      { id: 'c', name: 'Charlie', path: '/tmp/charlie', agent_count: 1, needs_input_count: 1, unread_count: 1 } as ProjectInfo,
+    ]
+    renderSwitcher({ items: blocked, index: 0 })
+    // needs_input beats unread: the dot goes red (same escalation as the
+    // top-bar folder-button dot).
+    expect(screen.getByTitle('1 agent needs your input').className).toContain('bg-red-500')
   })
 
   it('styles only the highlighted row for the accent background (white numbers)', () => {
