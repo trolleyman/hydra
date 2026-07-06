@@ -75,7 +75,7 @@ The merge/lifecycle path, end to end:
 | `hydra/<id>` branch names | Team naming conventions, often `feat/JIRA-123-...` |
 | Base = local checkout, no fetch | Base must track `origin/<trunk>`, freshly fetched |
 | Merge detection = local merge commit / ancestor check | Squash merges leave no ancestry; truth lives in the MR state |
-| Head archive states: `merged` / `killed` | Needs an `in_review` limbo and a "merged remotely" terminal state |
+| Head archive states: `merged` / `killed` | Needs an MR-linked limbo (head alive, branch pushed) and a "merged remotely" terminal state |
 
 ---
 
@@ -153,8 +153,10 @@ branch naming) justify native support.
 
 The direct-merge flow remains correct for *local integration branches*:
 merge several stacked heads into a local `integration/foo`, test the
-combination, and publish that as one MR. Review-mode (Phase 2) should
-restrict direct merge to non-protected targets rather than remove it.
+combination, and publish that as one MR. The per-head MR link (3.3)
+leaves direct merge completely untouched; the optional
+`review.protected_branches` list (3.2) only adds a warning when a local
+merge targets a branch the server would reject a push to anyway.
 
 ---
 
@@ -171,8 +173,8 @@ committed config and `deploy.toml`:
   **project-local**. Same schema as `config.toml`, same union/last-wins
   merge semantics. Use cases: your personal remote name, extra allowed
   hosts, a personal `pre_prompt` addition ("our team's MR descriptions
-  follow template X"), enabling review mode on a repo whose committed
-  config doesn't have it yet.
+  follow template X"), setting `[review]` provider/remote on a repo whose
+  committed config doesn't have it yet.
   - Trust note: this file is on the *host*, editable only by the user, so
     it is as trusted as the root config. It participates in the
     `unsafe_host` trusted-set the same way the root config does.
@@ -186,13 +188,28 @@ committed config and `deploy.toml`:
 
 ### 3.2 A `[review]` config section (Phase 1-2)
 
+There is deliberately **no `mode` switch**: the MR link is per-head
+(section 3.3), so this section only supplies defaults for the Create MR
+dialog and tells Hydra how to talk to the forge.
+
 ```toml
 [review]
-# "direct" (today's behavior) | "mr" (publish flow replaces direct merge)
-mode = "mr"
-provider = "gitlab"            # gitlab | github (extensible)
+# Forge provider. "auto" (the default) detects from the configured
+# remote's URL: github.com (or a host known to gh's hosts.yml) -> github;
+# gitlab.com (or a host known to glab) -> gitlab. Unresolvable self-hosted
+# domain -> the Create MR button explains what to set. Set explicitly to
+# skip detection.
+provider = "auto"               # auto | github | gitlab
 remote = "origin"
-target_branch = "main"          # MR target; also the spawn-base default
+target_branch = "main"          # default MR target; per-head editable
+# How Hydra talks to the forge: "cli" shells out to gh/glab on the host
+# (recommended - they own auth, incl. self-hosted via their multi-host
+# config); "token" uses the REST API with a token from the secrets file
+# (section 3.1) or the HYDRA_FORGE_TOKEN env var. Never a token inline.
+auth = "cli"                    # cli | token
+# Optional: warn before a DIRECT LOCAL merge into these branches (they
+# are protected on the server; the push would bounce anyway).
+# protected_branches = ["main"]
 # Default DOWNSTREAM branch name: what the head branch is pushed AS (the
 # local branch stays hydra/<id>). This is only the template; each head
 # carries its own editable downstream_branch seeded from it - see 3.3a.
@@ -215,33 +232,54 @@ Committed parts (provider, target, templates - team conventions) live in
 `config.toml`; personal deviations in `config.local.toml`; nothing secret in
 either. Follow the existing nil-means-default pointer-field convention.
 
-### 3.3 The Publish flow (Phase 2) - the heart of it
+**Settings-page UI**: the web Settings page (which already hosts the
+sandbox-policy editor) gains a Review section showing the *effective*
+resolved values and where each came from: detected provider (+ the remote
+URL it was detected from), remote, auth method and its live status
+("gh: logged in as X" / "glab: not authenticated" / "token: present"),
+with a test-connection button. Editing writes to `config.local.toml` (or
+`config.toml` where the user chooses to share it).
 
-A new head action, **Publish**, sitting exactly where Merge sits today
-(same CAS claim, same UI position; in review mode the primary button
-becomes Publish and direct Merge moves behind an explicit
-"merge locally" affordance, disabled for the protected target).
+### 3.3 The per-head MR link (Phase 2) - the heart of it
 
-Daemon-side (`performPublish`, parallel to `performClaimedMerge`):
+The head<->MR link is **optional and per-head** - there is no global
+"review mode". Every head starts unlinked and behaves exactly as today
+(direct local Merge stays available, unchanged); a **Create MR** button
+establishes the link, after which the same spot shows **View MR** plus
+sync affordances. A repo mixing both styles per head is the normal case,
+not a mode switch.
+
+Button lifecycle on the head page:
+
+1. **Unlinked** (default): `Create MR` (next to Merge, not replacing it).
+   Opens a dialog prefilled from config + the head: downstream branch
+   name (3.3a), target branch, title/description (seeded from the head's
+   task and commit log), draft toggle. Confirming runs the publish below.
+2. **Linked**: the button becomes `View MR` (deep link to the forge) with
+   an MR state chip (draft / open / CI / approvals / merged), plus,
+   contextually:
+   - `Push to MR` when the local head branch is ahead of the remote
+     downstream branch;
+   - `Pull from MR` when the remote is ahead (3.3b).
+
+Daemon-side `performPublish` (parallel to `performClaimedMerge`):
 
 1. Claim the head (`idle -> publishing`).
 2. Run the local test gate (same `testGateVerdict`, same force override) -
-   local tests become a *pre-push* gate instead of a pre-merge gate.
-3. `git push <remote> hydra/<id>:refs/heads/<push_branch>` - **host-side,
-   by the daemon**, with the user's own credentials. Force-with-lease on
-   re-publish.
+   local tests act as a *pre-push* gate.
+3. `git push <remote> hydra/<id>:refs/heads/<downstream>` - **host-side,
+   by the daemon**, with the user's own credentials. The LOCAL branch is
+   untouched: no rename, no rewrite, publish is a refspec push and
+   nothing more. Plain push by default; `--force-with-lease` only in the
+   one safe case spelled out in 3.3b.
 4. Create the MR/PR if none exists (via `glab`/`gh` or REST), targeting
-   `review.target_branch`; title/description seeded from the head's task
-   and commit log; store the MR URL + IID on the head (new DB fields:
-   `ReviewURL`, `ReviewID`, `DownstreamBranch`).
-5. Head status -> `in_review`. **Do not delete anything.** Worktree,
-   branch, and session all survive - review iteration is the normal case.
-6. Re-publish is idempotent: push again, the existing MR updates.
-
-UI: the head card/page shows an MR chip (state: draft/open/approved/
-CI-red/merged) linking to the forge. The agent header's merge button
-becomes a split Publish button ("Publish", "Publish as ready", "Merge
-locally...").
+   the dialog's target branch; store the MR URL + IID on the head (new
+   DB fields: `ReviewURL`, `ReviewID`, `DownstreamBranch`).
+5. **Do not delete anything.** Worktree, branch, and session all
+   survive - review iteration is the normal case. The link is metadata;
+   the head's status lifecycle is unchanged (only the transient
+   `publishing` claim is new).
+6. Re-publish (`Push to MR`) is idempotent: push again, the MR follows.
 
 #### 3.3a Per-head downstream branch name
 
@@ -269,6 +307,28 @@ listing rely on that prefix). Semantics:
   of this head (someone else's branch) - never force-push a branch this
   head did not create.
 
+#### 3.3b Bi-directional sync: Push to MR / Pull from MR
+
+The remote downstream branch is not write-only: reviewers apply
+suggestions in the forge UI, colleagues push fixups, bots amend commits.
+So the link must sync both ways. Hydra tracks ahead/behind between local
+`hydra/<id>` and `<remote>/<downstream>` (throttled background fetch -
+same machinery as the existing behind-base count and `maybeFetchRemote`):
+
+- **Local ahead** -> `Push to MR`: plain push (publish step 3 again).
+- **Remote ahead** -> `Pull from MR`: fetch, then `git.Merge` of the
+  remote-tracking ref INTO the head branch - deliberately the same
+  merge-not-rebase semantics as the existing update-from-base button, so
+  conflicts surface through the same conflict UI and nothing about the
+  head's history is rewritten. The agent needs no special notification:
+  its worktree IS the branch, so pulled commits are simply there on its
+  next turn (at most, toast the user).
+- **Diverged** -> `Pull from MR` first, then push. The ONLY
+  force-with-lease case: the head rewrote its own history AND the remote
+  tip still matches what this head last pushed (the lease enforces
+  exactly this) - foreign commits on the remote always win a pull-first,
+  never a force-push.
+
 ### 3.4 Authentication - does this need OAuth?
 
 Short answer: **no OAuth implementation in Hydra.** Hydra's daemon is a
@@ -278,6 +338,22 @@ credentials you already provision once on the host:
 - **`git push` (daemon-side)** uses your normal host git auth - SSH agent
   or credential helper - identically to the existing sidebar Push button,
   which already works today with zero Hydra auth code.
+  - **Passphrase-protected SSH keys**: the answer is `ssh-agent` (or the
+    OS keychain via `AddKeysToAgent`), NOT Hydra config. Hydra must never
+    store or prompt for a key passphrase - there is no safe place for it
+    and the ecosystem already solved this. The daemon inherits
+    `SSH_AUTH_SOCK` from the CLI that auto-started it; the gotcha is a
+    daemon started from a context without an agent (GUI launch, after
+    reboot with the socket stale). So publish/push must run strictly
+    non-interactively (`GIT_TERMINAL_PROMPT=0`, `GIT_SSH_COMMAND="ssh
+    -oBatchMode=yes"` - the existing `git.Fetch` already sets the former,
+    `git.Push` should too) and map the failure to an actionable error in
+    the UI: "push auth failed - add your key to ssh-agent (`ssh-add`) or
+    switch to HTTPS + credential helper", rather than hanging or a raw
+    git stderr. If the agent socket needs pinning on odd setups, a
+    NON-secret pointer like `ssh_auth_sock` or a `ssh_command` override
+    is a legitimate `config.local.toml` entry - the *passphrase itself
+    never is*.
 - **MR creation via `gh`/`glab` (CLI-first)**: these CLIs implement OAuth
   *themselves* (device flow). You run `gh auth login` /
   `glab auth login --hostname gitlab.mycorp.com` once on the host; the
@@ -302,6 +378,22 @@ Placement rule regardless of method: tokens live **host-side only**
 `.hydra/config*.toml` ever holds a secret, and nothing token-bearing is
 mounted into a sandbox by default (section 2.2).
 
+**Masking the project-level secret files from heads** - a gap that exists
+TODAY: sandbox masks are home-relative (`~/.ssh`, `~/.config`, ...,
+`internal/sandbox/defaults.go`), but heads also get read access to the
+host, including the project root - and `.hydra/deploy.toml` (which
+already holds the web `AuthKey` + ngrok config) is not masked. Fix as
+part of Phase 1: when building a head's sandbox options, always append
+project-relative masks for `.hydra/deploy.toml` and any future secrets
+file (`integrations.toml`), plus `.hydra/config.local.toml` (not secret
+by rule, but personal - a head has no business reading another layer's
+overrides, and masking it keeps the temptation to put a token there
+inert). These cannot live in the static defaults list (the project root
+varies per project), so they are appended at spawn/resume where the
+options are resolved (`internal/heads/heads.go` around
+`ResolveSandboxOptions`). The gate's `credentialRels` deny-list gets the
+same entries as defense in depth.
+
 Why daemon-side and not in-sandbox: credentials never enter the sandbox,
 the audit trail is "the user's daemon pushed", and it works for every agent
 type including bash heads. This follows the `unsafe_host` trust precedent:
@@ -312,8 +404,8 @@ copy.
 
 ### 3.5 MR lifecycle tracking (Phase 3)
 
-A watcher (sibling of `RunAutoMergeWatcher`) polls each `in_review` head's
-MR via the forge API:
+A watcher (sibling of `RunAutoMergeWatcher`) polls each MR-linked head's
+MR via the forge API (unlinked heads cost nothing):
 
 - **Status surfaced in UI**: CI pipeline state, approval count, unresolved
   discussion count, mergeability. The sidebar chip gains an MR state.
@@ -334,19 +426,19 @@ MR via the forge API:
 - **Review-comment loop** (the big quality-of-life win): a "Fetch review
   comments" action that pulls unresolved MR discussions and feeds them to
   the head as a new prompt ("Address this review feedback: ..."). Later,
-  optionally automatic: new unresolved discussion on an idle `in_review`
+  optionally automatic: new unresolved discussion on an idle MR-linked
   head -> notify, or (opt-in) auto-prompt.
 
 ### 3.6 Spawn-side changes (Phase 3)
 
-- **Fetch-fresh base**: in review mode, default spawn base to
-  `<remote>/<target_branch>` after a (throttled) fetch, instead of the
-  local checkout. Keeps every head based on the real trunk regardless of
-  local checkout drift. `maybeFetchRemote` throttling already exists to
-  build on.
-- **"Update from base" learns about the remote**: the behind-count and
-  update-from-base button compare against the remote-tracking ref in
-  review mode.
+- **Fetch-fresh base**: when a review provider is configured, default
+  spawn base to `<remote>/<target_branch>` after a (throttled) fetch,
+  instead of the local checkout. Keeps every head based on the real trunk
+  regardless of local checkout drift. `maybeFetchRemote` throttling
+  already exists to build on.
+- **"Update from base" learns about the remote**: for heads based on a
+  remote-tracking ref, the behind-count and update-from-base button
+  compare against it.
 - **Spawn-from-ticket** (with `[jira]` or MCP): paste `PROJ-1234`, Hydra
   (or the agent, via MCP) pulls summary/description into the prompt, and
   `{ticket}` feeds the push-branch template and MR title
@@ -373,11 +465,14 @@ MR via the forge API:
    fresh `origin/main`; the ticket body is in the prompt context.
 2. Head works; local `[[tests]]` run continuously as today.
 3. You skim the diff in the Hydra UI, maybe iterate.
-4. Press **Publish** - branch pushed as `feat/PROJ-1234-rate-limit`,
-   draft MR opened, head enters `in_review`. You keep working on other
-   heads.
-5. Reviewer comments. Hydra surfaces "2 unresolved discussions" - one
-   click feeds them to the agent, it pushes fixes, MR updates.
+4. Press **Create MR** - dialog prefilled (branch
+   `feat/PROJ-1234-rate-limit`, target `main`, title, draft), confirm:
+   branch pushed, draft MR opened, the button becomes **View MR** with a
+   state chip. You keep working on other heads.
+5. Reviewer comments; one applies a suggestion in the GitLab UI. Hydra
+   shows "2 unresolved discussions" and "remote ahead by 1" - one click
+   feeds the comments to the agent, one click pulls the suggestion commit
+   into the head, `Push to MR` sends the fixes back.
 6. You arm **merge when approved**. CI goes green, approval lands, the
    forge merges (squash), branch auto-deleted remotely.
 7. Hydra notices the MR merged: fetches, fast-forwards local `main`,
@@ -403,7 +498,13 @@ changing steps 1-3 at all.
 - `config.local.toml` as a fourth merge layer in `config.Load`
   (`internal/config/config.go:1004`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.
-- Add the `[review]` + `[jira]` sections (parsing + validation only).
+- **Mask project-level secret/personal files from head sandboxes**
+  (pre-existing gap, see 3.4): append project-relative masks for
+  `.hydra/deploy.toml`, the future secrets file, and
+  `.hydra/config.local.toml` where sandbox options are resolved; mirror
+  them in the gate's `credentialRels`.
+- Add the `[review]` + `[jira]` sections (parsing + validation only),
+  including provider auto-detection from the remote URL.
 - Forge credentials stay OUT of sandbox defaults (done: `~/.config/gh`
   removed from `RestoreRO` in `internal/sandbox/defaults.go` +
   `profiles/sandbox.sb`; `glab-cli` config was never in). Document the
@@ -423,13 +524,17 @@ changing steps 1-3 at all.
   `Discussions(id)` - with `gitlab` and `github` implementations
   (CLI-first: shell out to `glab`/`gh`; REST fallback later).
 - `performPublish` in `internal/http` (claim, local test gate, host-side
-  push, EnsureMR, status -> `in_review`).
-- API + web: Publish button/split-menu, MR chip, review-mode gating of the
-  direct Merge action against the protected target.
+  non-interactive push with actionable auth errors, EnsureMR, store the
+  link).
+- API + web: Create MR dialog -> View MR + state chip, `Push to MR` /
+  `Pull from MR` buttons with ahead/behind tracking (3.3b), optional
+  `protected_branches` warning on direct local merge.
+- Settings page: Review section with detected provider, auth status,
+  test-connection (3.2).
 
 ### Phase 3 - lifecycle automation
 
-- MR watcher: poll `in_review` heads; surface CI/approval state; detect
+- MR watcher: poll MR-linked heads; surface CI/approval state; detect
   remote merge -> fetch, ff local target, archive + teardown.
 - "Merge when approved" (prefer arming the forge's own auto-merge).
 - Fetch-fresh spawn base (`<remote>/<target>`); remote-aware behind-count
@@ -459,9 +564,21 @@ changing steps 1-3 at all.
 - **CLI-first fragility**: `glab`/`gh` output formats change; pin to
   `--json`/`-F json` output modes. REST clients are the eventual stable
   path.
-- **Force-push semantics on re-publish**: `--force-with-lease` is right,
-  but interacts with reviewers' local checkouts; consider making re-publish
-  append-only (plain push) unless the head's history was rewritten.
+- **Killing or locally merging a head with an open MR**: the remote
+  branch and MR outlive the head (they live on the server), but nothing
+  would track them afterwards. Kill/merge on an MR-linked head should
+  warn and offer: close the MR + delete the remote branch, or detach and
+  leave them be. Never silently either.
+- **Stacked heads -> stacked MRs**: a child head's natural MR target is
+  its parent's *downstream* branch, and the merge-close reparenting
+  (`AgentsByBaseBranch` retarget) has a remote analog (retarget the MR
+  when the parent's MR merges). Forges handle stacked MRs poorly in
+  general; punt beyond "target the parent's downstream branch" until real
+  demand.
+- **Forks / multiple remotes**: GitHub-style fork PRs need push-to-fork
+  with MR-targets-upstream (`push remote != MR repo`). `review.remote`
+  covers the simple case; a `push_remote`/`target_repo` split is a
+  known-shape extension, not designed here.
 - **Local tests vs remote CI drift**: the pre-push gate uses local
   `[[tests]]`; the forge gate uses CI. Keeping them aligned is a config
   discipline problem Hydra can't solve, only surface (show both states
