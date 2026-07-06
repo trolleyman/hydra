@@ -23,6 +23,7 @@ import { Tooltip } from './components/Tooltip'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
+import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './components/artifactDiffContext'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
@@ -2620,6 +2621,19 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           groupResult={testGroupResult}
           useScope={testUseScope && testsHaveScope}
           onScopeAvailable={setTestsHaveScope}
+        />
+      )}
+
+      {/* Live server previews ([[artifacts]] type = "server") for the selected
+          "after" version - single-sided like the tests above. Renders nothing
+          when the project configures no server scripts. */}
+      {agent.branch_name && projectId && (
+        <PreviewPanel
+          projectId={projectId}
+          agentId={agent.id}
+          headRef={artifactParams.headRef}
+          includeUncommitted={artifactParams.includeUncommitted}
+          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
         />
       )}
 
