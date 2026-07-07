@@ -975,8 +975,9 @@ func (c *Config) Merge(other Config) {
 
 // clone returns a deep-enough copy of the AgentConfig that Merge can mutate it
 // without touching the original's nested Sandbox/Network/Policy structs. (Merge
-// replaces slices and the PrePrompt/PreSpawnScript pointers wholesale, so only the
-// Sandbox, Network and Policy structs need fresh copies.)
+// replaces the PreSpawnScript pointer wholesale and joins PrePrompt into a
+// freshly allocated string, so only the Sandbox, Network and Policy structs need
+// fresh copies.)
 func (a AgentConfig) clone() AgentConfig {
 	out := a
 	if a.Sandbox != nil {
@@ -1008,8 +1009,20 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 		}
 		a.Policy.Merge(*other.Policy)
 	}
-	if other.PrePrompt != nil {
-		a.PrePrompt = other.PrePrompt
+	// Pre-prompts UNION across config layers (user -> project -> local) like the
+	// sandbox path lists, joined by a blank line, so a project adding its own
+	// rules doesn't silently drop the user's machine-wide ones. An identical
+	// value is not doubled; a nil or empty value inherits (there is no way to
+	// clear an inherited pre-prompt from a later layer, matching list semantics).
+	// This is the layer axis only - the defaults -> per-agent axis is combined
+	// separately at spawn time (BuildFinalPrePrompt).
+	if other.PrePrompt != nil && *other.PrePrompt != "" {
+		if a.PrePrompt == nil || *a.PrePrompt == "" {
+			a.PrePrompt = other.PrePrompt
+		} else if *a.PrePrompt != *other.PrePrompt {
+			joined := *a.PrePrompt + "\n\n" + *other.PrePrompt
+			a.PrePrompt = &joined
+		}
 	}
 	if other.Fullscreen != nil {
 		a.Fullscreen = other.Fullscreen
@@ -1555,7 +1568,7 @@ func defaultsSpec() []specEntry {
 	return []specEntry{
 		{
 			table: "", key: "pre_prompt",
-			doc: "extra instructions appended to every agent's system prompt.",
+			doc: "extra instructions appended to every agent's system prompt. Layers combine:\na user-config pre_prompt stays in force and a project's is appended after it.",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.PrePrompt != nil {

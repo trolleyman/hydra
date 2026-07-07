@@ -1063,3 +1063,46 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
 	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
 }
+
+// TestAgentConfigMergePrePromptUnions verifies pre-prompts union across config
+// layers, joined by a blank line: a project layer's pre_prompt appends to the
+// user layer's instead of replacing it. Empty/nil inherits; an identical value
+// is not doubled.
+func TestAgentConfigMergePrePromptUnions(t *testing.T) {
+	str := func(s string) *string { return &s }
+	get := func(a AgentConfig) string {
+		if a.PrePrompt == nil {
+			return "<nil>"
+		}
+		return *a.PrePrompt
+	}
+
+	// Both layers set: joined with a blank line.
+	a := AgentConfig{PrePrompt: str("user rules")}
+	a.Merge(AgentConfig{PrePrompt: str("project rules")})
+	if got := get(a); got != "user rules\n\nproject rules" {
+		t.Errorf("joined = %q", got)
+	}
+
+	// Later layer nil or empty: inherits.
+	a = AgentConfig{PrePrompt: str("user rules")}
+	a.Merge(AgentConfig{})
+	a.Merge(AgentConfig{PrePrompt: str("")})
+	if got := get(a); got != "user rules" {
+		t.Errorf("after nil/empty merges = %q", got)
+	}
+
+	// Earlier layer unset: later layer's value is taken as-is.
+	a = AgentConfig{}
+	a.Merge(AgentConfig{PrePrompt: str("project rules")})
+	if got := get(a); got != "project rules" {
+		t.Errorf("onto unset = %q", got)
+	}
+
+	// Identical text in both layers: not doubled.
+	a = AgentConfig{PrePrompt: str("same")}
+	a.Merge(AgentConfig{PrePrompt: str("same")})
+	if got := get(a); got != "same" {
+		t.Errorf("identical = %q", got)
+	}
+}
