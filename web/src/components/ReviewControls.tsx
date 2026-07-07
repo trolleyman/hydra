@@ -169,6 +169,7 @@ export function CreateMRDialog({
   onConfirm,
   onCancel,
   submitting,
+  error,
 }: {
   agent: AgentResponse
   config: ReviewConfigResponse | null
@@ -176,6 +177,9 @@ export function CreateMRDialog({
   onConfirm: (body: { downstream_branch: string; remote: string; target_branch: string; title: string; description: string; draft: boolean }) => void
   onCancel: () => void
   submitting?: boolean
+  // A publish failure to surface inline (the dialog stays open so the user can
+  // fix and retry) instead of a toast.
+  error?: string | null
 }) {
   const [branch, setBranch] = useState(agent.downstream_branch || config?.push_branch_template?.replace('{id}', agent.id).replace(/\{[a-z]+\}/g, '') || agent.id)
   const [remote, setRemote] = useState(config?.remote || 'origin')
@@ -265,15 +269,22 @@ export function CreateMRDialog({
             Open as draft
           </label>
         </div>
-        <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
-          <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
-          <DialogConfirmButton
-            tone="emerald"
-            onClick={() => onConfirm({ downstream_branch: branch.trim(), remote, target_branch: target.trim(), title: title.trim(), description, draft })}
-            disabled={submitting || !branch.trim() || !target.trim()}
-          >
-            {submitting ? 'Publishing...' : `Create ${providerLabel}`}
-          </DialogConfirmButton>
+        <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-2.5">
+          {error && (
+            <div className="text-xs rounded-md px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 whitespace-pre-wrap break-words max-h-32 overflow-auto">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+            <DialogConfirmButton
+              tone="emerald"
+              onClick={() => onConfirm({ downstream_branch: branch.trim(), remote, target_branch: target.trim(), title: title.trim(), description, draft })}
+              disabled={submitting || !branch.trim() || !target.trim()}
+            >
+              {submitting ? 'Publishing...' : `Create ${providerLabel}`}
+            </DialogConfirmButton>
+          </div>
         </div>
       </div>
     </div>

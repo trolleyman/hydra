@@ -330,6 +330,7 @@ export function AgentDetail({
   const [merging, setMerging] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
   const [reviewConfig, setReviewConfig] = useState<ReviewConfigResponse | null>(null)
   const [remotes, setRemotes] = useState<string[]>(['origin'])
   const [savingDownstream, setSavingDownstream] = useState(false)
@@ -939,20 +940,24 @@ export function AgentDetail({
   // openCreateMR opens the Create MR dialog immediately, refreshing the config
   // in the background rather than blocking the popup on a network round-trip.
   function openCreateMR() {
+    setPublishError(null)
     setShowCreateMR(true)
     void refreshReviewConfig()
   }
 
-  // doPublish runs the publish POST with the dialog's values.
+  // doPublish runs the publish POST with the dialog's values. A failure is shown
+  // inline in the dialog (not a toast) and keeps the dialog open so the values
+  // can be fixed and retried; success closes it.
   async function doPublish(body: { downstream_branch: string; remote: string; target_branch: string; title: string; description: string; draft: boolean }) {
     setPublishing(true)
-    const res = await runWithToast(() => api.default.publishAgent(projectId ?? '', agent.id, undefined, body), {
-      success: 'MR published',
-      errorPrefix: 'Publish failed',
-    })
-    if (res.ok) {
-      updateAgentInStore(res.value)
+    setPublishError(null)
+    try {
+      const updated = await api.default.publishAgent(projectId ?? '', agent.id, undefined, body)
+      updateAgentInStore(updated)
+      useToastStore.getState().show({ message: 'MR published', type: 'success' })
       setShowCreateMR(false)
+    } catch (err) {
+      setPublishError(formatError(err))
     }
     setPublishing(false)
   }
@@ -1115,6 +1120,7 @@ export function AgentDetail({
           config={reviewConfig}
           remotes={remotes}
           submitting={publishing}
+          error={publishError}
           onConfirm={(body) => void doPublish(body)}
           onCancel={() => setShowCreateMR(false)}
         />
