@@ -53,6 +53,14 @@ type Policy struct {
 	// gating: a server with some tools listed here is kept (spawned) so those tools
 	// work, while its other tools are parked for approval at runtime.
 	MCPToolsAllowed []string `json:"mcp_tools_allowed"`
+	// MCPBlocked lists MCP server names refused outright: stripped from the seeded
+	// config pre-launch, and any call that reaches the gate anyway is DENIED (never
+	// parked for approval). Block overrides allow - it is how a narrower config
+	// layer removes a server a broader layer granted, since the allow-lists union.
+	MCPBlocked []string `json:"mcp_blocked,omitempty"`
+	// MCPToolsBlocked lists individual MCP tools ("<server>__<tool>") denied
+	// outright even when their server is allowed. Block overrides allow.
+	MCPToolsBlocked []string `json:"mcp_tools_blocked,omitempty"`
 	// AutoAllowReadMCP, when true, auto-allows an MCP tool the read/write classifier
 	// deems read-only, parking only writes/unknown for approval. The classifier is a
 	// best-effort heuristic (see ClassifyMCPTool), so this trades safety for fewer

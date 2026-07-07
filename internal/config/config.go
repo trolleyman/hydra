@@ -48,7 +48,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
-	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
+	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server; `policy.mcp_blocked` / `policy.mcp_tools_blocked` deny a server or tool outright (block overrides allow). A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
 	"- `pre_spawn_script` - a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`. It can set env vars for the agent by appending `KEY=value` lines to the file at `$HYDRA_ENV`.\n" +
 	"- `pre_exit_script` - a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` - the standing instructions you are reading now.\n" +
@@ -131,6 +131,15 @@ type PolicyConfig struct {
 	// when the whole server is not. A server referenced here is kept (spawned) so
 	// those tools work; its other tools are parked for approval at runtime.
 	MCPToolsAllowed []string `toml:"mcp_tools_allowed"`
+	// MCPBlocked lists MCP server names refused outright: the server is stripped
+	// from the seeded config pre-launch and every call to it is DENIED at runtime
+	// (never parked for approval). Block overrides allow. Because the MCP
+	// allow-lists UNION across config layers, this is how a later layer (project /
+	// config.local.toml) removes a server a broader layer granted.
+	MCPBlocked []string `toml:"mcp_blocked"`
+	// MCPToolsBlocked lists individual MCP tools ("<server>__<tool>") denied
+	// outright even when their server is allowed. Block overrides allow.
+	MCPToolsBlocked []string `toml:"mcp_tools_blocked"`
 	// MCPAutoAllowRead auto-allows MCP tools the read/write classifier deems
 	// read-only (parking only writes/unknown). Best-effort heuristic; off by default.
 	MCPAutoAllowRead *bool `toml:"mcp_auto_allow_read"`
@@ -154,23 +163,33 @@ func (p PolicyConfig) IsGateEnabled() bool {
 	return p.GateEnabled == nil || *p.GateEnabled
 }
 
-// Merge merges another PolicyConfig into this one (slices are replaced wholesale
-// when set; a nil field leaves the existing value).
+// Merge merges another PolicyConfig into this one. The MCP allow/block lists
+// and known_tools UNION across config layers (internal defaults -> user ->
+// project -> local -> per-agent) like the sandbox path and network host lists:
+// a project's grants add to the user's instead of shadowing them. Narrowing is
+// done via the block lists - which override the allow lists outright - not by
+// shrinking an earlier layer's grant. A nil field leaves the existing value.
 func (p *PolicyConfig) Merge(other PolicyConfig) {
 	if other.GateEnabled != nil {
 		p.GateEnabled = other.GateEnabled
 	}
 	if other.MCPAllowed != nil {
-		p.MCPAllowed = other.MCPAllowed
+		p.MCPAllowed = unionStrings(p.MCPAllowed, other.MCPAllowed)
 	}
 	if other.MCPToolsAllowed != nil {
-		p.MCPToolsAllowed = other.MCPToolsAllowed
+		p.MCPToolsAllowed = unionStrings(p.MCPToolsAllowed, other.MCPToolsAllowed)
+	}
+	if other.MCPBlocked != nil {
+		p.MCPBlocked = unionStrings(p.MCPBlocked, other.MCPBlocked)
+	}
+	if other.MCPToolsBlocked != nil {
+		p.MCPToolsBlocked = unionStrings(p.MCPToolsBlocked, other.MCPToolsBlocked)
 	}
 	if other.MCPAutoAllowRead != nil {
 		p.MCPAutoAllowRead = other.MCPAutoAllowRead
 	}
 	if other.KnownTools != nil {
-		p.KnownTools = other.KnownTools
+		p.KnownTools = unionStrings(p.KnownTools, other.KnownTools)
 	}
 }
 
@@ -451,6 +470,19 @@ type Config struct {
 	// Tests are per-project test-runner commands whose pass/fail verdict gates a
 	// head's merge button (see internal/tests, PLAN #68).
 	Tests []TestScript `toml:"tests"`
+	// ArtifactsMerge / ServicesMerge / TestsMerge opt THIS file's array section
+	// into merging by name into the list inherited from earlier config layers
+	// (internal defaults -> user -> project -> config.local.toml) instead of
+	// replacing it wholesale (the default). Under merge, an entry whose name
+	// matches an inherited one patches it - set fields override, zero/absent
+	// fields inherit, so `[[tests]] name = "lint" enabled = false` in
+	// config.local.toml disables one runner without restating its command - and
+	// an entry with a new name appends. The flag is read from the overriding
+	// layer, per file: a project setting tests_merge does not change how a later
+	// config.local.toml [[tests]] applies.
+	ArtifactsMerge *bool `toml:"artifacts_merge"`
+	ServicesMerge  *bool `toml:"services_merge"`
+	TestsMerge     *bool `toml:"tests_merge"`
 	// Icon is an optional custom project icon shown in the web UI's project
 	// switcher and dropdown, in place of the default folder glyph. A single string
 	// interpreted by its content: an emoji (e.g. "🚀") renders as-is; a lucide-react
@@ -621,6 +653,9 @@ type rawConfig struct {
 	Artifacts           []ArtifactScript `toml:"artifacts"`
 	Services            []ServiceScript  `toml:"services"`
 	Tests               []TestScript     `toml:"tests"`
+	ArtifactsMerge      *bool            `toml:"artifacts_merge"`
+	ServicesMerge       *bool            `toml:"services_merge"`
+	TestsMerge          *bool            `toml:"tests_merge"`
 	Icon                *string          `toml:"icon"`
 	ResumePrompt        *string          `toml:"resume_prompt"`
 	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
@@ -640,7 +675,8 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
-	"tests":         true,
+	"tests":           true,
+	"artifacts_merge": true, "services_merge": true, "tests_merge": true,
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true, "preview_ports": true,
@@ -775,6 +811,9 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.Artifacts = raw.Artifacts
 	cfg.Services = raw.Services
 	cfg.Tests = raw.Tests
+	cfg.ArtifactsMerge = raw.ArtifactsMerge
+	cfg.ServicesMerge = raw.ServicesMerge
+	cfg.TestsMerge = raw.TestsMerge
 	cfg.Icon = raw.Icon
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
@@ -921,17 +960,41 @@ func (c *Config) Merge(other Config) {
 		}
 	}
 
-	// Artifact scripts are replaced wholesale when the other config sets any.
+	// Artifact/service/test scripts are replaced wholesale when the other config
+	// sets any - unless that config opts into name-keyed merging via its
+	// artifacts_merge / services_merge / tests_merge root key (see Config).
 	if other.Artifacts != nil {
-		c.Artifacts = other.Artifacts
+		if other.ArtifactsMerge != nil && *other.ArtifactsMerge {
+			c.Artifacts = mergeByName(c.Artifacts, other.Artifacts,
+				func(a ArtifactScript) string { return a.Name }, patchArtifactScript)
+		} else {
+			c.Artifacts = other.Artifacts
+		}
 	}
-	// Service scripts are replaced wholesale when the other config sets any.
+	if other.ArtifactsMerge != nil {
+		c.ArtifactsMerge = other.ArtifactsMerge
+	}
 	if other.Services != nil {
-		c.Services = other.Services
+		if other.ServicesMerge != nil && *other.ServicesMerge {
+			c.Services = mergeByName(c.Services, other.Services,
+				func(s ServiceScript) string { return s.Name }, patchServiceScript)
+		} else {
+			c.Services = other.Services
+		}
 	}
-	// Test scripts are replaced wholesale when the other config sets any.
+	if other.ServicesMerge != nil {
+		c.ServicesMerge = other.ServicesMerge
+	}
 	if other.Tests != nil {
-		c.Tests = other.Tests
+		if other.TestsMerge != nil && *other.TestsMerge {
+			c.Tests = mergeByName(c.Tests, other.Tests,
+				func(t TestScript) string { return t.Name }, patchTestScript)
+		} else {
+			c.Tests = other.Tests
+		}
+	}
+	if other.TestsMerge != nil {
+		c.TestsMerge = other.TestsMerge
 	}
 	// Test concurrency is overridden only when the other config sets it (non-nil).
 	if other.TestConcurrency != nil {
@@ -1110,6 +1173,112 @@ func unionStrings(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// mergeByName merges override entries into base by name for the opt-in
+// artifacts_merge / services_merge / tests_merge behavior: an override entry
+// whose name matches a base entry patches it in place (see the patch functions
+// below), an unmatched (or unnamed) one appends. Base order is preserved; new
+// entries append in their own order. Always returns a fresh slice.
+func mergeByName[T any](base, over []T, name func(T) string, patch func(T, T) T) []T {
+	out := make([]T, len(base))
+	copy(out, base)
+	idx := make(map[string]int, len(out))
+	for i, b := range out {
+		idx[name(b)] = i
+	}
+	for _, o := range over {
+		if i, ok := idx[name(o)]; ok && name(o) != "" {
+			out[i] = patch(out[i], o)
+		} else {
+			out = append(out, o)
+			idx[name(o)] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// patchArtifactScript overlays the set fields of o onto b: strings override
+// when non-empty, ints when positive, plain bools when true, pointers when
+// non-nil. Zero values inherit - so a config.local.toml entry can flip one
+// field (enabled = false) without restating the command. The flip side: a
+// patch cannot reset a field back to its zero value; restate it in the layer
+// that owns the entry for that.
+func patchArtifactScript(b, o ArtifactScript) ArtifactScript {
+	if o.Command != "" {
+		b.Command = o.Command
+	}
+	if o.TimeoutSec > 0 {
+		b.TimeoutSec = o.TimeoutSec
+	}
+	if o.UnsafeHost {
+		b.UnsafeHost = true
+	}
+	if o.CleanIgnored {
+		b.CleanIgnored = true
+	}
+	if o.Enabled != nil {
+		b.Enabled = o.Enabled
+	}
+	if o.Strict != nil {
+		b.Strict = o.Strict
+	}
+	if o.Type != "" {
+		b.Type = o.Type
+	}
+	if o.IdleTimeoutSec > 0 {
+		b.IdleTimeoutSec = o.IdleTimeoutSec
+	}
+	if o.ReadyTimeoutSec > 0 {
+		b.ReadyTimeoutSec = o.ReadyTimeoutSec
+	}
+	return b
+}
+
+// patchServiceScript is patchArtifactScript for [[services]] entries.
+func patchServiceScript(b, o ServiceScript) ServiceScript {
+	if o.Command != "" {
+		b.Command = o.Command
+	}
+	if o.Host {
+		b.Host = true
+	}
+	if o.MaxRestarts != nil {
+		b.MaxRestarts = o.MaxRestarts
+	}
+	if o.Enabled != nil {
+		b.Enabled = o.Enabled
+	}
+	if o.Strict != nil {
+		b.Strict = o.Strict
+	}
+	return b
+}
+
+// patchTestScript is patchArtifactScript for [[tests]] entries.
+func patchTestScript(b, o TestScript) TestScript {
+	if o.Command != "" {
+		b.Command = o.Command
+	}
+	if o.TimeoutSec > 0 {
+		b.TimeoutSec = o.TimeoutSec
+	}
+	if o.UnsafeHost {
+		b.UnsafeHost = true
+	}
+	if o.CleanIgnored {
+		b.CleanIgnored = true
+	}
+	if o.Enabled != nil {
+		b.Enabled = o.Enabled
+	}
+	if o.Strict != nil {
+		b.Strict = o.Strict
+	}
+	if o.Type != "" {
+		b.Type = o.Type
+	}
+	return b
 }
 
 // unionPorts is unionHosts for the loopback-port allow-list: fresh slice,
@@ -1724,6 +1893,18 @@ func defaultsSpec() []specEntry {
 			get: policySlice(func(p *PolicyConfig) []string { return p.MCPToolsAllowed }),
 		},
 		{
+			table: "policy", key: "mcp_blocked",
+			doc: "MCP server names refused outright: stripped before launch and every call DENIED at runtime (never parked for approval). Block overrides allow; since the allow-lists union across config layers, this is how a project or config.local.toml removes a server a broader layer granted (default none).",
+			def: func() string { return "[]" },
+			get: policySlice(func(p *PolicyConfig) []string { return p.MCPBlocked }),
+		},
+		{
+			table: "policy", key: "mcp_tools_blocked",
+			doc: `individual MCP tools ("<server>__<tool>") denied outright even when their server is allowed. Block overrides allow (default none).`,
+			def: func() string { return "[]" },
+			get: policySlice(func(p *PolicyConfig) []string { return p.MCPToolsBlocked }),
+		},
+		{
 			table: "policy", key: "mcp_auto_allow_read",
 			doc: "auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic - off by default.",
 			def: func() string { return "false" },
@@ -1775,6 +1956,10 @@ func managedKeySet() map[string]bool {
 	// preview_ports is Config-level (emitPreviewPorts); its regenerated
 	// "# preview_ports = ..." default line is recognised and dropped too.
 	m["preview_ports"] = true
+	// The array-section merge opt-ins are Config-level (emitArrayMergeFlag).
+	m["artifacts_merge"] = true
+	m["services_merge"] = true
+	m["tests_merge"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1835,6 +2020,9 @@ func artifactsDocLines() []string {
 		docPrefix + " logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.",
 		docPrefix + ` For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff`,
 		docPrefix + " viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).",
+		docPrefix + " Layering: a file that defines any [[artifacts]] replaces the inherited list",
+		docPrefix + " wholesale, unless it sets the root key artifacts_merge = true - then its entries",
+		docPrefix + " merge by name (set fields patch the same-named entry, new names append).",
 	}
 }
 
@@ -1931,6 +2119,9 @@ func servicesDocLines() []string {
 		docPrefix + "   strict        run the command under `set -eo pipefail` so a failed startup step",
 		docPrefix + "                 surfaces as a crash instead of a healthy process (default true).",
 		docPrefix + "   enabled       set false to stop the daemon supervising this service (default true).",
+		docPrefix + " Layering: a file that defines any [[services]] replaces the inherited list",
+		docPrefix + " wholesale, unless it sets the root key services_merge = true - then its entries",
+		docPrefix + " merge by name (set fields patch the same-named entry, new names append).",
 	}
 }
 
@@ -2036,6 +2227,11 @@ func testsDocLines() []string {
 		docPrefix + " backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return",
 		docPrefix + " (so a multi-line stack trace fits on the one line) - and a doubled backslash",
 		docPrefix + " becomes one literal backslash. Any other escape is left as-is.",
+		docPrefix + " Layering: a file that defines any [[tests]] replaces the inherited list",
+		docPrefix + " wholesale, unless it sets the root key tests_merge = true - then its entries",
+		docPrefix + " merge by name (set fields patch the same-named entry, new names append - e.g.",
+		docPrefix + ` config.local.toml can disable one runner with tests_merge = true plus`,
+		docPrefix + `   [[tests]] / name = "lint" / enabled = false, without restating its command).`,
 	}
 }
 
@@ -2601,6 +2797,23 @@ func renderConfig(existing []byte, cfg Config) string {
 			previewPorts = prev.PreviewPorts
 		}
 	}
+	// The artifacts_merge / services_merge / tests_merge opt-ins aren't in the
+	// Settings editor either, so a save that doesn't carry them preserves the
+	// file's existing hand-edited values rather than dropping them.
+	artifactsMerge, servicesMerge, testsMerge := cfg.ArtifactsMerge, cfg.ServicesMerge, cfg.TestsMerge
+	if artifactsMerge == nil || servicesMerge == nil || testsMerge == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			if artifactsMerge == nil {
+				artifactsMerge = prev.ArtifactsMerge
+			}
+			if servicesMerge == nil {
+				servicesMerge = prev.ServicesMerge
+			}
+			if testsMerge == nil {
+				testsMerge = prev.TestsMerge
+			}
+		}
+	}
 
 	var out []string
 	spec := defaultsSpec()
@@ -2620,6 +2833,9 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitTestConcurrency(&out, testConcurrency, keyComments)
 	emitTestPrefetch(&out, testPrefetch, keyComments)
 	emitPreviewPorts(&out, previewPorts, keyComments)
+	emitArrayMergeFlag(&out, "artifacts_merge", artifactsMerge, keyComments)
+	emitArrayMergeFlag(&out, "services_merge", servicesMerge, keyComments)
+	emitArrayMergeFlag(&out, "tests_merge", testsMerge, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
@@ -2889,6 +3105,25 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 	}
 }
 
+// emitArrayMergeFlag renders one of the top-level artifacts_merge /
+// services_merge / tests_merge opt-ins (Config-level booleans; TOML root keys,
+// so they must precede any table header even though they govern the array
+// sections at the bottom of the file). Unlike the other root scalars they are
+// emitted only when set: the section doc blocks already document them, and
+// three more commented defaults at the top of every config would be noise.
+func emitArrayMergeFlag(out *[]string, key string, v *bool, keyComments map[string][]string) {
+	if v == nil {
+		return
+	}
+	*out = appendSettingBlank(*out)
+	if uc := keyComments["\x00"+key]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	section := "[[" + strings.TrimSuffix(key, "_merge") + "]]"
+	*out = append(*out, docPrefix+" merge this file's "+section+" by name into those inherited from earlier config layers instead of replacing the whole list: set fields patch the same-named entry, new names append (default false).")
+	*out = append(*out, fmt.Sprintf("%s = %t", key, *v))
+}
+
 // emitPreviewPorts renders the top-level preview_ports key (a Config-level
 // setting, not part of the [defaults] spec table).
 func emitPreviewPorts(out *[]string, ports *string, keyComments map[string][]string) {
@@ -3102,6 +3337,8 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	}
 	emitSetField(out, name+".policy", "mcp_allowed", tomlStringArray(p.MCPAllowed), len(p.MCPAllowed) > 0, keyComments)
 	emitSetField(out, name+".policy", "mcp_tools_allowed", tomlStringArray(p.MCPToolsAllowed), len(p.MCPToolsAllowed) > 0, keyComments)
+	emitSetField(out, name+".policy", "mcp_blocked", tomlStringArray(p.MCPBlocked), len(p.MCPBlocked) > 0, keyComments)
+	emitSetField(out, name+".policy", "mcp_tools_blocked", tomlStringArray(p.MCPToolsBlocked), len(p.MCPToolsBlocked) > 0, keyComments)
 	if p.MCPAutoAllowRead != nil {
 		emitSetField(out, name+".policy", "mcp_auto_allow_read", fmt.Sprintf("%t", *p.MCPAutoAllowRead), true, keyComments)
 	}
@@ -3130,6 +3367,7 @@ func policyHasContent(p *PolicyConfig) bool {
 		return false
 	}
 	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
+		len(p.MCPBlocked) > 0 || len(p.MCPToolsBlocked) > 0 ||
 		p.MCPAutoAllowRead != nil || len(p.KnownTools) > 0
 }
 

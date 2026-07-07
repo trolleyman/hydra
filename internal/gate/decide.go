@@ -186,6 +186,20 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		if hint := p.MCPToolRW[full]; hint != "" {
 			rw = hint
 		}
+		// Block lists win over every grant: a blocked server/tool is denied outright,
+		// never parked - an "always allow" approval could not override it anyway.
+		if containsFold(p.MCPBlocked, server) {
+			return Result{
+				Decision: Deny,
+				Reason:   "MCP server " + quote(server) + " is blocked by policy (mcp_blocked)",
+			}
+		}
+		if containsFold(p.MCPToolsBlocked, full) {
+			return Result{
+				Decision: Deny,
+				Reason:   "MCP tool " + quote(full) + " is blocked by policy (mcp_tools_blocked)",
+			}
+		}
 		// Whole-server grant covers every tool.
 		if containsFold(p.MCPAllowed, server) {
 			return Result{Decision: Allow}

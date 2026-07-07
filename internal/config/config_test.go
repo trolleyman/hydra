@@ -376,6 +376,111 @@ func TestTestsMergeReplaces(t *testing.T) {
 	}
 }
 
+// TestTestsMergeOptIn verifies the tests_merge = true opt-in: the overriding
+// layer's entries merge by name into the inherited list - set fields patch the
+// same-named entry (a command-less enabled=false disables a runner without
+// restating it), new names append, and base order is preserved.
+func TestTestsMergeOptIn(t *testing.T) {
+	base := Config{Tests: []TestScript{
+		{Name: "go", Command: "go test ./...", TimeoutSec: 600},
+		{Name: "lint", Command: "eslint ."},
+	}}
+	base.Merge(Config{
+		TestsMerge: boolPtr(true),
+		Tests: []TestScript{
+			{Name: "lint", Enabled: boolPtr(false)},       // patch: disable, keep command
+			{Name: "e2e", Command: "playwright test"},     // append
+			{Name: "go", Command: "go test -short ./..."}, // patch: override command
+		},
+	})
+	if len(base.Tests) != 3 {
+		t.Fatalf("expected 3 tests after opt-in merge, got %+v", base.Tests)
+	}
+	if base.Tests[0].Name != "go" || base.Tests[0].Command != "go test -short ./..." || base.Tests[0].TimeoutSec != 600 {
+		t.Errorf("go entry not patched (command overridden, timeout inherited): %+v", base.Tests[0])
+	}
+	if base.Tests[1].Name != "lint" || base.Tests[1].Command != "eslint ." || base.Tests[1].IsEnabled() {
+		t.Errorf("lint entry not patched (disabled, command kept): %+v", base.Tests[1])
+	}
+	if base.Tests[2].Name != "e2e" || base.Tests[2].Command != "playwright test" {
+		t.Errorf("e2e entry not appended: %+v", base.Tests[2])
+	}
+
+	// A subsequent layer WITHOUT the flag still replaces wholesale: the opt-in
+	// is per overriding file, not sticky.
+	base.Merge(Config{Tests: []TestScript{{Name: "only", Command: "z"}}})
+	if len(base.Tests) != 1 || base.Tests[0].Name != "only" {
+		t.Errorf("flag leaked across layers; expected wholesale replace, got %+v", base.Tests)
+	}
+}
+
+// TestArtifactsServicesMergeOptIn spot-checks the artifacts_merge and
+// services_merge counterparts of TestTestsMergeOptIn.
+func TestArtifactsServicesMergeOptIn(t *testing.T) {
+	cfg := Config{
+		Artifacts: []ArtifactScript{{Name: "shots", Command: "run shots", TimeoutSec: 900}},
+		Services:  []ServiceScript{{Name: "emu", Command: "emu up", MaxRestarts: intPtr(3)}},
+	}
+	cfg.Merge(Config{
+		ArtifactsMerge: boolPtr(true),
+		Artifacts:      []ArtifactScript{{Name: "shots", Enabled: boolPtr(false)}, {Name: "vids", Command: "run vids"}},
+		ServicesMerge:  boolPtr(true),
+		Services:       []ServiceScript{{Name: "emu", Enabled: boolPtr(false)}},
+	})
+	if len(cfg.Artifacts) != 2 || cfg.Artifacts[0].IsEnabled() || cfg.Artifacts[0].Command != "run shots" || cfg.Artifacts[1].Name != "vids" {
+		t.Errorf("artifacts opt-in merge wrong: %+v", cfg.Artifacts)
+	}
+	if len(cfg.Services) != 1 || cfg.Services[0].IsEnabled() || cfg.Services[0].Command != "emu up" || *cfg.Services[0].MaxRestarts != 3 {
+		t.Errorf("services opt-in merge wrong: %+v", cfg.Services)
+	}
+}
+
+// TestArrayMergeFlagRoundTrip guards that a hand-set tests_merge = true survives
+// a Settings-UI-style save (which does not carry the flag) and decodes back.
+func TestArrayMergeFlagRoundTrip(t *testing.T) {
+	existing := "tests_merge = true\n\n[[tests]]\nname = \"lint\"\nenabled = false\n"
+	out := renderConfig([]byte(existing), Config{Tests: []TestScript{{Name: "lint", Command: "", Enabled: boolPtr(false)}}})
+	cfg, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("re-decode: %v\n%s", err, out)
+	}
+	if cfg.TestsMerge == nil || !*cfg.TestsMerge {
+		t.Errorf("tests_merge dropped by a save that did not carry it:\n%s", out)
+	}
+	// And a second render (still without the flag in cfg) keeps it stable.
+	out2 := renderConfig([]byte(out), Config{})
+	if strings.Count(out2, "\ntests_merge = true\n") != 1 {
+		t.Errorf("tests_merge not stable across renders:\n%s", out2)
+	}
+}
+
+// TestPolicyMergeUnionsAndBlocks verifies the MCP allow/block lists union across
+// layers (instead of a later layer shadowing an earlier one) and that the new
+// block lists ride the same rules.
+func TestPolicyMergeUnionsAndBlocks(t *testing.T) {
+	p := PolicyConfig{
+		MCPAllowed:      []string{"github"},
+		MCPToolsAllowed: []string{"sentry__list_issues"},
+		KnownTools:      []string{"mytool"},
+	}
+	p.Merge(PolicyConfig{
+		MCPAllowed:      []string{"linear", "github"}, // github is a duplicate
+		MCPBlocked:      []string{"playwright"},
+		MCPToolsBlocked: []string{"github__delete_repo"},
+		KnownTools:      []string{"othertool"},
+	})
+	eq := func(name string, got, want []string) {
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	eq("MCPAllowed", p.MCPAllowed, []string{"github", "linear"})
+	eq("MCPToolsAllowed", p.MCPToolsAllowed, []string{"sentry__list_issues"})
+	eq("MCPBlocked", p.MCPBlocked, []string{"playwright"})
+	eq("MCPToolsBlocked", p.MCPToolsBlocked, []string{"github__delete_repo"})
+	eq("KnownTools", p.KnownTools, []string{"mytool", "othertool"})
+}
+
 // TestArtifactsAndTestsCoexist guards that [[artifacts]] and [[tests]] blocks in
 // the same file are decoded into their own slices (the array-table router keys on
 // the header name, so they must not bleed into each other).
