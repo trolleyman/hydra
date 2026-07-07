@@ -96,6 +96,47 @@ export const useNotifyStore = create<NotifyState>()(
   ),
 )
 
+// Live OS notifications we've fired, keyed by tag. The Notification API's only
+// handle to an already-shown notification is the object its constructor returned
+// (there's no "close by tag"), so we hold those references here - a later state
+// change (the agent left needs_input, its unread changes were read, an approval
+// was withdrawn) can then retract the matching prompt instead of leaving it in
+// the OS tray. A tag maps to at most one entry; re-firing a tag replaces it (the
+// OS coalesces by tag, so only the newest is actually on screen).
+interface LiveNotification {
+  n: Notification
+  // Auto-dismiss timer, if the caller asked for one (see fireNotification).
+  timer?: ReturnType<typeof setTimeout>
+}
+const liveNotifications = new Map<string, LiveNotification>()
+
+// Drop our reference to a fired notification (and cancel its auto-dismiss timer).
+// Guarded so a stale close (an old same-tag notification the OS retired when it
+// was replaced) can't evict the newer notification now tracked under the tag.
+function forgetNotification(tag: string, n: Notification): void {
+  const entry = liveNotifications.get(tag)
+  if (!entry || entry.n !== n) return
+  if (entry.timer !== undefined) clearTimeout(entry.timer)
+  liveNotifications.delete(tag)
+}
+
+// dismissNotification closes an OS notification we previously fired under `tag`,
+// if it's still tracked (i.e. still on screen). A no-op when nothing was fired
+// for the tag, when it was already dismissed/expired/clicked, or when the browser
+// doesn't support the API. Callers use this when the condition that raised the
+// notification clears, so a stale prompt doesn't linger after it's moot.
+export function dismissNotification(tag: string): void {
+  const entry = liveNotifications.get(tag)
+  if (!entry) return
+  if (entry.timer !== undefined) clearTimeout(entry.timer)
+  liveNotifications.delete(tag)
+  try {
+    entry.n.close()
+  } catch {
+    // best-effort - close can throw in some embedded webviews.
+  }
+}
+
 // fireNotification shows one OS notification, if the user has opted in and the
 // browser has granted permission. Callers gate on visibility themselves (we only
 // want these while the tab is NOT in front - a focused tab already gets the toast).
@@ -104,12 +145,19 @@ export const useNotifyStore = create<NotifyState>()(
 // the OS tray rather than stacking, so a re-fire for the same agent/approval
 // doesn't pile up. `sticky` (requireInteraction) keeps blocking prompts on screen
 // until dismissed; informational "finished" notes auto-expire.
+//
+// `autoDismissMs` (optional, > 0) closes the notification via a timer after that
+// long. The Notification API has no built-in TTL, and a `sticky` notification
+// stays up until the user acts, so this bounds one the user never gets to - it's
+// closed instead of sitting in the tray forever. The fired notification is
+// tracked by tag so dismissNotification can retract it early.
 export function fireNotification(opts: {
   title: string
   body: string
   tag: string
   sticky: boolean
   onClick: () => void
+  autoDismissMs?: number
 }): void {
   const { enabled, permission } = useNotifyStore.getState()
   if (!enabled || permission !== 'granted' || !notificationsSupported()) return
@@ -120,6 +168,24 @@ export function fireNotification(opts: {
     // Some browsers only allow construction via a service worker; degrade silently.
     return
   }
+  // Cancel any prior same-tag timer before it can close the fresh notification,
+  // then track this one so it can be dismissed (early, by tag) or auto-dismissed.
+  const prior = liveNotifications.get(opts.tag)
+  if (prior?.timer !== undefined) clearTimeout(prior.timer)
+  const entry: LiveNotification = { n }
+  liveNotifications.set(opts.tag, entry)
+  // Keep the registry in sync when the OS closes it (user swipe, expiry, replace).
+  n.onclose = () => forgetNotification(opts.tag, n)
+  if (opts.autoDismissMs !== undefined && opts.autoDismissMs > 0) {
+    entry.timer = setTimeout(() => {
+      try {
+        n.close()
+      } catch {
+        // best-effort
+      }
+      forgetNotification(opts.tag, n)
+    }, opts.autoDismissMs)
+  }
   n.onclick = () => {
     try {
       window.focus()
@@ -127,6 +193,7 @@ export function fireNotification(opts: {
       // ignore - focusing is best-effort
     }
     n.close()
+    forgetNotification(opts.tag, n)
     opts.onClick()
   }
 }
