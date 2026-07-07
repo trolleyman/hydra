@@ -60,10 +60,10 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
   // Right-aligned action buttons (melt icons); omit for a card with no actions.
   actions?: ReactNode
   // A thin progress FILL (a determinate `width` bar or an indeterminate barber
-  // pole) shown flush under the header, full-bleed, as card chrome - the card owns
-  // the track (height/tint/clip), the caller supplies only the fill. It reads as a
-  // header-attached loading indicator, so a running card no longer needs to hand-space
-  // a bar against its body content. Omit for a card that isn't working.
+  // pole) drawn as a loading line pinned to the header's BOTTOM EDGE - out of flow,
+  // so it never shifts the body and shows whether the card is collapsed or open. The
+  // card owns the track (height/tint/clip to the rounded corners); the caller supplies
+  // only the fill. Omit for a card that isn't working.
   progress?: ReactNode
   collapsed: boolean
   onToggleCollapsed: () => void
@@ -139,7 +139,7 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
         className={
           sticky
             ? `sticky z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`
-            : 'flex items-stretch bg-gray-100 dark:bg-gray-700/40'
+            : 'relative flex items-stretch bg-gray-100 dark:bg-gray-700/40'
         }
       >
         <button
@@ -154,6 +154,16 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
         {/* Faint icon buttons, vertically centred in the stretch-height header.
             Each brightens only on its own hover (see MELT_BTN). */}
         {actions && <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">{actions}</div>}
+        {/* Progress: a loading line on the header's bottom edge. Absolute so it
+            never adds height to the header/body, and lives in the always-rendered
+            header so it shows while the card is collapsed too. The header's
+            overflow-hidden (sticky) or the card root's (non-sticky) clips it to the
+            rounded corners. */}
+        {progress && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-gray-200 dark:bg-gray-600/60">
+            {progress}
+          </div>
+        )}
       </div>
       {/* Height tracks the measured content: the body glides between 0 and its
           height on a user expand/collapse, and otherwise mirrors its content's
@@ -173,15 +183,7 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >
-        {mounted && (
-          <div ref={bodyRef}>
-            {/* Progress track: flush under the header (no top gap), full-bleed to
-                the card borders, above the padded content - so it reads as part of
-                the header rather than a floating bar. Clips the fill / barber pole. */}
-            {progress && <div className="h-1 bg-gray-100 dark:bg-gray-800 overflow-hidden">{progress}</div>}
-            <div className="p-3">{children}</div>
-          </div>
-        )}
+        {mounted && <div ref={bodyRef} className="p-3">{children}</div>}
       </div>
     </div>
   )
