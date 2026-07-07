@@ -924,20 +924,30 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 // server - which MCP only loads at launch - becomes usable without the user
 // manually resuming. The conversation is restored by the resume's --continue.
 func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
-	if reg.IsLive(head.ID) {
-		_ = reg.Kill(head.ID)
-		// Wait for the session to actually exit before relaunching, so the fresh
-		// session doesn't collide with the dying one in the registry.
-		deadline := time.Now().Add(10 * time.Second)
-		for reg.IsLive(head.ID) {
-			if time.Now().After(deadline) {
-				_ = reg.KillNow(head.ID)
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
+	StopSessionAndWait(reg, head.ID, 10*time.Second)
 	return errtrace.Wrap(ResumeHead(reg, store, projectRoot, head, rows, cols))
+}
+
+// StopSessionAndWait terminates a head's live session process (SIGTERM) and
+// waits, bounded by timeout, for it to actually exit - escalating to SIGKILL
+// at the deadline. Used before relaunching a head in a different configuration
+// (RestartHead, the chat-mode toggle) so the fresh session can't collide with
+// the dying one in the registry, and so a client reconnecting right after the
+// triggering API call reliably hits the on-attach lazy-resume path instead of
+// attaching to a dying session. No-op when the session isn't live.
+func StopSessionAndWait(reg *session.Registry, id string, timeout time.Duration) {
+	if !reg.IsLive(id) {
+		return
+	}
+	_ = reg.Kill(id)
+	deadline := time.Now().Add(timeout)
+	for reg.IsLive(id) {
+		if time.Now().After(deadline) {
+			_ = reg.KillNow(id)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {

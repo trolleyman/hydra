@@ -28,6 +28,10 @@ export type SpawnAgentRequest = {
      */
     base_branch?: string;
     /**
+     * Drive the head via the Claude CLI's stream-json interface and render a chat view instead of a terminal (Claude only; rejected for other agent types). The prompt is delivered as the first chat turn. See CHAT_MODE.md.
+     */
+    chat_mode?: boolean;
+    /**
      * If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
      */
     ephemeral?: boolean;

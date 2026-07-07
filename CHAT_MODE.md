@@ -1,5 +1,17 @@
 # Chat mode for Claude heads
 
+**Implementation status:** phases 0-2 are implemented, plus the interrupt
+button and per-turn cost footer from phase 3. Key landmarks:
+`internal/claudestream` (protocol), `internal/nshost` Pipes mode,
+`session.KindChat`, `internal/http/chat_ws.go` (WS framing),
+`web/src/components/AgentChat.tsx` (the pane),
+`renderMarkdownBlocks` in `web/src/lib/markdown.tsx`, the mode chip in
+`AgentDetail.tsx` and the spawn-form toggle in `SpawnForm.tsx`. The simulation
+server serves a chat-mode demo head (`agent-chat`) and the `agent-chat`
+screenshot covers it. Still open: token streaming
+(`--include-partial-messages`), transcript backfill beyond the ring, and
+image attachments in the chat input.
+
 Design doc for a per-head "chat mode": instead of attaching an xterm to the
 Claude CLI's interactive TUI over a PTY, Hydra drives the CLI's structured
 JSON streaming interface (`--input-format stream-json --output-format

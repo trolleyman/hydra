@@ -1461,14 +1461,15 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			head.ChatMode = chatMode
 			// The mode is baked into the running CLI's argv, so a live session
 			// must be relaunched to pick it up. Stop just the process (worktree,
-			// branch and DB row untouched); the client reconnects its socket and
-			// the on-attach lazy resume relaunches with --continue in the new
-			// mode - the conversation carries over (terminal and chat mode share
-			// one transcript). A head with no live session simply resumes in the
-			// new mode whenever it is next attached.
+			// branch and DB row untouched) and wait for it to exit before
+			// responding; the client swaps panes and reconnects on the response,
+			// and the on-attach lazy resume then relaunches with --continue in
+			// the new mode - the conversation carries over (terminal and chat
+			// mode share one transcript). A head with no live session simply
+			// resumes in the new mode whenever it is next attached.
 			if s.Sessions.IsLive(head.ID) {
 				log.Printf("api: chat_mode toggled to %v for %s; stopping session for mode switch", chatMode, head.ID)
-				_ = s.Sessions.Kill(head.ID)
+				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
 			}
 		}
 	}
