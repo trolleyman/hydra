@@ -11,10 +11,12 @@ import { highlightCode } from './markdown'
 // task lists, strikethrough, autolinks, plus fenced code highlighted through our
 // existing highlight.js (highlightCode) rather than a second highlighter.
 //
-// remark-breaks turns a single source newline into a hard <br>, matching the
-// line-preserving behaviour both hand-rolled renderers had before (chat used
-// whitespace-pre-wrap; the README renderer emitted one <p> per line). Only blank
-// lines start a new paragraph.
+// remark-breaks (the 'chat' variant only) turns a single source newline into a
+// hard <br>, matching the old whitespace-pre-wrap chat behaviour - authored text
+// (chat, prompt, config previews) should honour the newlines a person typed. The
+// 'doc' variant (README) deliberately omits it and uses standard CommonMark
+// paragraph reflow (single newline -> space), like GitHub renders a README: prose
+// hard-wrapped at ~80 columns reads better reflowed than broken at every line.
 //
 // The editable textarea overlay (renderMarkdownSource in ./markdown) is NOT one
 // of these surfaces: it must keep every source character glyph-for-glyph aligned
@@ -157,7 +159,13 @@ function alignStyle(align?: string | null): React.CSSProperties | undefined {
   return align ? { textAlign: align as React.CSSProperties['textAlign'] } : undefined
 }
 
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks]
+// 'chat' honours single newlines as <br> (remark-breaks); 'doc' reflows them
+// (standard CommonMark) - see the file header for why.
+type RemarkPlugins = React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']
+const REMARK_PLUGINS: Record<Variant, RemarkPlugins> = {
+  chat: [remarkGfm, remarkBreaks],
+  doc: [remarkGfm],
+}
 
 // buildComponents maps markdown elements to the variant's styled React nodes.
 function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
@@ -235,7 +243,7 @@ export function Markdown({ text, variant = 'chat', linkCtx, className }: Markdow
   )
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS[variant]} components={components}>
         {text}
       </ReactMarkdown>
     </div>
