@@ -31,6 +31,10 @@ export type AgentResponse = {
      */
     ephemeral?: boolean;
     /**
+     * True when the head runs in chat mode (stream-json + chat view; Claude only). See CHAT_MODE.md.
+     */
+    chat_mode?: boolean;
+    /**
      * Unix timestamp (seconds) when the session was started; 0 if not started
      */
     created_at?: number;

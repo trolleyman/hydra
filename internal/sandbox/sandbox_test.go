@@ -58,7 +58,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "")
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false)
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -67,7 +67,7 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", "", ""); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
 	}
 }
@@ -88,7 +88,7 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "", "", "opus")
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false)
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}

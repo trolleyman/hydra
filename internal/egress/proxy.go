@@ -267,10 +267,6 @@ func (p *Proxy) authorize(host string) bool {
 		return false
 	}
 	if p.requestApproval(host) {
-		p.mu.Lock()
-		p.allowed = append(p.allowed, host)
-		p.mu.Unlock()
-		log.Printf("hydra egress[%s]: user APPROVED outbound connection to %q (allowed for this session)", p.id, host)
 		return true
 	}
 	p.deny(host)
@@ -279,9 +275,17 @@ func (p *Proxy) authorize(host string) bool {
 
 // requestApproval runs the approve callback for host, collapsing concurrent
 // connections to the same unknown host into one prompt: the first caller runs the
-// approver; the rest wait for and share its verdict.
+// approver; the rest wait for and share its verdict. On approval the host joins
+// the session allow-list atomically with the in-flight entry's removal, so a
+// racer that read the allow-list before the verdict landed either finds the
+// entry still in flight or finds the host already allowed on the re-check here -
+// never a gap that would raise a second prompt for the same host.
 func (p *Proxy) requestApproval(host string) bool {
 	p.mu.Lock()
+	if gate.HostAllowed(p.allowed, host) {
+		p.mu.Unlock()
+		return true
+	}
 	if fa, ok := p.inflight[host]; ok {
 		p.mu.Unlock()
 		select {
@@ -299,9 +303,15 @@ func (p *Proxy) requestApproval(host string) bool {
 
 	p.mu.Lock()
 	fa.result = result
+	if result {
+		p.allowed = append(p.allowed, host)
+	}
 	delete(p.inflight, host)
 	p.mu.Unlock()
 	close(fa.done)
+	if result {
+		log.Printf("hydra egress[%s]: user APPROVED outbound connection to %q (allowed for this session)", p.id, host)
+	}
 	return result
 }
 

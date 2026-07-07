@@ -341,6 +341,7 @@ export function AgentDetail({
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
+  const [savingChatMode, setSavingChatMode] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
@@ -918,6 +919,38 @@ export function AgentDetail({
     setSavingBase(false)
   }
 
+  // Toggling chat mode (CHAT_MODE.md) relaunches the Claude process in the new
+  // mode: the backend stops the live session and the pane's reconnect
+  // lazy-resumes it with --continue, so the conversation itself is preserved
+  // (terminal and chat mode share one transcript). Confirm first when the
+  // agent is mid-turn, since the in-flight turn gets cut short.
+  async function saveChatMode(next: boolean) {
+    if (next === (agent.chat_mode === true) || savingChatMode) return
+    const doSave = async () => {
+      setSavingChatMode(true)
+      const res = await runWithToast(
+        () => api.default.updateAgent(projectId ?? '', agent.id, { chat_mode: next }),
+        {
+          success: next ? 'Switched to chat mode' : 'Switched to terminal mode',
+          errorPrefix: 'Failed to switch mode',
+        },
+      )
+      if (res.ok) updateAgentInStore(res.value)
+      setSavingChatMode(false)
+    }
+    if (agent.agent_status?.status === 'running') {
+      useDialogStore.getState().show({
+        title: next ? 'Switch to chat mode?' : 'Switch to terminal mode?',
+        message: 'The agent is mid-turn. Switching modes restarts the Claude process, cutting the current turn short; the conversation itself is preserved.',
+        type: 'confirm',
+        confirmLabel: 'Switch',
+        onConfirm: () => void doSave(),
+      })
+      return
+    }
+    await doSave()
+  }
+
   // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
 
   // refreshReviewConfig loads the resolved review config into the project store.
@@ -1201,6 +1234,47 @@ export function AgentDetail({
                 </span>
               )}
             </span>
+            {/* Terminal/chat mode toggle (Claude only, CHAT_MODE.md). Switching
+                restarts the Claude process in the new mode; the conversation is
+                preserved via --continue. */}
+            {agent.agent_type === 'claude' && !agent.archived && (
+              <span
+                className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
+                title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
+              >
+                {savingChatMode ? (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
+                    <LoaderCircle className="w-3 h-3 animate-spin" />
+                    switching
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => void saveChatMode(false)}
+                      className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                        agent.chat_mode
+                          ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                          : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                      }`}
+                    >
+                      <TerminalSquare className="w-3 h-3" />
+                      terminal
+                    </button>
+                    <button
+                      onClick={() => void saveChatMode(true)}
+                      className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
+                        agent.chat_mode
+                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                      }`}
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                      chat
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
             {/* Downstream branch (the name this head is pushed AS) - editable
                 until first publish, then soft-locked. Only shown once set. */}
             <DownstreamBranchEditor agent={agent} onSave={(n) => void saveDownstream(n)} saving={savingDownstream} />
@@ -1226,6 +1300,7 @@ export function AgentDetail({
           agentId={agent.id}
           projectId={projectId}
           isEphemeral={agent.ephemeral}
+          chatMode={agent.chat_mode === true}
           onRefresh={onRefresh}
           onDiffRefresh={(headMoved) => {
             setDiffRefreshTrigger((t) => t + 1)

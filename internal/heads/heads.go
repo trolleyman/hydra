@@ -18,6 +18,7 @@ import (
 	"braces.dev/errtrace"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/gate"
@@ -45,6 +46,9 @@ type Head struct {
 	Prompt        string
 	BaseBranch    string
 	Ephemeral     bool
+	// ChatMode drives the head via the Claude CLI's stream-json interface and
+	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	ChatMode bool
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp; 0 if not started
@@ -125,6 +129,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			Prompt:           a.Prompt,
 			BaseBranch:       a.BaseBranch,
 			Ephemeral:        a.Ephemeral,
+			ChatMode:         a.ChatMode,
 			CreatedAt:        a.CreatedAt.Unix(),
 			AgentStatus:      computeAgentStatus(&a),
 			HasUnreadChanges: a.HasUnreadChanges,
@@ -302,6 +307,7 @@ func archivedHead(a *db.Agent) Head {
 		Prompt:      a.Prompt,
 		BaseBranch:  a.BaseBranch,
 		Ephemeral:   a.Ephemeral,
+		ChatMode:    a.ChatMode,
 		CreatedAt:   a.CreatedAt.Unix(),
 		AgentStatus: archivedAgentStatus(a),
 		Archived:    true,
@@ -334,7 +340,11 @@ type SpawnHeadOptions struct {
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
 	BaseBranch string            // empty = current HEAD branch
 	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
-	Resume     bool              // if true, resume the agent's prior conversation
+	// ChatMode drives the head via the Claude CLI's stream-json interface and
+	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	// The task prompt is delivered as the first stdin user message, not argv.
+	ChatMode bool
+	Resume   bool // if true, resume the agent's prior conversation
 	// Replace allows an explicit ID to take over an ARCHIVED head with the same
 	// ID in the SAME project, overwriting its archived record (the restart and
 	// `hydra spawn --force` paths). Without it any existing record - active or
@@ -445,6 +455,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			Prompt:        opts.Prompt,
 			Title:         title,
 			Ephemeral:     opts.Ephemeral,
+			ChatMode:      opts.ChatMode,
 			SessionStatus: "pending",
 			HeadStatus:    "idle",
 			CreatedAt:     now,
@@ -531,7 +542,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model, opts.ChatMode)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -540,7 +551,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
-	env = append(env, claudeRenderingEnv(opts.AgentType, cfg.ResolveFullscreen(string(opts.AgentType)))...)
+	// Chat mode has no TUI to render; force the classic (non-fullscreen)
+	// renderer env regardless of config.
+	env = append(env, claudeRenderingEnv(opts.AgentType, !opts.ChatMode && cfg.ResolveFullscreen(string(opts.AgentType)))...)
 	// Filtering egress: when the head has a network allow-list, route its outbound
 	// HTTP(S) through a per-head proxy that only relays allow-listed hosts (hard
 	// netns+nft boundary when available, else advisory proxy env).
@@ -562,6 +575,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		CowMounts:      cowMounts,
 		Env:            env,
 		Argv:           argv,
+		StdioPipes:     opts.ChatMode,
 		PreSpawnScript: preSpawn,
 		EgressWrap:     egressWrap,
 		HardenGUI:      true,
@@ -570,6 +584,17 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
 		return nil, errtrace.Wrap(err)
+	}
+
+	// A chat-mode head takes its task over stdin: with --input-format
+	// stream-json the CLI accepts no argv prompt, and delivering the task as a
+	// real user turn makes it (and its --replay-user-messages echo) part of the
+	// conversation the chat view reconstructs. The pipe buffers it while the
+	// CLI boots.
+	if opts.ChatMode && !opts.Resume && opts.Prompt != "" {
+		if err := reg.Write(opts.ID, claudestream.TextUserMessageLine(opts.Prompt)); err != nil {
+			log.Printf("warn: send initial chat prompt to %s: %v", opts.ID, err)
+		}
 	}
 
 	pid := sess.PID()
@@ -606,6 +631,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Prompt:        opts.Prompt,
 		BaseBranch:    baseBranch,
 		Ephemeral:     opts.Ephemeral,
+		ChatMode:      opts.ChatMode,
 		AgentStatus:   initialStatus,
 		CreatedAt:     now.Unix(),
 	}, nil
@@ -815,7 +841,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			if err != nil {
 				return "", errtrace.Wrap(fmt.Errorf("spawn shell in namespace host: %w", err))
 			}
-			if _, err := reg.StartWithProc(shellID, sandbox.AgentTypeBash, worktreePath, rows, cols, true, sp); err != nil {
+			if _, err := reg.StartWithProc(shellID, sandbox.AgentTypeBash, worktreePath, rows, cols, true, session.KindTerminal, sp); err != nil {
 				return "", errtrace.Wrap(err)
 			}
 			return shellID, nil
@@ -898,20 +924,30 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 // server - which MCP only loads at launch - becomes usable without the user
 // manually resuming. The conversation is restored by the resume's --continue.
 func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
-	if reg.IsLive(head.ID) {
-		_ = reg.Kill(head.ID)
-		// Wait for the session to actually exit before relaunching, so the fresh
-		// session doesn't collide with the dying one in the registry.
-		deadline := time.Now().Add(10 * time.Second)
-		for reg.IsLive(head.ID) {
-			if time.Now().After(deadline) {
-				_ = reg.KillNow(head.ID)
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
+	StopSessionAndWait(reg, head.ID, 10*time.Second)
 	return errtrace.Wrap(ResumeHead(reg, store, projectRoot, head, rows, cols))
+}
+
+// StopSessionAndWait terminates a head's live session process (SIGTERM) and
+// waits, bounded by timeout, for it to actually exit - escalating to SIGKILL
+// at the deadline. Used before relaunching a head in a different configuration
+// (RestartHead, the chat-mode toggle) so the fresh session can't collide with
+// the dying one in the registry, and so a client reconnecting right after the
+// triggering API call reliably hits the on-attach lazy-resume path instead of
+// attaching to a dying session. No-op when the session isn't live.
+func StopSessionAndWait(reg *session.Registry, id string, timeout time.Duration) {
+	if !reg.IsLive(id) {
+		return
+	}
+	_ = reg.Kill(id)
+	deadline := time.Now().Add(timeout)
+	for reg.IsLive(id) {
+		if time.Now().After(deadline) {
+			_ = reg.KillNow(id)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
@@ -963,7 +999,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	cowMounts := buildCowMounts(projectRoot, worktreePath, home, head.ID, cowPaths, true)
 	// Resume passes no model: the agent restores the model its transcript was
 	// saved with (and any in-session change), avoiding a cache-missing re-read.
-	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "")
+	// head.ChatMode relaunches in whatever mode the head is currently set to,
+	// so a mode toggled while the session was down takes effect here.
+	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "", head.ChatMode)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -971,7 +1009,8 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
-	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
+	// Chat mode has no TUI to render; force the classic renderer env (see SpawnHead).
+	env = append(env, claudeRenderingEnv(head.AgentType, !head.ChatMode && cfg.ResolveFullscreen(string(head.AgentType)))...)
 	// Filtering egress (see SpawnHead): restart it fresh on resume.
 	egressEnv, egressWrap := startEgress(projectRoot, head.ID, head.AgentType, &net)
 	env = append(env, egressEnv...)
@@ -991,6 +1030,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		CowMounts:      cowMounts,
 		Env:            env,
 		Argv:           argv,
+		StdioPipes:     head.ChatMode,
 		PreSpawnScript: preSpawn,
 		EgressWrap:     egressWrap,
 		HardenGUI:      true,
@@ -1030,13 +1070,21 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		}
 	}
 	if willNudge {
-		// The agent restored its prior conversation but won't act on it on its
-		// own, so type the nudge to make it continue. Done async because the TUI
-		// can take a while to finish rendering a large restored conversation, and
-		// ResumeHead must not block its callers (daemon boot, terminal attach).
-		// The agent's own hooks flip its status back to running once the nudge
-		// submits, so the "waiting" written above is only momentary.
-		go nudgeResumedAgent(reg, head.ID, nudge)
+		if head.ChatMode {
+			// No TUI to wait out in chat mode: deliver the nudge directly as a
+			// stream-json user turn (the pipe buffers it while the CLI boots).
+			if err := reg.Write(head.ID, claudestream.TextUserMessageLine(nudge)); err != nil {
+				log.Printf("warn: resume nudge (chat): write to %s: %v", head.ID, err)
+			}
+		} else {
+			// The agent restored its prior conversation but won't act on it on its
+			// own, so type the nudge to make it continue. Done async because the TUI
+			// can take a while to finish rendering a large restored conversation, and
+			// ResumeHead must not block its callers (daemon boot, terminal attach).
+			// The agent's own hooks flip its status back to running once the nudge
+			// submits, so the "waiting" written above is only momentary.
+			go nudgeResumedAgent(reg, head.ID, nudge)
+		}
 	}
 	return nil
 }

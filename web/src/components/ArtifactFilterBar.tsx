@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, RotateCcw, Search, X } from 'lucide-react'
+import { ChevronDown, FunnelX, Search, X } from 'lucide-react'
 import {
   type FilterableArtifact, parseScopedTag, collectTags, computeScopeCounts,
   fileMediaType, effectiveChangeType, TYPE_CATEGORY, CHANGE_TYPE_ORDER,
@@ -351,7 +351,7 @@ export function ArtifactFilterBar({
           title="Reset filters"
           className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
         >
-          <RotateCcw className="w-3 h-3" />
+          <FunnelX className="w-3 h-3" />
           <span className="lowercase">reset</span>
         </button>
       )}

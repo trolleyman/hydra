@@ -12,15 +12,27 @@ import {
   SettingsContent,
 } from '../components/SettingsComponents'
 import { PageTopBar } from '../components/PageTopBar'
+import { BrowserSections } from '../components/settings/BrowserSections'
+import { ScopeTabs } from '../components/settings/shared'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
 
+type GlobalSettingsTab = 'user' | 'browser'
+
+const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
+  user: 'Every project on this machine - stored in ~/.config/hydra/config.toml. Open a project\'s settings to configure that project itself.',
+  browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+}
+
 function SettingsPage() {
   const router = useRouter()
   const canGoBack = useCanGoBack()
   const { selectedProjectId, projects } = useProjectStore()
+  // Unlike the project page there is only one config scope here, so switching
+  // tabs never refetches: the user-config draft survives a Browser detour.
+  const [tab, setTab] = useState<GlobalSettingsTab>('user')
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
   const [activeSection, setActiveSection] = useState<SettingsSection>('all')
@@ -112,45 +124,65 @@ function SettingsPage() {
     setTestAgent(null)
   }
 
-  if (!effectiveProjectId) return <div className="p-8 text-gray-500">Add a project to view user settings.</div>
-  if (loading) return <div className="p-8 text-gray-500">Loading configuration...</div>
-  if (error) return <div className="p-8 text-red-500">Error: {error}</div>
-  if (!config) return <div className="p-8 text-gray-500">No configuration found.</div>
-
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Single "Settings" header bar with a small save button (always shown,
-          never grayed). The show-sidebar toggle joins it when collapsed. */}
+          never grayed - except on the Browser tab, whose preferences apply
+          instantly). The show-sidebar toggle joins it when collapsed. */}
       <PageTopBar
         title="Settings"
         always
         onBack={canGoBack ? () => router.history.back() : undefined}
         right={
-          <button
-            onClick={handleSave}
-            aria-label="Save settings"
-            title="Save settings"
-            className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          </button>
+          tab !== 'browser' ? (
+            <button
+              onClick={handleSave}
+              aria-label="Save settings"
+              title="Save settings"
+              className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            </button>
+          ) : undefined
         }
       />
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
-          <SettingsContent
-            config={config}
-            setConfig={setConfig}
-            inheritedConfig={null}
-            activeSection={activeSection}
-            setActiveSection={setActiveSection}
-            selectedProject={selectedProject}
-            testAgent={testAgent}
-            testing={testing}
-            onTest={handleTest}
-            onCloseTestAgent={handleCloseTestAgent}
-            projectId={selectedProjectId ?? null}
+          <ScopeTabs
+            tabs={[
+              { id: 'user' as GlobalSettingsTab, label: 'User' },
+              { id: 'browser' as GlobalSettingsTab, label: 'Browser' },
+            ]}
+            active={tab}
+            onSelect={setTab}
+            description={TAB_DESCRIPTIONS[tab]}
           />
+          {tab === 'browser' ? (
+            <BrowserSections />
+          ) : !effectiveProjectId ? (
+            <div className="py-8 text-gray-500">Add a project to view user settings.</div>
+          ) : loading ? (
+            <div className="py-8 text-gray-500">Loading configuration...</div>
+          ) : error ? (
+            <div className="py-8 text-red-500">Error: {error}</div>
+          ) : !config ? (
+            <div className="py-8 text-gray-500">No configuration found.</div>
+          ) : (
+            <SettingsContent
+              config={config}
+              setConfig={setConfig}
+              inheritedConfig={null}
+              activeSection={activeSection}
+              setActiveSection={setActiveSection}
+              selectedProject={selectedProject}
+              testAgent={testAgent}
+              testing={testing}
+              onTest={handleTest}
+              onCloseTestAgent={handleCloseTestAgent}
+              projectId={selectedProjectId ?? null}
+              scope="user"
+            />
+          )}
         </div>
       </div>
     </div>

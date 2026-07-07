@@ -959,6 +959,12 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // Chat mode (CHAT_MODE.md): agent-chat renders the chat view instead of a
+      // terminal - user bubble, markdown-rich assistant turns, tool cards (the
+      // Bash one expanded via click, showing its red error result), a thinking
+      // disclosure, per-turn cost footers and the input box - plus the
+      // terminal|chat mode chip in the metadata row.
+      { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewportOnly: true, click: 'button:has-text("go test ./internal/artifacts/")' },
       // The "Merge queued" pill's hover hint, on an agent whose queued merge is
       // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
       // (tests already green) but hasn't reached a finished state, so the hint
@@ -1190,6 +1196,11 @@ try {
       // below that - so the viewport must be tall enough to reach the very bottom
       // (simulation seeds one of each there).
       { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 2900 } },
+      // The User scope tab of the settings page: the user-config
+      // ("~/.config/hydra/config.toml") agent form every project inherits.
+      // Project-only sections (icon, review, artifacts/tests/services editors,
+      // remove project) and the browser preferences (their own tab) are absent.
+      { name: 'settings-user', path: '/project/sim-project/settings', click: 'button[role="tab"]:text-is("User")', viewport: { width: 1280, height: 2400 } },
       // The per-agent Claude settings tab, opened by clicking the "Claude" pill in
       // the AgentSelector. Documents the agent-specific ConfigForm and, in
       // particular, the Claude-only "Fullscreen Rendering" toggle that sits between
@@ -1701,8 +1712,11 @@ try {
 
       // ── Desktop: the moved chrome ───────────────────────────────────────────
       // The Settings page now hosts the Appearance (light/dark/system) control
-      // that used to live in the top bar; capture its header region to document it.
-      { name: 'settings-appearance', path: '/project/sim-project/settings', viewport: { width: 1280, height: 900 }, viewportOnly: true },
+      // that used to live in the top bar. It lives on the Browser scope tab (a
+      // browser-local preference), so switch tabs before capturing the header
+      // region that documents it - this shot doubles as the Browser tab's
+      // documentation (theme / terminal / notifications, no Save button).
+      { name: 'settings-appearance', path: '/project/sim-project/settings', click: 'button[role="tab"]:text-is("Browser")', viewport: { width: 1280, height: 900 }, viewportOnly: true },
       // The desktop layout with the sidebar collapsed (Ctrl+. / the header
       // button): full-width content + the floating reveal button.
       { name: 'desktop-collapsed', path: '/project/sim-project/agent/agent-1', click: 'button[aria-label="Hide sidebar"]', viewportOnly: true },

@@ -234,6 +234,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("terminal ws: found head: %s", head.ID)
 
+	// A chat-mode head speaks the chat framing (see chat_ws.go) on this same
+	// endpoint: text frames both ways, no PTY semantics. Bash shell tabs stay
+	// plain terminals even on a chat-mode head.
+	chatMode := head.ChatMode && !useShell
+
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("terminal ws: upgrade error for agent %q: %v", agentID, err)
@@ -318,7 +323,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	att, err := s.Sessions.Attach(sessionID, 0, 0)
 	if err != nil {
 		log.Printf("terminal ws: attach session %q: %v", sessionID, err)
-		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))
+		if !chatMode {
+			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))
+		}
 		sendStatusUpdate(conn, "stopped")
 		return
 	}
@@ -345,8 +352,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// client sizes its terminal to match first (otherwise the replay's cursor
 	// moves land in the wrong cells and the history renders garbled). Sent here,
 	// synchronously, so it precedes the snapshot the goroutine emits below.
-	if rows, cols := att.Size(); rows > 0 && cols > 0 {
-		sendTerminalSize(conn, rows, cols)
+	// Chat panes have no terminal to size.
+	if !chatMode {
+		if rows, cols := att.Size(); rows > 0 && cols > 0 {
+			sendTerminalSize(conn, rows, cols)
+		}
 	}
 
 	done := make(chan struct{})
@@ -366,10 +376,17 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			switch msgType {
 			case websocket.BinaryMessage:
+				if chatMode {
+					continue // raw bytes are not part of the chat framing
+				}
 				if err := s.Sessions.Write(sessionID, data); err != nil {
 					return
 				}
 			case websocket.TextMessage:
+				if chatMode {
+					s.handleChatClientMessage(sessionID, data)
+					continue
+				}
 				var msg termResizeMsg
 				if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
 					_ = s.Sessions.Resize(sessionID, uint16(msg.Rows), uint16(msg.Cols))
@@ -398,6 +415,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close() // Closing the WS will unblock the ReadMessage in the other goroutine
 		}()
 
+		if chatMode {
+			worktree := ""
+			if head.Worktree != nil {
+				worktree = *head.Worktree
+			}
+			pumpChatOutput(conn, att, agentID, worktree)
+			return
+		}
 		for {
 			select {
 			case <-att.Done:

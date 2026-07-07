@@ -105,6 +105,34 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// TestDecideMCPBlockLists verifies mcp_blocked / mcp_tools_blocked deny outright
+// (never park) and that block overrides allow.
+func TestDecideMCPBlockLists(t *testing.T) {
+	p := basePolicy()
+	p.MCPAllowed = []string{"github", "evil"} // evil allowed AND blocked: block wins
+	p.MCPBlocked = []string{"evil"}
+	p.MCPToolsBlocked = []string{"github__delete_repo"}
+
+	cases := []struct {
+		name string
+		tool string
+		want Decision
+	}{
+		{"blocked server denied despite allow", "mcp__evil__run", Deny},
+		{"blocked tool denied despite server allow", "mcp__github__delete_repo", Deny},
+		{"sibling tool of blocked tool still allowed", "mcp__github__create_issue", Allow},
+		{"unrelated unknown server still parks", "mcp__other__run", Ask},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Decide(p, c.tool, nil)
+			if got.Decision != c.want {
+				t.Errorf("Decide(%s) = %s (%s), want %s", c.tool, got.Decision, got.Reason, c.want)
+			}
+		})
+	}
+}
+
 func TestDecideGateDisabledAllowsEverything(t *testing.T) {
 	p := basePolicy()
 	p.GateEnabled = false

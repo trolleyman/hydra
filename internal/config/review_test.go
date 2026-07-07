@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDetectProvider(t *testing.T) {
 	cases := []struct {
@@ -137,5 +140,36 @@ func TestRenderReviewExampleWhenAbsent(t *testing.T) {
 	out := renderConfig(nil, Config{})
 	if !contains(out, "# [review]") {
 		t.Errorf("expected commented [review] example; output tail:\n%s", out)
+	}
+	// Prose lines of the example are Hydra docs and must carry the docPrefix,
+	// per the file banner's stated convention (## = Hydra-owned, # = user's).
+	if !contains(out, "\n"+docPrefix+" [review] configures how Hydra talks to a forge") {
+		t.Errorf("review example prose is not a managed doc line; output tail:\n%s", out)
+	}
+	if contains(out, "\n# [review] configures how Hydra talks to a forge") {
+		t.Errorf("review example prose still rendered as a plain user comment:\n%s", out)
+	}
+}
+
+// TestRenderReviewExampleStable guards that re-rendering on top of a previous
+// render keeps exactly one copy of the [review]/[jira] example, and that a real
+// table appearing below the example does not glue the example's commented lines
+// to itself as preserved user comments (they are regenerated, not user-owned).
+func TestRenderReviewExampleStable(t *testing.T) {
+	out1 := renderConfig(nil, Config{})
+	out2 := renderConfig([]byte(out1), Config{})
+	if got := strings.Count(out2, "\n# [review]\n"); got != 1 {
+		t.Errorf("re-render has %d '# [review]' example headers, want 1:\n%s", got, out2)
+	}
+
+	// A hand-written [jira] table below the example: the example lines land in
+	// the gap before it and must be dropped, not preserved as user comments.
+	withJira := out1 + "\n[jira]\nurl = \"https://x.atlassian.net\"\n"
+	out3 := renderConfig([]byte(withJira), Config{})
+	if got := strings.Count(out3, `# provider = "auto"`); got != 1 {
+		t.Errorf("example body duplicated/preserved as user comments (%d copies):\n%s", got, out3)
+	}
+	if !contains(out3, "url = \"https://x.atlassian.net\"") {
+		t.Errorf("hand-written [jira] table dropped:\n%s", out3)
 	}
 }

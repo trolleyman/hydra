@@ -57,7 +57,7 @@ func (f *fakePTY) Signal(os.Signal) error {
 // and lazy resume treat it as gone.
 func TestReapDeadStuckSession(t *testing.T) {
 	r := NewRegistry()
-	r.register("stuck", sandbox.AgentTypeClaude, "/wt", 24, 80, false, newFakePTY(false), func() {})
+	r.register("stuck", sandbox.AgentTypeClaude, "/wt", 24, 80, false, KindTerminal, newFakePTY(false), func() {})
 
 	if !r.IsLive("stuck") {
 		t.Fatal("precondition: a freshly registered session should be live")
@@ -95,7 +95,7 @@ func TestReapDeadStuckSession(t *testing.T) {
 func TestReapDeadLeavesLiveSession(t *testing.T) {
 	r := NewRegistry()
 	pty := newFakePTY(true)
-	r.register("alive", sandbox.AgentTypeClaude, "/wt", 24, 80, false, pty, func() {})
+	r.register("alive", sandbox.AgentTypeClaude, "/wt", 24, 80, false, KindTerminal, pty, func() {})
 	t.Cleanup(func() { _ = pty.Close() })
 
 	if r.ReapDead("alive") {

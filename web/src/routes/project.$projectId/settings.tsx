@@ -10,23 +10,37 @@ import { useToastStore } from '../../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
-  SettingSection,
 } from '../../components/SettingsComponents'
 import { PageTopBar } from '../../components/PageTopBar'
 import { ProjectIconSection } from '../../components/settings/ProjectIconSection'
 import { RemoveProjectSection } from '../../components/settings/RemoveProjectSection'
+import { BrowserSections } from '../../components/settings/BrowserSections'
+import { ScopeTabs } from '../../components/settings/shared'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
 })
 
-type SettingsScope = 'project' | 'user'
+type SettingsScope = 'project' | 'local' | 'user'
+type SettingsTab = SettingsScope | 'browser'
+
+const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
+  project:
+    'This project only - stored in .hydra/config.toml in the project root and shared with everyone working on it. Layered on top of the user config: path and host lists combine and pre-prompts append; other values override.',
+  local:
+    'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
+  user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
+  browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+}
 
 function ProjectSettingsPage() {
   const { projectId } = useParams({ from: '/project/$projectId/settings' })
   const router = useRouter()
   const canGoBack = useCanGoBack()
   const { projects } = useProjectStore()
+  // The visible tab. `scope` lags behind it as the last *config* tab, so the
+  // fetched config (and any unsaved draft) survives a detour via Browser.
+  const [tab, setTab] = useState<SettingsTab>('project')
   const [scope, setScope] = useState<SettingsScope>('project')
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
@@ -68,16 +82,17 @@ function ProjectSettingsPage() {
       setLoading(true)
       setError(null)
       try {
+        const editCfg = await api.default.getConfig(projectId, scope)
+        setConfig(editCfg)
+        setBaseConfig(JSON.stringify(editCfg))
+        // The "Inherited:" hints show the layer directly underneath the one
+        // being edited: user for the project tab, project for the local tab.
+        // The user tab is the bottom config layer, so nothing is shown.
         if (scope === 'project') {
-          const editCfg = await api.default.getConfig(projectId, 'project')
-          setConfig(editCfg)
-          setBaseConfig(JSON.stringify(editCfg))
-          const userCfg = await api.default.getConfig(projectId, 'user')
-          setInheritedConfig(userCfg)
+          setInheritedConfig(await api.default.getConfig(projectId, 'user'))
+        } else if (scope === 'local') {
+          setInheritedConfig(await api.default.getConfig(projectId, 'project'))
         } else {
-          const editCfg = await api.default.getConfig(projectId, 'user')
-          setConfig(editCfg)
-          setBaseConfig(JSON.stringify(editCfg))
           setInheritedConfig(null)
         }
       } catch (err) {
@@ -126,65 +141,83 @@ function ProjectSettingsPage() {
     setTestAgent(null)
   }
 
-  if (loading) return <div className="p-8 text-gray-500">Loading configuration...</div>
-  if (error) return <div className="p-8 text-red-500">Error: {error}</div>
-  if (!config) return <div className="p-8 text-gray-500">No configuration found.</div>
-
-  const scopeDescription = scope === 'project'
-    ? 'Settings stored in .hydra/config.toml within the project root.'
-    : 'Settings stored in ~/.config/hydra/config.toml for all projects.'
+  // Switching between the two config tabs refetches and discards the draft, so
+  // guard that the same way navigation is guarded. The Browser tab touches no
+  // config state, so moving to or from it needs no guard.
+  function switchTab(t: SettingsTab) {
+    if (t === tab) return
+    if (t !== 'browser' && t !== scope) {
+      if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) return
+      setScope(t)
+    }
+    setTab(t)
+  }
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Single "Settings" header bar with a small save button (always shown,
-          never grayed). The show-sidebar toggle joins it when collapsed. */}
+          never grayed - except on the Browser tab, whose preferences apply
+          instantly). The show-sidebar toggle joins it when collapsed. */}
       <PageTopBar
         title="Settings"
         always
         onBack={canGoBack ? () => router.history.back() : undefined}
         right={
-          <button
-            onClick={handleSave}
-            aria-label="Save settings"
-            title="Save settings"
-            className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          </button>
+          tab !== 'browser' ? (
+            <button
+              onClick={handleSave}
+              aria-label="Save settings"
+              title="Save settings"
+              className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            </button>
+          ) : undefined
         }
       />
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
-          <SettingsContent
-            config={config}
-            setConfig={setConfig}
-            inheritedConfig={inheritedConfig}
-            activeSection={activeSection}
-            setActiveSection={setActiveSection}
-            selectedProject={selectedProject}
-            testAgent={testAgent}
-            testing={testing}
-            onTest={handleTest}
-            onCloseTestAgent={handleCloseTestAgent}
-            projectId={projectId}
-            iconSection={scope === 'project' && selectedProject ? <ProjectIconSection project={selectedProject} /> : undefined}
-            scopeSelector={
-              <SettingSection title="Scope" description={scopeDescription}>
-                <div className="inline-flex p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  {(['project', 'user'] as SettingsScope[]).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setScope(s)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all cursor-pointer ${scope === s ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                    >
-                      {s === 'project' ? 'Project' : 'Global'}
-                    </button>
-                  ))}
-                </div>
-              </SettingSection>
-            }
+          {/* Scope tabs: which settings store the page edits. Kept outside the
+              loading swap so the strip doesn't flicker away on tab switch. */}
+          <ScopeTabs
+            tabs={[
+              { id: 'project' as SettingsTab, label: 'Project' },
+              { id: 'local' as SettingsTab, label: 'Local' },
+              { id: 'user' as SettingsTab, label: 'User' },
+              { id: 'browser' as SettingsTab, label: 'Browser' },
+            ]}
+            active={tab}
+            onSelect={switchTab}
+            description={TAB_DESCRIPTIONS[tab]}
           />
-          {selectedProject && <RemoveProjectSection project={selectedProject} />}
+          {tab === 'browser' ? (
+            <BrowserSections />
+          ) : loading ? (
+            <div className="py-8 text-gray-500">Loading configuration...</div>
+          ) : error ? (
+            <div className="py-8 text-red-500">Error: {error}</div>
+          ) : !config ? (
+            <div className="py-8 text-gray-500">No configuration found.</div>
+          ) : (
+            <>
+              <SettingsContent
+                config={config}
+                setConfig={setConfig}
+                inheritedConfig={inheritedConfig}
+                activeSection={activeSection}
+                setActiveSection={setActiveSection}
+                selectedProject={selectedProject}
+                testAgent={testAgent}
+                testing={testing}
+                onTest={handleTest}
+                onCloseTestAgent={handleCloseTestAgent}
+                projectId={projectId}
+                scope={scope}
+                iconSection={scope === 'project' && selectedProject ? <ProjectIconSection project={selectedProject} /> : undefined}
+              />
+              {scope === 'project' && selectedProject && <RemoveProjectSection project={selectedProject} />}
+            </>
+          )}
         </div>
       </div>
     </div>

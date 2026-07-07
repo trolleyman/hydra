@@ -193,12 +193,14 @@ const (
 
 // Defines values for GetConfigParamsScope.
 const (
+	GetConfigParamsScopeLocal   GetConfigParamsScope = "local"
 	GetConfigParamsScopeProject GetConfigParamsScope = "project"
 	GetConfigParamsScopeUser    GetConfigParamsScope = "user"
 )
 
 // Defines values for SaveConfigParamsScope.
 const (
+	SaveConfigParamsScopeLocal   SaveConfigParamsScope = "local"
 	SaveConfigParamsScopeProject SaveConfigParamsScope = "project"
 	SaveConfigParamsScopeUser    SaveConfigParamsScope = "user"
 )
@@ -243,6 +245,9 @@ type AgentResponse struct {
 	Archived   *bool   `json:"archived,omitempty"`
 	BaseBranch string  `json:"base_branch"`
 	BranchName *string `json:"branch_name"`
+
+	// ChatMode True when the head runs in chat mode (stream-json + chat view; Claude only). See CHAT_MODE.md.
+	ChatMode *bool `json:"chat_mode,omitempty"`
 
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
@@ -769,14 +774,23 @@ type PolicyConfig struct {
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 
+	// KnownTools Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
+	KnownTools *[]string `json:"known_tools"`
+
 	// McpAllowed MCP server names the agent may use (whole-server grant). Servers not listed (nor referenced by mcp_tools_allowed) are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
 	McpAllowed *[]string `json:"mcp_allowed"`
 
 	// McpAutoAllowRead Auto-allow MCP tools the read/write classifier deems read-only, parking only writes/unknown. Best-effort heuristic; off by default.
 	McpAutoAllowRead *bool `json:"mcp_auto_allow_read"`
 
+	// McpBlocked MCP server names refused outright - stripped pre-launch and DENIED at runtime (never parked for approval). Block overrides allow; since the allow-lists union across config layers, this is how a narrower layer removes a server a broader layer granted.
+	McpBlocked *[]string `json:"mcp_blocked"`
+
 	// McpToolsAllowed Individual MCP tools ("<server>__<tool>") allowed even when the whole server is not. The server is kept (spawned) so those tools work; its other tools park for approval at runtime.
 	McpToolsAllowed *[]string `json:"mcp_tools_allowed"`
+
+	// McpToolsBlocked Individual MCP tools ("<server>__<tool>") denied outright even when their server is allowed. Block overrides allow.
+	McpToolsBlocked *[]string `json:"mcp_tools_blocked"`
 }
 
 // PreviewState Preview instance lifecycle state
@@ -1205,6 +1219,9 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
+	// ChatMode Drive the head via the Claude CLI's stream-json interface and render a chat view instead of a terminal (Claude only; rejected for other agent types). The prompt is delivered as the first chat turn. See CHAT_MODE.md.
+	ChatMode *bool `json:"chat_mode,omitempty"`
+
 	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
 	Cols *int `json:"cols,omitempty"`
 
@@ -1444,6 +1461,9 @@ type UpdateAgentRequest struct {
 	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
 	BaseBranch *string `json:"base_branch,omitempty"`
 
+	// ChatMode Switch the head between terminal and chat mode (Claude only; rejected for other agent types). When the value actually changes and a session is live, the Claude process is stopped and relaunched in the new mode with --continue - the conversation is preserved (terminal and chat mode share one transcript). See CHAT_MODE.md.
+	ChatMode *bool `json:"chat_mode,omitempty"`
+
 	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.
 	Title *string `json:"title,omitempty"`
 }
@@ -1602,7 +1622,7 @@ type GetAgentTestsParams struct {
 
 // GetConfigParams defines parameters for GetConfig.
 type GetConfigParams struct {
-	// Scope Load only a specific scope's raw config instead of the merged config
+	// Scope Load only a specific scope's raw config instead of the merged config (local = the untracked per-user .hydra/config.local.toml)
 	Scope *GetConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
 
@@ -1611,7 +1631,7 @@ type GetConfigParamsScope string
 
 // SaveConfigParams defines parameters for SaveConfig.
 type SaveConfigParams struct {
-	// Scope Whether to save to the project or user config file (defaults to project)
+	// Scope Which config file to save to - project (.hydra/config.toml), user (~/.config/hydra/config.toml) or local (the untracked per-user .hydra/config.local.toml). Defaults to project.
 	Scope *SaveConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
 

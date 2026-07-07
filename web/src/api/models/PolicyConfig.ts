@@ -19,8 +19,20 @@ export type PolicyConfig = {
      */
     mcp_tools_allowed?: Array<string> | null;
     /**
+     * MCP server names refused outright - stripped pre-launch and DENIED at runtime (never parked for approval). Block overrides allow; since the allow-lists union across config layers, this is how a narrower layer removes a server a broader layer granted.
+     */
+    mcp_blocked?: Array<string> | null;
+    /**
+     * Individual MCP tools ("<server>__<tool>") denied outright even when their server is allowed. Block overrides allow.
+     */
+    mcp_tools_blocked?: Array<string> | null;
+    /**
      * Auto-allow MCP tools the read/write classifier deems read-only, parking only writes/unknown. Best-effort heuristic; off by default.
      */
     mcp_auto_allow_read?: boolean | null;
+    /**
+     * Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
+     */
+    known_tools?: Array<string> | null;
 };
 

@@ -4,7 +4,7 @@ import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, GitBranch } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -200,6 +200,9 @@ export function SpawnForm({
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
+  // Chat mode (Claude only, CHAT_MODE.md): drive the head via stream-json and
+  // show a chat view instead of a terminal. Remembered like the agent/model.
+  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the project's
@@ -257,6 +260,10 @@ export function SpawnForm({
   useEffect(() => {
     writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
+
+  useEffect(() => {
+    writeLocal(StorageKeys.defaultChatMode, chatMode ? 'true' : 'false')
+  }, [chatMode])
 
   // Remember the chosen model per agent type so the next spawn of that agent
   // defaults to it (mirrors defaultAgentType).
@@ -612,6 +619,9 @@ export function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
+        // chat_mode is Claude-only; the toggle is hidden for other agent types,
+        // and a remembered value must not leak into their spawns.
+        ...(agentType === 'claude' && chatMode ? { chat_mode: true } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
@@ -649,6 +659,33 @@ export function SpawnForm({
         onRemove={removeAttachment}
         onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
       />
+    )
+  }
+
+  // The chat-mode toggle pill, next to the agent/model picker. Claude-only
+  // (other CLIs have no stream-json interface); lights up when on. The spawned
+  // head then opens as a chat view instead of a terminal (CHAT_MODE.md).
+  function renderChatToggle(compactSel: boolean) {
+    if (agentType !== 'claude') return null
+    return (
+      <Tooltip content={chatMode ? 'Spawns with a chat view. Click for a terminal.' : 'Spawns with a terminal. Click for a chat view.'} side="top">
+        <button
+          type="button"
+          aria-pressed={chatMode}
+          onClick={() => setChatMode((c) => !c)}
+          disabled={loading || disabled}
+          className={`flex items-center gap-1 rounded-lg border transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
+            compactSel ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'
+          } ${
+            chatMode
+              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+              : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <MessageSquare className={compactSel ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
+          Chat
+        </button>
+      </Tooltip>
     )
   }
 
@@ -785,6 +822,7 @@ export function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} size="sm" />
+                {renderChatToggle(true)}
               </div>
               {renderBranchSelector(true)}
               <button
@@ -864,6 +902,7 @@ export function SpawnForm({
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
                   <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} />
+                  {renderChatToggle(false)}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                   {renderBranchSelector(false)}

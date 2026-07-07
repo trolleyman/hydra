@@ -17,6 +17,46 @@ export function SettingSection({ title, description, action, children }: { title
   )
 }
 
+// ── ScopeTabs ─────────────────────────────────────────────────────────────────
+// The tab strip at the top of a settings page selecting which settings store is
+// being edited (project config.toml / user config.toml / this browser), with a
+// one-line description of the active tab underneath. Shared by both settings
+// pages so the strips can't drift apart.
+export function ScopeTabs<T extends string>({
+  tabs,
+  active,
+  onSelect,
+  description,
+}: {
+  tabs: { id: T; label: string }[]
+  active: T
+  onSelect: (id: T) => void
+  description: string
+}) {
+  return (
+    <div className="mb-6">
+      <div className="flex border-b border-gray-200 dark:border-gray-700" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={active === t.id}
+            onClick={() => onSelect(t.id)}
+            className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+              active === t.id
+                ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{description}</p>
+    </div>
+  )
+}
+
 // ── EnabledToggle ─────────────────────────────────────────────────────────────
 // A small on/off switch used to enable or disable a single artifact or service
 // without deleting it. Green + "Enabled" when on; muted + "Disabled" when off.

@@ -149,8 +149,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// normally and our policy layers on top authoritatively. (AUDIT.md F4.)
 		// The set of MCP servers KEPT in the seeded config: whole-server grants plus
 		// any server referenced by a per-tool grant (so a partially-allowed server
-		// still spawns and the runtime gate enforces the per-tool subset).
-		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed)
+		// still spawns and the runtime gate enforces the per-tool subset), minus any
+		// server on the block list (block overrides allow).
+		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed, policy.MCPBlocked)
 		managed, err := sandbox.BuildClaudeSettings(nil, stableHydraBin, policy.GateEnabled, mcpKeep)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
@@ -280,6 +281,8 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		GateEnabled:      p.IsGateEnabled(),
 		MCPAllowed:       p.MCPAllowed,
 		MCPToolsAllowed:  p.MCPToolsAllowed,
+		MCPBlocked:       p.MCPBlocked,
+		MCPToolsBlocked:  p.MCPToolsBlocked,
 		AutoAllowReadMCP: p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
 		KnownTools:       p.KnownTools,
 	}
@@ -322,11 +325,19 @@ func seedMCPCatalog(res *seedResult, cacheDir, id string, hostClaudeJSON, mcpJSO
 // whole-server allow-list plus the server segment of every per-tool grant
 // ("<server>__<tool>" → "<server>"). A partially-allowed server must be kept so
 // it spawns; the runtime gate then enforces which of its tools are permitted.
-func mcpKeepSet(serversAllowed, toolsAllowed []string) []string {
+func mcpKeepSet(serversAllowed, toolsAllowed, serversBlocked []string) []string {
+	blocked := func(s string) bool {
+		for _, b := range serversBlocked {
+			if strings.EqualFold(b, s) {
+				return true
+			}
+		}
+		return false
+	}
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {
-		if s != "" && !seen[s] {
+		if s != "" && !seen[s] && !blocked(s) {
 			seen[s] = true
 			out = append(out, s)
 		}

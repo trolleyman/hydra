@@ -231,7 +231,10 @@ export function ConfigForm({
       next.gate_enabled == null &&
       next.mcp_auto_allow_read == null &&
       !next.mcp_allowed?.length &&
-      !next.mcp_tools_allowed?.length
+      !next.mcp_tools_allowed?.length &&
+      !next.mcp_blocked?.length &&
+      !next.mcp_tools_blocked?.length &&
+      !next.known_tools?.length
     onChange({ ...value, policy: empty ? null : next })
   }
 
@@ -272,7 +275,7 @@ export function ConfigForm({
               ) : (
                 <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>
               )}
-              <p className="mt-1.5 text-gray-400 italic">Pre-prompts are merged in order: default → all agents → agent-specific.</p>
+              <p className="mt-1.5 text-gray-400 italic">Pre-prompts are merged in order: default → all agents → agent-specific. User-config and project-config values combine too (project appended after user), so setting one here does not replace the other scope's.</p>
             </InfoTooltip>
           </div>
         )}
@@ -625,6 +628,31 @@ export function ConfigForm({
             onChange={(mcp_tools_allowed) => updatePolicy({ mcp_tools_allowed })}
             placeholder="e.g. linear__create_issue"
             addLabel="Add Tool"
+          />
+          <div className="flex items-center gap-1.5 pt-1">
+            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Blocked servers</label>
+            <InfoTooltip title="Blocked servers">
+              <p>Servers refused outright: stripped before launch and <strong>denied</strong> at runtime - never parked for approval. Block overrides allow.</p>
+              <p className="mt-1.5">The allow-lists combine across the user, project and local config layers, so blocking here is how this layer removes a server a broader layer granted.</p>
+            </InfoTooltip>
+          </div>
+          <PathListEditor
+            paths={policy.mcp_blocked ?? []}
+            onChange={(mcp_blocked) => updatePolicy({ mcp_blocked })}
+            placeholder="e.g. playwright"
+            addLabel="Block Server"
+          />
+          <div className="flex items-center gap-1.5 pt-1">
+            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Blocked individual tools</label>
+            <InfoTooltip title="Blocked individual tools">
+              <p>Deny specific tools as <code className="text-blue-300">server__tool</code> (e.g. <code className="text-blue-300">github__delete_repo</code>), even when their server is allowed. Block overrides allow.</p>
+            </InfoTooltip>
+          </div>
+          <PathListEditor
+            paths={policy.mcp_tools_blocked ?? []}
+            onChange={(mcp_tools_blocked) => updatePolicy({ mcp_tools_blocked })}
+            placeholder="e.g. github__delete_repo"
+            addLabel="Block Tool"
           />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">

@@ -544,6 +544,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		Prompt:             h.Prompt,
 		BaseBranch:         h.BaseBranch,
 		Ephemeral:          &h.Ephemeral,
+		ChatMode:           &h.ChatMode,
 		CreatedAt:          createdAt,
 		AgentStatus:        h.AgentStatus,
 		NetworkEnforcement: netEnf,
@@ -734,12 +735,15 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		// Load only the raw config for the requested scope (not merged).
 		var path string
 		var err error
-		if *request.Params.Scope == api.GetConfigParamsScopeUser {
+		switch *request.Params.Scope {
+		case api.GetConfigParamsScopeUser:
 			path, err = config.GetUserConfigPath()
 			if err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-		} else {
+		case api.GetConfigParamsScopeLocal:
+			path = paths.GetProjectConfigLocalPath(projectRoot)
+		default:
 			path = config.GetProjectConfigPath(projectRoot)
 		}
 		raw, err := config.LoadFile(path)
@@ -993,7 +997,12 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			GateEnabled:      p.GateEnabled,
 			McpAllowed:       &p.MCPAllowed,
 			McpToolsAllowed:  &p.MCPToolsAllowed,
+			McpBlocked:       &p.MCPBlocked,
+			McpToolsBlocked:  &p.MCPToolsBlocked,
 			McpAutoAllowRead: p.MCPAutoAllowRead,
+			// known_tools is not edited by the Settings UI, but must ride along in
+			// the response so a round-tripped save preserves a hand-edited value.
+			KnownTools: &p.KnownTools,
 		}
 	}
 	return out
@@ -1052,6 +1061,15 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Policy.McpToolsAllowed != nil {
 			p.MCPToolsAllowed = *a.Policy.McpToolsAllowed
+		}
+		if a.Policy.McpBlocked != nil {
+			p.MCPBlocked = *a.Policy.McpBlocked
+		}
+		if a.Policy.McpToolsBlocked != nil {
+			p.MCPToolsBlocked = *a.Policy.McpToolsBlocked
+		}
+		if a.Policy.KnownTools != nil {
+			p.KnownTools = *a.Policy.KnownTools
 		}
 		out.Policy = p
 	}
@@ -1132,13 +1150,16 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 
 	var savePath string
-	if scope == api.SaveConfigParamsScopeUser {
+	switch scope {
+	case api.SaveConfigParamsScopeUser:
 		var err error
 		savePath, err = config.GetUserConfigPath()
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-	} else {
+	case api.SaveConfigParamsScopeLocal:
+		savePath = paths.GetProjectConfigLocalPath(projectRoot)
+	default:
 		savePath = config.GetProjectConfigPath(projectRoot)
 	}
 
@@ -1147,10 +1168,10 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 
 	// Restart the project's services so config changes (added/removed/edited
-	// [[services]]) take effect immediately. Only for project-scope saves: a
-	// user-scope save would have to restart every registered project, and the
-	// merged result is reloaded from disk by RestartProject anyway.
-	if s.Services != nil && scope == api.SaveConfigParamsScopeProject {
+	// [[services]]) take effect immediately. Project and local scopes both feed
+	// this project's merged config; a user-scope save would have to restart
+	// every registered project, so it is left to the next natural restart.
+	if s.Services != nil && scope != api.SaveConfigParamsScopeUser {
 		s.Services.RestartProject(projectRoot)
 	}
 
@@ -1260,6 +1281,15 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		model = strings.TrimSpace(*request.Body.Model)
 	}
 
+	chatMode := request.Body.ChatMode != nil && *request.Body.ChatMode
+	if chatMode && agentType != sandbox.AgentTypeClaude {
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "chat_mode is only supported for claude agents",
+		}, nil
+	}
+
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
 	// 80x24 - those narrow-wrapped bytes can't be re-flowed once a wider client
@@ -1283,6 +1313,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Model:         model,
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
+		ChatMode:      chatMode,
 		Replace:       force,
 		Rows:          rows,
 		Cols:          cols,
@@ -1353,11 +1384,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	if request.Body.Title == nil && request.Body.BaseBranch == nil {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "at least one field (title or base_branch) is required",
+			Details: "at least one field (title, base_branch or chat_mode) is required",
 		}, nil
 	}
 
@@ -1432,6 +1463,35 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			return nil, errtrace.Wrap(err)
 		}
 		head.Title = title
+	}
+
+	if request.Body.ChatMode != nil {
+		chatMode := *request.Body.ChatMode
+		if head.AgentType != sandbox.AgentTypeClaude {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "chat_mode is only supported for claude agents",
+			}, nil
+		}
+		if chatMode != head.ChatMode {
+			if err := s.DB.UpdateAgentChatMode(request.Id, chatMode); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			head.ChatMode = chatMode
+			// The mode is baked into the running CLI's argv, so a live session
+			// must be relaunched to pick it up. Stop just the process (worktree,
+			// branch and DB row untouched) and wait for it to exit before
+			// responding; the client swaps panes and reconnects on the response,
+			// and the on-attach lazy resume then relaunches with --continue in
+			// the new mode - the conversation carries over (terminal and chat
+			// mode share one transcript). A head with no live session simply
+			// resumes in the new mode whenever it is next attached.
+			if s.Sessions.IsLive(head.ID) {
+				log.Printf("api: chat_mode toggled to %v for %s; stopping session for mode switch", chatMode, head.ID)
+				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+			}
+		}
 	}
 
 	s.notifyAgentsChanged(projectRoot, false)
@@ -1790,6 +1850,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		Prompt:     prompt,
 		AgentType:  agentType,
 		BaseBranch: baseBranch,
+		ChatMode:   head.ChatMode,
 		// The kill above just archived this ID; Replace lets the respawn take
 		// the archived record back over instead of failing the ID-collision
 		// check.
