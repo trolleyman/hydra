@@ -26,10 +26,11 @@ Everything on the agent page is a single vertically-stacked scroll container
 | | agents   |  | |   PromptBlock (read-only)            | ||
 | | list     |  | |   AgentTerminal (live)              | ||
 | |          |  | |   DiffViewer:                        | ||
+| |          |  | |     Changes bar (selectors, cog)    | ||
 | |          |  | |     TestsPanel (collapsible card)   | ||
 | |          |  | |     PreviewPanel                    | ||
 | |          |  | |     ArtifactsPanel                  | ||
-| |          |  | |     Changes bar + file list + diff  | ||
+| |          |  | |     file list + file diffs          | ||
 | | settings |  | +--------------------------------------+ ||
 | +----------+  +------------------------------------------+|
 +----------------------------------------------------------+
@@ -44,9 +45,11 @@ Key facts that constrain the redesign:
   (`web/src/components/AgentTopBar.tsx`): Create/View MR, the Merge split-button,
   the merge-when-green pill, rename/kill. Stays in the header.
 - **Tests / previews / artifacts are NOT tabbed today** - they are stacked
-  `CollapsibleCard`s rendered sequentially inside `DiffViewer`
-  (`web/src/DiffViewer.tsx`): `TestsPanel` -> `PreviewPanel` ->
-  `ArtifactsPanel` -> Changes bar + file-list column + file diffs.
+  sections rendered sequentially inside `DiffViewer`
+  (`web/src/DiffViewer.tsx`), *below* the Changes toolbar: Changes bar ->
+  `TestsPanel` -> `PreviewPanel` -> `ArtifactsPanel` -> file-list column +
+  file diffs. Tests and previews wrap in `CollapsibleCard`; `ArtifactsPanel`
+  renders its own filter bar + masonry grid (no card).
 - **Prompt** is `PromptBlock` (read-only, in `AgentDetail.tsx`), rendered above
   the terminal. There is no live prompt *input* on this page - prompting is done
   through the terminal/chat.
@@ -182,12 +185,16 @@ embedding. Upgrade the Previews view into a mini-browser embedded in the pane:
 **Talking to the iframe (injected bridge).** A different-port preview iframe is
 cross-origin, so normally the parent can't read its URL or postMessage into it.
 But Hydra **already reverse-proxies the preview** - `in.proxy =
-httputil.NewSingleHostReverseProxy(...)` in `internal/preview/spawn.go`, and
-`internal/preview/proxy.go` already branches on `text/html`. So add a
-`ModifyResponse` hook that, for HTML responses, **injects a small bridge
-`<script>` before `</head>`**. That script runs *inside* the iframe at the app's
-own origin, so it can read everything and `postMessage` up to the parent Hydra
-window. The proxy is the bridge. This dissolves both cross-origin problems:
+httputil.NewSingleHostReverseProxy(...)` in `internal/preview/spawn.go`. Today
+that proxy passes upstream responses through **untouched** (no `ModifyResponse`,
+no body rewriting, no compression handling; `prefersHTML()` in
+`internal/preview/proxy.go` only sniffs the *request* Accept header to decide
+whether to serve Hydra's own loading page while the server boots). The upgrade
+is a new `ModifyResponse` hook that, for HTML responses, **injects a small
+bridge `<script>` before `</head>`**. That script runs *inside* the iframe at
+the app's own origin, so it can read everything and `postMessage` up to the
+parent Hydra window. The proxy is the bridge. This dissolves both cross-origin
+problems:
 
 - **Address bar reflects the real URL.** The injected script patches
   `history.pushState`/`replaceState` and listens to `popstate`/`hashchange`,
@@ -228,7 +235,10 @@ its contents; it simply spans both new panes.
 ## Selector state
 
 - Selected inspector view (`diff | tests | previews`) persisted per agent
-  (extend `agentViewPrefs`). Default `diff`.
+  (extend `agentViewPrefs`). Default `diff`. Note this means no deep-linking:
+  agent routes carry no search params today, so a tab choice in localStorage is
+  not shareable/back-button-navigable. Acceptable for v1; a `?view=` search
+  param can be layered on later if wanted.
 - Show a count/badge on each selector segment when relevant: e.g. the test
   verdict chip's `N` on Tests, a "running"/"failing" dot on Previews. The
   verdict chip already exists (`TestVerdictChip`) - reuse it inline in the
@@ -280,7 +290,11 @@ its contents; it simply spans both new panes.
    `forwardSidebarWheelToMain` (wheel-forwards *to* `[data-main-scroll]`), and
    per-agent scroll restore in `agentViewPrefs`. All must be re-scoped to the
    right pane's own scroll container, and there are now two scroll contexts to
-   persist.
+   persist. Two more couplings hide nearby: the file-list column's sticky
+   `max-h-[calc(100vh-140px)]` is hard-coded viewport math that a shorter pane
+   invalidates, and the Changes bar's `z-[25]` is deliberately kept below the
+   sidebar scrim's `z-30` (see the comment in `DiffViewer.tsx`) - new stacking
+   contexts could reintroduce that scrim-overlap bug.
 4. **Vertical squeeze on laptops.** Side-by-side panes both live at full page
    height, so a tall diff scrolls inside a short pane - on a 13" screen
    vertical space becomes the constraint instead of horizontal. Collapsing the
@@ -291,6 +305,20 @@ its contents; it simply spans both new panes.
 6. **Handle proliferation.** Four resize handles now: global sidebar, split
    divider, diff file-list, terminal height. The split divider and file-list
    handle are both near each other - visually distinguish them.
+7. **The archived-agent view is a second render path.** `AgentDetail.tsx` has
+   *two* `[data-main-scroll]` containers - the active-agent page and a simpler
+   archived-agent view with its own metadata row. Decide whether archived
+   agents get the split too or explicitly keep the single column (probably the
+   latter - no live terminal to sit beside).
+8. **Unmounting the diff unmounts its keyboard handlers.** `DiffViewer`
+   registers window-level `keydown` handlers (merge-conflict fix flow, the
+   B/H artifact-highlight toggle). With unmount-inactive-views (decision #4)
+   those go dead whenever Tests/Previews is the active tab. Probably fine, but
+   make it deliberate - or lift truly global shortcuts up.
+9. **Group-by controls must relocate.** "Group by result"/"Group by scope"
+   checkboxes live in the *diff* settings cog today (`SettingsPopup` in the
+   Changes toolbar). Tests-as-a-view needs them moved into the Tests toolbar
+   (row 2), else they'd be stranded in a different tab.
 
 (Dropped: an earlier "two adjacent base selectors" concern - the metadata
 row's base-*branch* selector already sits beside the diff's comparison
@@ -332,7 +360,8 @@ selectors today; moving that block into a right panel changes nothing.)
   switching (e.g. `web/src/components/InspectorPane.tsx`).
 - New: a split-pane primitive (or hand-rolled divider) + `StorageKeys` entry.
 - `web/src/components/TestsPanel.tsx`, `PreviewPanel.tsx`, `ArtifactsPanel.tsx`
-  - adapt from `CollapsibleCard` framing to first-class views.
+  - adapt from `CollapsibleCard` framing to first-class views (`ArtifactsPanel`
+  already renders card-less; it mainly folds into the Diff view).
 - `web/src/components/AgentTopBar.tsx` - add the inspector-pane hide/show
   toggle (mirror the show-sidebar button); content otherwise unchanged; verify
   it spans the full width above both panes.
