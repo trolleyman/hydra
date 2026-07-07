@@ -32,6 +32,11 @@ type chatClientMsg struct {
 	// CLI verbatim (the client owns the block shapes; the daemon only wraps
 	// them in the stdin envelope).
 	Content json.RawMessage `json:"content,omitempty"`
+	// Model is the set_model target (a CLI alias like "sonnet").
+	Model string `json:"model,omitempty"`
+	// Response is a control_response payload (e.g. AskUserQuestion answers),
+	// forwarded verbatim like Content.
+	Response json.RawMessage `json:"response,omitempty"`
 }
 
 // chatEventFrame is the server -> client wrapper around one stream-json line.
@@ -65,6 +70,26 @@ func (s *Server) handleChatClientMessage(sessionID string, data []byte) {
 		id := fmt.Sprintf("hydra-interrupt-%d", chatInterruptSeq.Add(1))
 		if err := s.Sessions.Write(sessionID, claudestream.InterruptLine(id)); err != nil {
 			log.Printf("chat ws: write interrupt to %q: %v", sessionID, err)
+		}
+	case "set_model":
+		if msg.Model == "" {
+			log.Printf("chat ws: set_model without a model for %q", sessionID)
+			return
+		}
+		id := fmt.Sprintf("hydra-set-model-%d", chatInterruptSeq.Add(1))
+		if err := s.Sessions.Write(sessionID, claudestream.SetModelLine(id, msg.Model)); err != nil {
+			log.Printf("chat ws: write set_model to %q: %v", sessionID, err)
+		}
+	case "control_response":
+		// The client answers a CLI control_request (AskUserQuestion) with a
+		// payload the daemon forwards verbatim.
+		line, err := claudestream.ControlResponseLine(msg.Response)
+		if err != nil {
+			log.Printf("chat ws: bad control_response for %q: %v", sessionID, err)
+			return
+		}
+		if err := s.Sessions.Write(sessionID, line); err != nil {
+			log.Printf("chat ws: write control_response to %q: %v", sessionID, err)
 		}
 	case "resize":
 		// Chat sessions have no PTY; nothing to resize.

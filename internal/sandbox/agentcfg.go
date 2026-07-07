@@ -432,9 +432,16 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // chatMode (Claude only, CHAT_MODE.md) drives the CLI's structured stream-json
 // interface instead of the interactive TUI: the process stays alive reading
 // user turns from stdin, and the task prompt is sent as the first stdin
-// message (see SpawnHead) rather than as argv. --continue composes with it on
-// resume, so terminal and chat mode share one conversation transcript.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool) ([]string, error) {
+// message (see SpawnHead) rather than as argv.
+//
+// resumeSessionID (Claude only) resumes that exact conversation with
+// --resume <id> instead of --continue. Load-bearing for the chat->terminal
+// mode toggle: the interactive TUI's --continue skips conversations recorded
+// by -p/stream-json runs ("No conversation found to continue",
+// spike-verified), while an explicit --resume <id> loads them fine. Callers
+// pass the newest non-sidechain transcript's id
+// (claudestream.LatestSessionID); empty falls back to --continue.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID string) ([]string, error) {
 	if chatMode && agentType != AgentTypeClaude {
 		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude agents, not %q", agentType))
 	}
@@ -447,6 +454,12 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
 		}
+		resumeArgs := func() []string {
+			if resumeSessionID != "" {
+				return []string{"--resume", resumeSessionID}
+			}
+			return []string{"--continue"}
+		}
 		if chatMode {
 			// stream-json output requires --verbose in -p mode.
 			// --replay-user-messages echoes stdin user turns back onto stdout,
@@ -456,6 +469,12 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 			// --include-partial-messages adds stream_event token deltas for
 			// live streaming; those are filtered OUT of the scrollback ring
 			// (session.RingFilter) so replay stays compact.
+			// --permission-prompt-tool stdio is what exposes AskUserQuestion
+			// headless: the tool call arrives as a can_use_tool
+			// control_request the chat client answers over the socket. It
+			// composes with --dangerously-skip-permissions - everything not
+			// requiring user interaction is auto-allowed without a
+			// control_request (spike-verified).
 			argv = append(argv,
 				"-p",
 				"--input-format", "stream-json",
@@ -463,17 +482,18 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 				"--verbose",
 				"--replay-user-messages",
 				"--include-partial-messages",
+				"--permission-prompt-tool", "stdio",
 			)
 			if resume {
-				argv = append(argv, "--continue")
+				argv = append(argv, resumeArgs()...)
 			}
 			return argv, nil
 		}
 		if resume {
-			// --continue resumes the most recent conversation in the worktree
-			// directly; --resume would pop an interactive session picker that
-			// exits the process if cancelled.
-			return append(argv, "--continue"), nil
+			// Explicit --resume <id> when the transcript is known (see above);
+			// bare --continue otherwise. A bare --resume would pop an
+			// interactive session picker that exits the process if cancelled.
+			return append(argv, resumeArgs()...), nil
 		}
 		if prompt != "" {
 			argv = append(argv, "--", prompt)

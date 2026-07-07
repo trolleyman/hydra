@@ -850,7 +850,7 @@ Check items off in the commit that lands them.
     bordered code chips in all markdown (dark like image2, light like image4).
 11. [x] **Ctrl+C interrupts.** When a turn is running, focus is in the chat and
     no text is selected, Ctrl+C sends interrupt.
-12. [ ] **Composer layout + model dropdown.** One rounded card: textarea on
+12. [x] **Composer layout + model dropdown.** One rounded card: textarea on
     top, controls row below (no separator) - "+" attach bottom-left, model
     dropdown bottom-right wired to the CLI's live set_model control request
     (spike-verified; persists in the transcript across resumes).
@@ -880,7 +880,7 @@ Check items off in the commit that lands them.
     the head's worktree prefix from absolute paths.
 20. [x] **Chat scroll memory.** Per-agent (agentViewPrefs) - switching away and
     back restores the scroll offset when it wasn't pinned to the bottom.
-21. [ ] **Fix chat->terminal switch.** Interactive `--continue` refuses
+21. [x] **Fix chat->terminal switch.** Interactive `--continue` refuses
     -p/stream-json conversations ("No conversation found to continue",
     spike-verified); resume Claude heads with `--resume <session-id>` from the
     newest non-sidechain transcript instead, falling back to --continue.

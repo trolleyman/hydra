@@ -542,7 +542,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model, opts.ChatMode)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "")
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -1001,7 +1001,17 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// saved with (and any in-session change), avoiding a cache-missing re-read.
 	// head.ChatMode relaunches in whatever mode the head is currently set to,
 	// so a mode toggled while the session was down takes effect here.
-	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "", head.ChatMode)
+	// Claude resumes by explicit session id (the newest non-sidechain
+	// transcript): the TUI's --continue can't see conversations recorded by a
+	// chat-mode (-p/stream-json) run, so this is what makes the chat->terminal
+	// toggle actually restore the conversation. Empty (fresh head, no
+	// transcript yet) falls back to --continue.
+	resumeSession := ""
+	if head.AgentType == sandbox.AgentTypeClaude {
+		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		resumeSession = claudestream.LatestSessionID(dir)
+	}
+	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "", head.ChatMode, resumeSession)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}

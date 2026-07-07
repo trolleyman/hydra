@@ -58,7 +58,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false)
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -67,8 +67,48 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, ""); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
+	}
+}
+
+// TestAgentArgvChatAndResumeSession covers the chat-mode stream-json argv and
+// the explicit --resume <id> resume path (which is what lets a head toggled
+// from chat mode back to terminal mode restore its conversation - the TUI's
+// --continue can't see -p-recorded sessions).
+func TestAgentArgvChatAndResumeSession(t *testing.T) {
+	chatFlags := []string{
+		"-p", "--input-format", "stream-json", "--output-format", "stream-json",
+		"--verbose", "--replay-user-messages", "--include-partial-messages",
+		"--permission-prompt-tool", "stdio",
+	}
+	cases := []struct {
+		name      string
+		resume    bool
+		chatMode  bool
+		sessionID string
+		want      []string
+	}{
+		{"chat fresh", false, true, "", append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...)},
+		{"chat resume no id", true, true, "", append(append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...), "--continue")},
+		{"chat resume with id", true, true, "abc-123", append(append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...), "--resume", "abc-123")},
+		{"terminal resume with id", true, false, "abc-123", []string{"claude", "--dangerously-skip-permissions", "--resume", "abc-123"}},
+		{"terminal resume no id", true, false, "", []string{"claude", "--dangerously-skip-permissions", "--continue"}},
+		// The session id only matters on resume; a fresh spawn ignores it.
+		{"fresh ignores id", false, false, "abc-123", []string{"claude", "--dangerously-skip-permissions"}},
+	}
+	for _, c := range cases {
+		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID)
+		if err != nil {
+			t.Fatalf("%s: AgentArgv error: %v", c.name, err)
+		}
+		if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+			t.Errorf("%s: AgentArgv = %v, want %v", c.name, got, c.want)
+		}
+	}
+
+	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, ""); err == nil {
+		t.Error("chat mode for gemini: expected error, got nil")
 	}
 }
 
@@ -88,7 +128,7 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false)
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}

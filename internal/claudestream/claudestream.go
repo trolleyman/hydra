@@ -120,6 +120,29 @@ func SetModelLine(requestID, model string) []byte {
 	return append(line, '\n')
 }
 
+// ControlResponseLine wraps a client-built control response payload (e.g. the
+// AskUserQuestion answers - a can_use_tool allow with updatedInput) into the
+// stdin line the CLI expects. The payload is forwarded verbatim; the client
+// owns its shape, exactly like user_message content blocks. response must be
+// a JSON object.
+func ControlResponseLine(response json.RawMessage) ([]byte, error) {
+	if !json.Valid(response) {
+		return nil, errtrace.Errorf("invalid control response JSON")
+	}
+	trimmed := bytes.TrimSpace(response)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, errtrace.Errorf("control response must be a JSON object")
+	}
+	line, err := json.Marshal(map[string]any{
+		"type":     "control_response",
+		"response": json.RawMessage(trimmed),
+	})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return append(line, '\n'), nil
+}
+
 // LineBuffer reassembles complete newline-terminated lines from an arbitrary
 // byte-chunk stream (the session fan-out delivers whatever read sizes the pipe
 // produced, and the scrollback-ring replay may even start mid-line after a
