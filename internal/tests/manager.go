@@ -954,7 +954,7 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
 		opts.RestoreRO = restore
 		// Apply cow_paths so a shared host cache the project isolates per-head
 		// (e.g. ~/.gradle) is writable for the test run too - otherwise a

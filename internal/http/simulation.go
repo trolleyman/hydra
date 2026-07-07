@@ -13,7 +13,24 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/forge"
 )
+
+// simAgentByID returns a minimal fixture AgentResponse for the given id, used by
+// the review/publish simulation handlers that echo an updated agent.
+func simAgentByID(id string) api.AgentResponse {
+	createdAt := simNow().Add(-1 * time.Hour).Unix()
+	return api.AgentResponse{
+		Id:            id,
+		Title:         ptr("Simulated agent " + id),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/" + id),
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		AgentStatus:   &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
+	}
+}
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
@@ -343,6 +360,19 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		if resp[i].Id == "agent-md" || resp[i].Id == "agent-queued" {
 			resp[i].MergeWhenGreen = ptr(true)
 		}
+		// agent-approval demonstrates a linked MR (View MR + state chip); agent-1 a
+		// linked, ahead-by-1 head (Push to MR); agent-2 an unlinked head with a
+		// seeded downstream branch (Create MR).
+		switch resp[i].Id {
+		case "agent-approval":
+			resp[i].DownstreamBranch = ptr("feat/mcp-github")
+			resp[i].Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+		case "agent-1":
+			resp[i].DownstreamBranch = ptr("feat/rate-limit")
+			resp[i].Review = simReviewLink("open", forge.CISuccess, 2, 0, 1, 0)
+		case "agent-2":
+			resp[i].DownstreamBranch = ptr("feat/small-fix")
+		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
@@ -564,6 +594,84 @@ func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, 
 
 func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.MergeAgentParams) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// simReviewLink builds a fixture ReviewLink for the simulation server.
+func simReviewLink(state, ci string, approvals, unresolved, ahead, behind int) *api.ReviewLink {
+	return &api.ReviewLink{
+		Url:          "https://gitlab.example.com/team/repo/-/merge_requests/42",
+		Id:           "42",
+		Provider:     forge.ProviderGitLab,
+		TargetBranch: ptr("main"),
+		Ahead:        ptr(ahead),
+		Behind:       ptr(behind),
+		State: &api.ReviewState{
+			State:                 state,
+			CiStatus:              ptr(ci),
+			Approvals:             ptr(approvals),
+			ApprovalsRequired:     ptr(2),
+			UnresolvedDiscussions: ptr(unresolved),
+			Mergeable:             ptr(state == "open" && ci == forge.CISuccess),
+		},
+	}
+}
+
+func (s *SimulationServer) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.PublishAgentParams) {
+	resp := simAgentByID(id)
+	resp.DownstreamBranch = ptr("feat/published")
+	resp.Review = simReviewLink("draft", forge.CIPending, 0, 0, 0, 0)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *SimulationServer) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	resp := simAgentByID(id)
+	resp.Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	resp := simAgentByID(id)
+	resp.Review = simReviewLink("open", forge.CISuccess, 1, 0, 0, 0)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.SetDownstreamBranchJSONBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	resp := simAgentByID(id)
+	resp.DownstreamBranch = &body.DownstreamBranch
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (s *SimulationServer) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteJSON(w, http.StatusOK, api.ReviewConfigResponse{
+		Configured:         true,
+		Provider:           forge.ProviderGitLab,
+		ProviderSetting:    ptr("auto"),
+		Remote:             "origin",
+		RemoteUrl:          ptr("git@gitlab.example.com:team/repo.git"),
+		BrowseUrl:          ptr("https://gitlab.example.com/team/repo"),
+		TargetBranch:       "main",
+		Auth:               "cli",
+		AuthStatus:         ptr("glab: logged in to gitlab.example.com as sim-user"),
+		Authenticated:      ptr(true),
+		DefaultAction:      "create_mr",
+		PushBranchTemplate: ptr("feat/{ticket}-{id}"),
+		Draft:              ptr(true),
+		Squash:             ptr(true),
+		DeleteRemoteBranch: ptr(true),
+		RequireLocalTests:  ptr(true),
+		PublishWhenGreen:   ptr(false),
+		ProtectedBranches:  &[]string{"main"},
+	})
 }
 
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
@@ -2476,6 +2584,12 @@ func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version st
 	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
 	st.Connections = ptr(1)
 	st.Url = ptr("http://" + r.Host + "/")
+	// The "Latest changes" (uncommitted) channel runs in its own checkout that
+	// mirrors the live worktree; show it going stale so the restart affordance
+	// is exercised in the sim.
+	if version == "uncommitted" {
+		st.Stale = ptr(true)
+	}
 	return st
 }
 

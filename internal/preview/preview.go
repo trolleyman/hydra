@@ -1,6 +1,7 @@
 // Package preview runs live "server" artifacts ([[artifacts]] type = "server"):
 // per-project commands that start an HTTP server from a checkout of the
-// repository, exposed to the browser through a per-instance reverse-proxy port.
+// repository, exposed to the browser through a stable per-slot reverse-proxy
+// port.
 //
 // Unlike the run-to-completion generators in internal/artifacts, a preview has
 // no cached output and no terminal state - it is a supervised child process
@@ -9,10 +10,14 @@
 // timeout). The proxy listener itself persists, so revisiting a preview link
 // after teardown transparently respawns the server.
 //
-// An instance is keyed by (project root, script name, version), where version
-// follows the artifacts vocabulary: a head's live worktree, or a pinned commit
-// materialized into a dedicated ephemeral checkout under
-// .hydra/local/artifacts/preview/.
+// There is exactly one visible server per (project, script, head): a "slot"
+// that owns the proxy port and follows the diff viewer's "to" selection. The
+// selection maps to a channel - the head's live worktree, a pinned commit
+// (materialized into a dedicated ephemeral checkout under
+// .hydra/local/artifacts/preview/), or the branch tip. Switching channels swaps
+// the backing server; the branch-tip channel additionally rebuilds in the
+// background and hot-swaps when the tip moves, so the URL never changes. Those
+// backing servers are `instance`s, an implementation detail behind the slot.
 package preview
 
 import (
@@ -22,7 +27,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +40,7 @@ import (
 const (
 	// ReadyMarker is the optional stdout line a server script prints to declare
 	// readiness explicitly (e.g. it binds its port early but warms up late).
-	// Without it, the first successful TCP dial of the child port counts.
+	// Without it, the first successful HTTP response from the child port counts.
 	ReadyMarker = "::hydra:server:ready::"
 	// ProgressMarker mirrors internal/artifacts.ProgressMarker for the loading
 	// page headline (kept as a separate const to avoid the package dependency).
@@ -48,10 +52,6 @@ const (
 	// DefaultReadyTimeout bounds spawn-to-ready; server commands often build
 	// first, so it is generous.
 	DefaultReadyTimeout = 15 * time.Minute
-	// stoppedInstanceTTL removes a torn-down commit-pinned instance (freeing its
-	// port and ephemeral checkout) after this long without any activity. Live
-	// worktree instances are reclaimed by the head reaper instead.
-	stoppedInstanceTTL = 2 * time.Hour
 	// logRingSize bounds the in-memory per-instance log (most recent lines win).
 	logRingSize = 500
 )
@@ -67,23 +67,32 @@ const (
 	StateError    State = "error"
 )
 
-// Version identifies which checkout of the repository an instance serves.
-// Exactly one of WorktreeDir or SHA is set: a head's live worktree (HeadID set
-// alongside for teardown bookkeeping), or a pinned commit materialized into an
-// ephemeral checkout owned by the instance.
+// Version identifies which checkout of the repository a slot should serve, from
+// the diff viewer's "to" selection. Exactly one backing shape is set: a head's
+// live worktree (WorktreeDir), or a commit (SHA). A SHA with Branch set is the
+// branch-tip channel - it follows that branch, rebuilding in the background when
+// the tip moves; a SHA without Branch is a pinned commit that never moves.
+// HeadID scopes the slot to the viewing head's page.
 type Version struct {
 	HeadID      string
 	WorktreeDir string
 	SHA         string
+	Branch      string
 }
 
-// key returns the map-key segment for this version, reusing the artifacts
-// cache vocabulary (worktree/... vs commit/...).
-func (v Version) key() string {
-	if v.WorktreeDir != "" {
-		return "worktree/" + v.HeadID
+// channelID names the slot channel this version selects. A slot keeps serving
+// its current server as long as the channel is unchanged; a different channel
+// swaps the backing server. Tip channels omit the SHA so a moved tip stays the
+// same channel (handled by background hot-swap), pinned commits include it.
+func (v Version) channelID() string {
+	switch {
+	case v.WorktreeDir != "":
+		return "worktree"
+	case v.Branch != "":
+		return "tip:" + v.Branch
+	default:
+		return "commit:" + v.SHA
 	}
-	return "commit/" + v.SHA
 }
 
 // Label is the human-readable version tag shown in the UI.
@@ -91,10 +100,14 @@ func (v Version) Label() string {
 	if v.WorktreeDir != "" {
 		return "uncommitted"
 	}
-	if len(v.SHA) > 8 {
-		return v.SHA[:8]
+	return shortSHA(v.SHA)
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
 	}
-	return v.SHA
+	return sha
 }
 
 // LogLine is one captured output line, tagged with its stream ("stdout" or
@@ -104,18 +117,19 @@ type LogLine struct {
 	Stream string `json:"stream"`
 }
 
-// Status is a snapshot of one instance (or a configured-but-never-started
-// script, which reports StateStopped with no port).
+// Status is a snapshot of one slot's front server (or a configured-but-never-
+// started script, which reports StateStopped with no port).
 type Status struct {
 	Name      string
 	State     State
-	Version   string // Version.Label()
-	Port      int    // proxy listener port; 0 until a listener exists
+	Version   string // Version.Label() of the front server
+	Port      int    // slot proxy listener port; 0 until a slot exists
 	Pid       int    // child pid while starting/running
 	Inflight  int    // in-flight proxied requests (incl. open WS tunnels)
 	StartedAt time.Time
 	Progress  string // latest ::hydra:progress:: headline while starting
 	Message   string // error detail when State == StateError
+	Stale     bool   // worktree channel: live code changed since this server built
 	Log       []LogLine
 }
 
@@ -126,12 +140,11 @@ type Authorizer interface {
 	Authorized(r *http.Request) bool
 }
 
-// Manager owns every preview instance across projects. Construct with
-// NewManager, wire StopHead/StopAll into head/daemon teardown, and run the
-// reaper via Run.
+// Manager owns every preview slot across projects. Construct with NewManager,
+// wire StopHead/StopAll into head/daemon teardown, and run the reaper via Run.
 type Manager struct {
-	mu        sync.Mutex
-	instances map[string]*instance
+	mu    sync.Mutex
+	slots map[string]*slot
 
 	bindHost string // listener bind host, the web server's resolved host
 	auth     Authorizer
@@ -155,7 +168,7 @@ func NewManager(bindHost string, auth Authorizer) *Manager {
 		bindHost = "127.0.0.1"
 	}
 	return &Manager{
-		instances:    map[string]*instance{},
+		slots:        map[string]*slot{},
 		bindHost:     bindHost,
 		auth:         auth,
 		idleDefault:  DefaultIdleTimeout,
@@ -172,110 +185,110 @@ func previewDir(projectRoot string) string {
 	return filepath.Join(paths.GetArtifactsDirFromProjectRoot(projectRoot), "preview")
 }
 
-func instanceKey(root, script, versionKey string) string {
-	return root + "\x00" + script + "\x00" + versionKey
+// slotKey identifies the one slot for a (project, script, head) view. The
+// version/channel is deliberately NOT part of the key: one slot follows the
+// selection, rather than a new instance piling up per version.
+func slotKey(root, script, headID string) string {
+	return root + "\x00" + script + "\x00" + headID
 }
 
-// Ensure returns the instance for (root, spec, version), creating its listener
-// on first use, and spawns the child if it is not already starting/running.
-// The returned Status carries the proxy port the UI should link to.
+// Ensure returns the slot for (root, spec, head), creating its listener on
+// first use, points it at the selected version's channel, and starts the
+// server. The returned Status carries the proxy port the UI should link to.
 func (m *Manager) Ensure(root string, spec config.ArtifactScript, version Version) (Status, error) {
-	inst, err := m.ensureInstance(root, spec, version)
+	s, err := m.ensureSlot(root, spec, version)
 	if err != nil {
 		return Status{}, errtrace.Wrap(err)
 	}
-	inst.ensureStarted()
-	return inst.status(), nil
+	if err := s.retarget(spec, version, true); err != nil {
+		return Status{}, errtrace.Wrap(err)
+	}
+	return s.status(), nil
 }
 
-// Peek returns the current status for (root, script, version) without creating
-// anything: a configured script with no instance reports StateStopped, port 0.
+// Peek returns the current status of the slot's front server without creating
+// or starting anything: no slot yet reports StateStopped with port 0.
 func (m *Manager) Peek(root string, spec config.ArtifactScript, version Version) Status {
 	m.mu.Lock()
-	inst := m.instances[instanceKey(root, spec.Name, version.key())]
+	s := m.slots[slotKey(root, spec.Name, version.HeadID)]
 	m.mu.Unlock()
-	if inst == nil {
+	if s == nil {
 		return Status{Name: spec.Name, State: StateStopped, Version: version.Label()}
 	}
-	return inst.status()
+	return s.status()
 }
 
-// Others returns statuses of live instances of this script for OTHER versions
-// than the given one (e.g. the page selection moved on but an old demo is
-// still running), most recently active first.
-func (m *Manager) Others(root string, script string, version Version) []Status {
-	cur := instanceKey(root, script, version.key())
-	prefix := root + "\x00" + script + "\x00"
-	var out []Status
-	m.mu.Lock()
-	for k, inst := range m.instances {
-		if k != cur && strings.HasPrefix(k, prefix) {
-			if st := inst.status(); st.State != StateStopped {
-				out = append(out, st)
-			}
-		}
-	}
-	m.mu.Unlock()
-	return out
-}
-
-// Stop tears down the child of (root, script, version) but keeps the instance
-// and its listener for a later respawn. No-op if there is no such instance.
+// Stop tears down the slot's server for (root, script, head) but keeps the slot
+// and its listener for a later respawn. No-op if there is no such slot.
 func (m *Manager) Stop(root, script string, version Version) {
 	m.mu.Lock()
-	inst := m.instances[instanceKey(root, script, version.key())]
+	s := m.slots[slotKey(root, script, version.HeadID)]
 	m.mu.Unlock()
-	if inst != nil {
-		inst.stopChild(StateStopped, "")
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	active := s.active
+	pending := s.pending
+	s.pending = nil
+	s.mu.Unlock()
+	if active != nil {
+		active.stopChild(StateStopped, "")
+	}
+	if pending != nil {
+		go pending.teardown()
 	}
 }
 
-// StopHead removes every live-worktree instance belonging to the given head
-// (its worktree is going away). Commit-pinned instances are head-independent
-// and unaffected.
+// StopHead removes every slot belonging to the given head (its page is going
+// away with the worktree). Commit and tip channels the head was viewing go with
+// it - the slot is per-head.
 func (m *Manager) StopHead(root, headID string) {
-	m.removeMatching(func(inst *instance) bool {
-		return inst.root == root && inst.version.HeadID == headID && inst.version.WorktreeDir != ""
-	})
+	m.removeSlotsMatching(func(s *slot) bool { return s.root == root && s.headID == headID })
 }
 
-// StopAll tears down every instance: children killed, listeners closed,
-// ephemeral checkouts removed. Called on daemon shutdown.
+// StopAll tears down every slot: servers killed, listeners closed, ephemeral
+// checkouts removed. Called on daemon shutdown.
 func (m *Manager) StopAll() {
-	m.removeMatching(func(*instance) bool { return true })
+	m.removeSlotsMatching(func(*slot) bool { return true })
 }
 
-// removeMatching removes (fully: child, listener, checkout) every instance the
-// predicate selects.
-func (m *Manager) removeMatching(match func(*instance) bool) {
-	var doomed []*instance
+// removeSlotsMatching removes (fully: servers, listener, checkouts) every slot
+// the predicate selects.
+func (m *Manager) removeSlotsMatching(match func(*slot) bool) {
+	var doomed []*slot
 	m.mu.Lock()
-	for k, inst := range m.instances {
-		if match(inst) {
-			doomed = append(doomed, inst)
-			delete(m.instances, k)
+	for k, s := range m.slots {
+		if match(s) {
+			doomed = append(doomed, s)
+			delete(m.slots, k)
 		}
 	}
 	m.mu.Unlock()
-	for _, inst := range doomed {
-		inst.remove()
+	for _, s := range doomed {
+		s.teardown()
 	}
 }
 
-// ensureInstance returns the existing instance or creates one: sweep orphans
-// once per project, materialize the commit checkout if needed, allocate a
-// listener port from the project's configured range, and start serving.
-func (m *Manager) ensureInstance(root string, spec config.ArtifactScript, version Version) (*instance, error) {
-	key := instanceKey(root, spec.Name, version.key())
+// removeSlot removes one slot from the map (if still current) and tears it down.
+func (m *Manager) removeSlot(s *slot) {
 	m.mu.Lock()
-	if inst := m.instances[key]; inst != nil {
-		// Config may have changed since the instance was created (timeouts,
-		// command); adopt the latest spec for future spawns.
-		inst.mu.Lock()
-		inst.spec = spec
-		inst.mu.Unlock()
+	if m.slots[s.key] == s {
+		delete(m.slots, s.key)
+	}
+	m.mu.Unlock()
+	s.teardown()
+}
+
+// ensureSlot returns the existing slot or creates one: sweep orphans once per
+// project, allocate a listener port from the project's configured range, and
+// start serving. Instances (backing servers) are created later by retarget.
+func (m *Manager) ensureSlot(root string, spec config.ArtifactScript, version Version) (*slot, error) {
+	key := slotKey(root, spec.Name, version.HeadID)
+	m.mu.Lock()
+	if s := m.slots[key]; s != nil {
 		m.mu.Unlock()
-		return inst, nil
+		return s, nil
 	}
 	sweep := !m.sweptRoots[root]
 	m.sweptRoots[root] = true
@@ -285,67 +298,41 @@ func (m *Manager) ensureInstance(root string, spec config.ArtifactScript, versio
 		m.sweepOrphans(root)
 	}
 
-	runDir := version.WorktreeDir
-	ownsCheckout := false
-	if runDir == "" {
-		dir := filepath.Join(previewDir(root), "checkouts", spec.Name+"-"+version.SHA[:min(len(version.SHA), 12)])
-		// Defensively clear any stale worktree at the path before adding.
-		_ = git.RemoveWorktree(root, dir)
-		_ = os.RemoveAll(dir)
-		if err := git.AddDetachedWorktree(root, dir, version.SHA); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("materialize preview checkout: %w", err))
-		}
-		runDir = dir
-		ownsCheckout = true
-	}
-
 	ln, port, err := m.allocListener(root)
 	if err != nil {
-		if ownsCheckout {
-			_ = git.RemoveWorktree(root, runDir)
-			_ = os.RemoveAll(runDir)
-		}
 		return nil, errtrace.Wrap(err)
 	}
-
-	inst := &instance{
-		mgr:          m,
-		root:         root,
-		spec:         spec,
-		version:      version,
-		runDir:       runDir,
-		ownsCheckout: ownsCheckout,
-		ln:           ln,
-		port:         port,
-		state:        StateStopped,
-		lastActive:   time.Now(),
+	s := &slot{
+		mgr:    m,
+		root:   root,
+		name:   spec.Name,
+		headID: version.HeadID,
+		key:    key,
+		ln:     ln,
+		port:   port,
+		spec:   spec,
 	}
-	inst.srv = &http.Server{
-		Handler:           http.HandlerFunc(inst.serveHTTP),
+	s.srv = &http.Server{
+		Handler:           http.HandlerFunc(s.serveHTTP),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
 	m.mu.Lock()
-	if existing := m.instances[key]; existing != nil {
-		// Lost a race; discard ours.
+	if existing := m.slots[key]; existing != nil {
 		m.mu.Unlock()
 		_ = ln.Close()
-		if ownsCheckout {
-			_ = git.RemoveWorktree(root, runDir)
-			_ = os.RemoveAll(runDir)
-		}
 		return existing, nil
 	}
-	m.instances[key] = inst
+	m.slots[key] = s
 	m.mu.Unlock()
 
-	go func() { _ = inst.srv.Serve(ln) }()
-	return inst, nil
+	go func() { _ = s.srv.Serve(ln) }()
+	return s, nil
 }
 
 // allocListener binds the first free port in the project's configured preview
 // range on the manager's bind host. Busy ports (other daemons, dev servers,
-// our own instances) are skipped.
+// our own slots) are skipped.
 func (m *Manager) allocListener(root string) (net.Listener, int, error) {
 	cfg, _ := config.Load(root)
 	lo, hi := cfg.ResolvePreviewPortRange()
@@ -359,8 +346,8 @@ func (m *Manager) allocListener(root string) (net.Listener, int, error) {
 }
 
 // sweepOrphans removes preview checkouts left behind by a previous daemon run
-// (crash or unclean shutdown). Called once per project before the first
-// instance is created, so nothing here can belong to a live instance.
+// (crash or unclean shutdown). Called once per project before the first slot is
+// created, so nothing here can belong to a live instance.
 func (m *Manager) sweepOrphans(root string) {
 	dir := filepath.Join(previewDir(root), "checkouts")
 	entries, err := os.ReadDir(dir)
@@ -375,10 +362,10 @@ func (m *Manager) sweepOrphans(root string) {
 	_ = git.PruneWorktrees(root)
 }
 
-// Run drives the reaper until ctx is done: idle instances are torn down,
-// instances whose live worktree vanished (head killed/merged via any path) are
-// removed entirely, and long-stopped commit instances release their checkout
-// and port. Call as a goroutine.
+// Run drives the reaper until ctx is done: idle servers are torn down, slots
+// whose live worktree vanished (head killed/merged via any path) are removed
+// entirely, and branch-tip slots rebuild+hot-swap when their tip moves. Call as
+// a goroutine.
 func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(m.reapInterval)
 	defer t.Stop()
@@ -393,43 +380,51 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 
-// reap applies the periodic lifecycle rules to every instance.
+// reap applies the periodic lifecycle rules to every slot.
 func (m *Manager) reap() {
 	m.mu.Lock()
-	all := make([]*instance, 0, len(m.instances))
-	for _, inst := range m.instances {
-		all = append(all, inst)
+	all := make([]*slot, 0, len(m.slots))
+	for _, s := range m.slots {
+		all = append(all, s)
 	}
 	m.mu.Unlock()
 
 	now := time.Now()
-	for _, inst := range all {
-		// A head's worktree was removed: the instance is unservable, remove it.
-		if inst.version.WorktreeDir != "" {
-			if _, err := os.Stat(inst.version.WorktreeDir); err != nil {
-				m.removeMatching(func(x *instance) bool { return x == inst })
+	for _, s := range all {
+		s.mu.Lock()
+		active := s.active
+		s.mu.Unlock()
+
+		// A head's worktree was removed: the slot is unservable, remove it.
+		if active != nil && active.version.WorktreeDir != "" {
+			if _, err := os.Stat(active.version.WorktreeDir); err != nil {
+				m.removeSlot(s)
 				continue
 			}
 		}
-		inst.mu.Lock()
-		state := inst.state
-		idleFor := now.Sub(inst.lastActive)
-		inflight := inst.inflight
-		idleTimeout := inst.idleTimeout()
-		inst.mu.Unlock()
 
-		switch state {
-		case StateRunning, StateStarting:
-			if inflight == 0 && idleFor > idleTimeout {
-				inst.stopChild(StateStopped, "")
-			}
-		case StateStopped, StateError:
-			// Commit-pinned instances hold a checkout + port; release them after a
-			// long quiet period. Worktree instances are cheap (no checkout) and die
-			// with their head, so they are kept for instant respawn.
-			if inst.ownsCheckout && idleFor > stoppedInstanceTTL {
-				m.removeMatching(func(x *instance) bool { return x == inst })
+		if active != nil {
+			active.mu.Lock()
+			state := active.state
+			idleFor := now.Sub(active.lastActive)
+			inflight := active.inflight
+			idleTimeout := active.idleTimeout()
+			active.mu.Unlock()
+			if (state == StateRunning || state == StateStarting) && inflight == 0 && idleFor > idleTimeout {
+				active.stopChild(StateStopped, "")
+				// A background hot-swap build nobody is watching is pointless.
+				s.mu.Lock()
+				p := s.pending
+				s.pending = nil
+				s.mu.Unlock()
+				if p != nil {
+					go p.teardown()
+				}
+				continue
 			}
 		}
+
+		// Branch-tip slots follow their tip in the background.
+		s.followTip()
 	}
 }

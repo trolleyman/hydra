@@ -38,6 +38,39 @@ type Deps struct {
 	// the user decides (or it times out). It returns whether it was approved and a
 	// human-readable message to relay to the agent.
 	RequestAccess func(name string) (approved bool, message string)
+	// GetReview returns this head's current MR link + cached forge state (status,
+	// unresolved discussions), or nil when unavailable. Populated from the per-head
+	// review file the MR watcher writes; nil disables the review tools. See
+	// NON_LOCAL_INTEGRATION.md 3.5a.
+	GetReview func() *ReviewFile
+}
+
+// ReviewFile is the per-head MR snapshot the daemon's MR watcher writes and the
+// `hydra mcp` server reads for the review tools. It is this head's MR by
+// construction (the file is bound only into this head's sandbox).
+type ReviewFile struct {
+	Linked                bool            `json:"linked"`
+	URL                   string          `json:"url,omitempty"`
+	ID                    string          `json:"id,omitempty"`
+	Provider              string          `json:"provider,omitempty"`
+	TargetBranch          string          `json:"target_branch,omitempty"`
+	State                 string          `json:"state,omitempty"`
+	CIStatus              string          `json:"ci_status,omitempty"`
+	Approvals             int             `json:"approvals,omitempty"`
+	ApprovalsRequired     int             `json:"approvals_required,omitempty"`
+	UnresolvedDiscussions int             `json:"unresolved_discussions,omitempty"`
+	Mergeable             bool            `json:"mergeable,omitempty"`
+	Comments              []ReviewComment `json:"comments,omitempty"`
+	UpdatedAt             string          `json:"updated_at,omitempty"`
+}
+
+// ReviewComment is one unresolved review thread with file/line context.
+type ReviewComment struct {
+	Author string `json:"author,omitempty"`
+	Body   string `json:"body,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Line   int    `json:"line,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 // rpcRequest / rpcResponse are the subset of JSON-RPC 2.0 we parse/emit. A
@@ -107,7 +140,7 @@ func dispatch(deps Deps, req rpcRequest) (rpcResponse, bool) {
 	case "ping":
 		base.Result = map[string]any{}
 	case "tools/list":
-		base.Result = map[string]any{"tools": toolDefs()}
+		base.Result = map[string]any{"tools": toolDefs(deps)}
 	case "tools/call":
 		base.Result = callTool(deps, req.Params)
 	default:
@@ -116,9 +149,10 @@ func dispatch(deps Deps, req rpcRequest) (rpcResponse, bool) {
 	return base, true
 }
 
-// toolDefs is the advertised tool catalog (tools/list).
-func toolDefs() []map[string]any {
-	return []map[string]any{
+// toolDefs is the advertised tool catalog (tools/list). The review tools are
+// advertised only when GetReview is wired (a review-capable head).
+func toolDefs(deps Deps) []map[string]any {
+	defs := []map[string]any{
 		{
 			"name":        "list_available_mcp_servers",
 			"description": "List MCP servers configured on the host that are NOT yet available to you. Use this to discover tools you could request access to.",
@@ -137,6 +171,23 @@ func toolDefs() []map[string]any {
 			},
 		},
 	}
+	if deps.GetReview != nil {
+		defs = append(defs,
+			map[string]any{
+				"name":        "get_review_status",
+				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Scoped to this head's own MR only.",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+				"annotations": map[string]any{"readOnlyHint": true},
+			},
+			map[string]any{
+				"name":        "get_review_comments",
+				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Use this to address reviewer feedback, then commit your changes.",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+				"annotations": map[string]any{"readOnlyHint": true},
+			},
+		)
+	}
+	return defs
 }
 
 // callTool dispatches a tools/call by name and returns an MCP tool result
@@ -160,9 +211,103 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		approved, msg := deps.RequestAccess(args.Name)
 		return textResult(msg, !approved)
+	case "get_review_status":
+		return textResult(reviewStatusText(deps), false)
+	case "get_review_comments":
+		return textResult(reviewCommentsText(deps), false)
 	default:
 		return textResult("unknown tool: "+p.Name, true)
 	}
+}
+
+// reviewStatusText renders this head's MR status for get_review_status.
+func reviewStatusText(deps Deps) string {
+	if deps.GetReview == nil {
+		return "This head is not linked to a merge/pull request."
+	}
+	rf := deps.GetReview()
+	if rf == nil || !rf.Linked {
+		return "This head is not linked to a merge/pull request. It has not been published yet."
+	}
+	var b strings.Builder
+	b.WriteString("Your merge/pull request:\n")
+	b.WriteString("- URL: " + rf.URL + "\n")
+	b.WriteString("- Provider: " + rf.Provider + " (id " + rf.ID + ")\n")
+	if rf.TargetBranch != "" {
+		b.WriteString("- Target branch: " + rf.TargetBranch + "\n")
+	}
+	if rf.State != "" {
+		b.WriteString("- State: " + rf.State + "\n")
+	}
+	if rf.CIStatus != "" && rf.CIStatus != "none" {
+		b.WriteString("- CI: " + rf.CIStatus + "\n")
+	}
+	if rf.ApprovalsRequired > 0 {
+		b.WriteString("- Approvals: " + itoa(rf.Approvals) + "/" + itoa(rf.ApprovalsRequired) + "\n")
+	}
+	b.WriteString("- Unresolved discussions: " + itoa(rf.UnresolvedDiscussions) + "\n")
+	if rf.UnresolvedDiscussions > 0 {
+		b.WriteString("Use get_review_comments to read the unresolved discussions.\n")
+	}
+	return b.String()
+}
+
+// reviewCommentsText renders this head's unresolved discussions for
+// get_review_comments.
+func reviewCommentsText(deps Deps) string {
+	if deps.GetReview == nil {
+		return "This head is not linked to a merge/pull request."
+	}
+	rf := deps.GetReview()
+	if rf == nil || !rf.Linked {
+		return "This head is not linked to a merge/pull request."
+	}
+	if len(rf.Comments) == 0 {
+		return "No unresolved review discussions."
+	}
+	var b strings.Builder
+	b.WriteString("Unresolved review discussions on your MR (address them, then commit):\n\n")
+	for i, c := range rf.Comments {
+		b.WriteString(itoa(i + 1))
+		b.WriteString(". ")
+		if c.Path != "" {
+			b.WriteString(c.Path)
+			if c.Line > 0 {
+				b.WriteString(":" + itoa(c.Line))
+			}
+			b.WriteString(" ")
+		}
+		if c.Author != "" {
+			b.WriteString("(@" + c.Author + ") ")
+		}
+		b.WriteString("\n   ")
+		b.WriteString(strings.ReplaceAll(strings.TrimSpace(c.Body), "\n", "\n   "))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// itoa is a tiny strconv.Itoa avoiding the import for one call site.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 // listAvailableText renders the available-server list as human/agent-readable text.

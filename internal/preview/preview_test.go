@@ -62,11 +62,44 @@ func pythonServerSpec(t *testing.T) config.ArtifactScript {
 	}
 }
 
-// worktreeVersion fabricates a live-worktree version backed by a temp dir
-// holding one marker file.
-func worktreeVersion(t *testing.T, headID, content string) Version {
+// runGit runs git in dir, failing the test on error, and returns trimmed stdout.
+func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	dir := t.TempDir()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ensureGitRoot makes root a git repo with at least one commit (idempotent).
+func ensureGitRoot(t *testing.T, root string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		return
+	}
+	runGit(t, root, "init", "-q")
+	if err := os.WriteFile(filepath.Join(root, ".gitkeep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "init")
+}
+
+// worktreeVersion adds a real live worktree of root's repo (the shape the
+// preview worktree channel expects) with one uncommitted marker file, and
+// returns its version.
+func worktreeVersion(t *testing.T, root, headID, content string) Version {
+	t.Helper()
+	ensureGitRoot(t, root)
+	dir := filepath.Join(t.TempDir(), "wt-"+headID)
+	runGit(t, root, "worktree", "add", "--detach", dir, "HEAD")
 	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +144,7 @@ func TestSpawnProxyRoundTrip(t *testing.T) {
 	m.idleDefault = time.Minute // no teardown during this test
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h1", "roundtrip-body")
+	v := worktreeVersion(t, root, "h1", "roundtrip-body")
 
 	st, err := m.Ensure(root, spec, v)
 	if err != nil {
@@ -148,7 +181,7 @@ func TestLoadingPageWhileStarting(t *testing.T) {
 	m.idleDefault = time.Minute
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h2", "x")
+	v := worktreeVersion(t, root, "h2", "x")
 
 	st, err := m.Ensure(root, spec, v)
 	if err != nil {
@@ -180,7 +213,7 @@ func TestIdleTeardownAndRespawn(t *testing.T) {
 	m := fastManager()
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h3", "respawn-body")
+	v := worktreeVersion(t, root, "h3", "respawn-body")
 
 	st, err := m.Ensure(root, spec, v)
 	if err != nil {
@@ -227,7 +260,7 @@ func TestReadyMarker(t *testing.T) {
 	m.idleDefault = time.Minute
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h4", "x")
+	v := worktreeVersion(t, root, "h4", "x")
 
 	if _, err := m.Ensure(root, spec, v); err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -250,7 +283,7 @@ func TestNeverReadyErrorsWithLog(t *testing.T) {
 	m.idleDefault = time.Minute
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h5", "x")
+	v := worktreeVersion(t, root, "h5", "x")
 
 	if _, err := m.Ensure(root, spec, v); err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -285,11 +318,7 @@ func TestWorktreeGoneReaper(t *testing.T) {
 	defer m.StopAll()
 	root := newRoot(t)
 
-	dir := filepath.Join(t.TempDir(), "wt")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	v := Version{HeadID: "h6", WorktreeDir: dir}
+	v := worktreeVersion(t, root, "h6", "x")
 	st, err := m.Ensure(root, spec, v)
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -298,9 +327,8 @@ func TestWorktreeGoneReaper(t *testing.T) {
 		t.Fatal("no port allocated")
 	}
 
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
+	// The live worktree is pruned out from under the running preview.
+	runGit(t, root, "worktree", "remove", "--force", v.WorktreeDir)
 	m.reap()
 	if after := m.Peek(root, spec, v); after.Port != 0 || after.State != StateStopped {
 		t.Fatalf("instance survived worktree removal: %+v", after)
@@ -321,7 +349,7 @@ func TestStopHeadAndStopAll(t *testing.T) {
 	m.idleDefault = time.Minute
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h7", "x")
+	v := worktreeVersion(t, root, "h7", "x")
 
 	if _, err := m.Ensure(root, spec, v); err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -352,7 +380,7 @@ func TestAuthGate(t *testing.T) {
 	m.auth = headerAuth{}
 	defer m.StopAll()
 	root := newRoot(t)
-	v := worktreeVersion(t, "h8", "secret-body")
+	v := worktreeVersion(t, root, "h8", "secret-body")
 
 	st, err := m.Ensure(root, spec, v)
 	if err != nil {
@@ -445,6 +473,179 @@ func TestCommitCheckoutLifecycle(t *testing.T) {
 	m.StopAll()
 	if entries, err := os.ReadDir(checkouts); err == nil && len(entries) != 0 {
 		t.Fatalf("checkout not removed on StopAll: %v", entries)
+	}
+}
+
+// gitRepo initializes a git repo at a fresh project root (with the test port
+// range) and returns the root, its branch name, and a commit helper that writes
+// marker.txt with the given content and returns the new HEAD sha.
+func gitRepo(t *testing.T) (string, string, func(content string) string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := newRoot(t)
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q")
+	commit := func(content string) string {
+		if err := os.WriteFile(filepath.Join(root, "marker.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run("add", ".")
+		run("commit", "-qm", content)
+		return run("rev-parse", "HEAD")
+	}
+	sha := commit("v1")
+	branch := run("rev-parse", "--abbrev-ref", "HEAD")
+	_ = sha
+	return root, branch, commit
+}
+
+// TestChannelSwitchKeepsPort checks that pointing the slot at a different
+// channel (worktree -> pinned commit) swaps the backing server in place: the
+// proxy port is unchanged and the newly selected content is served.
+func TestChannelSwitchKeepsPort(t *testing.T) {
+	spec := pythonServerSpec(t)
+	root, _, commit := gitRepo(t)
+	sha := commit("committed-body")
+
+	m := fastManager()
+	m.idleDefault = time.Minute
+	defer m.StopAll()
+
+	// Start on the head's live worktree.
+	wt := worktreeVersion(t, root, "h9", "worktree-body")
+	st, err := m.Ensure(root, spec, wt)
+	if err != nil {
+		t.Fatalf("Ensure worktree: %v", err)
+	}
+	port := st.Port
+	if code, body := get(t, port, "/hello.txt"); code != 200 || !strings.Contains(body, "worktree-body") {
+		t.Fatalf("worktree GET = %d %q", code, body)
+	}
+
+	// Switch the same head's selection to a pinned commit.
+	st2, err := m.Ensure(root, spec, Version{HeadID: "h9", SHA: sha})
+	if err != nil {
+		t.Fatalf("Ensure commit: %v", err)
+	}
+	if st2.Port != port {
+		t.Fatalf("port changed across channel switch: %d -> %d", port, st2.Port)
+	}
+	if code, body := get(t, port, "/marker.txt"); code != 200 || !strings.Contains(body, "committed-body") {
+		t.Fatalf("commit GET after switch = %d %q", code, body)
+	}
+}
+
+// TestWorktreeSyncAndStale checks the "Latest changes" channel runs in its own
+// checkout that mirrors the live worktree, and latches stale when the worktree
+// diverges from what the running server was built from.
+func TestWorktreeSyncAndStale(t *testing.T) {
+	spec := pythonServerSpec(t)
+	m := fastManager()
+	m.idleDefault = time.Minute
+	defer m.StopAll()
+	root := newRoot(t)
+	v := worktreeVersion(t, root, "h11", "orig")
+
+	st, err := m.Ensure(root, spec, v)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// The uncommitted marker is mirrored into the own-checkout (not served from
+	// the live worktree).
+	if code, body := get(t, st.Port, "/hello.txt"); code != 200 || !strings.Contains(body, "orig") {
+		t.Fatalf("initial worktree GET = %d %q", code, body)
+	}
+	if m.Peek(root, spec, v).Stale {
+		t.Fatal("a freshly built worktree server should not be stale")
+	}
+
+	// Change the live worktree; the sync loop mirrors it and marks the running
+	// (build-then-serve) server stale.
+	if err := os.WriteFile(filepath.Join(v.WorktreeDir, "hello.txt"), []byte("edited-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, body := get(t, st.Port, "/hello.txt")
+		stale := m.Peek(root, spec, v).Stale
+		if strings.Contains(body, "edited-body") && stale {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("worktree change never synced+staled (body=%q stale=%v)", body, stale)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// TestTipFollowHotSwap checks the branch-tip channel rebuilds in the background
+// and hot-swaps when the tip advances: the port is stable, the served content
+// flips to the new commit, and the superseded checkout is reaped.
+func TestTipFollowHotSwap(t *testing.T) {
+	spec := pythonServerSpec(t)
+	root, branch, commit := gitRepo(t)
+	sha1, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := fastManager()
+	m.idleDefault = time.Minute
+	defer m.StopAll()
+
+	v := Version{HeadID: "h10", SHA: strings.TrimSpace(string(sha1)), Branch: branch}
+	st, err := m.Ensure(root, spec, v)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	port := st.Port
+	if code, body := get(t, port, "/marker.txt"); code != 200 || !strings.Contains(body, "v1") {
+		t.Fatalf("initial tip GET = %d %q", code, body)
+	}
+
+	// Advance the branch tip; the reaper should follow it in the background.
+	commit("v2")
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		m.reap()
+		_, body := get(t, port, "/marker.txt")
+		if strings.Contains(body, "v2") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tip never hot-swapped to v2 (last body %q)", body)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if st := m.Peek(root, spec, v); st.Port != port {
+		t.Fatalf("port changed across hot-swap: %d -> %d", port, st.Port)
+	}
+
+	// The old checkout is reaped, leaving exactly the new tip's checkout.
+	checkouts := filepath.Join(previewDir(root), "checkouts")
+	rdeadline := time.Now().Add(5 * time.Second)
+	for {
+		entries, _ := os.ReadDir(checkouts)
+		if len(entries) == 1 {
+			break
+		}
+		if time.Now().After(rdeadline) {
+			t.Fatalf("expected 1 checkout after swap, got %d", len(entries))
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

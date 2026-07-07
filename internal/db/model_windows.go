@@ -64,6 +64,18 @@ type Agent struct {
 	// spawns (also soft-deleted, but EndState "") never surface there.
 	EndState string
 
+	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// See model_unix.go for field docs.
+	DownstreamBranch   string
+	ReviewURL          string
+	ReviewID           string
+	ReviewProvider     string
+	ReviewTargetBranch string
+	ReviewState        string
+	ReviewStateTime    string
+	PublishWhenGreen   bool `gorm:"default:false"`
+	PublishWhenGreenAt string
+
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`

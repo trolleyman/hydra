@@ -78,3 +78,40 @@ export function detectCodeLanguage(dt: DataTransfer | null): string | null {
 export function fenceCode(text: string, lang: string): string {
   return `\`\`\`${lang}\n${text}\n\`\`\``
 }
+
+// Fence/language tags (see detectCodeLanguage) whose file extension isn't just
+// the tag itself. Anything not listed is used verbatim (go, json, html, css,
+// tsx, jsx, sql, java, php, swift, kotlin, toml, xml, scss, ...), which already
+// matches the conventional extension.
+const LANG_TO_EXT: Record<string, string> = {
+  markdown: 'md',
+  bash: 'sh',
+  shellscript: 'sh',
+  python: 'py',
+  ruby: 'rb',
+  rust: 'rs',
+  typescript: 'ts',
+  javascript: 'js',
+  csharp: 'cs',
+  cpp: 'cpp',
+  yaml: 'yml',
+  docker: 'dockerfile',
+}
+
+// The file extension (no leading dot) to save a pasted text block under. Uses
+// only what the clipboard DECLARES - the editor language (VS Code copies:
+// markdown -> md, python -> py, ...) or an offered HTML representation - with no
+// content sniffing. When the clipboard says nothing, it's plain 'txt'.
+export function pastedTextExtension(dt: DataTransfer | null): string {
+  const lang = detectCodeLanguage(dt)
+  if (lang) return LANG_TO_EXT[lang] ?? lang
+  return 'txt'
+}
+
+// The MIME type to stamp on a saved paste of the given extension. Only affects
+// the client-side File object; the backend infers content-type from the name.
+export function extensionMime(ext: string): string {
+  if (ext === 'md') return 'text/markdown'
+  if (ext === 'html') return 'text/html'
+  return 'text/plain'
+}
