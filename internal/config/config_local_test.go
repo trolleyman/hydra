@@ -31,7 +31,7 @@ func TestConfigLocalOverrideLayer(t *testing.T) {
 	writeProjectConfig(t, root, "config.toml", `
 [review]
 provider = "github"
-target_branch = "main"
+push_branch_template = "{id}"
 
 [sandbox.network]
 allowed_hosts = ["committed.example.com"]
@@ -39,7 +39,7 @@ allowed_hosts = ["committed.example.com"]
 	// The local layer overrides scalar review fields and unions the host list.
 	writeProjectConfig(t, root, "config.local.toml", `
 [review]
-target_branch = "develop"
+push_branch_template = "feat/{id}"
 
 [sandbox.network]
 allowed_hosts = ["local.example.com"]
@@ -56,8 +56,8 @@ allowed_hosts = ["local.example.com"]
 	if got := derefStr(cfg.Review.Provider); got != "github" {
 		t.Errorf("provider = %q, want github (from committed config)", got)
 	}
-	if got := derefStr(cfg.Review.TargetBranch); got != "develop" {
-		t.Errorf("target_branch = %q, want develop (local override wins)", got)
+	if got := derefStr(cfg.Review.PushBranchTemplate); got != "feat/{id}" {
+		t.Errorf("push_branch_template = %q, want feat/{id} (local override wins)", got)
 	}
 
 	sb := cfg.GetResolvedConfig("claude").Sandbox

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
+import { apiErrorBody, formatError } from '../api/format_error'
+import { PanelError } from './PanelError'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
 import { TestCaseStatus } from '../api/models/TestCaseStatus'
@@ -84,6 +86,9 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [runners, setRunners] = useState<TestRunResult[] | null>(null)
+  // A server-side failure to surface (e.g. a config that won't parse), reached
+  // via the polling fallback; a transient blip stays null and the panel is quiet.
+  const [error, setError] = useState<string | null>(null)
   // Connection mode: WS while live, polling if the socket can't connect or drops.
   const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
   const wsRef = useRef<WebSocket | null>(null)
@@ -190,11 +195,15 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
         const resp = await api.default.getAgentTests(projectId, agentId, headRef, includeUncommitted, first ? refreshRunner ?? undefined : undefined)
         if (cancelled) return
         setRunners(resp.runners)
+        setError(null)
         if (resp.runners.some((r) => r.status === 'running')) {
           pollTimerRef.current = setTimeout(() => tick(false), 1500)
         }
-      } catch {
-        // leave previous state; a transient error shouldn't blank the panel
+      } catch (err) {
+        if (cancelled) return
+        // A structured server error (e.g. a config that won't parse) is surfaced
+        // so the panel doesn't silently vanish; a transient blip leaves state be.
+        if (apiErrorBody(err)) setError(formatError(err))
       }
     }
     clear()
@@ -273,6 +282,9 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
 
   // Nothing configured (or not loaded yet) → render nothing, like the artifacts
   // panel, so the diff viewer doesn't reserve empty space for an absent feature.
+  if (error && (!runners || runners.length === 0)) {
+    return <PanelError title="Tests" icon={<FlaskConical className="w-3.5 h-3.5" />} message={error} />
+  }
   if (!runners || runners.length === 0) return null
 
   const runningCount = runners.filter((r) => r.status === 'running').length
@@ -537,6 +549,21 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       name={runner.name}
       status={status}
       actions={actions}
+      // Running: a thin progress fill under the header (card chrome) - determinate
+      // (completed cases over the declared total) when the run streams a denominator,
+      // an indeterminate sliding barber pole otherwise. The card owns the track.
+      progress={
+        running
+          ? liveDenominator(runner) > 0
+            ? (
+              <div
+                className="h-full bg-blue-500 transition-[width] duration-300"
+                style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
+              />
+            )
+            : <div className="h-full w-full bg-blue-500 animate-barber-pole" />
+          : undefined
+      }
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
       // Toggling the build log is a deliberate in-place swap - glide the card to
@@ -544,29 +571,13 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       // deliberately don't bump this, so they keep mirroring instantly).
       glideKey={logVisible}
     >
-      {/* Running: a thin progress bar above the live log tail - determinate
-          (completed cases over the declared total) when the run streams a
-          denominator, an indeterminate sliding barber pole otherwise. */}
-      {running && (
-        <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
-          {liveDenominator(runner) > 0 ? (
-            <div
-              className="h-full bg-blue-500 transition-[width] duration-300"
-              style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
-            />
-          ) : (
-            <div className="h-full w-full bg-blue-500 animate-barber-pole" />
-          )}
-        </div>
-      )}
-
       {/* Build log (xterm) - live `log` while running, the persisted `log_url`
           once settled (red border on failure, green on a clean finish). */}
       {logVisible && <TestLog runner={runner} failed={failed} />}
 
       {/* Errored with no log to show: surface the captured error text. */}
       {errored && runner.error && !hasLog ? (
-        <div className="my-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
+        <div className="mb-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
           {runner.error}
         </div>
       ) : null}
@@ -576,7 +587,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
-        <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 flex flex-col border-t border-gray-100 dark:border-gray-800">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
             : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
@@ -720,7 +731,7 @@ function liveDenominator(runner: TestRunResult): number {
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
   return (
-    <span className="flex items-center gap-2 text-sm font-medium shrink-0">
+    <span className="flex items-baseline gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>
@@ -794,7 +805,7 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const log = running ? runner.log ?? [] : fetched ?? []
   const emptyText = running ? 'starting...' : url ? 'Loading...' : 'No output'
   return (
-    <div className="pt-1.5 pb-1">
+    <div className="pb-1">
       <LogView log={log} emptyText={emptyText} failed={failed} succeeded={!running && !failed} />
     </div>
   )

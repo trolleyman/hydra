@@ -27,7 +27,6 @@ export type ReviewConfigResponse = {
      * Derived https browse URL for the repo (for the forge web link), or empty.
      */
     browse_url?: string;
-    target_branch: string;
     /**
      * Auth method ("cli" | "token").
      */

@@ -888,7 +888,7 @@ Check items off in the commit that lands them.
     the composer like the Claude app.
 23. [x] **Persist composer height.** The dragged composer min-height lives in
     agentViewPrefs (localStorage) like the terminal height.
-24. [ ] **Merge main** into this branch before final verification.
+24. [x] **Merge main** into this branch before final verification.
 25. [x] **Direction decision (settled).** claude.ai-style chrome (proportional
     font, bubbles, cards, app theming) + Claude Code function (tool cards,
     slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic

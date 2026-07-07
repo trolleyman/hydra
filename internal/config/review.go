@@ -3,10 +3,56 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"braces.dev/errtrace"
 )
+
+// isEmpty reports whether no field is set at this layer (all pointers nil / no
+// protected branches). Used by renderConfig to fall back to the commented
+// example rather than emitting an empty [review] table.
+func (r ReviewConfig) isEmpty() bool {
+	return r.Provider == nil && r.Remote == nil && r.Auth == nil &&
+		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.Draft == nil && r.Squash == nil &&
+		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.PublishWhenGreen == nil &&
+		len(r.ProtectedBranches) == 0
+}
+
+// reviewFieldLines renders the [review] table for renderConfig, emitting only the
+// fields set at this layer (a nil pointer is left out so it keeps inheriting the
+// layer below). Mirrors artifactFieldLines / testFieldLines.
+func reviewFieldLines(r ReviewConfig) []string {
+	out := []string{"[review]"}
+	addStr := func(key string, v *string) {
+		if v != nil {
+			out = append(out, key+" = "+tomlStringValue(*v))
+		}
+	}
+	addBool := func(key string, v *bool) {
+		if v != nil {
+			out = append(out, key+" = "+strconv.FormatBool(*v))
+		}
+	}
+	addStr("provider", r.Provider)
+	addStr("remote", r.Remote)
+	addStr("auth", r.Auth)
+	addStr("default_action", r.DefaultAction)
+	addStr("push_branch_template", r.PushBranchTemplate)
+	addBool("draft", r.Draft)
+	addBool("squash", r.Squash)
+	addBool("delete_remote_branch", r.DeleteRemoteBranch)
+	addBool("require_local_tests", r.RequireLocalTests)
+	addBool("publish_when_green", r.PublishWhenGreen)
+	if len(r.ProtectedBranches) > 0 {
+		quoted := make([]string, len(r.ProtectedBranches))
+		for i, b := range r.ProtectedBranches {
+			quoted[i] = tomlStringValue(b)
+		}
+		out = append(out, "protected_branches = ["+strings.Join(quoted, ", ")+"]")
+	}
+	return out
+}
 
 // Review provider / auth / action constants. The string values are the config
 // spellings (see NON_LOCAL_INTEGRATION.md 3.2).
@@ -27,7 +73,6 @@ const (
 const (
 	defaultReviewProvider           = ReviewProviderAuto
 	defaultReviewRemote             = "origin"
-	defaultReviewTargetBranch       = "main"
 	defaultReviewAuth               = ReviewAuthCLI
 	defaultReviewDefaultAction      = ReviewActionMerge
 	defaultReviewPushBranchTemplate = "{id}"
@@ -46,8 +91,6 @@ type ReviewConfig struct {
 	Provider *string `toml:"provider"`
 	// Remote is the git remote a publish targets (default "origin").
 	Remote *string `toml:"remote"`
-	// TargetBranch is the default MR target branch (per-head editable; default "main").
-	TargetBranch *string `toml:"target_branch"`
 	// Auth is how Hydra talks to the forge: "cli" (shell out to gh/glab) or "token"
 	// (REST with a token from the secrets file / HYDRA_FORGE_TOKEN). Default "cli".
 	Auth *string `toml:"auth"`
@@ -102,14 +145,6 @@ func (r *ReviewConfig) GetRemote() string {
 		return defaultReviewRemote
 	}
 	return *r.Remote
-}
-
-// GetTargetBranch returns the configured default MR target or "main".
-func (r *ReviewConfig) GetTargetBranch() string {
-	if r == nil || r.TargetBranch == nil || *r.TargetBranch == "" {
-		return defaultReviewTargetBranch
-	}
-	return *r.TargetBranch
 }
 
 // GetAuth returns the configured auth method or "cli".
@@ -187,9 +222,6 @@ func (r *ReviewConfig) Merge(other ReviewConfig) {
 	}
 	if other.Remote != nil {
 		r.Remote = other.Remote
-	}
-	if other.TargetBranch != nil {
-		r.TargetBranch = other.TargetBranch
 	}
 	if other.Auth != nil {
 		r.Auth = other.Auth

@@ -152,7 +152,10 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	review := reviewConfigFor(projectRoot)
 	cfg, _ := config.Load(projectRoot)
 	remote := firstNonEmpty(ov.Remote, review.GetRemote())
-	target := firstNonEmpty(ov.TargetBranch, review.GetTargetBranch())
+	// The MR targets the head's base branch (where its work merges back), unless
+	// the publish request explicitly overrode it. There is no configurable
+	// [review] target_branch - the base branch is the source of truth.
+	target := firstNonEmpty(ov.TargetBranch, head.BaseBranch)
 	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.Jira, head))
 	title := firstNonEmpty(ov.Title, defaultMRTitle(head))
 	description := head.Prompt
@@ -383,6 +386,13 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	return api.GetReviewConfig200JSONResponse(s.resolveReviewConfigResponse(ctx, projectRoot)), nil
+}
+
+// resolveReviewConfigResponse builds the resolved [review] config response
+// (defaults applied, provider auto-detected, live forge auth checked) for a
+// project root. Shared by GetReviewConfig and SaveReviewConfig.
+func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot string) api.ReviewConfigResponse {
 	cfg, _ := config.Load(projectRoot)
 	review := cfg.Review
 	if review == nil {
@@ -399,7 +409,6 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 		Remote:             remote,
 		RemoteUrl:          ptr(remoteURL),
 		BrowseUrl:          ptr(config.BrowseURL(remoteURL)),
-		TargetBranch:       review.GetTargetBranch(),
 		Auth:               review.GetAuth(),
 		DefaultAction:      review.GetDefaultAction(),
 		PushBranchTemplate: ptr(review.GetPushBranchTemplate()),
@@ -418,7 +427,7 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 			resp.AuthStatus = ptr(detail)
 		}
 	}
-	return api.GetReviewConfig200JSONResponse(resp), nil
+	return resp
 }
 
 // ArmPublishWhenGreen arms publish-when-green for a head (3.5).

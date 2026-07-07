@@ -823,6 +823,10 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.TestPrefetch = &b
 	}
 
+	// The raw [review] table for this layer (nil = unset here → the editor shows
+	// the field empty and inherits the layer below).
+	resp.Review = toAPIReviewConfig(cfg.Review)
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -958,6 +962,54 @@ func listCandidateMCPServers(projectRoot string) []api.McpServer {
 		out[i] = api.McpServer{Name: srv.Name, Source: srv.Source}
 	}
 	return out
+}
+
+// toAPIReviewConfig converts the raw internal [review] table to its API shape
+// (both are all-optional pointer fields). nil in → nil out (the layer sets none).
+func toAPIReviewConfig(r *config.ReviewConfig) *api.ReviewConfig {
+	if r == nil {
+		return nil
+	}
+	out := api.ReviewConfig{
+		Provider:           r.Provider,
+		Remote:             r.Remote,
+		Auth:               r.Auth,
+		DefaultAction:      r.DefaultAction,
+		PushBranchTemplate: r.PushBranchTemplate,
+		Draft:              r.Draft,
+		Squash:             r.Squash,
+		DeleteRemoteBranch: r.DeleteRemoteBranch,
+		RequireLocalTests:  r.RequireLocalTests,
+		PublishWhenGreen:   r.PublishWhenGreen,
+	}
+	if r.ProtectedBranches != nil {
+		pb := append([]string(nil), r.ProtectedBranches...)
+		out.ProtectedBranches = &pb
+	}
+	return &out
+}
+
+// fromAPIReviewConfig is the inverse of toAPIReviewConfig, for a SaveConfig body.
+func fromAPIReviewConfig(r *api.ReviewConfig) *config.ReviewConfig {
+	if r == nil {
+		return nil
+	}
+	out := config.ReviewConfig{
+		Provider:           r.Provider,
+		Remote:             r.Remote,
+		Auth:               r.Auth,
+		DefaultAction:      r.DefaultAction,
+		PushBranchTemplate: r.PushBranchTemplate,
+		Draft:              r.Draft,
+		Squash:             r.Squash,
+		DeleteRemoteBranch: r.DeleteRemoteBranch,
+		RequireLocalTests:  r.RequireLocalTests,
+		PublishWhenGreen:   r.PublishWhenGreen,
+	}
+	if r.ProtectedBranches != nil {
+		out.ProtectedBranches = append([]string(nil), *r.ProtectedBranches...)
+	}
+	return &out
 }
 
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
@@ -1115,6 +1167,9 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			newCfg.Tests = append(newCfg.Tests, fromAPITestScript(t))
 		}
 	}
+	// The raw [review] table for this layer. renderConfig regenerates [review]
+	// from it (or preserves the existing block when nil).
+	newCfg.Review = fromAPIReviewConfig(request.Body.Review)
 	// Artifact concurrency: a set value (0 = unlimited, N>0 = at most N) is
 	// applied authoritatively; nil/absent clears it so it resets to the built-in
 	// default. Negatives are coerced to 0 (unlimited), matching the API minimum.

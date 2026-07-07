@@ -10,8 +10,8 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Settings, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
-  MoveRight, MessageSquarePlus, FolderSync,
+  Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
+  ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
@@ -1869,7 +1869,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
             : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
             }`}
         >
-          <Settings className="w-3.5 h-3.5" />
+          <Settings2 className="w-3.5 h-3.5" />
         </button>
       </Tooltip>
 
@@ -2563,7 +2563,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
               drops to the next line together when it can't fit beside the stats. */}
           <div className="flex items-center gap-3">
             <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
-            <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><MoveRight className='w-6 h-6' strokeWidth='1.5' /></span>
+            <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
             <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
               left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
           </div>

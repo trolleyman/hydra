@@ -24,8 +24,10 @@ const COLLAPSE_MS = 200
 // the tests panel (PLAN #68): a header row whose left half is a click-to-collapse
 // button (chevron + icon + name + an inline `status` slot) and whose right half
 // hosts `actions` - the melt-style icon buttons (see MELT_BTN). The body renders
-// below the header only while expanded, in the same `px-3 pb-2` inset both panels
-// rely on. Every state lives inside the one bordered card so toggling between them
+// below the header only while expanded, in the same symmetric `p-3` inset both
+// panels rely on - so a body child (a log terminal, an image grid) sits with equal
+// breathing room on all four sides. Full-bleed rows opt out with `-mx-3`.
+// Every state lives inside the one bordered card so toggling between them
 // never shifts the layout and the action buttons stay reachable.
 //
 // With `sticky`, the header pins itself flush below the panel's section bar while
@@ -50,13 +52,19 @@ const COLLAPSE_MS = 200
 // the very content it framed. The body stays MOUNTED only while open (plus the brief
 // collapse animation), so a collapsed card never pays to render its heavy children
 // (xterm logs, image grids); see `mounted` below.
-export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false, glideKey }: {
+export function CollapsibleCard({ icon, name, status, actions, progress, collapsed, onToggleCollapsed, children, sticky = false, glideKey }: {
   icon: ReactNode
   name: ReactNode
   // Inline chips/summary shown after the name, inside the collapse button.
   status?: ReactNode
   // Right-aligned action buttons (melt icons); omit for a card with no actions.
   actions?: ReactNode
+  // A thin progress FILL (a determinate `width` bar or an indeterminate barber
+  // pole) drawn as a loading line pinned to the header's BOTTOM EDGE - out of flow,
+  // so it never shifts the body and shows whether the card is collapsed or open. The
+  // card owns the track (height/tint/clip to the rounded corners); the caller supplies
+  // only the fill. Omit for a card that isn't working.
+  progress?: ReactNode
   collapsed: boolean
   onToggleCollapsed: () => void
   children?: ReactNode
@@ -131,7 +139,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         className={
           sticky
             ? `sticky z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`
-            : 'flex items-stretch bg-gray-100 dark:bg-gray-700/40'
+            : 'relative flex items-stretch bg-gray-100 dark:bg-gray-700/40'
         }
       >
         <button
@@ -146,6 +154,16 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         {/* Faint icon buttons, vertically centred in the stretch-height header.
             Each brightens only on its own hover (see MELT_BTN). */}
         {actions && <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">{actions}</div>}
+        {/* Progress: a loading line on the header's bottom edge. Absolute so it
+            never adds height to the header/body, and lives in the always-rendered
+            header so it shows while the card is collapsed too. The header's
+            overflow-hidden (sticky) or the card root's (non-sticky) clips it to the
+            rounded corners. */}
+        {progress && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-gray-200 dark:bg-gray-600/60">
+            {progress}
+          </div>
+        )}
       </div>
       {/* Height tracks the measured content: the body glides between 0 and its
           height on a user expand/collapse, and otherwise mirrors its content's
@@ -165,7 +183,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >
-        {mounted && <div ref={bodyRef} className="px-3 pb-2">{children}</div>}
+        {mounted && <div ref={bodyRef} className="p-3">{children}</div>}
       </div>
     </div>
   )

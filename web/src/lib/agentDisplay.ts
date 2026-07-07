@@ -62,7 +62,8 @@ export function agentDotClass(agent: AgentResponse): string {
 // Returns '' for settled states (waiting, needs_input, finished, stopped) so they
 // stay calm/static.
 export function agentDotAnimate(agent: AgentResponse): string {
-  switch (agent.agent_status?.status) {
+  const status = agent.agent_status?.status
+  switch (status) {
     case 'running':
     case 'merging':
     case 'starting':
@@ -71,8 +72,11 @@ export function agentDotAnimate(agent: AgentResponse): string {
     case 'killing':
       return 'animate-status-pulse'
   }
-  // No agent status yet - fall back to the raw session state so a live session
-  // still pulses while it reports in.
+  // A settled agent status (finished/waiting/needs_input/stopped/...) stays
+  // calm even while its PTY session lingers alive - only fall back to the raw
+  // session state when no agent status has been reported yet, so a freshly
+  // spawned live session still pulses while it reports in.
+  if (status) return ''
   return agent.session_status === 'running' ? 'animate-status-pulse' : ''
 }
 

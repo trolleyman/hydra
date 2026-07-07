@@ -655,7 +655,7 @@ export function SpawnForm({
       <AttachmentChips
         attachments={attachments}
         size={size}
-        className={`px-3 ${size === 'sm' ? 'pb-1.5' : 'pb-2'}`}
+        className={`mx-3 ${size === 'sm' ? 'mb-1.5' : 'mb-2'}`}
         onRemove={removeAttachment}
         onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
       />

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { AgentStatus } from '../api'
 import { useAgentStore } from '../stores/agentStore'
-import { renderMarkdown, renderMarkdownBlocks } from '../lib/markdown'
+import { Markdown } from '../lib/MarkdownRenderer'
 import hljs from '../lib/hljs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -181,8 +181,10 @@ function summarizeToolInput(input: unknown): string {
 // --- Claude-app-ish shared styles -------------------------------------------
 
 // The user's message bubble: borderless, a shade off the pane background.
+// No whitespace-pre-wrap: the Markdown chat variant's remark-breaks already
+// preserves typed newlines.
 const USER_BUBBLE_CLASS =
-  'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 whitespace-pre-wrap break-words'
+  'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 break-words'
 
 // Quiet code/output panels inside tool cards.
 const PANEL_CLASS =
@@ -1467,7 +1469,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const m = fence.exec(rest)
       if (!m) break
       const before = rest.slice(0, m.index)
-      if (before.trim()) parts.push(<div key={key++}>{renderMarkdownBlocks(before)}</div>)
+      if (before.trim()) parts.push(<Markdown key={key++} text={before} />)
       const specs = parseQuestionBlock(m[1])
       if (specs) {
         parts.push(
@@ -1476,12 +1478,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>,
         )
       } else {
-        parts.push(<div key={key++}>{renderMarkdownBlocks(m[0])}</div>)
+        parts.push(<Markdown key={key++} text={m[0]} />)
       }
       rest = rest.slice(m.index + m[0].length)
     }
-    if (parts.length === 0) return renderMarkdownBlocks(text)
-    if (rest.trim()) parts.push(<div key={key++}>{renderMarkdownBlocks(rest)}</div>)
+    if (parts.length === 0) return <Markdown text={text} />
+    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} />)
     return parts
   }
 
@@ -1490,7 +1492,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       case 'user':
         return (
           <div className="flex justify-end">
-            <div className={USER_BUBBLE_CLASS}>{renderMarkdown(item.text)}</div>
+            <div className={USER_BUBBLE_CLASS}>
+              <Markdown text={item.text} />
+            </div>
           </div>
         )
       case 'command': {
@@ -1600,7 +1604,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               thoughts, its preview auto-updating as tokens arrive. */}
           {stream && stream.kind === 'assistant' && (
             <div className="max-w-[95%] leading-relaxed">
-              {renderMarkdownBlocks(closeOpenFence(stream.text))}
+              <Markdown text={closeOpenFence(stream.text)} />
               <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
             </div>
           )}
@@ -1609,7 +1613,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               the processed turn back, visibly queued while a turn is running. */}
           {pendingSends.map((p) => (
             <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
-              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>{renderMarkdown(p.text)}</div>
+              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
+                <Markdown text={p.text} />
+              </div>
               <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
                 {p.queued ? (
                   <>

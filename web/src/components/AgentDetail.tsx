@@ -5,7 +5,6 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
-import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
@@ -24,11 +23,12 @@ import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
-import { renderMarkdown } from '../lib/markdown'
+import { Markdown } from '../lib/MarkdownRenderer'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
 
@@ -85,11 +85,11 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
       {/* A taller max-height means most prompts (incl. a code block or two)
           don't need to scroll at all. */}
       <div className="overflow-y-auto max-h-96">
-        {text && <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(text)}</p>}
+        {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
         <AttachmentChips
           attachments={attachments}
           size="md"
-          className={text ? 'pt-3' : ''}
+          className={text ? 'mt-3' : ''}
           onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
         />
       </div>
@@ -330,8 +330,12 @@ export function AgentDetail({
   const [merging, setMerging] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
-  const [reviewConfig, setReviewConfig] = useState<ReviewConfigResponse | null>(null)
-  const [remotes, setRemotes] = useState<string[]>(['origin'])
+  const [publishError, setPublishError] = useState<string | null>(null)
+  // Review config is project-scoped, cached in the project store so it is
+  // fetched once per project (not per agent) and shared with the Settings editor.
+  const reviewConfig = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] ?? null : null))
+  const setReviewConfigInStore = useProjectStore((s) => s.setReviewConfig)
+  const remotes = reviewConfig?.remote ? [reviewConfig.remote] : ['origin']
   const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -949,34 +953,44 @@ export function AgentDetail({
 
   // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
 
-  // openCreateMR fetches the resolved review config + remotes, then opens the
-  // Create MR dialog prefilled from them.
-  async function openCreateMR() {
+  // refreshReviewConfig loads the resolved review config into the project store.
+  const refreshReviewConfig = useCallback(async () => {
     if (!projectId) return
     try {
-      const [cfg, branchInfo] = await Promise.all([
-        api.default.getReviewConfig(projectId),
-        api.default.getRepositoryBranches(projectId).catch(() => null),
-      ])
-      setReviewConfig(cfg)
-      void branchInfo // branches already loaded elsewhere; remotes come from config
-      setRemotes(cfg.remote ? [cfg.remote] : ['origin'])
+      setReviewConfigInStore(projectId, await api.default.getReviewConfig(projectId))
     } catch {
-      setReviewConfig(null)
+      // Leave any previously-loaded config in place on a transient failure.
     }
+  }, [projectId, setReviewConfigInStore])
+
+  // Fetch the review config once per project (if not already cached) as soon as
+  // the head is on screen, so clicking "Create MR" opens the dialog instantly
+  // with prefilled values - the fetch no longer gates the popup.
+  useEffect(() => {
+    if (projectId && !reviewConfig) void refreshReviewConfig()
+  }, [projectId, reviewConfig, refreshReviewConfig])
+
+  // openCreateMR opens the Create MR dialog immediately, refreshing the config
+  // in the background rather than blocking the popup on a network round-trip.
+  function openCreateMR() {
+    setPublishError(null)
     setShowCreateMR(true)
+    void refreshReviewConfig()
   }
 
-  // doPublish runs the publish POST with the dialog's values.
+  // doPublish runs the publish POST with the dialog's values. A failure is shown
+  // inline in the dialog (not a toast) and keeps the dialog open so the values
+  // can be fixed and retried; success closes it.
   async function doPublish(body: { downstream_branch: string; remote: string; target_branch: string; title: string; description: string; draft: boolean }) {
     setPublishing(true)
-    const res = await runWithToast(() => api.default.publishAgent(projectId ?? '', agent.id, undefined, body), {
-      success: 'MR published',
-      errorPrefix: 'Publish failed',
-    })
-    if (res.ok) {
-      updateAgentInStore(res.value)
+    setPublishError(null)
+    try {
+      const updated = await api.default.publishAgent(projectId ?? '', agent.id, undefined, body)
+      updateAgentInStore(updated)
+      useToastStore.getState().show({ message: 'MR published', type: 'success' })
       setShowCreateMR(false)
+    } catch (err) {
+      setPublishError(formatError(err))
     }
     setPublishing(false)
   }
@@ -1119,7 +1133,7 @@ export function AgentDetail({
           label: 'Create MR',
           icon: <MRIcon linked={false} className="w-4 h-4" />,
           onClick: () => void openCreateMR(),
-          variant: 'segment',
+          variant: 'blue',
           disabled: busy || publishing,
           menu: [
             agent.publish_when_green
@@ -1127,9 +1141,9 @@ export function AgentDetail({
               : { label: 'Publish when green', description: 'Auto-open a draft MR once local tests pass and the head finishes.', icon: <Clock className="w-4 h-4" />, onClick: () => void armPublish(), tone: 'emerald' as const, disabled: busy || publishing },
           ] as AgentTopBarMenuItem[],
         }
-  // default_action orders the two primary buttons: create_mr puts the MR button
-  // first (before Merge); otherwise Merge stays primary and MR is a segment.
-  const mrFirst = reviewConfig?.default_action === 'create_mr' || linked
+  // Create MR (blue) always leads, to the left of Merge; once linked it becomes
+  // the View-MR button, still first.
+  const mrFirst = true
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -1139,6 +1153,7 @@ export function AgentDetail({
           config={reviewConfig}
           remotes={remotes}
           submitting={publishing}
+          error={publishError}
           onConfirm={(body) => void doPublish(body)}
           onCancel={() => setShowCreateMR(false)}
         />
