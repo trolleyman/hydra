@@ -537,6 +537,21 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       name={runner.name}
       status={status}
       actions={actions}
+      // Running: a thin progress fill under the header (card chrome) - determinate
+      // (completed cases over the declared total) when the run streams a denominator,
+      // an indeterminate sliding barber pole otherwise. The card owns the track.
+      progress={
+        running
+          ? liveDenominator(runner) > 0
+            ? (
+              <div
+                className="h-full bg-blue-500 transition-[width] duration-300"
+                style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
+              />
+            )
+            : <div className="h-full w-full bg-blue-500 animate-barber-pole" />
+          : undefined
+      }
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
       // Toggling the build log is a deliberate in-place swap - glide the card to
@@ -544,22 +559,6 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       // deliberately don't bump this, so they keep mirroring instantly).
       glideKey={logVisible}
     >
-      {/* Running: a thin progress bar above the live log tail - determinate
-          (completed cases over the declared total) when the run streams a
-          denominator, an indeterminate sliding barber pole otherwise. */}
-      {running && (
-        <div className="mb-1.5 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
-          {liveDenominator(runner) > 0 ? (
-            <div
-              className="h-full bg-blue-500 transition-[width] duration-300"
-              style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
-            />
-          ) : (
-            <div className="h-full w-full bg-blue-500 animate-barber-pole" />
-          )}
-        </div>
-      )}
-
       {/* Build log (xterm) - live `log` while running, the persisted `log_url`
           once settled (red border on failure, green on a clean finish). */}
       {logVisible && <TestLog runner={runner} failed={failed} />}

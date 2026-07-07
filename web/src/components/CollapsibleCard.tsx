@@ -52,13 +52,19 @@ const COLLAPSE_MS = 200
 // the very content it framed. The body stays MOUNTED only while open (plus the brief
 // collapse animation), so a collapsed card never pays to render its heavy children
 // (xterm logs, image grids); see `mounted` below.
-export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false, glideKey }: {
+export function CollapsibleCard({ icon, name, status, actions, progress, collapsed, onToggleCollapsed, children, sticky = false, glideKey }: {
   icon: ReactNode
   name: ReactNode
   // Inline chips/summary shown after the name, inside the collapse button.
   status?: ReactNode
   // Right-aligned action buttons (melt icons); omit for a card with no actions.
   actions?: ReactNode
+  // A thin progress FILL (a determinate `width` bar or an indeterminate barber
+  // pole) shown flush under the header, full-bleed, as card chrome - the card owns
+  // the track (height/tint/clip), the caller supplies only the fill. It reads as a
+  // header-attached loading indicator, so a running card no longer needs to hand-space
+  // a bar against its body content. Omit for a card that isn't working.
+  progress?: ReactNode
   collapsed: boolean
   onToggleCollapsed: () => void
   children?: ReactNode
@@ -167,7 +173,15 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >
-        {mounted && <div ref={bodyRef} className="p-3">{children}</div>}
+        {mounted && (
+          <div ref={bodyRef}>
+            {/* Progress track: flush under the header (no top gap), full-bleed to
+                the card borders, above the padded content - so it reads as part of
+                the header rather than a floating bar. Clips the fill / barber pole. */}
+            {progress && <div className="h-1 bg-gray-100 dark:bg-gray-800 overflow-hidden">{progress}</div>}
+            <div className="p-3">{children}</div>
+          </div>
+        )}
       </div>
     </div>
   )
