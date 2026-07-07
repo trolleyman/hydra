@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
+import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
@@ -335,7 +335,7 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
               title="Reset filters"
               className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
             >
-              <RotateCcw className="w-3 h-3" />
+              <FunnelX className="w-3 h-3" />
               <span className="lowercase">reset</span>
             </button>
           )}
