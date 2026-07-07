@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { CircleCheck, CircleX } from 'lucide-react'
+import { CircleCheck, CircleX, RotateCcw } from 'lucide-react'
 import { api } from '../../stores/apiClient'
 import type { ReviewConfig } from '../../api/models/ReviewConfig'
 import type { ReviewConfigResponse } from '../../api/models/ReviewConfigResponse'
+import { StorageKeys } from '../../lib/storage'
 import { SettingSection } from './shared'
 import { ProviderIcon } from '../ReviewControls'
 
@@ -10,20 +11,20 @@ const inputClass =
   'px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm'
 
 // SCOPE_FILE names the file a save at each scope writes to, shown in the section
-// description so it is obvious where a value lands.
+// description so it is obvious where a value lands. Review is only offered under
+// the project and local scopes (it is repo-specific), so 'user' never shows.
 const SCOPE_FILE: Record<'project' | 'local' | 'user', string> = {
   project: '.hydra/config.toml (shared with your team)',
   local: '.hydra/config.local.toml (personal, never committed)',
-  user: '~/.config/hydra/config.toml (all your projects)',
+  user: '~/.config/hydra/config.toml',
 }
 
 // ReviewSection edits the raw [review] table for ONE config layer (the scope tab
-// the page is on). Every field is optional: leave it on "Inherit" and it falls
-// through to the layer below (project -> user -> built-in defaults). So provider
-// / target / branch template naturally live in the shared Project config, while
-// personal tweaks (default action, publish-when-green) go under the Local tab.
-// The resolved/effective values and live forge auth are fetched read-only as
-// hints.
+// the page is on). Every field is optional: leave it inherited and it falls
+// through to the layer below (project -> built-in defaults). So provider /
+// target / branch template naturally live in the shared Project config, while
+// personal tweaks (publish-when-green) go under the Local tab. The section is a
+// collapsible card (collapsed by default) since most people rarely touch it.
 export function ReviewSection({
   review,
   onChange,
@@ -71,7 +72,10 @@ export function ReviewSection({
   return (
     <SettingSection
       title="Review / Merge requests"
-      description={`How Hydra publishes heads as forge MRs/PRs. Fields left on "Inherit" fall through to the layer below. Saving writes to ${SCOPE_FILE[scope]}. Never put a token here; auth is handled by gh/glab on the host.`}
+      description={`How Hydra publishes heads as forge MRs/PRs. Fields left inherited fall through to the layer below. Saving writes to ${SCOPE_FILE[scope]}. Never put a token here; auth is handled by gh/glab on the host.`}
+      collapsible
+      defaultCollapsed
+      storageKey={StorageKeys.settingsReviewCollapsed}
     >
       <div className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
         <div className="flex flex-col gap-3 px-3.5 py-3 text-sm">
@@ -95,16 +99,16 @@ export function ReviewSection({
             </div>
           </Row>
           <Row label="Target branch">
-            <Text value={r.target_branch ?? ''} placeholder={resolved?.target_branch || 'main'} onChange={(v) => set('target_branch', v || null)} className="w-48" />
-          </Row>
-          <Row label="Primary action">
-            <Select value={r.default_action ?? ''} onChange={(v) => set('default_action', v || null)} options={[['', `Inherit (${resolved?.default_action === 'create_mr' ? 'Create MR' : 'Merge'})`], ['merge', 'Merge (local)'], ['create_mr', 'Create MR']]} />
+            <div className="flex items-center gap-2 flex-wrap">
+              <Text value={r.target_branch ?? ''} placeholder={resolved?.target_branch || ''} onChange={(v) => set('target_branch', v || null)} className="w-48" />
+              <Hint>follows {resolved?.remote || 'origin'}&apos;s default branch{resolved?.target_branch ? ` (${resolved.target_branch})` : ''} unless set</Hint>
+            </div>
           </Row>
           <Row label="Branch template">
             <Text value={r.push_branch_template ?? ''} placeholder={resolved?.push_branch_template || '{id}'} onChange={(v) => set('push_branch_template', v || null)} className="w-64 font-mono" />
           </Row>
           <Row label="Defaults">
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               <Bool label="Open MRs as draft" value={r.draft} effective={resolved?.draft} onChange={(v) => set('draft', v)} />
               <Bool label="Request squash on merge" value={r.squash} effective={resolved?.squash} onChange={(v) => set('squash', v)} />
               <Bool label="Delete source branch on merge" value={r.delete_remote_branch} effective={resolved?.delete_remote_branch} onChange={(v) => set('delete_remote_branch', v)} />
@@ -164,22 +168,31 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
   )
 }
 
-// Bool is a tri-state control for a nullable boolean: Inherit / Yes / No. Inherit
-// (null) shows the effective value inherited from a lower layer.
+// Bool is a nullable-boolean control: a checkbox showing the value in force, with
+// a reset (to inherit) affordance once you have overridden it at this layer. When
+// inherited it mirrors the effective value in a muted style with an "inherited"
+// tag; clicking it sets an explicit override at this layer.
 function Bool({ label, value, effective, onChange }: { label: string; value: boolean | null | undefined; effective: boolean | null | undefined; onChange: (v: boolean | null) => void }) {
-  const v = value == null ? '' : value ? 'yes' : 'no'
+  const overridden = value != null
+  const shown = overridden ? value : !!effective
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <select
-        value={v}
-        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value === 'yes')}
-        className={`${inputClass} py-1`}
-      >
-        <option value="">Inherit ({effective ? 'Yes' : 'No'})</option>
-        <option value="yes">Yes</option>
-        <option value="no">No</option>
-      </select>
-      {label}
-    </label>
+    <div className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input type="checkbox" checked={shown} onChange={(e) => onChange(e.target.checked)} className="cursor-pointer" />
+        <span className={overridden ? '' : 'text-gray-500 dark:text-gray-400'}>{label}</span>
+      </label>
+      {overridden ? (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          title="Reset to inherited"
+          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      ) : (
+        <span className="text-[11px] text-gray-400 dark:text-gray-500">inherited</span>
+      )}
+    </div>
   )
 }

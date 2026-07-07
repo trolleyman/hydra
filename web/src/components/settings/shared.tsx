@@ -1,18 +1,59 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronRight } from 'lucide-react'
+import { readLocal, writeLocal } from '../../lib/storage'
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'codex' | 'defaults'
 
 // A labelled block at the top of settings: a Title-Case heading, an optional
 // one-line description, then the control(s). Used for Theme / Scope / Agent.
-export function SettingSection({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
+// When `collapsible`, the heading becomes a chevron toggle that hides the body;
+// pass `storageKey` to remember the open/closed state across visits.
+export function SettingSection({
+  title,
+  description,
+  action,
+  children,
+  collapsible = false,
+  defaultCollapsed = false,
+  storageKey,
+}: {
+  title: string
+  description?: string
+  action?: ReactNode
+  children: ReactNode
+  collapsible?: boolean
+  defaultCollapsed?: boolean
+  storageKey?: string
+}) {
+  const [collapsed, setCollapsed] = useState(() => {
+    if (!collapsible) return false
+    if (storageKey) {
+      const v = readLocal(storageKey)
+      if (v === '1') return true
+      if (v === '0') return false
+    }
+    return defaultCollapsed
+  })
+  const toggle = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    if (storageKey) writeLocal(storageKey, next ? '1' : '0')
+  }
   return (
     <div className="mb-5">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+        {collapsible ? (
+          <button type="button" onClick={toggle} className="flex items-center gap-1 -ml-1 cursor-pointer group">
+            <ChevronRight className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-gray-700 dark:group-hover:text-gray-300">{title}</h2>
+          </button>
+        ) : (
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+        )}
         {action}
       </div>
-      {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
-      <div className="mt-2">{children}</div>
+      {description && !collapsed && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
+      {!collapsed && <div className="mt-2">{children}</div>}
     </div>
   )
 }

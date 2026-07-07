@@ -29,6 +29,7 @@ import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
+import { useDefaultAction } from '../lib/uiPrefs'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
 
@@ -335,6 +336,9 @@ export function AgentDetail({
   // fetched once per project (not per agent) and shared with the Settings editor.
   const reviewConfig = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] ?? null : null))
   const setReviewConfigInStore = useProjectStore((s) => s.setReviewConfig)
+  // Per-device "which button is primary" preference (Browser settings); read here
+  // with the other hooks so it precedes any early return.
+  const primaryActionPref = useDefaultAction((s) => s.action)
   const remotes = reviewConfig?.remote ? [reviewConfig.remote] : ['origin']
   const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -1141,9 +1145,12 @@ export function AgentDetail({
               : { label: 'Publish when green', description: 'Auto-open a draft MR once local tests pass and the head finishes.', icon: <Clock className="w-4 h-4" />, onClick: () => void armPublish(), tone: 'emerald' as const, disabled: busy || publishing },
           ] as AgentTopBarMenuItem[],
         }
-  // default_action orders the two primary buttons: create_mr puts the MR button
-  // first (before Merge); otherwise Merge stays primary and MR is a segment.
-  const mrFirst = reviewConfig?.default_action === 'create_mr' || linked
+  // Which button leads: the per-device Browser preference wins; if unset it
+  // falls back to the project's [review] default_action, else Merge. A linked
+  // head always puts its MR button first. (primaryActionPref is read at the top
+  // with the other hooks so it stays before any early return.)
+  const primaryAction = primaryActionPref ?? reviewConfig?.default_action ?? 'merge'
+  const mrFirst = primaryAction === 'create_mr' || linked
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">

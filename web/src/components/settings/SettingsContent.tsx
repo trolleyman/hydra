@@ -148,7 +148,9 @@ export function SettingsContent({
   return (
     <>
       {scope === 'project' && iconSection}
-      {selectedProject && (
+      {/* Review is repo-specific, so it is offered under Project + Local only - a
+          global (all-projects) provider/remote/target would be meaningless. */}
+      {scope !== 'user' && selectedProject && (
         <ReviewSection
           review={config.review}
           onChange={(review) => setConfig({ ...config, review: review ?? undefined })}
