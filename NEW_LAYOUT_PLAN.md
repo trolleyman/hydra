@@ -49,7 +49,8 @@ Key facts that constrain the redesign:
   (`web/src/DiffViewer.tsx`), *below* the Changes toolbar: Changes bar ->
   `TestsPanel` -> `PreviewPanel` -> `ArtifactsPanel` -> file-list column +
   file diffs. Tests and previews wrap in `CollapsibleCard`; `ArtifactsPanel`
-  renders its own filter bar + masonry grid (no card).
+  has no single outer card - it renders a filter bar plus one `CollapsibleCard`
+  *per artifact set*, each set's files in a masonry grid.
 - **Prompt** is `PromptBlock` (read-only, in `AgentDetail.tsx`), rendered above
   the terminal. There is no live prompt *input* on this page - prompting is done
   through the terminal/chat.
@@ -332,8 +333,10 @@ selectors today; moving that block into a right panel changes nothing.)
    filter.
 2. ~~**Split library vs hand-rolled?**~~ DECIDED: hand-rolled, mirroring
    `handleSidebarResizeStart` in `__root.tsx`. No new dependency.
-3. **Which pane owns the metadata row?** Proposed: left pane. Alternative:
-   a thin strip under the header spanning both.
+3. ~~**Which pane owns the metadata row?**~~ DECIDED: left pane, as proposed.
+   It describes the agent/terminal side (type, status, branch, terminal/chat
+   toggle) and keeping it there leaves the inspector chrome purely about the
+   comparison.
 4. ~~**Keep panels mounted-but-hidden or unmount on tab switch?**~~ DECIDED:
    unmount inactive views - match what happens today. `CollapsibleCard`
    already unmounts a collapsed body ("the body stays mounted only while open";
@@ -346,8 +349,9 @@ selectors today; moving that block into a right panel changes nothing.)
    the embedded app (full reload + server wake on return); if that is annoying
    in practice, special-case previews to stay alive. Start with uniform
    unmount.
-5. **Default split ratio** - e.g. 40% terminal / 60% inspector? Diff usually
-   wants more room.
+5. ~~**Default split ratio**~~ DECIDED: 40% terminal / 60% inspector. The diff
+   (especially side-by-side + file list) needs the extra room; chat mode reads
+   fine at 40%.
 
 ## Affected files (first pass)
 
@@ -361,7 +365,7 @@ selectors today; moving that block into a right panel changes nothing.)
 - New: a split-pane primitive (or hand-rolled divider) + `StorageKeys` entry.
 - `web/src/components/TestsPanel.tsx`, `PreviewPanel.tsx`, `ArtifactsPanel.tsx`
   - adapt from `CollapsibleCard` framing to first-class views (`ArtifactsPanel`
-  already renders card-less; it mainly folds into the Diff view).
+  keeps its per-set `CollapsibleCard`s; it mainly folds into the Diff view).
 - `web/src/components/AgentTopBar.tsx` - add the inspector-pane hide/show
   toggle (mirror the show-sidebar button); content otherwise unchanged; verify
   it spans the full width above both panes.

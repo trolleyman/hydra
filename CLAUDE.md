@@ -50,7 +50,8 @@ and `web/src/DiffViewer.tsx`):
   never lifted; stats, refresh, settings cog), then `TestsPanel` -> `PreviewPanel` ->
   `ArtifactsPanel`, then the file-list column + file diffs. Tests and previews wrap
   in `CollapsibleCard` (which fully unmounts its body ~200ms after collapse);
-  `ArtifactsPanel` is card-less (own filter bar + masonry grid). The agent-page
+  `ArtifactsPanel` has no outer card but renders one `CollapsibleCard` per artifact
+  set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
 - Sticky-header coordination: `DiffViewer` publishes `--sticky-changes-h` via a
@@ -77,6 +78,10 @@ and `web/src/DiffViewer.tsx`):
   whether to serve Hydra's own loading page while the server boots. `PreviewPanel`'s
   Open button is a `window.open` of the proxy URL; nothing in `web/src` embeds an
   iframe today.
+- Gotcha: `web/src/components/ArtifactsPanel.tsx` contains **raw NUL bytes** (used
+  as a collision-proof key separator in template literals around line 1268), so
+  plain `grep` treats the whole file as binary and silently matches nothing - use
+  `grep -a` (or read the file) when searching it.
 
 ## Testing
 
