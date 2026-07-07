@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusDotClass, agentDotClass, agentStatusBadge, archivedEndStateBadge } from '../lib/agentDisplay'
+import { statusDotClass, agentDotClass, agentDotAnimate, agentStatusBadge, archivedEndStateBadge } from '../lib/agentDisplay'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
 import { TONE_DOT, TONE_BADGE } from './badgeTones'
@@ -91,6 +91,38 @@ describe('agentDotClass', () => {
     expect(agentDotClass(makeAgent({ session: 'running' }))).toBe('bg-green-500')
     expect(agentDotClass(makeAgent({ session: 'exited' }))).toBe('bg-red-400')
     expect(agentDotClass(makeAgent({ session: 'stopped' }))).toBe(GRAY)
+  })
+})
+
+// The dot pulses only while the agent is actively "whirring". A settled agent
+// status must stay static even while its PTY session lingers alive - the
+// session-running fallback is strictly for "no agent status reported yet".
+describe('agentDotAnimate', () => {
+  const PULSE = 'animate-status-pulse'
+
+  it.each([
+    AgentStatus.RUNNING,
+    AgentStatus.MERGING,
+    AgentStatus.STARTING,
+    AgentStatus.BUILDING,
+    AgentStatus.PENDING,
+    AgentStatus.KILLING,
+  ])('pulses for the whirring status %s', (status) => {
+    expect(agentDotAnimate(makeAgent({ status }))).toBe(PULSE)
+  })
+
+  it.each([
+    AgentStatus.WAITING,
+    AgentStatus.NEEDS_INPUT,
+    AgentStatus.FINISHED,
+    AgentStatus.STOPPED,
+  ])('stays static for the settled status %s even with a live session', (status) => {
+    expect(agentDotAnimate(makeAgent({ session: 'running', status }))).toBe('')
+  })
+
+  it('falls back to the session state only when no agent_status is reported', () => {
+    expect(agentDotAnimate(makeAgent({ session: 'running' }))).toBe(PULSE)
+    expect(agentDotAnimate(makeAgent({ session: 'stopped' }))).toBe('')
   })
 })
 

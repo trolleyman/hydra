@@ -553,6 +553,8 @@ export function AgentTopBar({
           the toolbar always has room to lay out. AdaptiveActions measures this
           row via its own parentElement, so the row needs no ref. */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
+        {/* Status dot sits just before the agent's name. */}
+        {statusDot && <div className="shrink-0">{statusDot}</div>}
         {rename ? (
           // A single always-mounted input (read-only until editing) so the box
           // keeps its full width, clicking places the caret where you click, and
@@ -602,9 +604,6 @@ export function AgentTopBar({
           <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} />
         )}
       </div>
-
-      {/* Status dot pinned to the right, inset to match the bar's centering. */}
-      {statusDot && <div className="shrink-0">{statusDot}</div>}
     </div>
   )
 }
