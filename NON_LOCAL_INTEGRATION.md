@@ -20,16 +20,16 @@ The merge/lifecycle path, end to end:
 - **Merge is a local git merge.** `hydra merge` / the web Merge button call
   `POST .../agents/{id}/merge`, which claims the head (`idle -> merging`),
   runs the local test gate, and calls `performClaimedMerge`
-  (`internal/http/handlers.go:1510`). That resolves a checkout of
+  (`internal/http/handlers.go:1545`). That resolves a checkout of
   `head.BaseBranch` and runs `git.Merge` (`internal/git/merge.go:36`):
   `--ff-only` when possible, else a `--no-ff` merge commit. No squash, no
   push, no remote involvement of any kind.
 - **The branch dies on merge.** The close path reparents stacked children,
   then `heads.KillHeadNoLock(..., "merged")` removes the worktree and deletes
   the branch (only `hydra/*` branches are eligible for deletion,
-  `internal/heads/heads.go:1180`).
+  `internal/heads/heads.go:1181`).
 - **Merge-when-green is local too.** `RunAutoMergeWatcher`
-  (`internal/http/tests.go:461`) polls armed heads every 5s and merges when
+  (`internal/http/tests.go:463`) polls armed heads every 5s and merges when
   the branch's `[[tests]]` are green and the agent has been `finished` for
   10s. The gate is Hydra's own test runners, not any remote CI.
 - **The only remote interaction is "repository sync".** `git.Push/Fetch/Pull`
@@ -39,14 +39,16 @@ The merge/lifecycle path, end to end:
   a successful local merge, nothing reaches the server until you press Sync.
 - **Base branch = whatever the project root has checked out.**
   `SpawnHead` defaults `BaseBranch` to `git.GetCurrentBranch(projectRoot)`
-  (`internal/heads/heads.go:385`). There is no `origin/HEAD` detection and no
+  (`internal/heads/heads.go:388`). There is no `origin/HEAD` detection and no
   fetch-before-spawn, so a stale local trunk silently produces heads based on
   old code.
 - **No forge or tracker code exists.** Case-insensitive grep for
   GitHub/GitLab/PR/MR/JIRA finds only network allow-list hosts
-  (`github.com`, `*.github.com`, `gitlab.com`, `*.gitlab.com`) and the
-  read-only re-exposure of `~/.config/gh` inside the sandbox
-  (`internal/sandbox/defaults.go:62-66`). Everything below is greenfield.
+  (`github.com`, `*.github.com`, `gitlab.com`, `*.gitlab.com`,
+  `bitbucket.org` - `InfraAllowedHosts`, `internal/sandbox/sandbox.go:126`)
+  and the comment explaining why `~/.config/gh` is deliberately NOT
+  restored into the sandbox (`internal/sandbox/defaults.go:63`).
+  Everything below is greenfield.
 - **Credentials:** the sandbox masks `~/.ssh`, `~/.git-credentials`,
   `~/.netrc`, etc., the gate denies `git push` from Bash outright, and the
   Read tool is denied on credential paths. `~/.config/gh` *used to be*
@@ -60,7 +62,7 @@ The merge/lifecycle path, end to end:
   host-side action.
 - **Config layering:** internal defaults -> `~/.config/hydra/config.toml`
   (user/machine) -> `<root>/.hydra/config.toml` (project, committed), merged
-  in `config.Load` (`internal/config/config.go:1004`). There is **no
+  in `config.Load` (`internal/config/config.go:1085`). There is **no
   untracked per-project override** ("config.local.toml") today. The closest
   precedent is `.hydra/deploy.toml` (`internal/config/deploy.go`): an
   uncommitted, gitignored, 0600 per-machine secrets file.
@@ -130,7 +132,9 @@ of preference:
   post a comment, but creating/merging an MR pings me" is expressible
   today with config only. Prefer an HTTP/hosted MCP server (token stays
   out of in-sandbox files) over a stdio one whose config rides into the
-  sandbox.
+  sandbox. (Once the scoped `mcp__hydra__*` MR tools exist, 3.5a, they
+  cover the this-head's-own-MR case with no forge MCP at all; a generic
+  forge server stays the route for deliberately broader access.)
 - **Opt-in ambient CLI (`restore_ro = ["~/.config/gh"]`).** Simple and
   unrestricted: the head IS you on the forge, no approval step. Reasonable
   on a personal repo; at work, don't.
@@ -181,12 +185,16 @@ committed config and `deploy.toml`:
 - **Secrets stay out of both - and out of the repo tree entirely.**
   Preferred: not stored by Hydra at all - shell out to `gh`/`glab` and
   let their credential stores handle it (**CLI-first**). Fallback for
-  forges/JIRA without a good CLI: a 0600 token file under
-  `~/.config/hydra/` (e.g. `~/.config/hydra/secrets.toml` with per-host
-  sections) - deliberately NOT a new file in `.hydra/`: the home
-  location is covered by the sandbox's existing `~/.config` mask for
-  free, needs no gitignore entry, and cannot be committed by
-  construction. (`.hydra/deploy.toml` predates this rule and is really
+  forges/JIRA without a good CLI: a 0600 token file,
+  `~/.config/hydra/secrets.toml`, with per-host sections - deliberately
+  NOT a new file in `.hydra/`: the home location is covered by the
+  sandbox's existing `~/.config` mask for free, needs no gitignore
+  entry, and cannot be committed by construction. Decided: ONE
+  host-side file keyed by forge host, not per-project - tokens are
+  host-scoped (one corporate GitLab serves many repos), so per-project
+  storage would just duplicate the same token and multiply the leak
+  surface. The Settings page edits this file when the user picks token
+  auth; a project only ever *references* a host, never holds a secret. (`.hydra/deploy.toml` predates this rule and is really
   instance config, not a universal Hydra file - see 3.4 for how it gets
   masked and where it might move.)
 
@@ -228,8 +236,14 @@ default_action = "merge"        # merge | create_mr
 # local branch stays hydra/<id>). This is only the template; each head
 # carries its own editable downstream_branch seeded from it - see 3.3a.
 # Placeholders: {id}, {ticket} (extracted from prompt/title, see [jira]),
-# {base} (the head's base branch).
-push_branch_template = "feat/{ticket}-{id}"
+# {base} (the head's base branch). The default is plain "{id}"; teams
+# opt in to a convention like the example. Empty-expansion rule: a
+# placeholder that expands to nothing collapses its adjacent separator
+# characters ('-', '_', '/') and empty path segments are dropped, so
+# "feat/{ticket}-{id}" with no ticket yields "feat/<id>" - deliberately
+# NO bash-style ${x:-fallback} syntax; the collapse rule covers the
+# real cases without inventing a template language.
+push_branch_template = "{id}"   # e.g. "feat/{ticket}-{id}"
 draft = true                    # open MRs as draft by default
 squash = true                   # request squash-on-merge
 delete_remote_branch = true     # tell the forge to delete on merge
@@ -310,9 +324,10 @@ listing rely on that prefix). Semantics:
   later in the UI, exactly like the existing base-branch editor in
   `AgentDetail.tsx` (same pattern: a metadata-only field with an inline
   editor).
-- **Empty template -> mirror**: with no template configured, the
-  downstream name defaults to the local name (`hydra/<id>`), which is the
-  degenerate local-ish behavior.
+- **Default = `{id}`**: with no template configured the downstream name
+  is just the head id - it is the *published* name, so it should read
+  like a normal topic branch, not carry the `hydra/` implementation
+  prefix. Empty placeholders collapse per the rule in 3.2.
 - **Soft-locked after first publish**: on GitLab/GitHub the source branch
   IS the MR's identity - renaming it orphans the MR (GitLab closes it;
   GitHub retargets at best). After `ReviewID` is set, editing
@@ -377,10 +392,15 @@ credentials you already provision once on the host:
     reboot with the socket stale). So publish/push must run strictly
     non-interactively (`GIT_TERMINAL_PROMPT=0`, `GIT_SSH_COMMAND="ssh
     -oBatchMode=yes"` - the existing `git.Fetch` already sets the former,
-    `git.Push` should too) and map the failure to an actionable error in
+    `git.Push` sets NEITHER today, so the existing sidebar Push button
+    can already hang the daemon on a credential prompt; hardening it is
+    a Phase 1 item) and map the failure to an actionable error in
     the UI: "push auth failed - add your key to ssh-agent (`ssh-add`) or
     switch to HTTPS + credential helper", rather than hanging or a raw
-    git stderr. If the agent socket needs pinning on odd setups, a
+    git stderr. A later upgrade could forward the prompt to the web UI
+    instead of failing fast (git/ssh support this via
+    `GIT_ASKPASS`/`SSH_ASKPASS` pointing at a small hydra helper) -
+    tracked as a follow-up in PLAN.md, explicitly not part of this plan. If the agent socket needs pinning on odd setups, a
     NON-secret pointer like `ssh_auth_sock` or a `ssh_command` override
     is a legitimate `config.local.toml` entry - the *passphrase itself
     never is*.
@@ -414,7 +434,7 @@ TODAY: sandbox masks are home-relative (`~/.ssh`, `~/.config`, ...,
 host, including the project root - and `.hydra/deploy.toml` is not
 masked. (What deploy.toml actually is: the web `AuthKey` + ngrok config,
 loaded once at daemon boot from the boot project's root,
-`internal/cli/runtime.go:253`; a missing file just means auth disabled.
+`internal/cli/runtime.go:259`; a missing file just means auth disabled.
 So it is *instance* config in per-project clothing, present only in
 projects that actually deploy - not a universal Hydra file.)
 
@@ -424,7 +444,7 @@ just an entry in it, not a special case:
 - **The mechanism: project-relative masks.** Let `[sandbox]
   masked_paths` take project-relative entries (and simple globs)
   alongside today's home/absolute ones - the dual convention `cow_paths`
-  already has - and add **`.hydraignore`** (name TBD: `.hydramask`?) as
+  already has - and add **`.hydraignore`** (name settled) as
   the .gitignore-style spelling of the same thing: one glob per line at
   the project root, unioned into the same mask set. Trust is easy: masks
   only ever ADD restriction, so honoring a head's own branch copy (union
@@ -459,7 +479,13 @@ copy.
 ### 3.5 MR lifecycle tracking (Phase 3)
 
 A watcher (sibling of `RunAutoMergeWatcher`) polls each MR-linked head's
-MR via the forge API (unlinked heads cost nothing):
+MR via the forge API (unlinked heads cost nothing).
+
+Design constraint from the daemon model: ONE `hydrad` serves every
+project, so the watcher must iterate all projects, not just the boot
+root (the same lesson `runtime.go`'s other background loops learned),
+and `[review]`/provider/remote resolution must read each head's own
+project-root config - never the daemon's boot project's.
 
 - **Status surfaced in UI**: CI pipeline state, approval count, unresolved
   discussion count, mergeability. The sidebar chip gains an MR state.
@@ -479,23 +505,69 @@ MR via the forge API (unlinked heads cost nothing):
   protected-branch rules Hydra can't replicate).
 - **Remote-merge detection and cleanup**: when the MR reports `merged`,
   fetch, fast-forward the local target branch (reusing `git.Pull`
-  machinery), then archive the head with a new end state
-  (`merged_remote` or reuse `merged`) via the existing teardown - now safe
+  machinery), then archive the head as `merged` (decided: no separate
+  `merged_remote` state - the head's stored `ReviewURL` already records
+  that it landed via an MR if the distinction ever matters) via the
+  existing teardown - now safe
   because the code has landed. Squash merges are handled correctly because
   the truth is the **MR state, not git ancestry** (the existing
   `MergedHydraBranches` ancestry scan cannot see squashes; do not try to
   make it).
-- **Review-comment loop** (the big quality-of-life win): a "Fetch review
-  comments" action that pulls unresolved MR discussions and feeds them to
-  the head as a new prompt ("Address this review feedback: ..."). Later,
-  optionally automatic: new unresolved discussion on an idle MR-linked
-  head -> notify, or (opt-in) auto-prompt.
+- **Review-comment loop** (the big quality-of-life win) - agent-pull,
+  not push: a "Respond to review comments" button that sends the head a
+  one-line canned prompt ("Fetch your MR's unresolved review comments
+  with the hydra MCP tools and address them") via the existing
+  `sendAgentInput` endpoint - the same pattern as the diff viewer's
+  "Fix the merge conflicts with branch ..." action
+  (`web/src/DiffViewer.tsx:1506`). The agent pulls the discussions
+  itself through `mcp__hydra__*` (3.5a), so the data is fresh at the
+  moment the agent actually reads it, not at the moment of the click.
+  New unresolved discussion on an idle linked head -> notify the user;
+  deliberately NO automatic prompting of the agent (deferred until the
+  button proves insufficient - an agent that silently starts churning
+  on review context you haven't seen yet is worse than one click).
 - **Stacked MRs** (settled direction): a child head's MR targets its
   parent's *downstream* branch; when the parent's MR merges, retarget
   the child's MR at the trunk - the remote analog of the existing local
   reparenting (`AgentsByBaseBranch` -> `UpdateAgentBaseBranch`).
   Anything fancier waits for real demand; forges handle MR stacks
   poorly.
+
+#### 3.5a Agent-facing MR tools: `mcp__hydra__*` (Phase 3)
+
+Hydra already seeds an always-available "hydra" MCP server into every
+agent's MCP config (`hydra mcp` - `internal/cli/mcp.go` +
+`internal/mcpserver`, currently exposing
+`list_available_mcp_servers`/`request_mcp_server`). MR awareness slots
+in as new tools on that existing server, NOT as a generic forge MCP:
+
+- `get_review_status` - is this head linked to an MR? URL, target
+  branch, draft state, CI, approvals, unresolved-discussion count
+  (served from the watcher's cached view, 3.5).
+- `get_review_comments` - the unresolved discussions with file/line
+  context, ready to act on.
+- Write-side, maybe later: `reply_to_review_comment` /
+  `resolve_discussion` - gated like any MCP write (parked for approval
+  unless allow-listed), since they act as the user on the forge.
+
+Why this beats pointing heads at a generic GitHub/GitLab MCP server:
+
+- **Scoped by construction.** The daemon knows which head is calling
+  and answers only about THAT head's linked MR. A generic forge MCP
+  hands the agent the user's whole forge identity (every repo, every
+  MR) - gated per-tool, but not per-resource.
+- **No new credentials.** Publish and the watcher already give the
+  daemon host-side forge auth; the tools reuse it. Nothing token-shaped
+  enters the sandbox. (Generic forge MCP, section 2.2, remains the
+  answer when the user deliberately wants a head to have *unscoped*
+  forge access.)
+- **Transport.** The in-sandbox `hydra mcp` process needs a channel to
+  the daemon; precedent exists in the gate's file-based
+  request/decision channel that `request_mcp_server` already uses for
+  its approval round-trip - extend that, or bind a per-head socket.
+  Design constraint either way: per-head identity must come from the
+  channel itself (each head's dir/socket is bound only into its own
+  sandbox), never from a self-reported head ID.
 
 ### 3.6 Spawn-side changes (Phase 3)
 
@@ -555,7 +627,11 @@ MR via the forge API (unlinked heads cost nothing):
   link and sync state) -> spawn -> running heads. It also keeps the
   repo row adjacent to the project selector it describes. Cost: the
   spawn box - the most-used control - drops ~40px; acceptable, it
-  remains fully visible. Verdict: do it, as a standalone tweak. (day in the life, after Phase 3)
+  remains fully visible. Verdict: do it, as a standalone tweak.
+
+---
+
+## 4. A day in the life (after Phase 3)
 
 1. `hydra spawn "PROJ-1234: rate-limit the webhook endpoint"` - base is a
    fresh `origin/main`; the ticket body is in the prompt context.
@@ -567,7 +643,8 @@ MR via the forge API (unlinked heads cost nothing):
    state chip. You keep working on other heads.
 5. Reviewer comments; one applies a suggestion in the GitLab UI. Hydra
    shows "2 unresolved discussions" and "remote ahead by 1" - one click
-   feeds the comments to the agent, one click pulls the suggestion commit
+   tells the agent to address the comments (it fetches them itself via
+   `mcp__hydra__*`), one click pulls the suggestion commit
    into the head, `Push to MR` sends the fixes back.
 6. You arm **merge when approved**. CI goes green, approval lands, the
    forge merges (squash), branch auto-deleted remotely.
@@ -591,8 +668,14 @@ changing steps 1-3 at all.
 
 ### Phase 1 - config groundwork (small)
 
+- Harden `git.Push` to run strictly non-interactively
+  (`GIT_TERMINAL_PROMPT=0` + `GIT_SSH_COMMAND="ssh -oBatchMode=yes"`,
+  matching what `git.Fetch` half-does today) and surface an actionable
+  auth error. Standalone fix: the existing sidebar Push button can hang
+  the daemon on a credential prompt right now (3.4). The interactive
+  askpass-to-web-UI upgrade is a PLAN.md follow-up, not this.
 - `config.local.toml` as a fourth merge layer in `config.Load`
-  (`internal/config/config.go:1004`); gitignore it next to `deploy.toml`;
+  (`internal/config/config.go:1085`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.
 - **Mask project-level secret/personal files from head sandboxes**
   (pre-existing gap, see 3.4): project-relative `masked_paths` +
@@ -642,7 +725,11 @@ changing steps 1-3 at all.
 - "Merge when approved" (prefer arming the forge's own auto-merge).
 - Fetch-fresh spawn base (`<remote>/<target>`); remote-aware behind-count
   and update-from-base.
-- "Fetch review comments -> prompt agent" action.
+- `mcp__hydra__*` MR tools on the seeded hydra MCP server
+  (`get_review_status`/`get_review_comments`, 3.5a) + the "Respond to
+  review comments" canned-prompt button (`sendAgentInput`, the
+  fix-merge-conflicts pattern). Notify on new unresolved discussions;
+  no auto-prompting.
 
 ### Phase 4 - polish / tracker depth
 
@@ -658,7 +745,7 @@ changing steps 1-3 at all.
 ## 6. Open questions / risks
 
 - **Branch naming vs teardown**: local branches stay `hydra/<id>` (teardown
-  at `internal/heads/heads.go:1180` only deletes `hydra/*`); only the
+  at `internal/heads/heads.go:1181` only deletes `hydra/*`); only the
   *push* refspec is renamed. If teams demand renamed local branches too,
   teardown eligibility needs rethinking - avoid unless forced.
 - **Multi-user forges, single-user Hydra**: Hydra's daemon acts as one
