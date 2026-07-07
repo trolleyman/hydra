@@ -19,6 +19,9 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
   running: { label: 'running', badge: 'green', dot: 'green' },
   starting: { label: 'starting', badge: 'blue', dot: 'blue' },
   needs_input: { label: 'needs_input', badge: 'red', dot: 'red' },
+  // A turn that failed mid-response (Claude "API Error: ... response above may be
+  // incomplete."). Like needs_input it wants your eyes now, so it reads red.
+  errored: { label: 'errored', badge: 'red', dot: 'red' },
   waiting: { label: 'waiting', badge: 'yellow', dot: 'yellow' },
   finished: { label: 'finished', badge: 'violet', dot: 'violet' },
   merging: { label: 'merging', badge: 'green', dot: 'green' },
@@ -172,6 +175,7 @@ export function agentStatusDetail(agent: AgentResponse): string {
     case 'needs_input': return 'Waiting for your answer...'
     case 'waiting':     return 'Waiting...'
     case 'merging':     return 'Merging...'
+    case 'errored':     return 'API error - the reply may be incomplete.'
     default:            return ''
   }
 }

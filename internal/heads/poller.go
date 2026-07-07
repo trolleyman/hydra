@@ -278,7 +278,11 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// user back to - so it advances the status but arms no unread flag.
 			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
 			statusChanged := a.AgentStatus == nil || *a.AgentStatus != agentStatus
-			immediate := statusChanged && agentStatus == "needs_input"
+			// needs_input and errored are both explicit "come back to me now"
+			// moments (blocked on you / a turn that failed mid-response), so both
+			// raise the unread flag the instant they appear rather than riding out
+			// the finished grace window.
+			immediate := statusChanged && (agentStatus == "needs_input" || agentStatus == "errored")
 			// Only a change the client actually renders is worth an agents_changed
 			// event: the status string flipping, or the unread flag being raised
 			// (immediate). A running agent rewrites status.json on every tool call,
@@ -376,6 +380,8 @@ func mapAgentStatus(s api.AgentStatus) string {
 		return "waiting"
 	case api.Finished:
 		return "finished"
+	case api.Errored:
+		return "errored"
 	case api.Stopped, "ended", "exited":
 		return "stopped"
 	default:

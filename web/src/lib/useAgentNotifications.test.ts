@@ -80,4 +80,17 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
     runTransition('a1', AgentStatus.NEEDS_INPUT)
     expect(transitionToasts()).toHaveLength(0)
   })
+
+  it('pops an error transition toast when a different branch is selected', () => {
+    runTransition('other-agent', AgentStatus.ERRORED)
+    const toasts = transitionToasts()
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0].agentTransition?.status).toBe('errored')
+    expect(toasts[0].type).toBe('error')
+  })
+
+  it('suppresses the error toast when its own branch is the selected one', () => {
+    runTransition('a1', AgentStatus.ERRORED)
+    expect(transitionToasts()).toHaveLength(0)
+  })
 })

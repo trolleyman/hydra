@@ -158,6 +158,27 @@ export function useAgentNotifications(
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
+      } else if (status === 'errored') {
+        // A turn that failed mid-response - the reply is incomplete and the head
+        // needs a nudge to continue. Surfaced like a needs-input wait (lingering
+        // toast + sticky OS notification), but as an error.
+        if (!isSelected) {
+          toast.show({
+            message: `"${name}" hit an API error`,
+            type: 'error',
+            duration: NEEDS_INPUT_TOAST_MS,
+            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+          })
+        }
+        if (!pageActive) {
+          fireNotification({
+            title: `${name} hit an API error`,
+            body: 'The turn failed mid-response - the reply may be incomplete.',
+            tag: `error:${agent.id}`,
+            sticky: true,
+            onClick: () => openAgent(currentProjectId, agent.id),
+          })
+        }
       }
     }
     lastStatus.current = next
@@ -355,32 +376,39 @@ export function useAgentNotifications(
         // means gone-quiet or awaiting a background subagent, not a user wait), and
         // needs_input is covered immediately by the blocked diff above - so this is
         // a finished-only toast.
+        // Both finished and error raise the unread flag, so a newly-unread agent
+        // is one or the other (needs_input is covered immediately by the blocked
+        // diff above). Toast each with copy matching its kind.
         const unread = projectAgents.filter((a) => a.has_unread_changes)
         const seenUnread = bgUnread.current.get(pid) ?? new Set<string>()
         for (const a of unread) {
           if (seenUnread.has(a.id)) continue // already toasted (or pre-dates us).
           const status = a.agent_status?.status
-          if (status !== 'finished') continue
+          if (status !== 'finished' && status !== 'errored') continue
           // Only transitions that happened while this UI was open (60s slack
           // covers the daemon's grace window between the transition timestamp
           // and the unread flag being raised).
           const at = Date.parse(a.agent_status?.timestamp ?? '')
           if (Number.isNaN(at) || at < observedSince - 60_000) continue
           const agentName = a.title || a.id
+          const isErr = status === 'errored'
           toast.show({
             key: `bg-${status}:${a.id}`,
-            message: `Agent "${agentName}" in project "${projectName}" transitioned to finished`,
-            type: 'success',
-            duration: FINISHED_TOAST_MS,
+            message: isErr
+              ? `Agent "${agentName}" in project "${projectName}" hit an API error`
+              : `Agent "${agentName}" in project "${projectName}" transitioned to finished`,
+            type: isErr ? 'error' : 'success',
+            duration: isErr ? NEEDS_INPUT_TOAST_MS : FINISHED_TOAST_MS,
             agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon },
           })
-          // Desktop notification for finished only.
           if (!pageActive) {
             fireNotification({
-              title: `${agentName} finished`,
-              body: `In project "${projectName}" - the agent has completed its task.`,
-              tag: `finished:${a.id}`,
-              sticky: false,
+              title: isErr ? `${agentName} hit an API error` : `${agentName} finished`,
+              body: isErr
+                ? `In project "${projectName}" - the turn failed mid-response and the reply may be incomplete.`
+                : `In project "${projectName}" - the agent has completed its task.`,
+              tag: `${isErr ? 'error' : 'finished'}:${a.id}`,
+              sticky: isErr,
               onClick: () => openAgent(pid, a.id),
             })
           }
