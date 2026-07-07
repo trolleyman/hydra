@@ -57,7 +57,24 @@ type Head struct {
 	EndState string
 	// MergeWhenGreen is true when auto-merge is armed for this head (PLAN #68).
 	MergeWhenGreen bool
+
+	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// DownstreamBranch is the name the head's work is pushed AS (local stays
+	// hydra/<id>); "" until set.
+	DownstreamBranch string
+	// ReviewURL/ReviewID link this head to a forge MR/PR ("" = unlinked).
+	ReviewURL          string
+	ReviewID           string
+	ReviewProvider     string // "github" | "gitlab"
+	ReviewTargetBranch string
+	// ReviewState is the cached MR-state JSON from the lifecycle watcher (Phase 3).
+	ReviewState string
+	// PublishWhenGreen arms auto-publish (Phase 3).
+	PublishWhenGreen bool
 }
+
+// IsLinked reports whether this head is linked to a forge MR/PR.
+func (h Head) IsLinked() bool { return h.ReviewID != "" || h.ReviewURL != "" }
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
 // session state from the registry (best-effort; nil registry is allowed).
@@ -112,6 +129,14 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			AgentStatus:      computeAgentStatus(&a),
 			HasUnreadChanges: a.HasUnreadChanges,
 			MergeWhenGreen:   a.MergeWhenGreen,
+
+			DownstreamBranch:   a.DownstreamBranch,
+			ReviewURL:          a.ReviewURL,
+			ReviewID:           a.ReviewID,
+			ReviewProvider:     a.ReviewProvider,
+			ReviewTargetBranch: a.ReviewTargetBranch,
+			ReviewState:        a.ReviewState,
+			PublishWhenGreen:   a.PublishWhenGreen,
 		}
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
 		result = append(result, h)

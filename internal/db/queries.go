@@ -303,6 +303,79 @@ func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// SetDownstreamBranch sets the per-head downstream branch name (the name its work
+// is pushed AS; the local branch stays hydra/<id>). Metadata only.
+func (s *Store) SetDownstreamBranch(id, branch string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("downstream_branch", branch)
+	return errtrace.Wrap(result.Error)
+}
+
+// SetReviewLink records the head<->MR link after a publish: the forge URL/id, the
+// resolved provider, the MR target branch and the downstream branch it was pushed
+// as (NON_LOCAL_INTEGRATION.md 3.3 step 4). Metadata only - the head's status
+// lifecycle is unchanged.
+func (s *Store) SetReviewLink(id, downstreamBranch, url, reviewID, provider, targetBranch string) error {
+	updates := map[string]any{
+		"downstream_branch":    downstreamBranch,
+		"review_url":           url,
+		"review_id":            reviewID,
+		"review_provider":      provider,
+		"review_target_branch": targetBranch,
+	}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
+	return errtrace.Wrap(result.Error)
+}
+
+// ClearReviewLink detaches a head from its MR (leaves the forge MR alone). Used by
+// the "detach" kill/merge option (3.3c). Downstream branch is preserved so a
+// re-publish reuses the same name.
+func (s *Store) ClearReviewLink(id string) error {
+	updates := map[string]any{
+		"review_url":           "",
+		"review_id":            "",
+		"review_provider":      "",
+		"review_target_branch": "",
+		"review_state":         "",
+		"review_state_time":    "",
+	}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
+	return errtrace.Wrap(result.Error)
+}
+
+// SetReviewState caches the lifecycle watcher's latest MR state JSON (Phase 3) and
+// the RFC3339 time it was refreshed.
+func (s *Store) SetReviewState(id, state, at string) error {
+	updates := map[string]any{"review_state": state, "review_state_time": at}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
+	return errtrace.Wrap(result.Error)
+}
+
+// LinkedReviewHeads returns the active heads linked to an MR, across all projects.
+// Used by the MR lifecycle watcher (Phase 3) to find candidates to poll.
+func (s *Store) LinkedReviewHeads() ([]Agent, error) {
+	var agents []Agent
+	result := s.reader().Where("review_id <> ? OR review_url <> ?", "", "").Find(&agents)
+	return agents, errtrace.Wrap(result.Error)
+}
+
+// SetPublishWhenGreen arms or disarms "publish when green" for a head (Phase 3).
+func (s *Store) SetPublishWhenGreen(id string, armed bool, armedAt string) error {
+	updates := map[string]any{"publish_when_green": armed, "publish_when_green_at": armedAt}
+	if !armed {
+		updates["publish_when_green_at"] = ""
+	}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
+	return errtrace.Wrap(result.Error)
+}
+
+// ArmedPublishWhenGreen returns active heads with publish-when-green armed, across
+// all projects (Phase 3 watcher).
+func (s *Store) ArmedPublishWhenGreen() ([]Agent, error) {
+	var agents []Agent
+	result := s.reader().Where("publish_when_green = ?", true).Find(&agents)
+	return agents, errtrace.Wrap(result.Error)
+}
+
 // SetMergeWhenGreen arms or disarms auto-merge for a head (PLAN #68). When
 // arming, armedAt records the RFC3339 time; disarming clears it.
 func (s *Store) SetMergeWhenGreen(id string, armed bool, armedAt string) error {

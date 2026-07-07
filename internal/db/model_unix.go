@@ -63,8 +63,42 @@ type Agent struct {
 	// EndState records how an archived (soft-deleted) agent ended: "killed" |
 	// "merged", or "" for an active agent or an aborted spawn. The archived-history
 	// list shows only soft-deleted rows with a non-empty EndState, so aborted
-	// spawns (also soft-deleted, but EndState "") never surface there.
+	// spawns (also soft-deleted, but EndState "") never surface there. A head merged
+	// remotely (its MR landed on the forge) is archived as "merged" too - the stored
+	// ReviewURL records that it came via an MR (NON_LOCAL_INTEGRATION.md 3.5).
 	EndState string
+
+	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// The head<->MR link is optional and per-head: an unlinked head (all fields
+	// empty) behaves exactly as before, with direct local Merge available.
+
+	// DownstreamBranch is the branch name this head's work is pushed AS on the
+	// remote (the local branch always stays hydra/<id>). Seeded from
+	// review.push_branch_template at spawn/first-publish, editable until first
+	// publish, soft-locked after (renaming orphans the MR). "" = not yet set.
+	DownstreamBranch string
+	// ReviewURL is the forge URL of this head's MR/PR (deep link for "View MR").
+	// "" = unlinked.
+	ReviewURL string
+	// ReviewID is the MR/PR identifier on the forge (GitLab IID / GitHub number),
+	// used for API calls. "" = unlinked.
+	ReviewID string
+	// ReviewProvider is the resolved forge ("github" | "gitlab") captured at
+	// publish, so status/merge calls don't re-resolve.
+	ReviewProvider string
+	// ReviewTargetBranch is the MR's target branch (may differ from BaseBranch).
+	ReviewTargetBranch string
+	// ReviewState is the cached MR state (JSON) from the lifecycle watcher
+	// (Phase 3): draft/open/merged, CI, approvals, unresolved discussions.
+	ReviewState string
+	// ReviewStateTime is the RFC3339 time ReviewState was last refreshed.
+	ReviewStateTime string
+
+	// PublishWhenGreen arms "publish when green" (Phase 3): once local tests pass
+	// and the agent has finished, an unlinked head auto-opens a draft MR and a
+	// linked head auto-pushes. PublishWhenGreenAt is the RFC3339 arm time.
+	PublishWhenGreen   bool `gorm:"default:false"`
+	PublishWhenGreenAt string
 
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time
