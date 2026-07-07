@@ -106,6 +106,20 @@ func InterruptLine(requestID string) []byte {
 	return append(line, '\n')
 }
 
+// SetModelLine builds the control_request line that switches the session's
+// model in place, like the /model slash command (spike-verified: the CLI
+// answers with a control_response and a "Set model to ..." user echo, and the
+// change persists in the transcript across resumes). model is a CLI alias
+// ("sonnet") or full id.
+func SetModelLine(requestID, model string) []byte {
+	line, _ := json.Marshal(map[string]any{
+		"type":       "control_request",
+		"request_id": requestID,
+		"request":    map[string]any{"subtype": "set_model", "model": model},
+	})
+	return append(line, '\n')
+}
+
 // LineBuffer reassembles complete newline-terminated lines from an arbitrary
 // byte-chunk stream (the session fan-out delivers whatever read sizes the pipe
 // produced, and the scrollback-ring replay may even start mid-line after a

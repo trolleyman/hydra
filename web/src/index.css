@@ -242,6 +242,74 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   display: none;
 }
 
+/* --- Chat mode (AgentChat) ------------------------------------------------ */
+
+/* New live chat items (messages, tool cards, the streamed block) ease in with
+   a small rise; replayed history is committed in one batch without this class
+   so loading a long conversation doesn't strobe. */
+@keyframes chat-item-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-chat-item-in {
+  animation: chat-item-in 0.2s ease-out;
+}
+
+/* Height-animated disclosure for tool cards / thinking: the 0fr <-> 1fr
+   grid-row transition animates to the content's intrinsic height without
+   measuring it in JS. The single child must be allowed to shrink (min-height
+   0) and hide its overflow while mid-transition. */
+.chat-expandable {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+.chat-expandable.chat-expandable-open {
+  grid-template-rows: 1fr;
+}
+.chat-expandable > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Shimmering "Thinking..." label while thought tokens stream: a gradient swept
+   through the text itself (background-clip: text), light and dark variants. */
+@keyframes chat-text-shimmer {
+  from { background-position: 200% center; }
+  to   { background-position: -200% center; }
+}
+.chat-text-shimmer {
+  background-image: linear-gradient(90deg, #a8a29e 35%, #44403c 50%, #a8a29e 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-text-shimmer 2.2s linear infinite;
+}
+.dark .chat-text-shimmer {
+  background-image: linear-gradient(90deg, #78716c 35%, #e7e5e4 50%, #78716c 65%);
+}
+
+/* The mobile thinking viewer slides up from the bottom edge as a sheet. */
+@keyframes chat-sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-chat-sheet-up {
+  animation: chat-sheet-up 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-item-in,
+  .animate-chat-sheet-up { animation: none; }
+  .chat-expandable { transition: none; }
+  .chat-text-shimmer {
+    animation: none;
+    background-image: none;
+    color: inherit;
+  }
+}
+
 /* The prompt editor's highlight backdrop syntax-colours code blocks too, but it
    uses the proportional UI font and must stay glyph-aligned with the (invisible)
    textarea caret underneath. Token COLOUR is free — it doesn't affect layout —

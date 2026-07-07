@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"braces.dev/errtrace"
 )
@@ -38,6 +40,65 @@ func LatestTranscript(claudeProjectDir string) string {
 		}
 	}
 	return newest
+}
+
+// LatestSessionID returns the session id (transcript basename) of the newest
+// non-sidechain session in a Claude project directory, or "" when none is
+// found. Used to resume a head by explicit id: the interactive TUI's
+// --continue ignores conversations recorded by -p/stream-json runs
+// (spike-verified "No conversation found to continue"), so a head toggled
+// from chat mode back to terminal mode must be resumed with --resume <id> -
+// which loads them fine. Newest-first by mtime; a file whose first line is a
+// sub-agent sidechain entry is skipped so a freshly-written Task-tool
+// transcript can't hijack the resume.
+func LatestSessionID(claudeProjectDir string) string {
+	entries, err := os.ReadDir(claudeProjectDir)
+	if err != nil {
+		return ""
+	}
+	type candidate struct {
+		name string
+		mod  int64
+	}
+	var candidates []candidate
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, candidate{e.Name(), info.ModTime().UnixNano()})
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].mod > candidates[j].mod })
+	for _, c := range candidates {
+		if firstLineIsSidechain(filepath.Join(claudeProjectDir, c.name)) {
+			continue
+		}
+		return strings.TrimSuffix(c.name, ".jsonl")
+	}
+	return ""
+}
+
+// firstLineIsSidechain peeks a transcript's first parseable line and reports
+// whether it belongs to a sub-agent sidechain. Read errors report false: an
+// unreadable file shouldn't disqualify itself here, the resume just behaves
+// as before.
+func firstLineIsSidechain(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 64*1024)
+	n, _ := f.Read(buf)
+	for line := range bytes.SplitSeq(buf[:n], []byte{'\n'}) {
+		if ev, ok := ParseEvent(line); ok {
+			return ev.IsSidechain
+		}
+	}
+	return false
 }
 
 // TailTranscript reads (up to) the last maxBytes of a session transcript and

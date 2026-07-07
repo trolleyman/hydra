@@ -818,52 +818,52 @@
 Item IDs 1-13 are the original request; 14+ were added during the thread.
 Check items off in the commit that lands them.
 
-1. [ ] **Code chip readability.** Inline-code background too light/washed out in
+1. [x] **Code chip readability.** Inline-code background too light/washed out in
    dark mode - bordered chip, darker bg.
-2. [ ] **Thinking cards.** Thinking must not leak as plain text: Claude-app-style
+2. [x] **Thinking cards.** Thinking must not leak as plain text: Claude-app-style
    collapsed disclosure - shimmer label + auto-updating tail while streaming,
    snippet when settled, expand with "Show more" clamp on desktop, bottom-sheet
    popup on mobile.
-3. [ ] **Attachments in chat input.** Paste / drag-drop / picker like the spawn
+3. [x] **Attachments in chat input.** Paste / drag-drop / picker like the spawn
    box (chips, lightbox); uploaded paths ride below the message text.
-4. [ ] **Nicer tool cards (esp. Bash).** Header shows the description, not the
+4. [x] **Nicer tool cards (esp. Bash).** Header shows the description, not the
    script; expanded shows the full command syntax-highlighted and optimistically
    split at top-level `;`/`&&`/`||`; labeled Output section; Raw button for the
    tool-call JSON.
-5. [ ] **Animations.** Expand/collapse height animation, entrance rise for live
+5. [x] **Animations.** Expand/collapse height animation, entrance rise for live
    items (replay batch exempt), reduced-motion fallbacks.
-6. [ ] **Send button + hint.** Round arrow-up send button with accent bg when
+6. [x] **Send button + hint.** Round arrow-up send button with accent bg when
    sendable; queue icon when the message will queue behind a running turn
    (stream-json input queues mid-turn messages); "Enter to queue" hint only
    then, otherwise nothing.
-7. [ ] **Newline keybindings.** Alt+Enter always inserts a newline; Ctrl+Enter
+7. [x] **Newline keybindings.** Alt+Enter always inserts a newline; Ctrl+Enter
    behaves like Shift+Enter (newline); Enter sends.
-8. [ ] **Optimistic + queued messages.** Sent messages appear immediately
+8. [x] **Optimistic + queued messages.** Sent messages appear immediately
    (pinned under the transcript until the CLI's --replay-user-messages echo
    supersedes them); queued state clearly labeled. Chat sheds the terminal
    styling (see 25).
-9. [ ] **Auto-growing composer.** Grows line-by-line with content (not
+9. [x] **Auto-growing composer.** Grows line-by-line with content (not
    pixel-by-pixel) up to a cap; grab bar to force it taller, snapped to whole
    rows.
-10. [ ] **Claude-app theming.** Chat follows the app theme (no forced dark):
+10. [x] **Claude-app theming.** Chat follows the app theme (no forced dark):
     cream light / warm-gray dark surfaces, borderless user bubbles; terracotta
     bordered code chips in all markdown (dark like image2, light like image4).
-11. [ ] **Ctrl+C interrupts.** When a turn is running, focus is in the chat and
+11. [x] **Ctrl+C interrupts.** When a turn is running, focus is in the chat and
     no text is selected, Ctrl+C sends interrupt.
 12. [ ] **Composer layout + model dropdown.** One rounded card: textarea on
     top, controls row below (no separator) - "+" attach bottom-left, model
     dropdown bottom-right wired to the CLI's live set_model control request
     (spike-verified; persists in the transcript across resumes).
-13. [ ] **Slash commands.** `/` autocomplete fed by the init event's
+13. [x] **Slash commands.** `/` autocomplete fed by the init event's
     slash_commands; commands pass through as plain user text (spike-verified,
     the CLI executes them).
-14. [ ] **Jump to bottom.** Floating circular arrow above the composer when
+14. [x] **Jump to bottom.** Floating circular arrow above the composer when
     scrolled up; Ctrl+End jumps (Claude Code parity) without stealing the
     caret shortcut when already pinned.
-15. [ ] **Honest cost footer.** total_cost_usd is a notional API-rate figure;
+15. [x] **Honest cost footer.** total_cost_usd is a notional API-rate figure;
     on subscription auth (init apiKeySource == "none") no dollars are billed -
     show the `$` only for API-key heads, duration always.
-16. [ ] **Question cards UI.** Interactive question form component: radio /
+16. [x] **Question cards UI.** Interactive question form component: radio /
     checkbox options with primary+secondary text, "Other" free-text, one
     submit for all questions; also renders fenced ```question JSON blocks as a
     fallback path.
@@ -874,11 +874,11 @@ Check items off in the commit that lands them.
     renders the request as an interactive question card and answers via a
     control_response with updatedInput.answers; a simulated agent (agent-ask)
     has a question pending for manual testing.
-18. [ ] **Strip tool_use_error tags.** Show just the inner error text on tool
+18. [x] **Strip tool_use_error tags.** Show just the inner error text on tool
     cards (the card is already error-tinted).
-19. [ ] **Worktree-relative paths.** Tool summaries and expanded inputs trim
+19. [x] **Worktree-relative paths.** Tool summaries and expanded inputs trim
     the head's worktree prefix from absolute paths.
-20. [ ] **Chat scroll memory.** Per-agent (agentViewPrefs) - switching away and
+20. [x] **Chat scroll memory.** Per-agent (agentViewPrefs) - switching away and
     back restores the scroll offset when it wasn't pinned to the bottom.
 21. [ ] **Fix chat->terminal switch.** Interactive `--continue` refuses
     -p/stream-json conversations ("No conversation found to continue",
@@ -886,10 +886,10 @@ Check items off in the commit that lands them.
     newest non-sidechain transcript instead, falling back to --continue.
 22. [ ] **Mic / voice input.** TODO (not in this branch): dictation button in
     the composer like the Claude app.
-23. [ ] **Persist composer height.** The dragged composer min-height lives in
+23. [x] **Persist composer height.** The dragged composer min-height lives in
     agentViewPrefs (localStorage) like the terminal height.
 24. [ ] **Merge main** into this branch before final verification.
-25. [ ] **Direction decision (settled).** claude.ai-style chrome (proportional
+25. [x] **Direction decision (settled).** claude.ai-style chrome (proportional
     font, bubbles, cards, app theming) + Claude Code function (tool cards,
     slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic
     lights, dark tab bar) themed away when the chat tab is active.
