@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, CircleStop, SendHorizontal, Wrench } from 'lucide-react'
 import { AgentStatus } from '../api'
 import { useAgentStore } from '../stores/agentStore'
-import { renderMarkdown, renderMarkdownBlocks } from '../lib/markdown'
+import { Markdown } from '../lib/MarkdownRenderer'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 
@@ -430,15 +430,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             case 'user':
               return (
                 <div key={item.id} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-lg bg-blue-900/60 border border-blue-800/60 px-2.5 py-1.5 whitespace-pre-wrap break-words">
-                    {renderMarkdown(item.text)}
+                  <div className="max-w-[85%] rounded-lg bg-blue-900/60 border border-blue-800/60 px-2.5 py-1.5 break-words">
+                    <Markdown text={item.text} />
                   </div>
                 </div>
               )
             case 'assistant':
               return (
                 <div key={item.id} className="max-w-[95%]">
-                  {renderMarkdownBlocks(item.text)}
+                  <Markdown text={item.text} />
                 </div>
               )
             case 'thinking':
@@ -465,7 +465,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             closing fence while inside a code block) plus a pulsing caret. */}
         {stream && stream.kind === 'assistant' && (
           <div className="max-w-[95%]">
-            {renderMarkdownBlocks(closeOpenFence(stream.text))}
+            <Markdown text={closeOpenFence(stream.text)} />
             <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-blue-400/80" />
           </div>
         )}

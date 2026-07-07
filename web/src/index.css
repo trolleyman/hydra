@@ -248,3 +248,9 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    but the theme's bold/italic would change glyph advances in a proportional font
    and drift the caret, so force weight/style off for these tokens only. */
 .md-src-code, .md-src-code * { font-weight: 400 !important; font-style: normal !important; }
+
+/* GFM task-list items (react-markdown + remark-gfm): the <ul> is styled
+   list-none/pl-0 by the Markdown component, so give the disabled checkbox a
+   little breathing room from its label. */
+.task-list-item { list-style: none; }
+.task-list-item input[type='checkbox'] { margin-right: 0.4rem; }

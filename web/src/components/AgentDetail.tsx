@@ -24,7 +24,7 @@ import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
-import { renderMarkdown } from '../lib/markdown'
+import { Markdown } from '../lib/MarkdownRenderer'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
@@ -85,7 +85,7 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
       {/* A taller max-height means most prompts (incl. a code block or two)
           don't need to scroll at all. */}
       <div className="overflow-y-auto max-h-96">
-        {text && <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(text)}</p>}
+        {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
         <AttachmentChips
           attachments={attachments}
           size="md"
