@@ -48,8 +48,16 @@ export function ReviewSection({ projectId }: { projectId: string | undefined }) 
       }
     >
       {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
+      {/* First load: show a placeholder instead of an empty block that then
+          pops in once the fetch resolves. */}
+      {projectId && !cfg && !error && (
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 px-3.5 py-3 text-sm text-gray-500 dark:text-gray-400">
+          <LoaderCircle className="w-4 h-4 animate-spin" />
+          Loading review settings...
+        </div>
+      )}
       {cfg && (
-        <div className="flex flex-col gap-2.5 text-sm">
+        <div className="flex flex-col gap-2.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 px-3.5 py-3">
           <Row label="Provider">
             {cfg.provider ? (
               <span className="inline-flex items-center gap-1.5">

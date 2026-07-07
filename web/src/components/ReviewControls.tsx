@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
-import { GitPullRequest, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Github, GitlabIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Github, GitlabIcon } from 'lucide-react'
 import type { AgentResponse } from '../api/models/AgentResponse'
 import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { Badge } from './Badge'
-import { DialogCancelButton, DialogConfirmButton, DialogSectionLabel } from './dialogPrimitives'
+import { DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
+import { HighlightedTextarea } from './HighlightedTextarea'
+import { ResizeHandle } from '../lib/ResizeHandle'
+
+// FieldLabel is the Create MR dialog's field caption: sentence case (not the
+// uppercase DialogSectionLabel) and tight to the input below it.
+function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{children}</span>
+}
 
 // providerIcon returns the small forge glyph for a provider name.
 export function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
@@ -175,6 +183,7 @@ export function CreateMRDialog({
   const [title, setTitle] = useState(agent.title || agent.id)
   const [description, setDescription] = useState(agent.prompt || '')
   const [draft, setDraft] = useState(config?.draft ?? true)
+  const descBoxRef = useRef<HTMLDivElement>(null)
 
   const onCancelRef = useRef(onCancel)
   useEffect(() => {
@@ -205,14 +214,14 @@ export function CreateMRDialog({
             </div>
           )}
           <label className="flex flex-col gap-1">
-            <DialogSectionLabel>Downstream branch</DialogSectionLabel>
+            <FieldLabel>Downstream branch</FieldLabel>
             <input value={branch} onChange={(e) => setBranch(e.target.value)} className={`${inputClass} font-mono`} />
             <span className="text-[11px] text-gray-400">The local branch stays {agent.branch_name}; this is the name it is pushed as.</span>
           </label>
           <div className="flex gap-3">
             {remotes.length > 1 && (
               <label className="flex flex-col gap-1 w-32">
-                <DialogSectionLabel>Remote</DialogSectionLabel>
+                <FieldLabel>Remote</FieldLabel>
                 <select value={remote} onChange={(e) => setRemote(e.target.value)} className={inputClass}>
                   {remotes.map((r) => (
                     <option key={r} value={r}>
@@ -223,18 +232,34 @@ export function CreateMRDialog({
               </label>
             )}
             <label className="flex flex-col gap-1 flex-1">
-              <DialogSectionLabel>Target branch</DialogSectionLabel>
+              <FieldLabel>Target branch</FieldLabel>
               <input value={target} onChange={(e) => setTarget(e.target.value)} className={`${inputClass} font-mono`} />
             </label>
           </div>
           <label className="flex flex-col gap-1">
-            <DialogSectionLabel>Title</DialogSectionLabel>
+            <FieldLabel>Title</FieldLabel>
             <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
           </label>
-          <label className="flex flex-col gap-1">
-            <DialogSectionLabel>Description</DialogSectionLabel>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
-          </label>
+          <div className="flex flex-col gap-1">
+            <FieldLabel>Description</FieldLabel>
+            {/* Resizable, markdown-highlighted like the spawn box: a grab bar
+                below the box adjusts its height, HighlightedTextarea tints the
+                markdown source as it is typed. */}
+            <div
+              ref={descBoxRef}
+              style={{ height: 140 }}
+              className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 overflow-hidden"
+            >
+              <HighlightedTextarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                wrapperClassName="h-full"
+                textClassName="px-2.5 py-1.5 text-sm leading-5"
+                placeholder="Describe the change - markdown supported"
+              />
+            </div>
+            <ResizeHandle targetRef={descBoxRef} minHeight={80} />
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
             Open as draft
@@ -255,7 +280,8 @@ export function CreateMRDialog({
   )
 }
 
-// mrIcon returns the icon for the publish/view-MR action button.
+// mrIcon returns the icon for the publish/view-MR action button: a
+// create-pull-request glyph before the MR exists, a merge glyph once linked.
 export function MRIcon({ linked, className }: { linked: boolean; className?: string }) {
-  return linked ? <GitMerge className={className} /> : <GitPullRequest className={className} />
+  return linked ? <GitMerge className={className} /> : <GitPullRequestCreate className={className} />
 }

@@ -916,22 +916,31 @@ export function AgentDetail({
 
   // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
 
-  // openCreateMR fetches the resolved review config + remotes, then opens the
-  // Create MR dialog prefilled from them.
-  async function openCreateMR() {
+  // refreshReviewConfig loads the resolved review config + remotes into state.
+  // Called on mount (so the dialog can open instantly, already prefilled) and
+  // again when the dialog is opened (to pick up host-side changes).
+  const refreshReviewConfig = useCallback(async () => {
     if (!projectId) return
     try {
-      const [cfg, branchInfo] = await Promise.all([
-        api.default.getReviewConfig(projectId),
-        api.default.getRepositoryBranches(projectId).catch(() => null),
-      ])
+      const cfg = await api.default.getReviewConfig(projectId)
       setReviewConfig(cfg)
-      void branchInfo // branches already loaded elsewhere; remotes come from config
       setRemotes(cfg.remote ? [cfg.remote] : ['origin'])
     } catch {
-      setReviewConfig(null)
+      // Leave any previously-loaded config in place on a transient failure.
     }
+  }, [projectId])
+
+  // Prefetch the review config once the head is on screen so clicking "Create
+  // MR" opens the dialog instantly (the fetch no longer gates the popup).
+  useEffect(() => {
+    void refreshReviewConfig()
+  }, [refreshReviewConfig])
+
+  // openCreateMR opens the Create MR dialog immediately, refreshing the config
+  // in the background rather than blocking the popup on a network round-trip.
+  function openCreateMR() {
     setShowCreateMR(true)
+    void refreshReviewConfig()
   }
 
   // doPublish runs the publish POST with the dialog's values.
