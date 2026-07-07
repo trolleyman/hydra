@@ -5,6 +5,7 @@
 import type { AgentConfig } from './AgentConfig';
 import type { ArtifactScript } from './ArtifactScript';
 import type { McpServer } from './McpServer';
+import type { ReviewConfig } from './ReviewConfig';
 import type { ServiceScript } from './ServiceScript';
 import type { TestScript } from './TestScript';
 export type ConfigResponse = {
@@ -46,5 +47,6 @@ export type ConfigResponse = {
      * Built-in default pre-prompt always prepended to agent prompts (read-only)
      */
     default_pre_prompt?: string;
+    review?: ReviewConfig;
 };
 

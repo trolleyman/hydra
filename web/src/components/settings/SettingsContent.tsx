@@ -148,7 +148,16 @@ export function SettingsContent({
   return (
     <>
       {scope === 'project' && iconSection}
-      {scope === 'project' && selectedProject && <ReviewSection projectId={selectedProject.id} />}
+      {/* Review is repo-specific, so it is offered under Project + Local only - a
+          global (all-projects) provider/remote/target would be meaningless. */}
+      {scope !== 'user' && selectedProject && (
+        <ReviewSection
+          review={config.review}
+          onChange={(review) => setConfig({ ...config, review: review ?? undefined })}
+          projectId={selectedProject.id}
+          scope={scope}
+        />
+      )}
       <SettingSection
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."

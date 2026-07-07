@@ -591,6 +591,9 @@ type ConfigResponse struct {
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
 
+	// Review The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
+	Review *ReviewConfig `json:"review,omitempty"`
+
 	// Services Per-project long-running supervised commands ([services.<name>] in config.toml)
 	Services *[]ServiceScript `json:"services"`
 
@@ -1044,6 +1047,26 @@ type RepositoryUncommittedFile struct {
 	Status string `json:"status"`
 }
 
+// ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
+type ReviewConfig struct {
+	// Auth "cli" | "token".
+	Auth *string `json:"auth"`
+
+	// DefaultAction "merge" | "create_mr".
+	DefaultAction      *string   `json:"default_action"`
+	DeleteRemoteBranch *bool     `json:"delete_remote_branch"`
+	Draft              *bool     `json:"draft"`
+	ProtectedBranches  *[]string `json:"protected_branches"`
+
+	// Provider "auto" | "github" | "gitlab".
+	Provider           *string `json:"provider"`
+	PublishWhenGreen   *bool   `json:"publish_when_green"`
+	PushBranchTemplate *string `json:"push_branch_template"`
+	Remote             *string `json:"remote"`
+	RequireLocalTests  *bool   `json:"require_local_tests"`
+	Squash             *bool   `json:"squash"`
+}
+
 // ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
 type ReviewConfigResponse struct {
 	// Auth Auth method ("cli" | "token").
@@ -1082,7 +1105,6 @@ type ReviewConfigResponse struct {
 	RemoteUrl         *string `json:"remote_url,omitempty"`
 	RequireLocalTests *bool   `json:"require_local_tests,omitempty"`
 	Squash            *bool   `json:"squash,omitempty"`
-	TargetBranch      string  `json:"target_branch"`
 }
 
 // ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
@@ -1580,7 +1602,7 @@ type PublishAgentJSONBody struct {
 	// Remote Git remote to push to. Defaults to review.remote.
 	Remote *string `json:"remote,omitempty"`
 
-	// TargetBranch MR target branch. Defaults to review.target_branch.
+	// TargetBranch MR target branch. Defaults to the head's base branch.
 	TargetBranch *string `json:"target_branch,omitempty"`
 	Title        *string `json:"title,omitempty"`
 }

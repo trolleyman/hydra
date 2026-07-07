@@ -559,7 +559,7 @@ paths:
                   description: Git remote to push to. Defaults to review.remote.
                 target_branch:
                   type: string
-                  description: MR target branch. Defaults to review.target_branch.
+                  description: MR target branch. Defaults to the head's base branch.
                 title:
                   type: string
                 description:
@@ -2801,7 +2801,7 @@ components:
     ReviewConfigResponse:
       type: object
       description: Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
-      required: [configured, provider, remote, target_branch, auth, default_action]
+      required: [configured, provider, remote, auth, default_action]
       properties:
         configured:
           type: boolean
@@ -2820,8 +2820,6 @@ components:
         browse_url:
           type: string
           description: Derived https browse URL for the repo (for the forge web link), or empty.
-        target_branch:
-          type: string
         auth:
           type: string
           description: Auth method ("cli" | "token").
@@ -2850,6 +2848,54 @@ components:
         protected_branches:
           type: array
           items: { type: string }
+
+    ReviewConfig:
+      type: object
+      description: >-
+        The raw [review] config for ONE config layer (project / user / local),
+        as edited in the Settings scope tabs. Every field is nullable; a null
+        field is unset at this layer and inherits the layer below (built-in
+        defaults are applied only in the resolved ReviewConfigResponse). Which
+        file a save writes to is chosen by the scope tab, so provider/target/etc.
+        can live in the shared config.toml and personal overrides in config.local.toml.
+      properties:
+        provider:
+          type: string
+          nullable: true
+          description: '"auto" | "github" | "gitlab".'
+        remote:
+          type: string
+          nullable: true
+        auth:
+          type: string
+          nullable: true
+          description: '"cli" | "token".'
+        default_action:
+          type: string
+          nullable: true
+          description: '"merge" | "create_mr".'
+        push_branch_template:
+          type: string
+          nullable: true
+        draft:
+          type: boolean
+          nullable: true
+        squash:
+          type: boolean
+          nullable: true
+        delete_remote_branch:
+          type: boolean
+          nullable: true
+        require_local_tests:
+          type: boolean
+          nullable: true
+        publish_when_green:
+          type: boolean
+          nullable: true
+        protected_branches:
+          type: array
+          items: { type: string }
+          nullable: true
 
     ReviewState:
       type: object
@@ -3982,6 +4028,11 @@ components:
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
+        review:
+          # The raw [review] table for this config layer (absent when the layer
+          # sets none). Edited in the Settings Review section; the scope tab
+          # decides which file a save writes to.
+          $ref: '#/components/schemas/ReviewConfig'
 
     ServiceStatus:
       type: object

@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
+import { apiErrorBody, formatError } from '../api/format_error'
+import { PanelError } from './PanelError'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
@@ -1347,7 +1349,9 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           pollTimerRef.current = setTimeout(() => tick(false), 2500)
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        // Surface a real server error (e.g. a config that won't parse); a bare
+        // network blip (no structured body) leaves the panel's state be.
+        if (!cancelled && apiErrorBody(e)) setError(formatError(e))
       }
     }
     clear()
@@ -1417,12 +1421,10 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     return Array.from(new Set([...live, ...cached]))
   }, [sets, chrome, anyGenerating])
 
-  if (error) {
-    return (
-      <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
-        Failed to load artifacts: {error}
-      </div>
-    )
+  // Surface a server error only when there is nothing else to show; if cached
+  // sets are on screen, keep them rather than replacing them with the error.
+  if (error && (!displaySets || displaySets.length === 0)) {
+    return <PanelError title="Artifacts" icon={<ImageIcon className="w-3.5 h-3.5" />} message={error} />
   }
   // Render nothing until we know there are configured scripts - either from the
   // live snapshot or the cached summary skeleton.

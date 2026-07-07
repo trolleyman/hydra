@@ -691,7 +691,6 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 		Remote:             "origin",
 		RemoteUrl:          ptr("git@gitlab.example.com:team/repo.git"),
 		BrowseUrl:          ptr("https://gitlab.example.com/team/repo"),
-		TargetBranch:       "main",
 		Auth:               "cli",
 		AuthStatus:         ptr("glab: logged in to gitlab.example.com as sim-user"),
 		Authenticated:      ptr(true),
@@ -2538,6 +2537,18 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		resp.Services = &[]api.ServiceScript{
 			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
 		}
+	}
+	// Review overrides per scope: the shared forge settings live in the project
+	// config, while a personal preference (default action) lives in the local
+	// override - so the Review section demonstrates the multi-scope story.
+	switch {
+	case params.Scope == nil || *params.Scope == api.GetConfigParamsScopeProject:
+		resp.Review = &api.ReviewConfig{
+			Provider:           ptr("gitlab"),
+			PushBranchTemplate: ptr("feat/{ticket}-{id}"),
+		}
+	case *params.Scope == api.GetConfigParamsScopeLocal:
+		resp.Review = &api.ReviewConfig{DefaultAction: ptr("create_mr")}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }

@@ -398,7 +398,7 @@ export class DefaultService {
              */
             remote?: string;
             /**
-             * MR target branch. Defaults to review.target_branch.
+             * MR target branch. Defaults to the head's base branch.
              */
             target_branch?: string;
             title?: string;

@@ -48,9 +48,6 @@ func TestGhCIStatus(t *testing.T) {
 
 func TestGhStateAndStatus(t *testing.T) {
 	pr := ghPR{Number: 7, URL: "https://gh/pr/7", State: "OPEN", IsDraft: true, Mergeable: "MERGEABLE", ReviewDecision: "APPROVED"}
-	pr.ReviewThreads.Nodes = []struct {
-		IsResolved bool `json:"isResolved"`
-	}{{IsResolved: false}, {IsResolved: true}}
 	st := pr.toStatus()
 	if st.State != StateDraft {
 		t.Errorf("state = %q, want draft", st.State)
@@ -58,11 +55,36 @@ func TestGhStateAndStatus(t *testing.T) {
 	if st.Approvals != 1 || st.ApprovalsRequired != 1 {
 		t.Errorf("approvals = %d/%d, want 1/1", st.Approvals, st.ApprovalsRequired)
 	}
-	if st.UnresolvedDiscussions != 1 {
-		t.Errorf("unresolved = %d, want 1", st.UnresolvedDiscussions)
-	}
 	if !st.Mergeable {
 		t.Error("want mergeable")
+	}
+}
+
+// TestGhStatusUnresolvedThreads checks Status pulls unresolved review threads
+// from the GraphQL query (not `gh pr view`, which rejects reviewThreads) and
+// never sends reviewThreads to `pr view`.
+func TestGhStatusUnresolvedThreads(t *testing.T) {
+	f := &fakeRunner{response: func(cmd string) (string, error) {
+		switch {
+		case strings.Contains(cmd, "pr view"):
+			if strings.Contains(cmd, "reviewThreads") {
+				t.Errorf("pr view must not request reviewThreads: %s", cmd)
+			}
+			return `{"number":7,"url":"https://gh/pr/7","state":"OPEN","mergeable":"MERGEABLE"}`, nil
+		case strings.Contains(cmd, "repo view"):
+			return "octo/hydra\n", nil
+		case strings.Contains(cmd, "api graphql"):
+			return `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true},{"isResolved":false}]}}}}}`, nil
+		}
+		return "", nil
+	}}
+	p := &githubProvider{run: f.run}
+	st, err := p.Status(context.Background(), "/repo", "origin", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.UnresolvedDiscussions != 2 {
+		t.Errorf("unresolved = %d, want 2", st.UnresolvedDiscussions)
 	}
 }
 

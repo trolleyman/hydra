@@ -28,6 +28,8 @@ export const StorageKeys = {
   // 'true' when the spawn form's chat-mode toggle (Claude only, CHAT_MODE.md)
   // was last on, so the next spawn defaults to the same mode.
   defaultChatMode: 'hydra-default-chat-mode',
+  // '1' when the Settings Review section is collapsed (it starts collapsed).
+  settingsReviewCollapsed: 'hydra-settings-review-collapsed',
   spawnHeight: 'hydra-sidebar-spawn-height',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is

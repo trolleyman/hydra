@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,11 +32,6 @@ type ghPR struct {
 		Status     string `json:"status"`     // legacy status contexts
 		Conclusion string `json:"conclusion"` // SUCCESS/FAILURE/...
 	} `json:"statusCheckRollup"`
-	ReviewThreads struct {
-		Nodes []struct {
-			IsResolved bool `json:"isResolved"`
-		} `json:"nodes"`
-	} `json:"reviewThreads"`
 }
 
 func (p *githubProvider) EnsureMR(ctx context.Context, o EnsureMROptions) (MR, error) {
@@ -78,9 +74,11 @@ func (p *githubProvider) find(ctx context.Context, dir, branch string) (ghPR, bo
 	return pr, true, nil
 }
 
-// ghViewFields are the --json fields fetched for status. reviewThreads populates
-// unresolved-discussion counts.
-const ghViewFields = "number,url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviewThreads"
+// ghViewFields are the --json fields fetched for status. reviewThreads is NOT
+// among them: it is a GraphQL-only field that `gh pr view --json` rejects
+// ("Unknown JSON field"), so unresolved-discussion counts come from a separate
+// GraphQL query (unresolvedThreadCount).
+const ghViewFields = "number,url,state,isDraft,mergeable,reviewDecision,statusCheckRollup"
 
 func (p *githubProvider) Status(ctx context.Context, repoDir, _ /*remote*/, id string) (Status, error) {
 	out, err := p.run(ctx, repoDir, "gh", "pr", "view", id, "--json", ghViewFields)
@@ -91,7 +89,75 @@ func (p *githubProvider) Status(ctx context.Context, repoDir, _ /*remote*/, id s
 	if err := json.Unmarshal([]byte(out), &pr); err != nil {
 		return Status{}, errtrace.Wrap(err)
 	}
-	return pr.toStatus(), nil
+	st := pr.toStatus()
+	// Unresolved review threads need GraphQL (see ghViewFields). Best-effort: a
+	// failure here just leaves the count at 0 rather than failing the whole poll.
+	if n, err := p.unresolvedThreadCount(ctx, repoDir, id); err == nil {
+		st.UnresolvedDiscussions = n
+	}
+	return st, nil
+}
+
+// unresolvedThreadCount returns the number of unresolved review threads on PR
+// `id` via a GraphQL query (the only place GitHub exposes thread resolution).
+// The repo (owner/name) is resolved from the checkout with `gh repo view`.
+func (p *githubProvider) unresolvedThreadCount(ctx context.Context, repoDir, id string) (int, error) {
+	num, err := strconv.Atoi(id)
+	if err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+	owner, name, err := p.repoOwnerName(ctx, repoDir)
+	if err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+	const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}}}}}`
+	out, err := p.run(ctx, repoDir, "gh", "api", "graphql",
+		"-f", "query="+query,
+		"-F", "owner="+owner,
+		"-F", "name="+name,
+		"-F", "number="+strconv.Itoa(num))
+	if err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						Nodes []struct {
+							IsResolved bool `json:"isResolved"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+	unresolved := 0
+	for _, t := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		if !t.IsResolved {
+			unresolved++
+		}
+	}
+	return unresolved, nil
+}
+
+// repoOwnerName resolves the checkout's forge repository as owner, name. It uses
+// gh's own repo detection (remotes/config), matching how the other gh calls
+// resolve the repo.
+func (p *githubProvider) repoOwnerName(ctx context.Context, repoDir string) (owner, name string, err error) {
+	out, err := p.run(ctx, repoDir, "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+	if err != nil {
+		return "", "", errtrace.Wrap(err)
+	}
+	full := strings.TrimSpace(out)
+	i := strings.IndexByte(full, '/')
+	if i <= 0 || i == len(full)-1 {
+		return "", "", errtrace.Wrap(fmt.Errorf("unexpected repo name %q from gh repo view", full))
+	}
+	return full[:i], full[i+1:], nil
 }
 
 func (pr ghPR) toStatus() Status {
@@ -107,11 +173,7 @@ func (pr ghPR) toStatus() Status {
 	} else if strings.EqualFold(pr.ReviewDecision, "REVIEW_REQUIRED") {
 		st.ApprovalsRequired = 1
 	}
-	for _, t := range pr.ReviewThreads.Nodes {
-		if !t.IsResolved {
-			st.UnresolvedDiscussions++
-		}
-	}
+	// UnresolvedDiscussions is filled by Status via unresolvedThreadCount (GraphQL).
 	return st
 }
 

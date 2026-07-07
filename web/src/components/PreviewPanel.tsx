@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ExternalLink, LoaderCircle, MonitorPlay, Play, RotateCcw, Square } from 'lucide-react'
 import { api } from '../stores/apiClient'
+import { apiErrorBody, formatError } from '../api/format_error'
 import type { PreviewStatus } from '../api/models/PreviewStatus'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
+import { PanelError } from './PanelError'
 
 // How eagerly the panel re-polls GET /previews, by the most active instance
 // state it can see. There is no WebSocket for previews (deliberately - the
@@ -52,6 +54,9 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [previews, setPreviews] = useState<PreviewStatus[] | null>(null)
+  // A server-side failure to surface (e.g. a config.toml that won't parse). A
+  // transient network blip is left null so the panel stays quiet and retries.
+  const [error, setError] = useState<string | null>(null)
   // Bumped after start/stop actions so the poll effect re-runs immediately.
   const [nonce, setNonce] = useState(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -71,11 +76,15 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
         const resp = await api.default.getAgentPreviews(projectId, agentId, headRef, includeUncommitted)
         if (cancelled) return
         setPreviews(resp.previews ?? [])
+        setError(null)
         if (timerRef.current) clearTimeout(timerRef.current)
         timerRef.current = setTimeout(tick, pollDelay(resp.previews ?? []))
-      } catch {
+      } catch (err) {
         if (cancelled) return
-        // Transient fetch failure (daemon restarting, ...): retry lazily.
+        // A structured server error (e.g. a config that won't parse) is a real,
+        // persistent failure - surface it instead of silently rendering nothing.
+        // A bare network blip (no body: daemon restarting) stays quiet.
+        setError(apiErrorBody(err) ? formatError(err) : null)
         if (timerRef.current) clearTimeout(timerRef.current)
         timerRef.current = setTimeout(tick, 15000)
       }
@@ -123,6 +132,12 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
 
   // Panel section header height, exported as the CSS var card headers stick under.
   const [headerRef, headerH] = useMeasuredHeight(41)
+
+  // A server error with nothing to show -> surface it in a red box (the panel
+  // header names what failed) rather than silently rendering nothing.
+  if (error && (!previews || previews.length === 0)) {
+    return <PanelError title="Previews" icon={<MonitorPlay className="w-3.5 h-3.5" />} message={error} />
+  }
 
   // Nothing configured (or not loaded yet) -> render nothing, like the tests
   // panel, so the diff viewer doesn't reserve space for an absent feature.
