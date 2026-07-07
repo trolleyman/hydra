@@ -981,6 +981,21 @@ export function AgentDetail({
     setSavingDownstream(false)
   }
 
+  // armPublish / disarmPublish toggle publish-when-green (auto-open a draft MR /
+  // auto-push once local tests pass and the head finishes).
+  async function armPublish() {
+    await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id), {
+      success: 'Publish when green armed',
+      errorPrefix: 'Failed to arm',
+    })
+  }
+  async function disarmPublish() {
+    await runWithToast(() => api.default.disarmPublishWhenGreen(projectId ?? '', agent.id), {
+      success: 'Publish when green disarmed',
+      errorPrefix: 'Failed to disarm',
+    })
+  }
+
   // respondToReview sends the agent a one-line canned prompt to fetch and address
   // its MR's unresolved review comments (via the mcp__hydra__* tools) - the same
   // agent-pull pattern as the diff viewer's "Fix the merge conflicts" action
@@ -1073,6 +1088,11 @@ export function AgentDetail({
           onClick: () => void openCreateMR(),
           variant: 'segment',
           disabled: busy || publishing,
+          menu: [
+            agent.publish_when_green
+              ? { label: 'Disarm publish-when-green', description: 'Stop auto-opening a draft MR when tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void disarmPublish(), tone: 'neutral' as const, disabled: busy }
+              : { label: 'Publish when green', description: 'Auto-open a draft MR once local tests pass and the head finishes.', icon: <Clock className="w-4 h-4" />, onClick: () => void armPublish(), tone: 'emerald' as const, disabled: busy || publishing },
+          ] as AgentTopBarMenuItem[],
         }
   // default_action orders the two primary buttons: create_mr puts the MR button
   // first (before Merge); otherwise Merge stays primary and MR is a segment.
