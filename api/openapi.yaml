@@ -1363,6 +1363,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/publish-when-green:
+    post:
+      summary: Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+      description: >
+        Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests
+        settle passing and the agent has finished, an unlinked head auto-opens a
+        draft MR and a linked head auto-pushes (plain push only). Idempotent.
+      operationId: armPublishWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: No Content (publish-when-green armed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Disarm publish-when-green for a head
+      operationId: disarmPublishWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: No Content (publish-when-green disarmed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/input:
     post:
       summary: Send text input to an agent's terminal stdin

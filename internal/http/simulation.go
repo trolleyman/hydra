@@ -643,6 +643,14 @@ func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Re
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (s *SimulationServer) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteJSON(w, http.StatusOK, api.ReviewConfigResponse{
 		Configured:         true,

@@ -72,9 +72,29 @@ func resolveDownstreamBranch(review *config.ReviewConfig, jira *config.JiraConfi
 	return name
 }
 
+// publishOverrides are the optional Create MR dialog overrides applied over the
+// resolved [review] defaults.
+type publishOverrides struct {
+	DownstreamBranch string
+	Remote           string
+	TargetBranch     string
+	Title            string
+	Description      *string
+	Draft            *bool
+}
+
+// publishFailure is a user-facing publish failure the HTTP layer maps to the
+// right response (400 ErrorResponse for badReq, else 409 MergeConflictError).
+type publishFailure struct {
+	badReq  bool
+	errType api.MergeConflictErrorError
+	detail  string
+	failing *int
+}
+
 // PublishAgent pushes a head's branch to the remote as its downstream branch and
 // creates/updates the forge MR - host-side, with the user's own credentials
-// (NON_LOCAL_INTEGRATION.md 3.3).
+// (NON_LOCAL_INTEGRATION.md 3.3). Thin wrapper over publishHead.
 func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentRequestObject) (api.PublishAgentResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -91,97 +111,112 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 		return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "agent has no git branch to publish"}, nil
 	}
 
+	var ov publishOverrides
+	if b := request.Body; b != nil {
+		if b.Remote != nil {
+			ov.Remote = *b.Remote
+		}
+		if b.TargetBranch != nil {
+			ov.TargetBranch = *b.TargetBranch
+		}
+		if b.DownstreamBranch != nil {
+			ov.DownstreamBranch = *b.DownstreamBranch
+		}
+		if b.Title != nil {
+			ov.Title = *b.Title
+		}
+		ov.Description = b.Description
+		ov.Draft = b.Draft
+	}
+	force := request.Params.Force != nil && *request.Params.Force
+
+	updated, fail := s.publishHead(ctx, projectRoot, *head, ov, force)
+	if fail != nil {
+		if fail.badReq {
+			return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fail.detail}, nil
+		}
+		resp := api.MergeConflictError{Error: fail.errType, Code: 409, Details: fail.detail}
+		if fail.failing != nil {
+			resp.FailingTests = fail.failing
+		}
+		return api.PublishAgent409JSONResponse(resp), nil
+	}
+	return api.PublishAgent200JSONResponse(s.agentResponseWithReview(*updated)), nil
+}
+
+// publishHead is the shared publish core used by the HTTP handler and the
+// publish-when-green watcher: claim (publishing), local test gate (force
+// bypasses), host-side refspec push, forge.EnsureMR, store the link, refresh
+// cached state. Returns the updated head on success, else a *publishFailure.
+func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads.Head, ov publishOverrides, force bool) (*heads.Head, *publishFailure) {
 	review := reviewConfigFor(projectRoot)
 	cfg, _ := config.Load(projectRoot)
-	remote := review.GetRemote()
-	target := review.GetTargetBranch()
-	downstream := resolveDownstreamBranch(review, cfg.Jira, *head)
-	title := defaultMRTitle(*head)
+	remote := firstNonEmpty(ov.Remote, review.GetRemote())
+	target := firstNonEmpty(ov.TargetBranch, review.GetTargetBranch())
+	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.Jira, head))
+	title := firstNonEmpty(ov.Title, defaultMRTitle(head))
 	description := head.Prompt
+	if ov.Description != nil {
+		description = *ov.Description
+	}
 	draft := review.IsDraft()
-	if b := request.Body; b != nil {
-		if b.Remote != nil && *b.Remote != "" {
-			remote = *b.Remote
-		}
-		if b.TargetBranch != nil && *b.TargetBranch != "" {
-			target = *b.TargetBranch
-		}
-		if b.DownstreamBranch != nil && *b.DownstreamBranch != "" {
-			downstream = *b.DownstreamBranch
-		}
-		if b.Title != nil && *b.Title != "" {
-			title = *b.Title
-		}
-		if b.Description != nil {
-			description = *b.Description
-		}
-		if b.Draft != nil {
-			draft = *b.Draft
-		}
+	if ov.Draft != nil {
+		draft = *ov.Draft
 	}
 
 	if err := git.ValidateRef(downstream); err != nil {
-		return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("invalid downstream branch %q: %v", downstream, err)}, nil
+		return nil, &publishFailure{badReq: true, detail: fmt.Sprintf("invalid downstream branch %q: %v", downstream, err)}
 	}
 
-	// Resolve the forge provider up front so a misconfiguration fails before we
-	// claim the head or push.
 	remoteURL := git.RemoteURL(projectRoot, remote)
 	provider, err := forge.Resolve(review, remoteURL)
 	if err != nil {
-		return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: err.Error()}, nil
+		return nil, &publishFailure{badReq: true, detail: err.Error()}
 	}
 
-	// Claim the head (idle -> publishing).
 	if s.DB != nil {
 		ok, err := s.DB.TrySetHeadStatus(head.ID, "idle", "publishing")
 		if err != nil {
-			return nil, errtrace.Wrap(err)
+			return nil, &publishFailure{errType: api.MergeConflictErrorErrorConflict, detail: err.Error()}
 		}
 		if !ok {
-			return api.PublishAgent409JSONResponse{Error: api.MergeConflictErrorErrorConflict, Code: 409, Details: "operation already in progress"}, nil
+			return nil, &publishFailure{errType: api.MergeConflictErrorErrorConflict, detail: "operation already in progress"}
 		}
 	}
-	// From here on, always release the claim on the way out.
 	release := func(errMsg *string) {
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, errMsg)
 		}
 	}
 
-	// Local test gate (same as merge; force bypasses). Acts as a pre-push gate.
-	force := request.Params.Force != nil && *request.Params.Force
 	if !force && review.IsRequireLocalTests() {
-		if code, failing, blocked := s.testGateVerdict(projectRoot, *head); blocked {
+		if code, failing, blocked := s.testGateVerdict(projectRoot, head); blocked {
 			errMsg := "publish blocked: the head's tests are not passing (pass force=true to override)"
 			release(&errMsg)
-			resp := api.MergeConflictError{Error: code, Code: 409, Details: errMsg}
+			f := &publishFailure{errType: code, detail: errMsg}
 			if code == api.MergeConflictErrorErrorTestsFailing {
-				resp.FailingTests = &failing
+				f.failing = &failing
 			}
-			return api.PublishAgent409JSONResponse(resp), nil
+			return nil, f
 		}
 	}
 
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
 
-	// Push hydra/<id> -> refs/heads/<downstream> on the remote. The local branch is
-	// untouched (a refspec push). Plain push - collisions fail cleanly (3.3a).
 	refspec := *head.Branch + ":refs/heads/" + downstream
 	if _, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil); err != nil {
 		var authErr *git.AuthError
 		if errors.As(err, &authErr) {
 			errMsg := authErr.Error()
 			release(&errMsg)
-			return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: errMsg}, nil
+			return nil, &publishFailure{badReq: true, detail: errMsg}
 		}
 		errMsg := fmt.Sprintf("push failed: %v", err)
 		release(&errMsg)
-		return api.PublishAgent409JSONResponse{Error: api.MergeConflictErrorErrorConflict, Code: 409, Details: errMsg}, nil
+		return nil, &publishFailure{errType: api.MergeConflictErrorErrorConflict, detail: errMsg}
 	}
 
-	// Create the MR/PR if none exists (idempotent).
 	mr, err := provider.EnsureMR(pubCtx, forge.EnsureMROptions{
 		RepoDir:            projectRoot,
 		Remote:             remote,
@@ -196,14 +231,13 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 	if err != nil {
 		errMsg := fmt.Sprintf("create MR failed: %v", err)
 		release(&errMsg)
-		return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: errMsg}, nil
+		return nil, &publishFailure{badReq: true, detail: errMsg}
 	}
 
-	// Store the link, release the claim, refresh cached state best-effort.
 	if s.DB != nil {
 		if err := s.DB.SetReviewLink(head.ID, downstream, mr.URL, mr.ID, provider.Name(), target); err != nil {
 			release(nil)
-			return nil, errtrace.Wrap(err)
+			return nil, &publishFailure{badReq: true, detail: err.Error()}
 		}
 	}
 	release(nil)
@@ -212,9 +246,17 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 
 	updated, _ := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, head.ID)
 	if updated == nil {
-		updated = head
+		updated = &head
 	}
-	return api.PublishAgent200JSONResponse(s.agentResponseWithReview(*updated)), nil
+	return updated, nil
+}
+
+// firstNonEmpty returns the first non-empty string of a, b.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // PushToMr re-pushes the local head branch to its downstream branch (idempotent
@@ -224,16 +266,13 @@ func (s *Server) PushToMr(ctx context.Context, request api.PushToMrRequestObject
 	if resp != nil {
 		return pushToMrErr(resp), nil
 	}
-	remote := reviewRemote(projectRoot)
-	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
-	defer cancel()
-	refspec := *head.Branch + ":refs/heads/" + head.DownstreamBranch
-	if _, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil); err != nil {
+	if err := s.pushHeadToMR(ctx, projectRoot, *head); err != nil {
 		var authErr *git.AuthError
+		detail := fmt.Sprintf("push failed: %v", err)
 		if errors.As(err, &authErr) {
-			return api.PushToMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: authErr.Error()}, nil
+			detail = authErr.Error()
 		}
-		return api.PushToMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("push failed: %v", err)}, nil
+		return api.PushToMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}, nil
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	updated, _ := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, head.ID)
@@ -241,6 +280,20 @@ func (s *Server) PushToMr(ctx context.Context, request api.PushToMrRequestObject
 		updated = head
 	}
 	return api.PushToMr200JSONResponse(s.agentResponseWithReview(*updated)), nil
+}
+
+// pushHeadToMR pushes a linked head's local branch to its downstream branch
+// (plain push, idempotent). Shared by the PushToMr handler and auto-publish.
+func (s *Server) pushHeadToMR(ctx context.Context, projectRoot string, head heads.Head) error {
+	if head.Branch == nil || head.DownstreamBranch == "" {
+		return fmt.Errorf("head is not linked to an MR")
+	}
+	remote := reviewRemote(projectRoot)
+	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
+	defer cancel()
+	refspec := *head.Branch + ":refs/heads/" + head.DownstreamBranch
+	_, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil)
+	return err
 }
 
 // PullFromMr merges the remote downstream ref INTO the head branch (merge, not
@@ -368,6 +421,43 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 	return api.GetReviewConfig200JSONResponse(resp), nil
 }
 
+// ArmPublishWhenGreen arms publish-when-green for a head (3.5).
+func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublishWhenGreenRequestObject) (api.ArmPublishWhenGreenResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil || head.Branch == nil {
+		return api.ArmPublishWhenGreen404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+	}
+	if s.DB != nil {
+		if err := s.DB.SetPublishWhenGreen(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	s.notifyAgentsChanged(projectRoot, true)
+	return api.ArmPublishWhenGreen204Response{}, nil
+}
+
+// DisarmPublishWhenGreen clears the publish-when-green intent for a head.
+func (s *Server) DisarmPublishWhenGreen(ctx context.Context, request api.DisarmPublishWhenGreenRequestObject) (api.DisarmPublishWhenGreenResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if s.DB != nil {
+		if err := s.DB.SetPublishWhenGreen(request.Id, false, ""); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	s.notifyAgentsChanged(projectRoot, true)
+	return api.DisarmPublishWhenGreen204Response{}, nil
+}
+
 // linkedHead resolves a head and asserts it is linked to an MR with a branch and
 // downstream name; on failure it returns a filled *linkErr the wrappers map to
 // the right per-endpoint response type.
@@ -427,7 +517,17 @@ func (s *Server) refreshReviewState(ctx context.Context, projectRoot, headID str
 	if err != nil {
 		return
 	}
-	apiState := api.ReviewState{
+	data, err := json.Marshal(reviewStateJSON(st))
+	if err != nil {
+		return
+	}
+	_ = s.DB.SetReviewState(headID, string(data), time.Now().Format(time.RFC3339))
+}
+
+// reviewStateJSON converts a forge.Status into the api.ReviewState cached on the
+// head (and returned to the UI). Shared by publish and the lifecycle watcher.
+func reviewStateJSON(st forge.Status) api.ReviewState {
+	return api.ReviewState{
 		State:                 st.State,
 		CiStatus:              ptr(st.CIStatus),
 		Approvals:             ptr(st.Approvals),
@@ -435,11 +535,6 @@ func (s *Server) refreshReviewState(ctx context.Context, projectRoot, headID str
 		UnresolvedDiscussions: ptr(st.UnresolvedDiscussions),
 		Mergeable:             ptr(st.Mergeable),
 	}
-	data, err := json.Marshal(apiState)
-	if err != nil {
-		return
-	}
-	_ = s.DB.SetReviewState(headID, string(data), time.Now().Format(time.RFC3339))
 }
 
 // defaultMRTitle seeds an MR title from the head's title or prompt first line.
