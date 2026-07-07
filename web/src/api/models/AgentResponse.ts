@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AgentStatusInfo } from './AgentStatusInfo';
+import type { ReviewLink } from './ReviewLink';
 import type { TestSummary } from './TestSummary';
 export type AgentResponse = {
     id: string;
@@ -55,5 +56,14 @@ export type AgentResponse = {
      * True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
      */
     merge_when_green?: boolean;
+    /**
+     * True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+     */
+    publish_when_green?: boolean;
+    /**
+     * The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
+     */
+    downstream_branch?: string;
+    review?: ReviewLink;
 };
 

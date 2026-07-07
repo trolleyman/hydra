@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/trolleyman/hydra/internal/gate"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -43,7 +44,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"## What the user can change for you\n" +
 	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
 	"- `writable_paths` - extra paths made writable inside the sandbox.\n" +
-	"- `masked_paths` - extra paths hidden inside the sandbox.\n" +
+	"- `masked_paths` - extra paths hidden inside the sandbox: home/absolute entries (`~/.ssh`) or project-relative globs (`.env*`, `secrets/`). A `.hydraignore` file at the project root is the .gitignore-style spelling of the same.\n" +
 	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
@@ -499,6 +500,14 @@ type Config struct {
 	// too heavy to run speculatively: foreground runs (on open / at merge) and the
 	// concurrency cap above still apply. nil/absent = enabled.
 	TestPrefetch *bool `toml:"test_prefetch"`
+	// Review configures how Hydra talks to a forge (GitHub/GitLab) and supplies
+	// defaults for the Create MR dialog (NON_LOCAL_INTEGRATION.md 3.2). nil = unset
+	// (a local-first project never touches any of it). Pointer so its own fields'
+	// nil-means-default convention is preserved across the merge layers.
+	Review *ReviewConfig `toml:"review"`
+	// Jira configures ticket-key extraction and the JIRA base URL for {ticket}
+	// templating and spawn-from-ticket. nil = unset.
+	Jira *JiraConfig `toml:"jira"`
 }
 
 // DefaultTestConcurrency is the test-runner parallelism used when the config
@@ -619,6 +628,8 @@ type rawConfig struct {
 	TestConcurrency     *int             `toml:"test_concurrency"`
 	TestPrefetch        *bool            `toml:"test_prefetch"`
 	PreviewPorts        *string          `toml:"preview_ports"`
+	Review              *ReviewConfig    `toml:"review"`
+	Jira                *JiraConfig      `toml:"jira"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -633,6 +644,7 @@ var reservedTopLevel = map[string]bool{
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true, "preview_ports": true,
+	"review": true, "jira": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -770,6 +782,14 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.TestConcurrency = raw.TestConcurrency
 	cfg.TestPrefetch = raw.TestPrefetch
 	cfg.PreviewPorts = raw.PreviewPorts
+	cfg.Review = raw.Review
+	cfg.Jira = raw.Jira
+	if err := cfg.Review.Validate(); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	if err := cfg.Jira.Validate(); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -937,6 +957,20 @@ func (c *Config) Merge(other Config) {
 	if other.ArtifactPrefetch != nil {
 		c.ArtifactPrefetch = other.ArtifactPrefetch
 	}
+	// Review/Jira sections merge field-by-field (their own nil-means-default
+	// convention), so a later layer overriding one field leaves the rest intact.
+	if other.Review != nil {
+		if c.Review == nil {
+			c.Review = &ReviewConfig{}
+		}
+		c.Review.Merge(*other.Review)
+	}
+	if other.Jira != nil {
+		if c.Jira == nil {
+			c.Jira = &JiraConfig{}
+		}
+		c.Jira.Merge(*other.Jira)
+	}
 }
 
 // clone returns a deep-enough copy of the AgentConfig that Merge can mutate it
@@ -1103,6 +1137,18 @@ func Load(projectRoot string) (Config, error) {
 		}
 		if projectCfg != nil {
 			cfg.Merge(*projectCfg)
+		}
+
+		// 3. Project-local override (.hydra/config.local.toml): untracked, non-secret,
+		// per-user-per-project. Same schema and union/last-wins merge semantics as the
+		// committed project config, applied last so it wins (NON_LOCAL_INTEGRATION.md
+		// 3.1). Absent file is not an error.
+		localCfg, err := LoadFile(paths.GetProjectConfigLocalPath(projectRoot))
+		if err != nil {
+			return Config{}, errtrace.Wrap(err)
+		}
+		if localCfg != nil {
+			cfg.Merge(*localCfg)
 		}
 	}
 
@@ -2055,6 +2101,8 @@ type existingAnalysis struct {
 	serviceMeta    map[string]artifactComments // service name -> preserved comments
 	testBlocks     [][]string                  // verbatim [[tests]] blocks, in source order
 	testMeta       map[string]artifactComments // test runner name -> preserved comments
+	reviewBlock    []string                    // verbatim [review] table, preserved on save
+	jiraBlock      []string                    // verbatim [jira] table, preserved on save
 }
 
 // tomlItem is one top-level TOML expression (a table header or a key/value),
@@ -2228,23 +2276,57 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		inArray, curArray, artLeading, artInterior, artName = false, "", nil, nil, ""
 	}
 
+	// [review] and [jira] are top-level single tables Hydra parses but does not
+	// render through the spec machinery, so preserve them verbatim (like the
+	// [[artifacts]] blocks) rather than dropping them on a Settings save.
+	inVerbatim := false
+	verbNorm := ""
+	var verbLeading []string
+	verbHeaderLine, verbLastLine := 0, 0
+	flushVerbatim := func() {
+		if !inVerbatim {
+			return
+		}
+		block := append([]string{}, userComments(verbLeading, keys)...)
+		block = append(block, lines[verbHeaderLine:verbLastLine+1]...)
+		switch verbNorm {
+		case "review":
+			res.reviewBlock = block
+		case "jira":
+			res.jiraBlock = block
+		}
+		inVerbatim, verbNorm, verbLeading = false, "", nil
+	}
+	isVerbatimTable := func(norm string) bool { return norm == "review" || norm == "jira" }
+
 	for _, it := range items {
 		g := gap(prevEnd, it.startLine)
 		switch it.kind {
 		case unstable.ArrayTable:
 			flushArray()
+			flushVerbatim()
 			inArray = true
 			curArray = it.norm
 			artLeading = g
 			artHeaderLine, artLastLine = it.startLine, it.endLine
 		case unstable.Table:
 			flushArray()
+			flushVerbatim()
+			if isVerbatimTable(it.norm) {
+				inVerbatim = true
+				verbNorm = it.norm
+				verbLeading = g
+				verbHeaderLine, verbLastLine = it.startLine, it.endLine
+				curNorm = it.norm
+				break
+			}
 			curNorm = it.norm
 			if uc := userComments(g, keys); len(uc) > 0 {
 				res.tableComments[curNorm] = append(res.tableComments[curNorm], uc...)
 			}
 		case unstable.KeyValue:
-			if inArray {
+			switch {
+			case inArray:
 				for _, ln := range g {
 					if strings.HasPrefix(strings.TrimSpace(ln), "#") {
 						artInterior = append(artInterior, ln)
@@ -2254,8 +2336,12 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 					artName = it.strVal
 				}
 				artLastLine = it.endLine
-			} else if uc := userComments(g, keys); len(uc) > 0 {
-				res.keyComments[curNorm+"\x00"+it.key] = uc
+			case inVerbatim:
+				verbLastLine = it.endLine
+			default:
+				if uc := userComments(g, keys); len(uc) > 0 {
+					res.keyComments[curNorm+"\x00"+it.key] = uc
+				}
 			}
 		}
 		if it.endLine > prevEnd {
@@ -2263,6 +2349,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		}
 	}
 	flushArray()
+	flushVerbatim()
 	return res
 }
 
@@ -2589,11 +2676,56 @@ func renderConfig(existing []byte, cfg Config) string {
 		}
 	}
 
+	// Review / Jira: preserve a hand-written [review]/[jira] table verbatim (the
+	// Settings Review editor writes these to config.local.toml, not here); show a
+	// documented commented example when absent so the section self-documents.
+	out = appendBlank(out)
+	if len(prior.reviewBlock) > 0 {
+		out = append(out, prior.reviewBlock...)
+	} else {
+		out = append(out, reviewExampleLines()...)
+	}
+	if len(prior.jiraBlock) > 0 {
+		out = appendBlank(out)
+		out = append(out, prior.jiraBlock...)
+	}
+
 	result := strings.Join(out, "\n")
 	if result != "" && !strings.HasSuffix(result, "\n") {
 		result += "\n"
 	}
 	return result
+}
+
+// reviewExampleLines returns a commented-out, self-documenting [review] example
+// for a config that has none, so the forge/MR settings are discoverable. See
+// NON_LOCAL_INTEGRATION.md 3.2. Personal (non-shared) values belong in
+// config.local.toml; nothing secret goes in either file.
+func reviewExampleLines() []string {
+	return []string{
+		"# [review] configures how Hydra talks to a forge (GitHub/GitLab) and the",
+		"# defaults for the Create MR dialog. There is no mode switch - the head<->MR",
+		"# link is per-head. Personal overrides belong in .hydra/config.local.toml;",
+		"# never put a token here (host-side gh/glab creds or the 0600 secrets file).",
+		"# [review]",
+		`# provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)`,
+		`# remote = "origin"`,
+		`# target_branch = "main"       # default MR target; per-head editable`,
+		`# auth = "cli"                 # cli (shell out to gh/glab) | token (REST)`,
+		`# default_action = "merge"     # merge (local, as today) | create_mr`,
+		`# push_branch_template = "{id}" # e.g. "feat/{ticket}-{id}"; {id} {ticket} {base}`,
+		"# draft = true                 # open MRs as draft",
+		"# squash = true                # request squash-on-merge",
+		"# delete_remote_branch = true  # tell the forge to delete on merge",
+		"# require_local_tests = true   # gate Publish on local [[tests]] like merge is",
+		"# publish_when_green = false   # arm new heads to auto-open a draft MR when green",
+		`# protected_branches = ["main"] # warn before a direct LOCAL merge into these`,
+		"",
+		"# [jira] powers {ticket} templating and (later) spawn-from-ticket.",
+		"# [jira]",
+		`# url = "https://mycorp.atlassian.net"`,
+		`# ticket_pattern = "[A-Z]+-[0-9]+"`,
+	}
 }
 
 // emitSpecTable appends one defaults table to out: set values active (with any

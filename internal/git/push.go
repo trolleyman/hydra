@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -90,6 +91,35 @@ func revListCount(projectRoot string, args ...string) (int, error) {
 	return n, nil
 }
 
+// AheadBehind reports how many commits `ours` has that `theirs` lacks (ahead) and
+// how many `theirs` has that `ours` lacks (behind), from the last-known refs (no
+// fetch). ok is false when either ref can't be resolved - e.g. the remote
+// downstream branch doesn't exist yet - so callers can distinguish "unpublished"
+// from "in sync". Used for the Push to MR / Pull from MR affordances (3.3b).
+func AheadBehind(projectRoot, ours, theirs string) (ahead, behind int, ok bool) {
+	for _, ref := range []string{ours, theirs} {
+		if _, err := gitOutput(projectRoot, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			return 0, 0, false
+		}
+	}
+	// `--left-right --count theirs...ours` prints "<left>\t<right>": left = commits
+	// in theirs not ours (behind), right = commits in ours not theirs (ahead).
+	out, err := gitOutput(projectRoot, "rev-list", "--left-right", "--count", theirs+"..."+ours)
+	if err != nil {
+		return 0, 0, false
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, 0, false
+	}
+	behind, err1 := strconv.Atoi(fields[0])
+	ahead, err2 := strconv.Atoi(fields[1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return ahead, behind, true
+}
+
 // TrackingRef returns the remote-tracking ref a push/pull compares against: the
 // configured upstream if any, else "<remote>/<branch>" when that ref exists,
 // else "" (the branch isn't on the remote yet).
@@ -113,11 +143,32 @@ func Fetch(ctx context.Context, projectRoot, remote string) error {
 		return errtrace.Wrap(err)
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "fetch", "--quiet", remote)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = nonInteractiveGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return errtrace.Wrap(fmt.Errorf("git fetch %s: %w: %s", remote, err, strings.TrimSpace(string(out))))
+		return errtrace.Wrap(classifyGitNetworkError("fetch "+remote, err, string(out)))
 	}
 	return nil
+}
+
+// RemoteURL returns the fetch URL configured for remote, or "" if it has none.
+func RemoteURL(projectRoot, remote string) string {
+	if remote == "" {
+		return ""
+	}
+	out, err := gitOutput(projectRoot, "remote", "get-url", remote)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// RemoteNames lists the configured remote names.
+func RemoteNames(projectRoot string) []string {
+	out, err := gitOutput(projectRoot, "remote")
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(out)
 }
 
 // resolveRemote picks the remote a push should target: the upstream's remote if
@@ -147,10 +198,71 @@ func resolveRemote(projectRoot, branch string) string {
 	return ""
 }
 
+// nonInteractiveGitEnv returns os.Environ() augmented with the settings that make
+// git and ssh fail fast rather than block on a credential or key-passphrase
+// prompt. The daemon runs push/fetch with no controlling terminal, so an
+// interactive prompt would hang it forever (see NON_LOCAL_INTEGRATION.md 3.4);
+// GIT_TERMINAL_PROMPT=0 disables git's own prompts and
+// GIT_SSH_COMMAND="ssh -oBatchMode=yes" stops ssh asking for a passphrase - the
+// answer to a passphrase-protected key is ssh-agent, never a Hydra prompt.
+func nonInteractiveGitEnv() []string {
+	return append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+	)
+}
+
+// AuthError reports that a git network operation (push/fetch) failed because it
+// could not authenticate - or would have needed an interactive credential /
+// passphrase prompt, which the daemon runs with disabled. Its message is
+// actionable so the UI can tell the user what to fix rather than surfacing raw
+// git stderr. Output holds the trimmed git output for detail.
+type AuthError struct{ Output string }
+
+func (e *AuthError) Error() string {
+	return "push authentication failed - add your key to ssh-agent (`ssh-add`) or switch to HTTPS + a credential helper"
+}
+
+// classifyGitNetworkError maps a failed push/fetch to an *AuthError when the
+// combined output looks like an authentication or non-interactive-prompt
+// failure, so callers can surface an actionable hint. Anything else is returned
+// as a plain wrapped error. err is the exec error; out is the combined output.
+func classifyGitNetworkError(op string, err error, out string) error {
+	if looksLikeAuthFailure(out) {
+		return errtrace.Wrap(&AuthError{Output: strings.TrimSpace(out)})
+	}
+	return errtrace.Wrap(fmt.Errorf("git %s: %w: %s", op, err, strings.TrimSpace(out)))
+}
+
+// authFailureMarkers are substrings of git/ssh output that indicate an
+// authentication or non-interactive-prompt failure rather than an ordinary
+// rejection (e.g. non-fast-forward), so the caller can hint at ssh-agent/creds.
+var authFailureMarkers = []string{
+	"authentication failed",
+	"permission denied",
+	"could not read from remote repository",
+	"terminal prompts disabled",
+	"host key verification failed",
+	"no such identity",
+	"could not read username",
+	"could not read password",
+	"batchmode", // ssh -oBatchMode refused an interactive prompt
+}
+
+// looksLikeAuthFailure reports whether git/ssh output matches a known auth marker.
+func looksLikeAuthFailure(out string) bool {
+	low := strings.ToLower(out)
+	return slices.ContainsFunc(authFailureMarkers, func(m string) bool {
+		return strings.Contains(low, m)
+	})
+}
+
 // Push pushes the currently checked-out branch of projectRoot to its remote,
 // setting upstream tracking so subsequent pushes need no arguments. It returns
 // the combined git output (useful as an error detail on failure). Network access
-// is required, so this must run outside the agent sandbox (the daemon does).
+// is required, so this must run outside the agent sandbox (the daemon does). It
+// runs strictly non-interactively (see nonInteractiveGitEnv) so a credential
+// prompt fails fast as an *AuthError instead of hanging the daemon.
 func Push(projectRoot string) (string, error) {
 	st, err := GetRemoteStatus(projectRoot)
 	if err != nil {
@@ -167,11 +279,66 @@ func Push(projectRoot string) (string, error) {
 	}
 
 	cmd := exec.Command("git", "-C", projectRoot, "push", "--set-upstream", st.Remote, st.Branch)
+	cmd.Env = nonInteractiveGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), errtrace.Wrap(fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(string(out))))
+		return string(out), errtrace.Wrap(classifyGitNetworkError("push", err, string(out)))
 	}
 	return string(out), nil
+}
+
+// PushRefspec pushes a single refspec (e.g. "hydra/<id>:refs/heads/<downstream>")
+// to remote, host-side, strictly non-interactively. It is the publish primitive
+// (NON_LOCAL_INTEGRATION.md 3.3 step 3): the local branch is untouched - only the
+// named refspec is sent. When forceWithLease is non-nil it pushes with
+// --force-with-lease=<forceWithLease> (the one safe force case in 3.3b: the head
+// rewrote its own history and the remote tip still matches what it last pushed);
+// otherwise the push is a plain fast-forward-only push that fails cleanly if the
+// downstream branch diverged. Returns combined git output; an auth failure is an
+// *AuthError. ctx bounds the network wait.
+func PushRefspec(ctx context.Context, projectRoot, remote, refspec string, forceWithLease *string) (string, error) {
+	if err := ValidateRef(remote); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	args := []string{"-C", projectRoot, "push"}
+	if forceWithLease != nil {
+		if *forceWithLease == "" {
+			args = append(args, "--force-with-lease")
+		} else {
+			args = append(args, "--force-with-lease="+*forceWithLease)
+		}
+	}
+	args = append(args, remote, refspec)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = nonInteractiveGitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), errtrace.Wrap(classifyGitNetworkError("push "+refspec, err, string(out)))
+	}
+	return string(out), nil
+}
+
+// DeleteRemoteBranch deletes a branch on remote (`git push <remote> --delete
+// <branch>`), host-side and non-interactively. Used when tearing down a linked
+// head that asked to close its MR and delete the remote branch (3.3c). A branch
+// that does not exist on the remote is treated as success (already gone).
+func DeleteRemoteBranch(ctx context.Context, projectRoot, remote, branch string) error {
+	if err := ValidateRef(remote); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := ValidateRef(branch); err != nil {
+		return errtrace.Wrap(err)
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "push", remote, "--delete", branch)
+	cmd.Env = nonInteractiveGitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(strings.ToLower(string(out)), "remote ref does not exist") {
+			return nil // already gone
+		}
+		return errtrace.Wrap(classifyGitNetworkError("push --delete "+branch, err, string(out)))
+	}
+	return nil
 }
 
 // ConflictError reports that an integration (pull/merge) could not complete

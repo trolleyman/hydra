@@ -9,6 +9,7 @@ import { SettingSection, type SettingsSection } from './shared'
 import { ThemeSection } from './ThemeSection'
 import { TerminalSection } from './TerminalSection'
 import { NotificationsSection } from './NotificationsSection'
+import { ReviewSection } from './ReviewSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
 import { TestsEditor } from './TestsEditor'
@@ -134,6 +135,7 @@ export function SettingsContent({
       <ThemeSection />
       <TerminalSection />
       <NotificationsSection />
+      {selectedProject && <ReviewSection projectId={selectedProject.id} />}
       {scopeSelector}
       {iconSection}
       <SettingSection

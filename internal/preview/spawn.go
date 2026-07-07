@@ -448,7 +448,7 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 			opts.GitCommonDir = gcd // ephemeral checkout git metadata lives here
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(in.root, in.runDir, masked)
 		opts.RestoreRO = restore
 		// Per-spawn ephemeral cow layers over shared caches (see the artifacts
 		// twin of this function for the full rationale).

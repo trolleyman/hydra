@@ -97,6 +97,20 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		"HYDRA_STATUS_LOG_PATH="+statusLogHost,
 	)
 
+	// Per-head review file: the MR lifecycle watcher writes this head's MR status +
+	// unresolved discussions here (host-side); the in-sandbox `hydra mcp` server
+	// reads it for get_review_status / get_review_comments. Bound writable at its
+	// real host path (like status.json) so it exists in the sandbox; the agent only
+	// reads it. Per-head by construction - bound only into THIS head's sandbox.
+	reviewJSONHost := paths.GetReviewJsonFromProjectRoot(projectRoot, id)
+	if _, err := os.Stat(reviewJSONHost); os.IsNotExist(err) {
+		if err := os.WriteFile(reviewJSONHost, []byte(`{"linked":false}`), 0644); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", reviewJSONHost, err))
+		}
+	}
+	res.WritablePaths = append(res.WritablePaths, reviewJSONHost)
+	res.Env = append(res.Env, "HYDRA_REVIEW_PATH="+reviewJSONHost)
+
 	// Per-head sub-agent tracking dir: trigger-hook drops a marker file per live
 	// Claude sub-agent so the main agent's Stop hook can distinguish a real finish
 	// from "turn ended but sub-agents still running". A directory (one file per
@@ -335,6 +349,7 @@ func mcpKeepSet(serversAllowed, toolsAllowed []string) []string {
 func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, home string, policy gate.Policy) error {
 	policy.Home = home
 	policy.WorktreePath = worktreePath
+	policy.ProjectRoot = projectRoot
 
 	policyHost := filepath.Join(cacheDir, id+"-gate-policy.json")
 	if err := policy.Save(policyHost); err != nil {

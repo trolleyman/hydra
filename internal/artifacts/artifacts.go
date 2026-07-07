@@ -1257,7 +1257,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 			opts.GitCommonDir = gcd // ephemeral worktree git metadata lives here
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
 		opts.RestoreRO = restore
 		// Apply the project's cow_paths so a shared host cache configured for
 		// per-head copy-on-write isolation (e.g. ~/.gradle) is writable during

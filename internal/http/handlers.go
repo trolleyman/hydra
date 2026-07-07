@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -550,7 +551,44 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		Archived:           &archived,
 		EndState:           endState,
 		MergeWhenGreen:     &h.MergeWhenGreen,
+		PublishWhenGreen:   &h.PublishWhenGreen,
 	}
+}
+
+// agentResponseWithReview is agentResponse plus the per-head MR link (downstream
+// branch + review link with cached state). Split out so the hot list path can skip
+// the extra work when a head is unlinked. ahead/behind vs the remote downstream
+// branch are read from the cached remote-tracking refs (no fetch).
+func (s *Server) agentResponseWithReview(h heads.Head) api.AgentResponse {
+	resp := agentResponse(h)
+	if h.DownstreamBranch != "" {
+		resp.DownstreamBranch = &h.DownstreamBranch
+	}
+	if !h.IsLinked() {
+		return resp
+	}
+	link := api.ReviewLink{
+		Url:      h.ReviewURL,
+		Id:       h.ReviewID,
+		Provider: h.ReviewProvider,
+	}
+	if h.ReviewTargetBranch != "" {
+		link.TargetBranch = &h.ReviewTargetBranch
+	}
+	if h.Branch != nil && h.DownstreamBranch != "" {
+		remote := reviewRemote(h.ProjectPath)
+		if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
+			link.Ahead, link.Behind = &ahead, &behind
+		}
+	}
+	if h.ReviewState != "" {
+		var st api.ReviewState
+		if json.Unmarshal([]byte(h.ReviewState), &st) == nil && st.State != "" {
+			link.State = &st
+		}
+	}
+	resp.Review = &link
+	return resp
 }
 
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
@@ -568,7 +606,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
-		resp[i] = agentResponse(h)
+		resp[i] = s.agentResponseWithReview(h)
 		resp[i].Tests = s.testSummaryFor(projectRoot, h)
 	}
 	return resp, nil
@@ -1297,7 +1335,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 			Details: "agent not found",
 		}, nil
 	}
-	return api.GetAgent200JSONResponse(agentResponse(*head)), nil
+	return api.GetAgent200JSONResponse(s.agentResponseWithReview(*head)), nil
 }
 
 // UpdateAgent patches an agent's mutable fields (title and/or base branch).

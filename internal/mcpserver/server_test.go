@@ -120,3 +120,43 @@ func firstText(t *testing.T, resp map[string]any) string {
 	content := resp["result"].(map[string]any)["content"].([]any)
 	return content[0].(map[string]any)["text"].(string)
 }
+
+func TestReviewToolsAdvertisedAndCalled(t *testing.T) {
+	rf := &ReviewFile{
+		Linked: true, URL: "https://gl/mr/7", ID: "7", Provider: "gitlab",
+		TargetBranch: "main", State: "open", CIStatus: "running",
+		Approvals: 1, ApprovalsRequired: 2, UnresolvedDiscussions: 1,
+		Comments: []ReviewComment{{Author: "alice", Body: "please rename", Path: "a.go", Line: 12}},
+	}
+	deps := Deps{
+		ListAvailable: func() []Candidate { return nil },
+		RequestAccess: func(string) (bool, string) { return false, "" },
+		GetReview:     func() *ReviewFile { return rf },
+	}
+	resps := runLines(t, deps,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_review_status"}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_review_comments"}}`,
+	)
+	tools := resps[0]["result"].(map[string]any)["tools"].([]any)
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 tools with GetReview wired, got %d", len(tools))
+	}
+	statusText := resps[1]["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(statusText, "https://gl/mr/7") || !strings.Contains(statusText, "1/2") {
+		t.Errorf("get_review_status text unexpected: %q", statusText)
+	}
+	commentsText := resps[2]["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(commentsText, "a.go:12") || !strings.Contains(commentsText, "please rename") {
+		t.Errorf("get_review_comments text unexpected: %q", commentsText)
+	}
+}
+
+func TestReviewToolsHiddenWhenUnwired(t *testing.T) {
+	deps := Deps{ListAvailable: func() []Candidate { return nil }, RequestAccess: func(string) (bool, string) { return false, "" }}
+	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	tools := resps[0]["result"].(map[string]any)["tools"].([]any)
+	if len(tools) != 2 {
+		t.Errorf("expected 2 tools without GetReview, got %d", len(tools))
+	}
+}
