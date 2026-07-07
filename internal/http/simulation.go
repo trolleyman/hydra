@@ -209,6 +209,31 @@ const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Matc
 	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
 	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
 
+// simAgentChatPrompt seeds the chat-mode demo agent (agent-chat), whose detail
+// page renders the chat view instead of a terminal (CHAT_MODE.md).
+const simAgentChatPrompt = "Add a retry with exponential backoff to the artifact uploader, and cover the giving-up path with a test."
+
+// simAgentChat is the chat-mode demo agent, shared by ListAgents and GetAgent.
+func simAgentChat() api.AgentResponse {
+	createdAt := simNow().Add(-45 * time.Minute).Unix()
+	return api.AgentResponse{
+		Id:            "agent-chat",
+		Title:         ptr("Add uploader retry with backoff"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/feat-uploader-retry"),
+		SessionPid:    1006,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentChatPrompt,
+		ChatMode:      ptr(true),
+		AgentStatus: &api.AgentStatusInfo{
+			Status:    api.Waiting,
+			Timestamp: simNow().Format(time.RFC3339),
+		},
+	}
+}
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -265,6 +290,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 				LastMessageIsSuggestedNextMessage: ptr(true),
 			},
 		},
+		// Chat-mode demo agent: its detail page renders the chat view instead of
+		// a terminal (CHAT_MODE.md); HandleTerminalWS serves it chat framing.
+		simAgentChat(),
 		{
 			// Blocked on the user (AskUserQuestion) while you were away → the red
 			// "needs you" status, which also lights the red needs-input marker on
@@ -477,6 +505,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			Tests:          simTestSummary("agent-md"),
 			MergeWhenGreen: ptr(true),
 		})
+		return
+	}
+	if id == "agent-chat" {
+		api.WriteJSON(w, http.StatusOK, simAgentChat())
 		return
 	}
 	if id == "agent-approval" {
@@ -2669,6 +2701,97 @@ func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// simChatEvents is the canned stream-json conversation the simulated chat
+// agent replays on attach: the task prompt as a user turn (what
+// --replay-user-messages produces), thinking, markdown-rich assistant text,
+// tool_use/tool_result pairs (one of them an error) and a result footer. Kept
+// as verbatim JSON lines to mirror exactly what the real daemon relays.
+var simChatEvents = []string{
+	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-sim"}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"text","text":"I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the ` + "`PUT`" + ` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_2","content":[{"type":"tool_use","id":"toolu_sim_1","name":"Read","input":{"file_path":"internal/artifacts/upload.go"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_1","content":"func (u *Uploader) Put(ctx context.Context, key string, r io.Reader) error {\n\treq, err := u.newRequest(ctx, key, r)\n\t..."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go test ./internal/artifacts/ -run TestPutRetry -count=1"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"FAIL: TestPutRetry (0.02s)\n    upload_test.go:41: expected 5 attempts, got 1","is_error":true}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_4","content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\nfor attempt := 0; attempt < maxAttempts; attempt++ {\n    if err = u.put(ctx, key, r); err == nil {\n        return nil\n    }\n    sleepBackoff(attempt)\n}\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"session_id":"sim-chat"}`,
+}
+
+// sendSimChatEvent relays one canned stream-json line as a claude_event frame.
+func sendSimChatEvent(conn *safeConn, line string) {
+	frame, _ := json.Marshal(chatEventFrame{
+		terminalEvent: terminalEvent{Type: "claude_event"},
+		Event:         json.RawMessage(line),
+	})
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
+}
+
+// handleSimChatWS speaks the chat framing (see chat_ws.go) for the simulated
+// chat-mode agent: replay the canned conversation, mark replay_done, then
+// answer each user_message with an echoed user turn and a scripted assistant
+// reply, so the input path can be exercised end to end.
+func handleSimChatWS(conn *safeConn) {
+	sendStatusUpdate(conn, "running")
+	for _, line := range simChatEvents {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+
+	turn := 0
+	for {
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if msgType != websocket.TextMessage {
+			continue
+		}
+		var msg struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(data, &msg) != nil || msg.Type != "user_message" {
+			continue
+		}
+		turn++
+		// Echo the user turn (as --replay-user-messages would), then stream the
+		// reply token by token (as --include-partial-messages does live) before
+		// the complete assistant event and the result footer.
+		userEv, _ := json.Marshal(map[string]any{
+			"type":    "user",
+			"message": map[string]any{"role": "user", "content": msg.Content},
+		})
+		sendSimChatEvent(conn, string(userEv))
+
+		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
+		streamEv := func(event map[string]any) {
+			line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": "sim-chat"})
+			sendSimChatEvent(conn, string(line))
+		}
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+		for chunk := range strings.SplitSeq(replyText, " ") {
+			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+			time.Sleep(90 * time.Millisecond)
+		}
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+
+		reply, _ := json.Marshal(map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"id":      fmt.Sprintf("msg_sim_reply_%d", turn),
+				"content": []map[string]any{{"type": "text", "text": replyText}},
+			},
+		})
+		sendSimChatEvent(conn, string(reply))
+		result, _ := json.Marshal(map[string]any{
+			"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042, "session_id": "sim-chat",
+		})
+		sendSimChatEvent(conn, string(result))
+	}
+}
+
 // HandleTerminalWS handles WebSocket connections for simulated agent terminal access.
 func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// Extract agent ID from path: /ws/projects/{project_id}/agents/{id}/terminal
@@ -2680,6 +2803,13 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	}
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
+
+	// The chat-mode demo agent speaks the chat framing, not PTY bytes. Its bash
+	// tabs (shell=true) still get the plain simulated terminal below.
+	if agentID == "agent-chat" && r.URL.Query().Get("shell") != "true" {
+		handleSimChatWS(conn)
+		return
+	}
 
 	// 1. Simulate sandbox startup. Emit the whole boot transcript in one burst
 	// rather than pacing it with sleeps: the screenshot generator captures this

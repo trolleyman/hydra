@@ -428,7 +428,16 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // Claude's /model). Forcing --model on resume would override that and, because
 // each model has its own prompt cache, trigger a full cache-missing re-read of
 // the conversation. Empty model inherits the CLI's own default.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string) ([]string, error) {
+//
+// chatMode (Claude only, CHAT_MODE.md) drives the CLI's structured stream-json
+// interface instead of the interactive TUI: the process stays alive reading
+// user turns from stdin, and the task prompt is sent as the first stdin
+// message (see SpawnHead) rather than as argv. --continue composes with it on
+// resume, so terminal and chat mode share one conversation transcript.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool) ([]string, error) {
+	if chatMode && agentType != AgentTypeClaude {
+		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude agents, not %q", agentType))
+	}
 	switch agentType {
 	case AgentTypeClaude:
 		argv := []string{"claude", "--dangerously-skip-permissions"}
@@ -437,6 +446,28 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		}
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
+		}
+		if chatMode {
+			// stream-json output requires --verbose in -p mode.
+			// --replay-user-messages echoes stdin user turns back onto stdout,
+			// so the session scrollback ring alone reconstructs the recent
+			// conversation for a freshly-attached chat client (older history is
+			// backfilled from the transcript file, see chat_ws.go).
+			// --include-partial-messages adds stream_event token deltas for
+			// live streaming; those are filtered OUT of the scrollback ring
+			// (session.RingFilter) so replay stays compact.
+			argv = append(argv,
+				"-p",
+				"--input-format", "stream-json",
+				"--output-format", "stream-json",
+				"--verbose",
+				"--replay-user-messages",
+				"--include-partial-messages",
+			)
+			if resume {
+				argv = append(argv, "--continue")
+			}
+			return argv, nil
 		}
 		if resume {
 			// --continue resumes the most recent conversation in the worktree

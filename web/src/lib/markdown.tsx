@@ -213,6 +213,145 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
   })
 }
 
+// --- Block-level rendering (chat view) ---------------------------------------
+//
+// renderMarkdownBlocks adds just enough block structure for assistant chat
+// messages (CHAT_MODE.md): #headings, -/* and 1. lists, > blockquotes and ---
+// rules, with all inline styling (and fenced code, via parseInline) delegated
+// to the machinery above. Still deliberately not a full markdown library -
+// tables and nested block quoting are out of scope until something needs them.
+
+type Block =
+  | { kind: 'p'; text: string }
+  | { kind: 'heading'; level: number; text: string }
+  | { kind: 'li'; ordered: boolean; indent: number; marker: string; text: string }
+  | { kind: 'quote'; text: string }
+  | { kind: 'hr' }
+
+function parseBlocks(text: string): Block[] {
+  const blocks: Block[] = []
+  const lines = text.split('\n')
+  let i = 0
+  const paragraph: string[] = []
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ kind: 'p', text: paragraph.join('\n') })
+      paragraph.length = 0
+    }
+  }
+  while (i < lines.length) {
+    const line = lines[i]
+    // A fenced block swallows lines until its closing fence; keep it inside the
+    // current paragraph so parseInline (which owns fences) renders it.
+    if (/^```/.test(line)) {
+      paragraph.push(line)
+      i++
+      while (i < lines.length) {
+        paragraph.push(lines[i])
+        if (/^```[ \t]*$/.test(lines[i])) {
+          i++
+          break
+        }
+        i++
+      }
+      continue
+    }
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line)
+    if (heading) {
+      flushParagraph()
+      blocks.push({ kind: 'heading', level: heading[1].length, text: heading[2] })
+      i++
+      continue
+    }
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushParagraph()
+      blocks.push({ kind: 'hr' })
+      i++
+      continue
+    }
+    const li = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line)
+    if (li) {
+      flushParagraph()
+      blocks.push({
+        kind: 'li',
+        ordered: /\d/.test(li[2]),
+        indent: Math.min(3, Math.floor(li[1].length / 2)),
+        marker: li[2],
+        text: li[3],
+      })
+      i++
+      continue
+    }
+    const quote = /^>\s?(.*)$/.exec(line)
+    if (quote) {
+      flushParagraph()
+      // Merge consecutive quote lines into one block.
+      const prev = blocks[blocks.length - 1]
+      if (prev && prev.kind === 'quote') prev.text += '\n' + quote[1]
+      else blocks.push({ kind: 'quote', text: quote[1] })
+      i++
+      continue
+    }
+    if (line.trim() === '') {
+      flushParagraph()
+      i++
+      continue
+    }
+    paragraph.push(line)
+    i++
+  }
+  flushParagraph()
+  return blocks
+}
+
+const HEADING_CLASSES: Record<number, string> = {
+  1: 'text-base font-bold mt-3 mb-1',
+  2: 'text-[0.95rem] font-bold mt-3 mb-1',
+  3: 'text-sm font-semibold mt-2 mb-0.5',
+  4: 'text-sm font-semibold mt-2 mb-0.5',
+}
+
+// renderMarkdownBlocks renders text with block structure for the chat view.
+// Callers should NOT wrap it in whitespace-pre-wrap (paragraphs manage their
+// own spacing; their inner text is pre-wrap).
+export function renderMarkdownBlocks(text: string): ReactNode {
+  const blocks = parseBlocks(text)
+  return blocks.map((b, i) => {
+    switch (b.kind) {
+      case 'heading':
+        return (
+          <div key={i} className={HEADING_CLASSES[b.level] ?? HEADING_CLASSES[4]}>
+            {renderMarkdown(b.text)}
+          </div>
+        )
+      case 'hr':
+        return <hr key={i} className="my-2 border-gray-300 dark:border-gray-600" />
+      case 'li':
+        return (
+          <div key={i} className="flex gap-1.5" style={{ paddingLeft: `${b.indent * 1}rem` }}>
+            <span className="shrink-0 select-none opacity-60">{b.ordered ? b.marker : '•'}</span>
+            <span className="whitespace-pre-wrap break-words min-w-0">{renderMarkdown(b.text)}</span>
+          </div>
+        )
+      case 'quote':
+        return (
+          <blockquote
+            key={i}
+            className="border-l-2 border-gray-400 dark:border-gray-500 pl-2 my-1 opacity-80 whitespace-pre-wrap break-words"
+          >
+            {renderMarkdown(b.text)}
+          </blockquote>
+        )
+      default:
+        return (
+          <div key={i} className="whitespace-pre-wrap break-words my-1 first:mt-0 last:mb-0">
+            {renderMarkdown(b.text)}
+          </div>
+        )
+    }
+  })
+}
+
 // splitFence breaks a fenced block's exact source into its opening fence line
 // (```lang), its body (the inner code, including the surrounding newlines) and
 // its closing ``` fence. open + body + close === raw exactly, so the textarea

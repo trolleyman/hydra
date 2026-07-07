@@ -26,6 +26,10 @@ type Agent struct {
 	// touches this field. Seeded from the prompt, optionally refined by an LLM.
 	Title     string
 	Ephemeral bool `gorm:"default:false"`
+	// ChatMode drives the head via the Claude CLI's stream-json interface and
+	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	// Mutable; a change takes effect on the next session (re)launch.
+	ChatMode bool `gorm:"default:false"`
 
 	// Session - updated by the liveness reconciler
 	SessionPID    int    // PID of the running sandbox session, 0 if not running

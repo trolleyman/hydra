@@ -98,3 +98,56 @@ func TestSpawnReportsExitCode(t *testing.T) {
 	}
 	_ = sp.Close()
 }
+
+// TestSpawnPipes exercises Pipes mode end to end: the child runs on plain
+// stdin/stdout pipes (no PTY), both fds are passed back over the control
+// socket, writes reach the child's stdin unechoed, its stdout comes back
+// verbatim (no CRLF translation), and closing the daemon's handle delivers
+// stdin EOF so the child exits.
+func TestSpawnPipes(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "control.sock")
+	go func() { _ = Serve(sock) }()
+	if err := WaitForSocket(sock, 2*time.Second); err != nil {
+		t.Fatalf("supervisor never listened: %v", err)
+	}
+	client := Dial(sock)
+
+	sp, err := client.Spawn(SpawnRequest{
+		Argv:  []string{"/bin/cat"},
+		Env:   os.Environ(),
+		Cwd:   dir,
+		Pipes: true,
+	})
+	if err != nil {
+		t.Fatalf("spawn cat: %v", err)
+	}
+
+	if _, err := sp.Write([]byte("{\"type\":\"user\"}\n")); err != nil {
+		t.Fatalf("write to child stdin: %v", err)
+	}
+	buf := make([]byte, 64)
+	n, err := sp.Read(buf)
+	if err != nil {
+		t.Fatalf("read child stdout: %v", err)
+	}
+	// A PTY would have echoed the input AND translated \n to \r\n; pipes must
+	// return exactly what cat copied through.
+	if got := string(buf[:n]); got != "{\"type\":\"user\"}\n" {
+		t.Fatalf("stdout = %q, want the exact bytes written", got)
+	}
+
+	if err := sp.Resize(50, 100); err != nil {
+		t.Errorf("Resize in pipes mode should be a no-op, got %v", err)
+	}
+
+	// Closing the daemon handle closes the child's stdin; cat exits on EOF.
+	done := make(chan struct{})
+	go func() { _ = sp.Wait(); close(done) }()
+	_ = sp.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("child did not exit after stdin EOF")
+	}
+}

@@ -12,8 +12,10 @@ import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { useDialogStore } from '../stores/dialogStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { loadLastGeometry, saveLastGeometry } from '../lib/terminalGeometry'
+import { saveLastGeometry } from '../lib/terminalGeometry'
 import { closeWebSocket } from '../lib/ws'
+import { getWsUrl } from '../lib/terminalWs'
+import { ChatPane } from './AgentChat'
 
 const DEFAULT_TERMINAL_HEIGHT = 450
 
@@ -37,27 +39,6 @@ interface PaneProps {
 // default and reflowing. It never resizes an already-live PTY (that still waits
 // for the client's settled measurement).
 
-function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
-  const params = new URLSearchParams()
-  if (shell) {
-    params.set('shell', 'true')
-    // Default is sandboxed; only signal when the user opted into a host shell.
-    if (sandboxed === false) params.set('sandboxed', 'false')
-    // Per-tab id: each shell tab is its own process; a refresh reuses the same id.
-    if (shellId) params.set('shell_id', shellId)
-  }
-  // Seed the initial PTY size from the last known geometry (see above).
-  const geom = loadLastGeometry()
-  if (geom) {
-    params.set('cols', String(geom.cols))
-    params.set('rows', String(geom.rows))
-  }
-  const qs = params.toString() ? `?${params.toString()}` : ''
-  const pid = projectId ? encodeURIComponent(projectId) : '_'
-  return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
-}
 
 function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onMetrics }: PaneProps) {
   const navigate = useNavigate()
@@ -659,12 +640,15 @@ interface Props {
   agentId: string
   projectId: string | null
   isEphemeral?: boolean
+  // chatMode renders the agent tab as a chat view (stream-json framing,
+  // CHAT_MODE.md) instead of an xterm. Bash tabs stay terminals either way.
+  chatMode?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
 }
 
-export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -852,7 +836,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
                     : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                 }`}
               >
-                {tab.label}
+                {tab.id === 'terminal' && chatMode ? 'Chat' : tab.label}
               </button>
               {tab.shell && (
                 <Tooltip content="Close tab" side="bottom">
@@ -938,18 +922,29 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
           className="flex-1 min-h-0 overflow-hidden"
           style={{ display: activeTabId === tab.id ? 'flex' : 'none', flexDirection: 'column' }}
         >
-          <TerminalPane
-            agentId={agentId}
-            projectId={projectId}
-            shell={tab.shell}
-            sandboxed={tab.sandboxed}
-            shellId={tab.id}
-            active={activeTabId === tab.id}
-            reconnectAttempt={reconnectKeys[tab.id] ?? 0}
-            onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
-            onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
-            onMetrics={reportMetrics}
-          />
+          {tab.id === 'terminal' && chatMode ? (
+            <ChatPane
+              agentId={agentId}
+              projectId={projectId}
+              active={activeTabId === tab.id}
+              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              onStatusUpdate={handleStatusUpdate}
+              onDiffRefresh={onDiffRefresh}
+            />
+          ) : (
+            <TerminalPane
+              agentId={agentId}
+              projectId={projectId}
+              shell={tab.shell}
+              sandboxed={tab.sandboxed}
+              shellId={tab.id}
+              active={activeTabId === tab.id}
+              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
+              onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
+              onMetrics={reportMetrics}
+            />
+          )}
         </div>
       ))}
 

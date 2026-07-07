@@ -17,16 +17,25 @@ package nshost
 
 // SpawnRequest asks the supervisor to launch one PTY-attached child. All paths
 // are resolved in the supervisor's (sandboxed) view of the filesystem.
+//
+// With Pipes set the child runs on plain stdin/stdout pipes instead of a PTY
+// (chat-mode heads, whose stdout is a JSONL protocol stream; a terminal
+// device's echo and CRLF translation would corrupt it). The child's stderr
+// goes to the supervisor's stderr, which the daemon folds into its log. The
+// reply then carries two fds (stdin write end, stdout read end) instead of the
+// single PTY master, and Rows/Cols are ignored.
 type SpawnRequest struct {
-	Argv []string `json:"argv"`
-	Env  []string `json:"env"`
-	Cwd  string   `json:"cwd"`
-	Rows uint16   `json:"rows"`
-	Cols uint16   `json:"cols"`
+	Argv  []string `json:"argv"`
+	Env   []string `json:"env"`
+	Cwd   string   `json:"cwd"`
+	Rows  uint16   `json:"rows"`
+	Cols  uint16   `json:"cols"`
+	Pipes bool     `json:"pipes,omitempty"`
 }
 
 // spawnReply is the supervisor's answer to a SpawnRequest. When OK, the same
-// message carries the child's PTY master fd as an SCM_RIGHTS control message.
+// message carries the child's PTY master fd (or, with Pipes, the stdin-write
+// and stdout-read pipe fds) as an SCM_RIGHTS control message.
 type spawnReply struct {
 	OK  bool   `json:"ok"`
 	Pid int    `json:"pid"`

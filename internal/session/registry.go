@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -68,18 +69,19 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("start sandboxed process: %w", err))
 	}
 
-	return r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, proc, spec.Cleanup), nil
+	return r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, KindTerminal, proc, spec.Cleanup), nil
 }
 
-// StartWithProc registers a session backed by an already-running PTY (e.g. a
-// child spawned inside a shared namespace host, whose master fd was passed back
-// to the daemon) instead of launching its own sandbox process. The proc is
+// StartWithProc registers a session backed by an already-running process (e.g.
+// a child spawned inside a shared namespace host, whose fds were passed back
+// to the daemon) instead of launching its own sandbox process. kind says what
+// the byte stream carries (terminal VT100 vs chat-mode JSONL). The proc is
 // closed when the session exits.
-func (r *Registry) StartWithProc(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, proc PTY) (*Session, error) {
+func (r *Registry) StartWithProc(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, kind Kind, proc PTY) (*Session, error) {
 	if err := r.reserve(id); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	return r.register(id, agentType, worktree, rows, cols, ephemeral, proc, func() { _ = proc.Close() }), nil
+	return r.register(id, agentType, worktree, rows, cols, ephemeral, kind, proc, func() { _ = proc.Close() }), nil
 }
 
 // reserve verifies no live session holds id, evicting an exited one so the id
@@ -102,14 +104,25 @@ func (r *Registry) reserve(id string) error {
 
 // register wires a started proc into a Session, stores it, and launches the
 // read loop. cleanup runs once after the process exits.
-func (r *Registry) register(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, proc PTY, cleanup func()) *Session {
+func (r *Registry) register(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, kind Kind, proc PTY, cleanup func()) *Session {
+	if kind == "" {
+		kind = KindTerminal
+	}
+	scrollback := defaultScrollback
+	var ringFilter *claudestream.RingFilter
+	if kind == KindChat {
+		scrollback = chatScrollback
+		ringFilter = &claudestream.RingFilter{}
+	}
 	s := &Session{
 		ID:           id,
 		AgentType:    agentType,
 		WorktreePath: worktree,
 		StartedAt:    time.Now(),
+		Kind:         kind,
 		proc:         proc,
-		scroll:       newRing(defaultScrollback),
+		scroll:       newRing(scrollback),
+		ringFilter:   ringFilter,
 		cleanup:      cleanup,
 		attachers:    make(map[*attacher]struct{}),
 		rows:         rows,

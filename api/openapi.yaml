@@ -2603,6 +2603,13 @@ components:
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to current branch)
+        chat_mode:
+          type: boolean
+          description: >-
+            Drive the head via the Claude CLI's stream-json interface and render
+            a chat view instead of a terminal (Claude only; rejected for other
+            agent types). The prompt is delivered as the first chat turn. See
+            CHAT_MODE.md.
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
@@ -2637,6 +2644,14 @@ components:
             update-from-base and the diff view) but does NOT move existing
             commits. Rebasing the agent's branch onto the new base, if desired,
             is left to the user. Must be an existing ref.
+        chat_mode:
+          type: boolean
+          description: >-
+            Switch the head between terminal and chat mode (Claude only;
+            rejected for other agent types). When the value actually changes
+            and a session is live, the Claude process is stopped and relaunched
+            in the new mode with --continue - the conversation is preserved
+            (terminal and chat mode share one transcript). See CHAT_MODE.md.
 
     AgentStatus:
       type: string
@@ -2715,6 +2730,9 @@ components:
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
+        chat_mode:
+          type: boolean
+          description: True when the head runs in chat mode (stream-json + chat view; Claude only). See CHAT_MODE.md.
         created_at:
           type: integer
           format: int64

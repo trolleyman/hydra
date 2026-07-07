@@ -544,6 +544,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		Prompt:             h.Prompt,
 		BaseBranch:         h.BaseBranch,
 		Ephemeral:          &h.Ephemeral,
+		ChatMode:           &h.ChatMode,
 		CreatedAt:          createdAt,
 		AgentStatus:        h.AgentStatus,
 		NetworkEnforcement: netEnf,
@@ -1260,6 +1261,15 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		model = strings.TrimSpace(*request.Body.Model)
 	}
 
+	chatMode := request.Body.ChatMode != nil && *request.Body.ChatMode
+	if chatMode && agentType != sandbox.AgentTypeClaude {
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "chat_mode is only supported for claude agents",
+		}, nil
+	}
+
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
 	// 80x24 - those narrow-wrapped bytes can't be re-flowed once a wider client
@@ -1283,6 +1293,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Model:         model,
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
+		ChatMode:      chatMode,
 		Replace:       force,
 		Rows:          rows,
 		Cols:          cols,
@@ -1353,11 +1364,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	if request.Body.Title == nil && request.Body.BaseBranch == nil {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "at least one field (title or base_branch) is required",
+			Details: "at least one field (title, base_branch or chat_mode) is required",
 		}, nil
 	}
 
@@ -1432,6 +1443,35 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			return nil, errtrace.Wrap(err)
 		}
 		head.Title = title
+	}
+
+	if request.Body.ChatMode != nil {
+		chatMode := *request.Body.ChatMode
+		if head.AgentType != sandbox.AgentTypeClaude {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "chat_mode is only supported for claude agents",
+			}, nil
+		}
+		if chatMode != head.ChatMode {
+			if err := s.DB.UpdateAgentChatMode(request.Id, chatMode); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			head.ChatMode = chatMode
+			// The mode is baked into the running CLI's argv, so a live session
+			// must be relaunched to pick it up. Stop just the process (worktree,
+			// branch and DB row untouched) and wait for it to exit before
+			// responding; the client swaps panes and reconnects on the response,
+			// and the on-attach lazy resume then relaunches with --continue in
+			// the new mode - the conversation carries over (terminal and chat
+			// mode share one transcript). A head with no live session simply
+			// resumes in the new mode whenever it is next attached.
+			if s.Sessions.IsLive(head.ID) {
+				log.Printf("api: chat_mode toggled to %v for %s; stopping session for mode switch", chatMode, head.ID)
+				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+			}
+		}
 	}
 
 	s.notifyAgentsChanged(projectRoot, false)
@@ -1790,6 +1830,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		Prompt:     prompt,
 		AgentType:  agentType,
 		BaseBranch: baseBranch,
+		ChatMode:   head.ChatMode,
 		// The kill above just archived this ID; Replace lets the respawn take
 		// the archived record back over instead of failing the ID-collision
 		// check.

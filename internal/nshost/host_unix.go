@@ -64,29 +64,35 @@ func handleConn(c *net.UnixConn) {
 	cmd := exec.Command(req.Argv[0], req.Argv[1:]...)
 	cmd.Env = req.Env
 	cmd.Dir = req.Cwd
-	rows, cols := req.Rows, req.Cols
-	if rows == 0 {
-		rows = 24
-	}
-	if cols == 0 {
-		cols = 80
-	}
-	master, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
-	if err != nil {
-		_ = writeReply(c, spawnReply{Err: err.Error()}, -1)
-		return
-	}
+	if req.Pipes {
+		if !startPipesChild(c, cmd) {
+			return
+		}
+	} else {
+		rows, cols := req.Rows, req.Cols
+		if rows == 0 {
+			rows = 24
+		}
+		if cols == 0 {
+			cols = 80
+		}
+		master, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+		if err != nil {
+			_ = writeReply(c, spawnReply{Err: err.Error()})
+			return
+		}
 
-	if err := writeReply(c, spawnReply{OK: true, Pid: cmd.Process.Pid}, int(master.Fd())); err != nil {
+		if err := writeReply(c, spawnReply{OK: true, Pid: cmd.Process.Pid}, int(master.Fd())); err != nil {
+			_ = master.Close()
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+			return
+		}
+		// The daemon now holds a dup of the master via SCM_RIGHTS; the supervisor
+		// keeps no master fd so that the daemon closing its copy is what delivers
+		// SIGHUP to the child. The child's slave keeps the pty alive until then.
 		_ = master.Close()
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return
 	}
-	// The daemon now holds a dup of the master via SCM_RIGHTS; the supervisor
-	// keeps no master fd so that the daemon closing its copy is what delivers
-	// SIGHUP to the child. The child's slave keeps the pty alive until then.
-	_ = master.Close()
 
 	// Relay signal requests from the daemon until the connection closes.
 	go func() {
@@ -106,14 +112,61 @@ func handleConn(c *net.UnixConn) {
 	_ = writeLine(c, event{Exited: true, ExitCode: exitCode(werr)})
 }
 
-// writeReply sends a JSON reply line, optionally carrying fd as an SCM_RIGHTS
+// startPipesChild launches the child on plain stdin/stdout pipes (SpawnRequest
+// Pipes mode) and passes the daemon the stdin-write and stdout-read ends. The
+// child's stderr is diagnostics, not protocol: it folds into the supervisor's
+// stderr, which the daemon folds into its log. Reports false when the spawn
+// failed or the reply could not be delivered (the connection is then dead and
+// the caller must not wait on the child's exit relay).
+func startPipesChild(c *net.UnixConn, cmd *exec.Cmd) bool {
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		_ = writeReply(c, spawnReply{Err: err.Error()})
+		return false
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = writeReply(c, spawnReply{Err: err.Error()})
+		return false
+	}
+	cmd.Stdin = stdinR
+	cmd.Stdout = stdoutW
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		for _, f := range []*os.File{stdinR, stdinW, stdoutR, stdoutW} {
+			_ = f.Close()
+		}
+		_ = writeReply(c, spawnReply{Err: err.Error()})
+		return false
+	}
+	// The child holds dups of its ends; drop the supervisor's copies so the
+	// daemon's stdout read end EOFs when the child exits.
+	_ = stdinR.Close()
+	_ = stdoutW.Close()
+
+	err = writeReply(c, spawnReply{OK: true, Pid: cmd.Process.Pid}, int(stdinW.Fd()), int(stdoutR.Fd()))
+	// The daemon holds dups via SCM_RIGHTS (or the reply failed); either way the
+	// supervisor keeps no pipe ends, so a daemon-side Close delivers stdin EOF.
+	_ = stdinW.Close()
+	_ = stdoutR.Close()
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		return false
+	}
+	return true
+}
+
+// writeReply sends a JSON reply line, optionally carrying fds as an SCM_RIGHTS
 // control message in the same datagram.
-func writeReply(c *net.UnixConn, rep spawnReply, fd int) error {
+func writeReply(c *net.UnixConn, rep spawnReply, fds ...int) error {
 	b, _ := json.Marshal(rep)
 	b = append(b, '\n')
 	var oob []byte
-	if fd >= 0 {
-		oob = syscall.UnixRights(fd)
+	if len(fds) > 0 {
+		oob = syscall.UnixRights(fds...)
 	}
 	_, _, err := c.WriteMsgUnix(b, oob, nil)
 	return errtrace.Wrap(err)
@@ -164,9 +217,11 @@ func WaitForSocket(socketPath string, timeout time.Duration) error {
 // Spawned is the daemon-side handle for one child running inside the namespace
 // host. It satisfies the PTY shape the session layer expects (Read/Write/
 // Resize/Wait/Signal/Pid/Close), backed by the child's master fd plus the
-// control connection.
+// control connection. In Pipes mode master is the stdout read end and in is
+// the stdin write end; Resize is then a no-op.
 type Spawned struct {
 	master *os.File
+	in     *os.File // Pipes mode only; nil when master is a real PTY
 	conn   *net.UnixConn
 	pid    int
 	exitCh chan int
@@ -205,22 +260,31 @@ func (c *Client) Spawn(req SpawnRequest) (*Spawned, error) {
 		return nil, errtrace.Wrap(err)
 	}
 	fds := parseRights(oob[:oobn])
-	if !rep.OK || len(fds) == 0 {
+	wantFds := 1
+	if req.Pipes {
+		wantFds = 2
+	}
+	if !rep.OK || len(fds) < wantFds {
 		for _, fd := range fds {
 			_ = syscall.Close(fd)
 		}
 		_ = uc.Close()
 		if rep.Err == "" {
-			rep.Err = "supervisor returned no pty"
+			rep.Err = "supervisor returned too few fds"
 		}
 		return nil, errtrace.Wrap(fmt.Errorf("nshost: spawn failed: %s", rep.Err))
 	}
 
 	sp := &Spawned{
-		master: os.NewFile(uintptr(fds[0]), "nshost-pty"),
 		conn:   uc,
 		pid:    rep.Pid,
 		exitCh: make(chan int, 1),
+	}
+	if req.Pipes {
+		sp.in = os.NewFile(uintptr(fds[0]), "nshost-stdin")
+		sp.master = os.NewFile(uintptr(fds[1]), "nshost-stdout")
+	} else {
+		sp.master = os.NewFile(uintptr(fds[0]), "nshost-pty")
 	}
 	// Any bytes after the reply line belong to the event stream.
 	go sp.readEvents(append([]byte(nil), leftover...))
@@ -268,18 +332,30 @@ func (s *Spawned) readEvents(leftover []byte) {
 	}
 }
 
-func (s *Spawned) Read(b []byte) (int, error)  { return s.master.Read(b) }  //errtrace:skip
-func (s *Spawned) Write(b []byte) (int, error) { return s.master.Write(b) } //errtrace:skip
+func (s *Spawned) Read(b []byte) (int, error) { return s.master.Read(b) } //errtrace:skip
 
-// Close drops the daemon's master fd (delivering SIGHUP to the child) and closes
-// the control connection.
+func (s *Spawned) Write(b []byte) (int, error) {
+	if s.in != nil {
+		return s.in.Write(b) //errtrace:skip
+	}
+	return s.master.Write(b) //errtrace:skip
+}
+
+// Close drops the daemon's fds (delivering SIGHUP to a PTY child, stdin EOF to
+// a pipes child) and closes the control connection.
 func (s *Spawned) Close() error {
 	err := s.master.Close()
+	if s.in != nil {
+		_ = s.in.Close()
+	}
 	_ = s.conn.Close()
 	return err //errtrace:skip
 }
 
 func (s *Spawned) Resize(rows, cols uint16) error {
+	if s.in != nil {
+		return nil // no terminal to resize in pipes mode
+	}
 	return errtrace.Wrap(pty.Setsize(s.master, &pty.Winsize{Rows: rows, Cols: cols}))
 }
 
