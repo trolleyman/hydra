@@ -242,6 +242,9 @@ function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
       onMouseDown={clickable ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
       onClick={clickable ? (e) => { e.stopPropagation(); onSelectLine!(side, num!, e.shiftKey) } : undefined}
       title={clickable ? `Select line ${num}` : undefined}
+      // Locates a line+side for scroll-into-view when a selection is deep-linked
+      // (the repository compare-diff scrolls #L<n>/#R<n>'s first row into view).
+      data-diff-ln={num != null ? `${side}:${num}` : undefined}
       className={`${baseClass} ${clickable ? 'cursor-pointer hover:!text-blue-500 dark:hover:!text-blue-400' : ''} ${selected ? SELECTED_NUM_CLASS : ''}`}
     >
       {num ?? ''}

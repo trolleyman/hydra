@@ -1373,6 +1373,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // files have no such row and fall back to the top.
   const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // The diff view drives its own scroll below; the pane is shared, so skip the
+    // file-view positioning while diffing (its reset-to-top would fight it).
+    if (diffActive) return
     const el = contentRef.current
     if (!el) return
     if (selRange) {
@@ -1387,7 +1390,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     el.scrollTop = 0
     // selRange is memoized on location.hash, so its identity is stable until
     // the selection actually changes.
-  }, [viewPath, file, selRange])
+  }, [viewPath, file, selRange, diffActive])
+
+  // Scroll a deep-linked compare-diff selection into view: the single-file view's
+  // #L<n>/#R<n> first row, if it isn't already visible. Runs when the diff, the
+  // selected file, or the selection changes, after FileDiff has rendered the rows
+  // (each gutter number carries data-diff-ln="<side>:<num>"). A line hidden behind
+  // a collapsed context region has no row and is simply left un-scrolled.
+  useEffect(() => {
+    if (!diffActive || !diffSettings.singleFile || !diffSelRange) return
+    const el = contentRef.current
+    if (!el) return
+    const target = el.querySelector(`[data-diff-ln="${diffSelRange.side}:${diffSelRange.start}"]`)
+    if (!target) return
+    const cr = el.getBoundingClientRect()
+    const tr = target.getBoundingClientRect()
+    if (tr.top < cr.top || tr.bottom > cr.bottom) target.scrollIntoView({ block: 'center' })
+  }, [diffActive, diffSettings.singleFile, selectedDiffPath, diff, diffSelRange])
 
   // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
   // full_context so context can be revealed client-side without round-trips.
