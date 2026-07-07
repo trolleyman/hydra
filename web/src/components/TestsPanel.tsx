@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
+import { apiErrorBody, formatError } from '../api/format_error'
+import { PanelError } from './PanelError'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
 import { TestCaseStatus } from '../api/models/TestCaseStatus'
@@ -84,6 +86,9 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [runners, setRunners] = useState<TestRunResult[] | null>(null)
+  // A server-side failure to surface (e.g. a config that won't parse), reached
+  // via the polling fallback; a transient blip stays null and the panel is quiet.
+  const [error, setError] = useState<string | null>(null)
   // Connection mode: WS while live, polling if the socket can't connect or drops.
   const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
   const wsRef = useRef<WebSocket | null>(null)
@@ -190,11 +195,15 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
         const resp = await api.default.getAgentTests(projectId, agentId, headRef, includeUncommitted, first ? refreshRunner ?? undefined : undefined)
         if (cancelled) return
         setRunners(resp.runners)
+        setError(null)
         if (resp.runners.some((r) => r.status === 'running')) {
           pollTimerRef.current = setTimeout(() => tick(false), 1500)
         }
-      } catch {
-        // leave previous state; a transient error shouldn't blank the panel
+      } catch (err) {
+        if (cancelled) return
+        // A structured server error (e.g. a config that won't parse) is surfaced
+        // so the panel doesn't silently vanish; a transient blip leaves state be.
+        if (apiErrorBody(err)) setError(formatError(err))
       }
     }
     clear()
@@ -273,6 +282,9 @@ export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncomm
 
   // Nothing configured (or not loaded yet) → render nothing, like the artifacts
   // panel, so the diff viewer doesn't reserve empty space for an absent feature.
+  if (error && (!runners || runners.length === 0)) {
+    return <PanelError title="Tests" icon={<FlaskConical className="w-3.5 h-3.5" />} message={error} />
+  }
   if (!runners || runners.length === 0) return null
 
   const runningCount = runners.filter((r) => r.status === 'running').length
