@@ -36,7 +36,7 @@ import (
 const (
 	// ReadyMarker is the optional stdout line a server script prints to declare
 	// readiness explicitly (e.g. it binds its port early but warms up late).
-	// Without it, the first successful TCP dial of the child port counts.
+	// Without it, the first successful HTTP response from the child port counts.
 	ReadyMarker = "::hydra:server:ready::"
 	// ProgressMarker mirrors internal/artifacts.ProgressMarker for the loading
 	// page headline (kept as a separate const to avoid the package dependency).

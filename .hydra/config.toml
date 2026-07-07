@@ -180,13 +180,15 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ##                to run the command exactly as written).
 ##   enabled      set false to skip this script in the diff viewer (default true).
 ##   type         "server" makes this a live preview instead of diffed media: the
-##                command must start an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT.
+##                command must start an HTTP server on the port Hydra hands it.
 ##                Hydra proxies a per-instance port to it, spinning it up when the
 ##                preview link is opened and tearing it down when idle. Server scripts
-##                get HYDRA_PREVIEW_PORT + HYDRA_PREVIEW_SOURCE (the checkout dir) and
-##                may print ::hydra:server:ready:: on stdout to declare readiness
-##                early (otherwise the first successful port dial counts). They never
-##                appear in the diff grid. Default "" = diffed media.
+##                get HYDRA_PREVIEW_PORT, HYDRA_PREVIEW_ADDR (the host:port to bind -
+##                0.0.0.0:PORT under network mode hard, else 127.0.0.1:PORT; bind this,
+##                not 127.0.0.1, or hard mode 502s) and HYDRA_PREVIEW_SOURCE (the
+##                checkout dir). They may print ::hydra:server:ready:: on stdout to
+##                declare readiness early (otherwise the first HTTP response counts).
+##                They never appear in the diff grid. Default "" = diffed media.
 ##   idle_timeout_sec   (server) teardown after this long with zero in-flight
 ##                requests; open WebSocket/long-poll connections count as in-flight
 ##                (0 = default 300). The link respawns it on the next visit.
@@ -233,7 +235,7 @@ timeout_sec = 900
 # time, hence the generous ready timeout.
 name = "demo"
 type = "server"
-command = "cd web && bun install && bun run build && cd .. && HYDRA_API_ADDR=localhost:$HYDRA_PREVIEW_PORT go run ./ server --simulation"
+command = "cd web && bun install && bun run build && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
 ## [[services]]: per-project long-running commands the daemon supervises while the
