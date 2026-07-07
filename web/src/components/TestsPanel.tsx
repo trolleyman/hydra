@@ -719,7 +719,7 @@ function liveDenominator(runner: TestRunResult): number {
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
   return (
-    <span className="flex items-center gap-2 text-sm font-medium shrink-0">
+    <span className="flex items-baseline gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>
