@@ -549,6 +549,21 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       name={runner.name}
       status={status}
       actions={actions}
+      // Running: a thin progress fill under the header (card chrome) - determinate
+      // (completed cases over the declared total) when the run streams a denominator,
+      // an indeterminate sliding barber pole otherwise. The card owns the track.
+      progress={
+        running
+          ? liveDenominator(runner) > 0
+            ? (
+              <div
+                className="h-full bg-blue-500 transition-[width] duration-300"
+                style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
+              />
+            )
+            : <div className="h-full w-full bg-blue-500 animate-barber-pole" />
+          : undefined
+      }
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
       // Toggling the build log is a deliberate in-place swap - glide the card to
@@ -556,29 +571,13 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       // deliberately don't bump this, so they keep mirroring instantly).
       glideKey={logVisible}
     >
-      {/* Running: a thin progress bar above the live log tail - determinate
-          (completed cases over the declared total) when the run streams a
-          denominator, an indeterminate sliding barber pole otherwise. */}
-      {running && (
-        <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
-          {liveDenominator(runner) > 0 ? (
-            <div
-              className="h-full bg-blue-500 transition-[width] duration-300"
-              style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
-            />
-          ) : (
-            <div className="h-full w-full bg-blue-500 animate-barber-pole" />
-          )}
-        </div>
-      )}
-
       {/* Build log (xterm) - live `log` while running, the persisted `log_url`
           once settled (red border on failure, green on a clean finish). */}
       {logVisible && <TestLog runner={runner} failed={failed} />}
 
       {/* Errored with no log to show: surface the captured error text. */}
       {errored && runner.error && !hasLog ? (
-        <div className="my-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
+        <div className="mb-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
           {runner.error}
         </div>
       ) : null}
@@ -588,7 +587,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
-        <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 flex flex-col border-t border-gray-100 dark:border-gray-800">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
             : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
@@ -732,7 +731,7 @@ function liveDenominator(runner: TestRunResult): number {
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
   return (
-    <span className="flex items-center gap-2 text-sm font-medium shrink-0">
+    <span className="flex items-baseline gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>
@@ -806,7 +805,7 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const log = running ? runner.log ?? [] : fetched ?? []
   const emptyText = running ? 'starting...' : url ? 'Loading...' : 'No output'
   return (
-    <div className="pt-1.5 pb-1">
+    <div className="pb-1">
       <LogView log={log} emptyText={emptyText} failed={failed} succeeded={!running && !failed} />
     </div>
   )

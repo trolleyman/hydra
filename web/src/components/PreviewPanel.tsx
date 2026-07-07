@@ -205,6 +205,7 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
   const live = p.state === 'running' || p.state === 'starting'
   return (
     <CollapsibleCard
+      sticky
       icon={<MonitorPlay className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />}
       name={p.name}
       status={
