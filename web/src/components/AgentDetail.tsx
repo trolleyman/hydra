@@ -5,6 +5,8 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
+import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
+import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
@@ -17,7 +19,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -326,6 +328,11 @@ export function AgentDetail({
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [showCreateMR, setShowCreateMR] = useState(false)
+  const [reviewConfig, setReviewConfig] = useState<ReviewConfigResponse | null>(null)
+  const [remotes, setRemotes] = useState<string[]>(['origin'])
+  const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -907,6 +914,73 @@ export function AgentDetail({
     setSavingBase(false)
   }
 
+  // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
+
+  // openCreateMR fetches the resolved review config + remotes, then opens the
+  // Create MR dialog prefilled from them.
+  async function openCreateMR() {
+    if (!projectId) return
+    try {
+      const [cfg, branchInfo] = await Promise.all([
+        api.default.getReviewConfig(projectId),
+        api.default.getRepositoryBranches(projectId).catch(() => null),
+      ])
+      setReviewConfig(cfg)
+      void branchInfo // branches already loaded elsewhere; remotes come from config
+      setRemotes(cfg.remote ? [cfg.remote] : ['origin'])
+    } catch {
+      setReviewConfig(null)
+    }
+    setShowCreateMR(true)
+  }
+
+  // doPublish runs the publish POST with the dialog's values.
+  async function doPublish(body: { downstream_branch: string; remote: string; target_branch: string; title: string; description: string; draft: boolean }) {
+    setPublishing(true)
+    const res = await runWithToast(() => api.default.publishAgent(projectId ?? '', agent.id, undefined, body), {
+      success: 'MR published',
+      errorPrefix: 'Publish failed',
+    })
+    if (res.ok) {
+      updateAgentInStore(res.value)
+      setShowCreateMR(false)
+    }
+    setPublishing(false)
+  }
+
+  // handlePushToMR / handlePullFromMR sync a linked head with its remote branch.
+  async function handlePushToMR() {
+    setPublishing(true)
+    const res = await runWithToast(() => api.default.pushToMr(projectId ?? '', agent.id), {
+      success: 'Pushed to MR',
+      errorPrefix: 'Push failed',
+    })
+    if (res.ok) updateAgentInStore(res.value)
+    setPublishing(false)
+  }
+
+  async function handlePullFromMR() {
+    setPublishing(true)
+    const res = await runWithToast(() => api.default.pullFromMr(projectId ?? '', agent.id), {
+      success: 'Pulled from MR',
+      errorPrefix: 'Pull failed',
+    })
+    if (res.ok) updateAgentInStore(res.value)
+    setPublishing(false)
+  }
+
+  // saveDownstream edits the head's downstream branch (metadata only; soft-locked
+  // after publish - the backend rejects a rename of a linked head).
+  async function saveDownstream(next: string) {
+    setSavingDownstream(true)
+    const res = await runWithToast(() => api.default.setDownstreamBranch(projectId ?? '', agent.id, { downstream_branch: next }), {
+      success: `Downstream branch set to ${next}`,
+      errorPrefix: 'Failed to set downstream branch',
+    })
+    if (res.ok) updateAgentInStore(res.value)
+    setSavingDownstream(false)
+  }
+
   // Archived agents are read-only: render the history view instead of the live
   // terminal/diff. Placed after all hooks above so hook order stays stable when
   // the same mounted component switches between a live and an archived agent.
@@ -960,8 +1034,49 @@ export function AgentDetail({
           ] as AgentTopBarMenuItem[]),
         }
 
+  // publishAction is the Create MR / View MR button (NON_LOCAL_INTEGRATION.md 3.3).
+  // Unlinked: "Create MR" opens the dialog. Linked: "View MR" deep-links to the
+  // forge, with Push to MR / Pull from MR in its dropdown (shown by ahead/behind).
+  const linked = !!agent.review
+  const ahead = agent.review?.ahead ?? 0
+  const behind = agent.review?.behind ?? 0
+  const publishAction: AgentTopBarAction = publishing
+    ? { label: 'Publishing...', icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
+    : linked
+      ? {
+          label: 'View MR',
+          icon: <ExternalLink className="w-4 h-4" />,
+          onClick: () => window.open(agent.review!.url, '_blank', 'noreferrer'),
+          variant: 'segment',
+          menu: [
+            ...(ahead > 0 ? [{ label: `Push to MR (${ahead} ahead)`, description: 'Push local commits to the MR branch.', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }] : []),
+            ...(behind > 0 ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote MR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
+            { label: 'Push to MR', description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing },
+          ] as AgentTopBarMenuItem[],
+        }
+      : {
+          label: 'Create MR',
+          icon: <MRIcon linked={false} className="w-4 h-4" />,
+          onClick: () => void openCreateMR(),
+          variant: 'segment',
+          disabled: busy || publishing,
+        }
+  // default_action orders the two primary buttons: create_mr puts the MR button
+  // first (before Merge); otherwise Merge stays primary and MR is a segment.
+  const mrFirst = reviewConfig?.default_action === 'create_mr' || linked
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {showCreateMR && (
+        <CreateMRDialog
+          agent={agent}
+          config={reviewConfig}
+          remotes={remotes}
+          submitting={publishing}
+          onConfirm={(body) => void doPublish(body)}
+          onCancel={() => setShowCreateMR(false)}
+        />
+      )}
       {/* The agent header is a single header bar (no separate H1): the name with
           an actions dropdown (Rename / Merge / Kill - clicking the name also
           renames it inline) and a status dot. While the sidebar is collapsed it
@@ -980,7 +1095,7 @@ export function AgentDetail({
           onCancel: () => setEditingTitle(false),
         }}
         actions={[
-          mergeAction,
+          ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
@@ -1038,6 +1153,11 @@ export function AgentDetail({
                 </span>
               )}
             </span>
+            {/* Downstream branch (the name this head is pushed AS) - editable
+                until first publish, then soft-locked. Only shown once set. */}
+            <DownstreamBranchEditor agent={agent} onSave={(n) => void saveDownstream(n)} saving={savingDownstream} />
+            {/* Linked-MR state chip (state/CI/approvals/discussions). */}
+            <MRStateChip agent={agent} />
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 created {formatStartedAgo(agent.created_at)}

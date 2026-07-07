@@ -23,6 +23,7 @@ import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesRes
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
+import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -370,6 +371,161 @@ export class DefaultService {
                 404: `Not Found`,
                 409: `Conflict (operation already in progress or merge conflicts)`,
                 500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
+     * Host-side, by the daemon, with the user's own credentials (NON_LOCAL_INTEGRATION.md 3.3). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
+     * @param projectId
+     * @param id
+     * @param force Bypass the local test gate (same semantics as merge's force).
+     * @param requestBody
+     * @returns AgentResponse Published (returns the updated agent with its review link).
+     * @throws ApiError
+     */
+    public publishAgent(
+        projectId: string,
+        id: string,
+        force?: boolean,
+        requestBody?: {
+            /**
+             * Branch name to push AS. Defaults to the head's downstream_branch (seeded from review.push_branch_template).
+             */
+            downstream_branch?: string;
+            /**
+             * Git remote to push to. Defaults to review.remote.
+             */
+            remote?: string;
+            /**
+             * MR target branch. Defaults to review.target_branch.
+             */
+            target_branch?: string;
+            title?: string;
+            description?: string;
+            draft?: boolean;
+        },
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/publish',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            query: {
+                'force': force,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (no branch, provider not configured, push auth failed)`,
+                404: `Not Found`,
+                409: `Conflict (operation in progress, tests failing, or push rejected)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Push the local head branch to its linked MR's downstream branch (Push to MR)
+     * @param projectId
+     * @param id
+     * @returns AgentResponse Pushed (returns the updated agent).
+     * @throws ApiError
+     */
+    public pushToMr(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/publish-push',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                400: `Bad Request (not linked, no branch, or push auth failed)`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Pull the remote downstream branch into the local head branch (Pull from MR)
+     * Fetches, then merges the remote-tracking downstream ref INTO the head branch (merge-not-rebase, same as update-from-base). Conflicts surface as 409.
+     * @param projectId
+     * @param id
+     * @returns AgentResponse Pulled (returns the updated agent).
+     * @throws ApiError
+     */
+    public pullFromMr(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/publish-pull',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                400: `Bad Request (not linked or no branch)`,
+                404: `Not Found`,
+                409: `Conflict (merge conflict pulling the remote in)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Set a head's downstream branch name (the name it is pushed AS)
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns AgentResponse Updated (returns the updated agent).
+     * @throws ApiError
+     */
+    public setDownstreamBranch(
+        projectId: string,
+        id: string,
+        requestBody: {
+            downstream_branch: string;
+        },
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}/agents/{id}/downstream-branch',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (invalid branch name, or soft-locked after publish without confirm)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Resolved [review] config + live forge auth status for a project
+     * The effective, resolved review settings (provider auto-detected from the remote URL) plus the forge CLI's live auth status, for the Settings Review section and the Create MR dialog prefill.
+     * @param projectId
+     * @returns ReviewConfigResponse OK
+     * @throws ApiError
+     */
+    public getReviewConfig(
+        projectId: string,
+    ): CancelablePromise<ReviewConfigResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/review-config',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
             },
         });
     }
