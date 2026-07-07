@@ -24,8 +24,11 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
-// instance is one live-preview slot: a persistent proxy listener plus an
-// on-demand child server process for a specific (project, script, version).
+// instance is one backing server for a slot: an on-demand child server process
+// running a specific checkout (worktree, or an ephemeral commit checkout). The
+// slot owns the proxy listener/port and forwards requests to whichever instance
+// is currently its front (see slot.serveHTTP); an instance never binds a
+// listener of its own, so it can be spawned in the background and hot-swapped in.
 type instance struct {
 	mgr *Manager
 
@@ -34,9 +37,12 @@ type instance struct {
 	version      Version
 	runDir       string
 	ownsCheckout bool
-	ln           net.Listener
-	srv          *http.Server
-	port         int
+	channel      string // the slot channel this instance serves (see Version.channelID)
+	// syncFrom/syncBaseSHA drive the "Latest changes" worktree channel: the
+	// server runs in runDir (an own checkout at syncBaseSHA) while a background
+	// loop mirrors the live worktree's changes in. Empty for commit/tip channels.
+	syncFrom    string
+	syncBaseSHA string
 
 	mu        sync.Mutex
 	spec      config.ArtifactScript
@@ -59,6 +65,11 @@ type instance struct {
 	startedAt  time.Time
 	inflight   int
 	lastActive time.Time
+	// baseFingerprint is the mirrored worktree state this run was built from;
+	// stale latches true once the live worktree diverges from it (worktree
+	// channel only). Both reset at the start of each run.
+	baseFingerprint string
+	stale           bool
 }
 
 // idleTimeout returns the effective idle teardown duration. Caller holds mu.
@@ -84,7 +95,8 @@ func (in *instance) touch() {
 	in.mu.Unlock()
 }
 
-// status snapshots the instance for the API.
+// status snapshots the instance for the API. Port is left 0; the slot fills in
+// its own proxy port (the instance owns no listener).
 func (in *instance) status() Status {
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -92,14 +104,21 @@ func (in *instance) status() Status {
 		Name:      in.spec.Name,
 		State:     in.state,
 		Version:   in.version.Label(),
-		Port:      in.port,
 		Pid:       in.pid,
 		Inflight:  in.inflight,
 		StartedAt: in.startedAt,
 		Progress:  in.progress,
 		Message:   in.message,
+		Stale:     in.stale,
 		Log:       append([]LogLine(nil), in.log...),
 	}
+}
+
+// setSpec adopts a possibly-updated spec (timeouts, command) for future spawns.
+func (in *instance) setSpec(spec config.ArtifactScript) {
+	in.mu.Lock()
+	in.spec = spec
+	in.mu.Unlock()
 }
 
 // appendLog adds a line to the bounded log ring and captures markers. Caller
@@ -150,12 +169,24 @@ func (in *instance) ensureStarted() {
 func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec config.ArtifactScript, gen int, readyCh chan struct{}) {
 	defer cancel()
 
+	// Worktree channel: bring the own-checkout current with the live worktree
+	// before the build starts, and record the fingerprint this run builds from
+	// (clearing any stale flag left by a previous run).
+	if in.syncFrom != "" {
+		if fp, err := mirrorWorktree(in.syncFrom, in.runDir, in.syncBaseSHA); err == nil {
+			in.mu.Lock()
+			in.baseFingerprint = fp
+			in.stale = false
+			in.mu.Unlock()
+		}
+	}
+
 	childPort, err := freePort()
 	if err != nil {
 		in.settleError(gen, fmt.Sprintf("allocate child port: %v", err))
 		return
 	}
-	launch, err := in.buildSpec(spec, childPort)
+	launch, hardMode, err := in.buildSpec(spec, childPort)
 	if err != nil {
 		in.settleError(gen, fmt.Sprintf("build sandbox spec: %v", err))
 		return
@@ -208,6 +239,12 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	readyDeadline := in.readyTimeout()
 	in.mu.Unlock()
 
+	// Worktree channel: mirror the live worktree's changes into the checkout
+	// while the server runs (only while it runs - ctx is cancelled on exit).
+	if in.syncFrom != "" {
+		go in.syncLoop(ctx)
+	}
+
 	var wg sync.WaitGroup
 	scan := func(r io.Reader, stream string) {
 		defer wg.Done()
@@ -226,24 +263,45 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	go scan(stdout, "stdout")
 	go scan(stderr, "stderr")
 
-	// Readiness prober: dial the child port until it accepts (or the ready
-	// deadline / process exit cancels us).
+	// Readiness prober: send a real HTTP GET to the child port until it
+	// answers (or the ready deadline / process exit cancels us). A bare TCP
+	// dial can't be trusted under hard mode - pasta holds the host port and
+	// completes the handshake itself even when nothing inside the netns is
+	// listening, so a dial would false-positive and every proxied request
+	// would then 502. Any HTTP response (even 404/500) proves the child is up.
 	probeCtx, probeCancel := context.WithTimeout(ctx, readyDeadline)
 	go func() {
 		defer probeCancel()
 		t := time.NewTicker(250 * time.Millisecond)
 		defer t.Stop()
 		addr := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", childPort))
+		client := &http.Client{
+			Timeout:   2 * time.Second,
+			Transport: &http.Transport{DisableKeepAlives: true},
+		}
+		hinted := false
 		for {
 			select {
 			case <-probeCtx.Done():
 				return
 			case <-t.C:
-				c, err := net.DialTimeout("tcp", addr, time.Second)
+				req, _ := http.NewRequestWithContext(probeCtx, http.MethodGet, "http://"+addr+"/", nil)
+				resp, err := client.Do(req)
 				if err == nil {
-					_ = c.Close()
+					_ = resp.Body.Close()
 					markReady()
 					return
+				}
+				// Under hard mode a raw dial that succeeds while HTTP keeps
+				// failing means the port is held (by pasta) but the server bound
+				// loopback INSIDE the netns, where pasta's inbound forward can't
+				// reach it. Surface a one-time hint so the log points at the fix.
+				if hardMode && !hinted {
+					if c, derr := net.DialTimeout("tcp", addr, time.Second); derr == nil {
+						_ = c.Close()
+						hinted = true
+						in.appendLog("hydra: port is open but the server isn't answering HTTP - under network mode hard the server must bind 0.0.0.0 (use HYDRA_PREVIEW_ADDR), not 127.0.0.1", "stderr")
+					}
 				}
 			}
 		}
@@ -337,12 +395,11 @@ func (in *instance) stopChild(finalState State, message string) {
 	}
 }
 
-// remove fully tears the instance down: child killed, listener closed, and the
-// ephemeral checkout (commit instances) deleted. The instance must already be
-// out of the manager map.
-func (in *instance) remove() {
+// teardown fully disposes of the instance: child killed and, for a commit-style
+// instance, its ephemeral checkout deleted. The slot owns the listener, so
+// nothing is closed here. The instance must already be detached from its slot.
+func (in *instance) teardown() {
 	in.stopChild(StateStopped, "")
-	_ = in.srv.Close()
 	if in.ownsCheckout {
 		_ = git.RemoveWorktree(in.root, in.runDir)
 		_ = os.RemoveAll(in.runDir)
@@ -353,7 +410,7 @@ func (in *instance) remove() {
 // mirroring internal/artifacts.buildCommandSpec minus the output dir: the
 // command runs in the checkout with the project's sandbox policy, cow mounts,
 // and network access, and is told its port via HYDRA_PREVIEW_PORT.
-func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandbox.Spec, error) {
+func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandbox.Spec, bool, error) {
 	home, _ := os.UserHomeDir()
 
 	env := append([]string{}, os.Environ()...)
@@ -382,14 +439,16 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 
 	var cowLayerDir string
 	var egressSess *egress.Session
+	hardMode := false
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(in.root)
 		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		hardMode = netPol.Mode == sandbox.NetHard
 		if gcd, err := git.GetCommonDir(in.root); err == nil {
 			opts.GitCommonDir = gcd // ephemeral checkout git metadata lives here
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(in.root, in.runDir, masked)
 		opts.RestoreRO = restore
 		// Per-spawn ephemeral cow layers over shared caches (see the artifacts
 		// twin of this function for the full rationale).
@@ -415,13 +474,24 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 		opts.Seccomp = true
 	}
 
+	// HYDRA_PREVIEW_ADDR is the host:port the server should bind, mode-aware:
+	// under hard mode it must be 0.0.0.0 (pasta's inbound forward lands on the
+	// netns's assigned address, not guest loopback), otherwise 127.0.0.1 keeps
+	// the server off other interfaces. Server commands can pass it straight to
+	// their listen flag instead of hardcoding a bind host.
+	bindHost := "127.0.0.1"
+	if hardMode {
+		bindHost = "0.0.0.0"
+	}
+	opts.Env = append(opts.Env, "HYDRA_PREVIEW_ADDR="+net.JoinHostPort(bindHost, fmt.Sprintf("%d", childPort)))
+
 	launch, err := sandbox.BuildSpec(opts)
 	if err != nil {
 		if cowLayerDir != "" {
 			_ = os.RemoveAll(cowLayerDir)
 		}
 		egressSess.Close()
-		return nil, errtrace.Wrap(err)
+		return nil, false, errtrace.Wrap(err)
 	}
 	if cowLayerDir != "" || egressSess != nil {
 		inner := launch.Cleanup
@@ -435,7 +505,7 @@ func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandb
 			egressSess.Close()
 		}
 	}
-	return launch, nil
+	return launch, hardMode, nil
 }
 
 // freePort asks the OS for an unused loopback TCP port. The listen/close/reuse

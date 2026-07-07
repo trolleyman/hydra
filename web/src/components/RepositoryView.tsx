@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
-import { useNavigate, useLocation, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
+import { useNavigate, useLocation, useSearch, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
 import { formatBytes } from '../lib/formatBytes'
 import { ensureLanguage } from '../lib/hljsLazy'
@@ -24,12 +24,17 @@ import { IconButton } from './IconButton'
 import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
+  type DiffSide,
 } from '../DiffViewer'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
-import { parseLineRange, formatLineHash, inRange, type LineRange } from '../lib/lineRange'
+import {
+  parseLineRange, formatLineHash, inRange, type LineRange,
+  parseDiffLineRange, formatDiffLineHash,
+} from '../lib/lineRange'
+import type { RepositorySearch } from '../routes/project.$projectId/repository.$'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -1029,6 +1034,10 @@ function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
   const location = useLocation()
+  // The compare-diff state that is promoted into the URL (PLAN.md #72): ?compare=
+  // (head ref) and ?dfile= (selected file in single-file mode). strict:false reads
+  // them from whichever repository route matched (bare or splat).
+  const search = useSearch({ strict: false }) as RepositorySearch
 
   // The app's nav sidebar collapse state - the repository header hosts the
   // "show sidebar" toggle while it's hidden (small screens), matching the agent
@@ -1056,10 +1065,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // ── Branch-compare diff view ──────────────────────────────────────────────
   // Picking a compare branch (head) diffs it against the browsed ref (base),
   // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
-  // is the whole diff state - '' means "not diffing" - and is ephemeral
-  // component state, deliberately kept out of the URL so the existing ref/path
-  // splat parser stays untouched.
-  const [compareRef, setCompareRef] = useState('')
+  // is the whole diff state - '' means "not diffing" - and lives in the URL's
+  // ?compare= search param (PLAN.md #72) so a comparison (and a line selection
+  // within it) is shareable and survives reload. The ref/path splat parser is
+  // untouched: the diff state rides query params + the hash alongside it.
+  const compareRef = search.compare ?? ''
   // On small screens the tree/changed-files list and the file/diff content are
   // shown one at a time as a drill-down (full-screen list → tap a file → full
   // file, with a back button). For normal browsing the URL path is the source of
@@ -1097,10 +1107,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, diffSettings.imageDiffMode) }, [diffSettings.imageDiffMode])
-  // In one-file-at-a-time mode, the file whose diff is shown; clicking a file in
-  // the sidebar selects it. Defaults to (and is kept valid against) the diff's
-  // first file.
-  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null)
+  // In one-file-at-a-time mode, the file whose diff is shown comes from the
+  // ?dfile= search param (clicking a file in the sidebar sets it); it is derived
+  // below (selectedDiffPath) once the diff has loaded, defaulting to the first
+  // file when the param is absent or names a file not in the diff.
   // The selected diff file's blob metadata (content), fetched so the single-file
   // header can offer the same copy/raw actions as the normal file view.
   const [diffFileMeta, setDiffFileMeta] = useState<RepositoryFileResponse | null>(null)
@@ -1185,6 +1195,14 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // drives the compare selector's known-branch vs short-SHA rendering.
   const compareKnown = !!branches?.some((b) => b.name === compareRef)
   const diffActive = !!compareRef && compareRef !== activeRef
+
+  // The one-file-at-a-time selection, from ?dfile= when it names a file still in
+  // the diff, else the diff's first file. null unless diffing in single-file
+  // mode. The default is not written back to the URL - a clean /repository?compare
+  // link lands on the first file - only an explicit click sets ?dfile=.
+  const selectedDiffPath = (diffActive && diffSettings.singleFile && diff && diff.files.length > 0)
+    ? (diff.files.some((f) => f.path === search.dfile) ? search.dfile! : diff.files[0].path)
+    : null
 
   // Whether the content pane (not the list) is the active view on small screens.
   // For normal browsing that's an explicitly-selected path (the bare /repository
@@ -1315,6 +1333,38 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     })
   }, [navigate, projectId, splat, selRange])
 
+  // The compare-diff's line selection also rides the URL hash, but side-aware:
+  // #L<n> selects on the old/base column, #R<n> on the new/head column (ranges
+  // #L5-L10 / #R5-R10). It only applies to the one-file-at-a-time view, where
+  // ?dfile= names the file the line belongs to; the stacked all-files view keeps
+  // its selection local per FileDiff (the hash can't name which file).
+  const diffSelRange = useMemo(() => parseDiffLineRange(location.hash || ''), [location.hash])
+  const diffAnchorRef = useRef<{ side: DiffSide; line: number } | null>(
+    diffSelRange ? { side: diffSelRange.side, line: diffSelRange.start } : null,
+  )
+  // Reset the shift-anchor when the selected diff file changes (its lines are a
+  // different file's), mirroring the file view's per-file anchor reset.
+  useEffect(() => { diffAnchorRef.current = null }, [selectedDiffPath])
+  const selectDiffLine = useCallback((side: DiffSide, line: number, extend: boolean) => {
+    let start = line
+    let end = line
+    // Extend only along the same side the anchor was set on; a shift+click on the
+    // other column starts a fresh single-line selection there.
+    if (extend && diffAnchorRef.current?.side === side) {
+      const anchor = diffAnchorRef.current.line
+      start = Math.min(anchor, line)
+      end = Math.max(anchor, line)
+    } else {
+      diffAnchorRef.current = { side, line }
+    }
+    navigate({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: splat },
+      search: (prev) => prev,
+      hash: formatDiffLineHash(side, start, end),
+    })
+  }, [navigate, projectId, splat])
+
   // Position the content when the displayed file (or selection) changes: scroll
   // the selection's first row into view if it isn't already visible, otherwise
   // reset to the top (PLAN.md #41g). Clicking an already-visible line thus
@@ -1323,6 +1373,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // files have no such row and fall back to the top.
   const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // The diff view drives its own scroll below; the pane is shared, so skip the
+    // file-view positioning while diffing (its reset-to-top would fight it).
+    if (diffActive) return
     const el = contentRef.current
     if (!el) return
     if (selRange) {
@@ -1337,7 +1390,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     el.scrollTop = 0
     // selRange is memoized on location.hash, so its identity is stable until
     // the selection actually changes.
-  }, [viewPath, file, selRange])
+  }, [viewPath, file, selRange, diffActive])
+
+  // Scroll a deep-linked compare-diff selection into view: the single-file view's
+  // #L<n>/#R<n> first row, if it isn't already visible. Runs when the diff, the
+  // selected file, or the selection changes, after FileDiff has rendered the rows
+  // (each gutter number carries data-diff-ln="<side>:<num>"). A line hidden behind
+  // a collapsed context region has no row and is simply left un-scrolled.
+  useEffect(() => {
+    if (!diffActive || !diffSettings.singleFile || !diffSelRange) return
+    const el = contentRef.current
+    if (!el) return
+    const target = el.querySelector(`[data-diff-ln="${diffSelRange.side}:${diffSelRange.start}"]`)
+    if (!target) return
+    const cr = el.getBoundingClientRect()
+    const tr = target.getBoundingClientRect()
+    if (tr.top < cr.top || tr.bottom > cr.bottom) target.scrollIntoView({ block: 'center' })
+  }, [diffActive, diffSettings.singleFile, selectedDiffPath, diff, diffSelRange])
 
   // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
   // full_context so context can be revealed client-side without round-trips.
@@ -1360,13 +1429,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // back to the changed-files list (so it never opens onto a stale selection).
   useEffect(() => { setMobileDiffOpen(false) }, [diffActive, compareRef])
 
-  // Keep the one-file-at-a-time selection pointed at a file that still exists in
-  // the current diff, defaulting to the first.
-  useEffect(() => {
-    if (!diff || diff.files.length === 0) { setSelectedDiffPath(null); return }
-    setSelectedDiffPath((prev) => (prev && diff.files.some((f) => f.path === prev)) ? prev : diff.files[0].path)
-  }, [diff])
-
   // Fetch the selected file's blob so the single-file header's copy/raw buttons
   // (reused FileActions) act on its actual content. Binary files still get a
   // working "Raw" link; the copy button hides itself when there's no content.
@@ -1383,10 +1445,15 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Selection from the diff branch selector. Picking the base branch (the one
   // being browsed) or the currently-diffed branch again exits diff mode; any
-  // other branch becomes the new compare target.
+  // other branch becomes the new compare target. Writes ?compare= to the URL and
+  // clears the file/line selection (a new comparison starts on its first file).
   const onDiffSelect = (name: string) => {
-    if (name === activeRef || name === compareRef) setCompareRef('')
-    else setCompareRef(name)
+    const next = (name === activeRef || name === compareRef) ? undefined : name
+    navigate({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: splat },
+      search: { compare: next },
+    })
   }
 
   const toggleDiffFileCollapse = useCallback((path: string) => {
@@ -1423,12 +1490,20 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     diffFileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  // Clicking a changed file in the sidebar: in one-file mode it selects the file,
-  // otherwise it scrolls the stacked diff to that file's card. On small screens
-  // it also drills into the full-screen content view (the back button returns).
+  // Clicking a changed file in the sidebar: in one-file mode it selects the file
+  // (writing ?dfile= and clearing any line hash), otherwise it scrolls the
+  // stacked diff to that file's card. On small screens it also drills into the
+  // full-screen content view (the back button returns).
   const onDiffFileClick = (path: string) => {
-    if (diffSettings.singleFile) setSelectedDiffPath(path)
-    else scrollToDiffFile(path)
+    if (diffSettings.singleFile) {
+      navigate({
+        to: '/project/$projectId/repository/$',
+        params: { projectId, _splat: splat },
+        search: (prev) => ({ compare: prev.compare, dfile: path }),
+      })
+    } else {
+      scrollToDiffFile(path)
+    }
     setMobileDiffOpen(true)
   }
   const activeDiffPath = diffSettings.singleFile ? selectedDiffPath : null
@@ -1451,9 +1526,15 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }
 
   // Navigate (history push) to a ref + path; empty path goes to the ref root.
+  // Keeps ?compare= (so switching the base branch re-diffs against the new base)
+  // but drops the file/line selection, which belonged to the old comparison.
   const goTo = (ref: string, path: string | null) => {
     const sp = path ? `${ref}/${path}` : ref
-    navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: sp } })
+    navigate({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: sp },
+      search: (prev) => ({ compare: prev.compare }),
+    })
   }
   const selectBranch = (name: string) => goTo(name, parsed.path)
   // <Link> target for a file at the current ref - used by the tree so file rows
@@ -1504,13 +1585,16 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             <GitBranch className="w-3.5 h-3.5" /> ...
           </div>
         )}
-        {diffActive ? (
+        {diffActive && branches !== null ? (
           // Diffing: "base → head", each capped + clipped so they stay compact.
+          // Gated on branches being loaded: a deep-linked ?compare= makes diff
+          // mode active before the branch list arrives, and the head selector
+          // needs it (it looks the ref up in the list).
           <>
             <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
             <div className="flex min-w-0 max-w-[11rem] shrink">
               <BranchSelector
-                branches={branches!}
+                branches={branches}
                 activeRef={compareRef}
                 isKnownBranch={compareKnown}
                 onSelect={onDiffSelect}
@@ -1772,6 +1856,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     // browsed ref, head = compare ref). Missing side → null.
                     imageBefore={f.change_type === 'added' ? null : repoBlobUrl(projectId, f.old_path || f.path, activeRef)}
                     imageAfter={f.change_type === 'deleted' ? null : repoBlobUrl(projectId, f.path, compareRef)}
+                    // Single-file view: drive the line selection from the URL hash
+                    // (#L/#R) so it is deep-linkable. The stacked view leaves it
+                    // uncontrolled (local per-file) - the hash can't name a file.
+                    selection={diffSettings.singleFile ? diffSelRange : undefined}
+                    onSelectLine={diffSettings.singleFile ? selectDiffLine : undefined}
                   />
                 ))}
               </div>

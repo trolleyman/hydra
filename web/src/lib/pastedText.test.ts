@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   countLines,
   detectCodeLanguage,
+  extensionMime,
   fenceCode,
   getClipboardText,
   isLargePaste,
+  pastedTextExtension,
   PASTE_CHAR_THRESHOLD,
 } from './pastedText'
 
@@ -84,5 +86,45 @@ describe('detectCodeLanguage', () => {
 describe('fenceCode', () => {
   it('wraps text in a tagged fence', () => {
     expect(fenceCode('<div>Test123123</div>', 'html')).toBe('```html\n<div>Test123123</div>\n```')
+  })
+})
+
+describe('pastedTextExtension', () => {
+  it('uses the VS Code language, mapped to a file extension', () => {
+    const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"python"}' })
+    expect(pastedTextExtension(dt)).toBe('py')
+  })
+  it('passes a language through when it already is the extension', () => {
+    const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"go"}' })
+    expect(pastedTextExtension(dt)).toBe('go')
+  })
+  it('maps a VS Code markdown copy to md', () => {
+    const dt = fakeDt({ 'text/plain': 'hi', 'vscode-editor-data': '{"mode":"markdown"}' })
+    expect(pastedTextExtension(dt)).toBe('md')
+  })
+  it('does not sniff content - undeclared markdown-looking text stays txt', () => {
+    const md = [
+      '# Heading',
+      '',
+      '- [ ] task with a [link](https://example.com)',
+      '',
+      '| a | b |',
+      '| --- | --- |',
+    ].join('\n')
+    expect(pastedTextExtension(fakeDt({ 'text/plain': md }))).toBe('txt')
+  })
+  it('falls back to txt for plain prose', () => {
+    expect(pastedTextExtension(fakeDt({ 'text/plain': 'just some ordinary words here' }))).toBe('txt')
+  })
+  it('falls back to txt for a null clipboard', () => {
+    expect(pastedTextExtension(null)).toBe('txt')
+  })
+})
+
+describe('extensionMime', () => {
+  it('maps md and html, defaulting to text/plain', () => {
+    expect(extensionMime('md')).toBe('text/markdown')
+    expect(extensionMime('html')).toBe('text/html')
+    expect(extensionMime('ts')).toBe('text/plain')
   })
 })

@@ -42,6 +42,10 @@ export type PreviewStatus = {
      */
     message?: string;
     /**
+     * "Latest changes" channel only - the live worktree changed since this server was built, so a build-then-serve preview is out of date (restart to rebuild)
+     */
+    stale?: boolean;
+    /**
      * Most recent captured output lines of the current/last spawn
      */
     log?: Array<ArtifactLogLine>;

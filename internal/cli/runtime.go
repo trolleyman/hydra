@@ -241,6 +241,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go server.RunTestPrefetcher(ctx, roots)
 	// Watch heads with auto-merge armed and merge them once their tests pass.
 	go server.RunAutoMergeWatcher(ctx)
+	// Poll MR-linked heads: refresh cached MR state, detect remote merges (fetch +
+	// ff local target + teardown), and auto-publish armed publish-when-green heads.
+	go server.RunReviewWatcher(ctx)
 
 	// Register each project's [[services]]. Done after the pollers so a slow
 	// service launch never delays request serving; StopAll on shutdown. Whether a

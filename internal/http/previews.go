@@ -53,13 +53,16 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		av = artifacts.Version{WorktreeDir: *head.Worktree}
 		pv = preview.Version{HeadID: head.ID, WorktreeDir: *head.Worktree}
 	case headRef != nil && *headRef != "":
+		// A pinned commit: no Branch, so the slot never follows a moving tip.
 		sha, err := git.ResolveRef(projectRoot, *headRef)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		av = artifacts.Version{Ref: sha}
-		pv = preview.Version{SHA: sha}
+		pv = preview.Version{HeadID: head.ID, SHA: sha}
 	default:
+		// "Latest commit" = the head's branch tip. Carry the branch so the slot
+		// rebuilds and hot-swaps in the background as the tip advances.
 		if head.Branch == nil {
 			return nil, nil
 		}
@@ -68,7 +71,7 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 			return nil, errtrace.Wrap(err)
 		}
 		av = artifacts.Version{Ref: sha}
-		pv = preview.Version{SHA: sha}
+		pv = preview.Version{HeadID: head.ID, SHA: sha, Branch: *head.Branch}
 	}
 
 	liveCfg, err := config.Load(projectRoot)
@@ -132,6 +135,10 @@ func toAPIPreviewStatus(ctx context.Context, st preview.Status) api.PreviewStatu
 	if st.Message != "" {
 		out.Message = &st.Message
 	}
+	if st.Stale {
+		stale := true
+		out.Stale = &stale
+	}
 	if len(st.Log) > 0 {
 		lines := make([]api.ArtifactLogLine, 0, len(st.Log))
 		for _, l := range st.Log {
@@ -160,24 +167,16 @@ func (s *Server) GetAgentPreviews(ctx context.Context, request api.GetAgentPrevi
 	}
 
 	previews := make([]api.PreviewStatus, 0, len(res.specs))
-	var others []api.PreviewStatus
 	for _, spec := range res.specs {
 		var st preview.Status
 		if s.Previews != nil {
 			st = s.Previews.Peek(res.projectRoot, spec, res.version)
-			for _, o := range s.Previews.Others(res.projectRoot, spec.Name, res.version) {
-				others = append(others, toAPIPreviewStatus(ctx, o))
-			}
 		} else {
 			st = preview.Status{Name: spec.Name, State: preview.StateStopped, Version: res.version.Label()}
 		}
 		previews = append(previews, toAPIPreviewStatus(ctx, st))
 	}
-	resp := api.PreviewsResponse{Previews: previews}
-	if len(others) > 0 {
-		resp.Others = &others
-	}
-	return api.GetAgentPreviews200JSONResponse(resp), nil
+	return api.GetAgentPreviews200JSONResponse(api.PreviewsResponse{Previews: previews}), nil
 }
 
 // StartAgentPreview ensures the named preview instance exists (listener + port)

@@ -88,6 +88,11 @@ type Policy struct {
 	Home string `json:"home"`
 	// WorktreePath is the agent's worktree; in-worktree file writes are allowed.
 	WorktreePath string `json:"worktree"`
+	// ProjectRoot is the real project root (parent of the worktree), used to resolve
+	// the project-relative credential files the gate protects (.hydra/deploy.toml,
+	// .hydra/config.local.toml). These are also masked in the sandbox; the gate check
+	// is defense-in-depth for the Read tool. "" disables the project-relative check.
+	ProjectRoot string `json:"project_root,omitempty"`
 }
 
 // LoadPolicy reads a seeded policy.json. A missing file is not an error: it

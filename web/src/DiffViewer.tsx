@@ -207,12 +207,13 @@ function trailingContext(hunk: DiffHunk): number {
 
 // ── Line selection ────────────────────────────────────────────────────────────
 // Clicking a gutter number selects that line (shift+click extends the range);
-// the selection is a side (old/new) plus a 1-based [start,end]. Unlike the file
-// view it lives in local per-file state, not the URL - the diff isn't
-// URL-addressable here (the agent diff has no per-file route, and the repo
-// compare-diff keeps its diff state out of the URL by design).
+// the selection is a side (old/new) plus a 1-based [start,end]. By default this
+// lives in local per-file state (the agent diff has no per-file route, so it
+// isn't URL-addressable there). The repository compare-diff's single-file view
+// IS URL-addressable, so it drives the selection from the URL by passing the
+// optional controlled `selection`/`onSelectLine` props to FileDiff below.
 
-type DiffSide = 'old' | 'new'
+export type DiffSide = 'old' | 'new'
 export type DiffLineSelection = { side: DiffSide; start: number; end: number }
 
 function selectionHas(sel: DiffLineSelection | null | undefined, side: DiffSide, num: number | null | undefined): boolean {
@@ -241,6 +242,9 @@ function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
       onMouseDown={clickable ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
       onClick={clickable ? (e) => { e.stopPropagation(); onSelectLine!(side, num!, e.shiftKey) } : undefined}
       title={clickable ? `Select line ${num}` : undefined}
+      // Locates a line+side for scroll-into-view when a selection is deep-linked
+      // (the repository compare-diff scrolls #L<n>/#R<n>'s first row into view).
+      data-diff-ln={num != null ? `${side}:${num}` : undefined}
       className={`${baseClass} ${clickable ? 'cursor-pointer hover:!text-blue-500 dark:hover:!text-blue-400' : ''} ${selected ? SELECTED_NUM_CLASS : ''}`}
     >
       {num ?? ''}
@@ -715,7 +719,7 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -741,6 +745,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // repository diff's one-file-at-a-time view, whose surrounding header already
   // carries the filename, change type, line counts and copy/raw actions.
   headless?: boolean
+  // Optional controlled line selection. When onSelectLine is provided the
+  // selection is driven from the parent (the repository compare-diff wires it to
+  // the URL hash); otherwise FileDiff keeps a local per-file selection. `extend`
+  // is the shift-click flag - the parent resolves the anchor.
+  selection?: DiffLineSelection | null
+  onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const lang = getLanguage(file.path)
 
@@ -895,12 +905,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   // Per-file line selection driven by clicking gutter numbers. A plain click
   // selects one line (and becomes the shift-anchor); shift+click extends the
-  // range from the anchor along the same side. Local state - see the note by
-  // DiffLineSelection on why this isn't URL-synced like the file view.
-  const [lineSel, setLineSel] = useState<DiffLineSelection | null>(null)
+  // range from the anchor along the same side. Uncontrolled by default (local
+  // state); the repository compare-diff drives it from the URL via the
+  // controlled selection/onSelectLine props - see the note by DiffLineSelection.
+  const [localSel, setLocalSel] = useState<DiffLineSelection | null>(null)
   const selAnchorRef = useRef<{ side: DiffSide; line: number } | null>(null)
-  const selectLine = useCallback((side: DiffSide, line: number, extend: boolean) => {
-    setLineSel((prev) => {
+  const localSelectLine = useCallback((side: DiffSide, line: number, extend: boolean) => {
+    setLocalSel((prev) => {
       if (extend && prev && prev.side === side) {
         const anchor = selAnchorRef.current?.side === side ? selAnchorRef.current.line : prev.start
         return { side, start: Math.min(anchor, line), end: Math.max(anchor, line) }
@@ -909,6 +920,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       return { side, start: line, end: line }
     })
   }, [])
+  const controlled = onSelectLine != null
+  const lineSel = controlled ? (selection ?? null) : localSel
+  const selectLine = controlled ? onSelectLine : localSelectLine
 
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide

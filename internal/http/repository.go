@@ -437,6 +437,10 @@ func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryReq
 	}
 
 	if _, err := git.Push(projectRoot); err != nil {
+		var authErr *git.AuthError
+		if errors.As(err, &authErr) {
+			return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(authErr.Error())} //errtrace:skip
+		}
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -495,6 +499,10 @@ func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryReq
 	// Push anything local that the pull left ahead.
 	if after, err := git.GetRemoteStatus(projectRoot); err == nil && after.CanPush() {
 		if _, err := git.Push(projectRoot); err != nil {
+			var authErr *git.AuthError
+			if errors.As(err, &authErr) {
+				return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(authErr.Error())} //errtrace:skip
+			}
 			return nil, errtrace.Wrap(err)
 		}
 	}

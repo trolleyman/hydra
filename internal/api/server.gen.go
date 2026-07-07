@@ -247,6 +247,9 @@ type AgentResponse struct {
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
 
+	// DownstreamBranch The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
+	DownstreamBranch *string `json:"downstream_branch,omitempty"`
+
 	// EndState How an archived agent ended ("killed" | "merged"); null/absent for active agents.
 	EndState *string `json:"end_state"`
 
@@ -265,6 +268,12 @@ type AgentResponse struct {
 	PrePrompt          string  `json:"pre_prompt"`
 	ProjectPath        string  `json:"project_path"`
 	Prompt             string  `json:"prompt"`
+
+	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
+
+	// Review The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+	Review *ReviewLink `json:"review,omitempty"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
 	SessionPid int `json:"session_pid"`
@@ -793,6 +802,9 @@ type PreviewStatus struct {
 	// Progress Latest ::hydra:progress:: headline while starting
 	Progress *string `json:"progress,omitempty"`
 
+	// Stale "Latest changes" channel only - the live worktree changed since this server was built, so a build-then-serve preview is out of date (restart to rebuild)
+	Stale *bool `json:"stale,omitempty"`
+
 	// StartedAt When the current child was spawned (null when stopped)
 	StartedAt *time.Time `json:"started_at"`
 
@@ -808,9 +820,6 @@ type PreviewStatus struct {
 
 // PreviewsResponse defines model for PreviewsResponse.
 type PreviewsResponse struct {
-	// Others Still-live instances of those scripts at other versions (e.g. the selection moved on)
-	Others *[]PreviewStatus `json:"others,omitempty"`
-
 	// Previews One entry per configured server script, for the requested version
 	Previews []PreviewStatus `json:"previews"`
 }
@@ -1019,6 +1028,85 @@ type RepositoryUncommittedFile struct {
 
 	// Status One of modified|added|deleted|renamed|copied|conflicted|untracked
 	Status string `json:"status"`
+}
+
+// ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+type ReviewConfigResponse struct {
+	// Auth Auth method ("cli" | "token").
+	Auth string `json:"auth"`
+
+	// AuthStatus Live auth status line (e.g. "gh: logged in as X" / "glab: not authenticated").
+	AuthStatus *string `json:"auth_status,omitempty"`
+
+	// Authenticated Whether the forge CLI is authenticated.
+	Authenticated *bool `json:"authenticated,omitempty"`
+
+	// BrowseUrl Derived https browse URL for the repo (for the forge web link), or empty.
+	BrowseUrl *string `json:"browse_url,omitempty"`
+
+	// Configured True when a [review] section exists (or a provider could be resolved) so the Create MR affordance should be offered.
+	Configured bool `json:"configured"`
+
+	// DefaultAction Primary head action ("merge" | "create_mr").
+	DefaultAction      string    `json:"default_action"`
+	DeleteRemoteBranch *bool     `json:"delete_remote_branch,omitempty"`
+	Draft              *bool     `json:"draft,omitempty"`
+	ProtectedBranches  *[]string `json:"protected_branches,omitempty"`
+
+	// Provider Resolved provider ("github" | "gitlab" | "") - empty when auto-detection could not decide.
+	Provider string `json:"provider"`
+
+	// ProviderSetting The raw provider setting ("auto" | "github" | "gitlab").
+	ProviderSetting *string `json:"provider_setting,omitempty"`
+
+	// PublishWhenGreen Default arming for new heads.
+	PublishWhenGreen   *bool   `json:"publish_when_green,omitempty"`
+	PushBranchTemplate *string `json:"push_branch_template,omitempty"`
+	Remote             string  `json:"remote"`
+
+	// RemoteUrl The URL of the configured remote (what provider detection ran against).
+	RemoteUrl         *string `json:"remote_url,omitempty"`
+	RequireLocalTests *bool   `json:"require_local_tests,omitempty"`
+	Squash            *bool   `json:"squash,omitempty"`
+	TargetBranch      string  `json:"target_branch"`
+}
+
+// ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+type ReviewLink struct {
+	// Ahead Commits the local head branch has that the remote downstream branch does not (drives "Push to MR").
+	Ahead *int `json:"ahead,omitempty"`
+
+	// Behind Commits the remote downstream branch has that the local head branch does not (drives "Pull from MR").
+	Behind *int `json:"behind,omitempty"`
+
+	// Id MR/PR identifier on the forge (GitLab IID / GitHub number).
+	Id string `json:"id"`
+
+	// Provider Resolved forge ("github" | "gitlab").
+	Provider string `json:"provider"`
+
+	// State Cached forge MR state from the lifecycle watcher (Phase 3). Absent until the watcher has polled.
+	State *ReviewState `json:"state,omitempty"`
+
+	// TargetBranch The MR's target branch.
+	TargetBranch *string `json:"target_branch,omitempty"`
+
+	// Url Forge URL of the MR/PR (deep link for "View MR").
+	Url string `json:"url"`
+}
+
+// ReviewState Cached forge MR state from the lifecycle watcher (Phase 3). Absent until the watcher has polled.
+type ReviewState struct {
+	Approvals         *int `json:"approvals,omitempty"`
+	ApprovalsRequired *int `json:"approvals_required,omitempty"`
+
+	// CiStatus Normalized CI status (success | failed | running | pending | none).
+	CiStatus  *string `json:"ci_status,omitempty"`
+	Mergeable *bool   `json:"mergeable,omitempty"`
+
+	// State Normalized MR state (draft | open | merged | closed).
+	State                 string `json:"state"`
+	UnresolvedDiscussions *int   `json:"unresolved_discussions,omitempty"`
 }
 
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
@@ -1420,6 +1508,11 @@ type GetAgentDiffFilesParams struct {
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 }
 
+// SetDownstreamBranchJSONBody defines parameters for SetDownstreamBranch.
+type SetDownstreamBranchJSONBody struct {
+	DownstreamBranch string `json:"downstream_branch"`
+}
+
 // MergeAgentParams defines parameters for MergeAgent.
 type MergeAgentParams struct {
 	// Force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway - covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
@@ -1454,6 +1547,28 @@ type StopAgentPreviewParams struct {
 
 	// IncludeUncommitted Stop the instance for the agent's uncommitted working tree.
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
+// PublishAgentJSONBody defines parameters for PublishAgent.
+type PublishAgentJSONBody struct {
+	Description *string `json:"description,omitempty"`
+
+	// DownstreamBranch Branch name to push AS. Defaults to the head's downstream_branch (seeded from review.push_branch_template).
+	DownstreamBranch *string `json:"downstream_branch,omitempty"`
+	Draft            *bool   `json:"draft,omitempty"`
+
+	// Remote Git remote to push to. Defaults to review.remote.
+	Remote *string `json:"remote,omitempty"`
+
+	// TargetBranch MR target branch. Defaults to review.target_branch.
+	TargetBranch *string `json:"target_branch,omitempty"`
+	Title        *string `json:"title,omitempty"`
+}
+
+// PublishAgentParams defines parameters for PublishAgent.
+type PublishAgentParams struct {
+	// Force Bypass the local test gate (same semantics as merge's force).
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
 // GetAgentTestsParams defines parameters for GetAgentTests.
@@ -1561,8 +1676,14 @@ type UpdateAgentJSONRequestBody = UpdateAgentRequest
 // DecideAgentApprovalJSONRequestBody defines body for DecideAgentApproval for application/json ContentType.
 type DecideAgentApprovalJSONRequestBody = ApprovalDecisionRequest
 
+// SetDownstreamBranchJSONRequestBody defines body for SetDownstreamBranch for application/json ContentType.
+type SetDownstreamBranchJSONRequestBody SetDownstreamBranchJSONBody
+
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
+
+// PublishAgentJSONRequestBody defines body for PublishAgent for application/json ContentType.
+type PublishAgentJSONRequestBody PublishAgentJSONBody
 
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
@@ -1629,6 +1750,9 @@ type ServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
 	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffFilesParams)
+	// Set a head's downstream branch name (the name it is pushed AS)
+	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
+	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1650,6 +1774,21 @@ type ServerInterface interface {
 	// Stop a live server preview instance
 	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
 	StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StopAgentPreviewParams)
+	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
+	// (POST /api/projects/{project_id}/agents/{id}/publish)
+	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params PublishAgentParams)
+	// Pull the remote downstream branch into the local head branch (Pull from MR)
+	// (POST /api/projects/{project_id}/agents/{id}/publish-pull)
+	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Push the local head branch to its linked MR's downstream branch (Push to MR)
+	// (POST /api/projects/{project_id}/agents/{id}/publish-push)
+	PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Disarm publish-when-green for a head
+	// (DELETE /api/projects/{project_id}/agents/{id}/publish-when-green)
+	DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+	// (POST /api/projects/{project_id}/agents/{id}/publish-when-green)
+	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1710,6 +1849,9 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
+	// Resolved [review] config + live forge auth status for a project
+	// (GET /api/projects/{project_id}/review-config)
+	GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
@@ -2405,6 +2547,40 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// SetDownstreamBranch operation middleware
+func (siw *ServerInterfaceWrapper) SetDownstreamBranch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetDownstreamBranch(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SendAgentInput operation middleware
 func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http.Request) {
 
@@ -2728,6 +2904,187 @@ func (siw *ServerInterfaceWrapper) StopAgentPreview(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StopAgentPreview(w, r, projectId, id, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PublishAgent operation middleware
+func (siw *ServerInterfaceWrapper) PublishAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PublishAgentParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "force", r.URL.Query(), &params.Force)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishAgent(w, r, projectId, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PullFromMr operation middleware
+func (siw *ServerInterfaceWrapper) PullFromMr(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PullFromMr(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PushToMr operation middleware
+func (siw *ServerInterfaceWrapper) PushToMr(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PushToMr(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisarmPublishWhenGreen operation middleware
+func (siw *ServerInterfaceWrapper) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisarmPublishWhenGreen(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArmPublishWhenGreen operation middleware
+func (siw *ServerInterfaceWrapper) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArmPublishWhenGreen(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3497,6 +3854,31 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetReviewConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetReviewConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReviewConfig(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetServices operation middleware
 func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
 
@@ -3740,6 +4122,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/downstream-branch", wrapper.SetDownstreamBranch)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
@@ -3747,6 +4130,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews", wrapper.GetAgentPreviews)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/start", wrapper.StartAgentPreview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/stop", wrapper.StopAgentPreview)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish", wrapper.PublishAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-pull", wrapper.PullFromMr)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-push", wrapper.PushToMr)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-when-green", wrapper.DisarmPublishWhenGreen)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-when-green", wrapper.ArmPublishWhenGreen)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
@@ -3767,6 +4155,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/push-status", wrapper.GetRepositoryPushStatus)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/sync", wrapper.SyncRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/review-config", wrapper.GetReviewConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -4430,6 +4819,43 @@ func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SetDownstreamBranchRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *SetDownstreamBranchJSONRequestBody
+}
+
+type SetDownstreamBranchResponseObject interface {
+	VisitSetDownstreamBranchResponse(w http.ResponseWriter) error
+}
+
+type SetDownstreamBranch200JSONResponse AgentResponse
+
+func (response SetDownstreamBranch200JSONResponse) VisitSetDownstreamBranchResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetDownstreamBranch400JSONResponse ErrorResponse
+
+func (response SetDownstreamBranch400JSONResponse) VisitSetDownstreamBranchResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetDownstreamBranch404JSONResponse ErrorResponse
+
+func (response SetDownstreamBranch404JSONResponse) VisitSetDownstreamBranchResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SendAgentInputRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -4696,6 +5122,231 @@ func (response StopAgentPreview404JSONResponse) VisitStopAgentPreviewResponse(w 
 type StopAgentPreview500JSONResponse ErrorResponse
 
 func (response StopAgentPreview500JSONResponse) VisitStopAgentPreviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PublishAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    PublishAgentParams
+	Body      *PublishAgentJSONRequestBody
+}
+
+type PublishAgentResponseObject interface {
+	VisitPublishAgentResponse(w http.ResponseWriter) error
+}
+
+type PublishAgent200JSONResponse AgentResponse
+
+func (response PublishAgent200JSONResponse) VisitPublishAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PublishAgent400JSONResponse ErrorResponse
+
+func (response PublishAgent400JSONResponse) VisitPublishAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PublishAgent404JSONResponse ErrorResponse
+
+func (response PublishAgent404JSONResponse) VisitPublishAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PublishAgent409JSONResponse MergeConflictError
+
+func (response PublishAgent409JSONResponse) VisitPublishAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PublishAgent500JSONResponse ErrorResponse
+
+func (response PublishAgent500JSONResponse) VisitPublishAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PullFromMrRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type PullFromMrResponseObject interface {
+	VisitPullFromMrResponse(w http.ResponseWriter) error
+}
+
+type PullFromMr200JSONResponse AgentResponse
+
+func (response PullFromMr200JSONResponse) VisitPullFromMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PullFromMr400JSONResponse ErrorResponse
+
+func (response PullFromMr400JSONResponse) VisitPullFromMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PullFromMr404JSONResponse ErrorResponse
+
+func (response PullFromMr404JSONResponse) VisitPullFromMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PullFromMr409JSONResponse MergeConflictError
+
+func (response PullFromMr409JSONResponse) VisitPullFromMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PullFromMr500JSONResponse ErrorResponse
+
+func (response PullFromMr500JSONResponse) VisitPullFromMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushToMrRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type PushToMrResponseObject interface {
+	VisitPushToMrResponse(w http.ResponseWriter) error
+}
+
+type PushToMr200JSONResponse AgentResponse
+
+func (response PushToMr200JSONResponse) VisitPushToMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushToMr400JSONResponse ErrorResponse
+
+func (response PushToMr400JSONResponse) VisitPushToMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushToMr404JSONResponse ErrorResponse
+
+func (response PushToMr404JSONResponse) VisitPushToMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushToMr500JSONResponse ErrorResponse
+
+func (response PushToMr500JSONResponse) VisitPushToMrResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisarmPublishWhenGreenRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type DisarmPublishWhenGreenResponseObject interface {
+	VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error
+}
+
+type DisarmPublishWhenGreen204Response struct {
+}
+
+func (response DisarmPublishWhenGreen204Response) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DisarmPublishWhenGreen404JSONResponse ErrorResponse
+
+func (response DisarmPublishWhenGreen404JSONResponse) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisarmPublishWhenGreen500JSONResponse ErrorResponse
+
+func (response DisarmPublishWhenGreen500JSONResponse) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmPublishWhenGreenRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type ArmPublishWhenGreenResponseObject interface {
+	VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error
+}
+
+type ArmPublishWhenGreen204Response struct {
+}
+
+func (response ArmPublishWhenGreen204Response) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ArmPublishWhenGreen404JSONResponse ErrorResponse
+
+func (response ArmPublishWhenGreen404JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmPublishWhenGreen500JSONResponse ErrorResponse
+
+func (response ArmPublishWhenGreen500JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -5487,6 +6138,32 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetReviewConfigRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetReviewConfigResponseObject interface {
+	VisitGetReviewConfigResponse(w http.ResponseWriter) error
+}
+
+type GetReviewConfig200JSONResponse ReviewConfigResponse
+
+func (response GetReviewConfig200JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetReviewConfig404JSONResponse ErrorResponse
+
+func (response GetReviewConfig404JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetServicesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -5663,6 +6340,9 @@ type StrictServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
 	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
+	// Set a head's downstream branch name (the name it is pushed AS)
+	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
+	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
@@ -5684,6 +6364,21 @@ type StrictServerInterface interface {
 	// Stop a live server preview instance
 	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
 	StopAgentPreview(ctx context.Context, request StopAgentPreviewRequestObject) (StopAgentPreviewResponseObject, error)
+	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
+	// (POST /api/projects/{project_id}/agents/{id}/publish)
+	PublishAgent(ctx context.Context, request PublishAgentRequestObject) (PublishAgentResponseObject, error)
+	// Pull the remote downstream branch into the local head branch (Pull from MR)
+	// (POST /api/projects/{project_id}/agents/{id}/publish-pull)
+	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
+	// Push the local head branch to its linked MR's downstream branch (Push to MR)
+	// (POST /api/projects/{project_id}/agents/{id}/publish-push)
+	PushToMr(ctx context.Context, request PushToMrRequestObject) (PushToMrResponseObject, error)
+	// Disarm publish-when-green for a head
+	// (DELETE /api/projects/{project_id}/agents/{id}/publish-when-green)
+	DisarmPublishWhenGreen(ctx context.Context, request DisarmPublishWhenGreenRequestObject) (DisarmPublishWhenGreenResponseObject, error)
+	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+	// (POST /api/projects/{project_id}/agents/{id}/publish-when-green)
+	ArmPublishWhenGreen(ctx context.Context, request ArmPublishWhenGreenRequestObject) (ArmPublishWhenGreenResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
@@ -5744,6 +6439,9 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
+	// Resolved [review] config + live forge auth status for a project
+	// (GET /api/projects/{project_id}/review-config)
+	GetReviewConfig(ctx context.Context, request GetReviewConfigRequestObject) (GetReviewConfigResponseObject, error)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
@@ -6292,6 +6990,40 @@ func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// SetDownstreamBranch operation middleware
+func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request SetDownstreamBranchRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body SetDownstreamBranchJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetDownstreamBranch(ctx, request.(SetDownstreamBranchRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetDownstreamBranch")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetDownstreamBranchResponseObject); ok {
+		if err := validResponse.VisitSetDownstreamBranchResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SendAgentInput operation middleware
 func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var request SendAgentInputRequestObject
@@ -6487,6 +7219,149 @@ func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StopAgentPreviewResponseObject); ok {
 		if err := validResponse.VisitStopAgentPreviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PublishAgent operation middleware
+func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params PublishAgentParams) {
+	var request PublishAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	var body PublishAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishAgent(ctx, request.(PublishAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PublishAgentResponseObject); ok {
+		if err := validResponse.VisitPublishAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PullFromMr operation middleware
+func (sh *strictHandler) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request PullFromMrRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PullFromMr(ctx, request.(PullFromMrRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PullFromMr")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PullFromMrResponseObject); ok {
+		if err := validResponse.VisitPullFromMrResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PushToMr operation middleware
+func (sh *strictHandler) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request PushToMrRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PushToMr(ctx, request.(PushToMrRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PushToMr")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PushToMrResponseObject); ok {
+		if err := validResponse.VisitPushToMrResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisarmPublishWhenGreen operation middleware
+func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request DisarmPublishWhenGreenRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisarmPublishWhenGreen(ctx, request.(DisarmPublishWhenGreenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisarmPublishWhenGreen")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisarmPublishWhenGreenResponseObject); ok {
+		if err := validResponse.VisitDisarmPublishWhenGreenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArmPublishWhenGreen operation middleware
+func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request ArmPublishWhenGreenRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArmPublishWhenGreen(ctx, request.(ArmPublishWhenGreenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArmPublishWhenGreen")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArmPublishWhenGreenResponseObject); ok {
+		if err := validResponse.VisitArmPublishWhenGreenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -7043,6 +7918,32 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReviewConfig operation middleware
+func (sh *strictHandler) GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetReviewConfigRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReviewConfig(ctx, request.(GetReviewConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReviewConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReviewConfigResponseObject); ok {
+		if err := validResponse.VisitGetReviewConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

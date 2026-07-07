@@ -96,6 +96,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // True while a file is dragged over the terminal, driving the drop overlay.
+  const [dragActive, setDragActive] = useState(false)
 
   // Latest status/diff handlers, read from the socket + data callbacks below. The
   // connection effect must NOT list them as deps (a fresh callback identity from the
@@ -547,6 +549,34 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     const textarea = term.textarea
     textarea?.addEventListener('paste', onPaste, true)
 
+    // Drag-and-drop of files onto the terminal, mirroring the file-paste path:
+    // upload each dropped file and type its absolute (sandbox-valid) path into
+    // the agent's prompt. Only file drags are intercepted; a text/URL drag is
+    // left to xterm. Listeners live on the container (el) so the drop zone
+    // covers the whole pane, not just xterm's focus textarea.
+    const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
+    const onDragOver = (ev: DragEvent) => {
+      if (!isFileDrag(ev.dataTransfer)) return
+      ev.preventDefault()
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy'
+      setDragActive(true)
+    }
+    const onDragLeave = (ev: DragEvent) => {
+      // Ignore leaves that just cross into a child element still inside the pane.
+      if (ev.relatedTarget && el.contains(ev.relatedTarget as Node)) return
+      setDragActive(false)
+    }
+    const onDrop = (ev: DragEvent) => {
+      setDragActive(false)
+      if (!isFileDrag(ev.dataTransfer)) return
+      ev.preventDefault()
+      const files = extractFiles(ev.dataTransfer)
+      if (files.length > 0) void handlePastedFiles(files)
+    }
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+
     // Resize terminal when the container element resizes. fitAndSend only sends
     // when the column/row count actually changes, avoiding spurious SIGWINCH
     // signals (e.g. from layout shifts caused by the diff viewer loading content
@@ -561,6 +591,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)
       inputDisposable.dispose()
       textarea?.removeEventListener('paste', onPaste, true)
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+      setDragActive(false)
       closeWebSocket(ws)
       term.dispose()
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
@@ -591,6 +625,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       {notice && (
         <div className="absolute top-2 left-2 px-2 py-1 bg-blue-900/90 text-gray-100 text-[10px] rounded border border-blue-700 shadow-lg pointer-events-none z-10 max-w-[80%] truncate">
           {notice}
+        </div>
+      )}
+      {dragActive && (
+        <div className="absolute inset-0 flex items-center justify-center bg-blue-950/70 border-2 border-dashed border-blue-400 rounded pointer-events-none z-20">
+          <div className="px-3 py-1.5 bg-blue-900/90 text-gray-100 text-xs rounded border border-blue-700 shadow-lg">
+            Drop files to attach
+          </div>
         </div>
       )}
     </div>

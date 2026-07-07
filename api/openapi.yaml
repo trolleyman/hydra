@@ -518,6 +518,238 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/publish:
+    post:
+      summary: Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
+      operationId: publishAgent
+      description: >-
+        Host-side, by the daemon, with the user's own credentials
+        (NON_LOCAL_INTEGRATION.md 3.3). Claims the head (publishing), runs the
+        local test gate (like merge; force bypasses), pushes hydra/<id> to the
+        downstream branch on the remote, then creates the MR/PR if none exists.
+        The local branch is untouched. Idempotent: re-publishing pushes again and
+        the MR follows. Returns the updated agent with its review link.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: force
+          required: false
+          schema: { type: boolean }
+          description: Bypass the local test gate (same semantics as merge's force).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Overrides for the Create MR dialog. Absent fields fall back to the resolved [review] config + head defaults.
+              properties:
+                downstream_branch:
+                  type: string
+                  description: Branch name to push AS. Defaults to the head's downstream_branch (seeded from review.push_branch_template).
+                remote:
+                  type: string
+                  description: Git remote to push to. Defaults to review.remote.
+                target_branch:
+                  type: string
+                  description: MR target branch. Defaults to review.target_branch.
+                title:
+                  type: string
+                description:
+                  type: string
+                draft:
+                  type: boolean
+      responses:
+        '200':
+          description: Published (returns the updated agent with its review link).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (no branch, provider not configured, push auth failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation in progress, tests failing, or push rejected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeConflictError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/publish-push:
+    post:
+      summary: Push the local head branch to its linked MR's downstream branch (Push to MR)
+      operationId: pushToMr
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pushed (returns the updated agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (not linked, no branch, or push auth failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/publish-pull:
+    post:
+      summary: Pull the remote downstream branch into the local head branch (Pull from MR)
+      operationId: pullFromMr
+      description: Fetches, then merges the remote-tracking downstream ref INTO the head branch (merge-not-rebase, same as update-from-base). Conflicts surface as 409.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pulled (returns the updated agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (not linked or no branch)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (merge conflict pulling the remote in)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeConflictError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/downstream-branch:
+    patch:
+      summary: Set a head's downstream branch name (the name it is pushed AS)
+      operationId: setDownstreamBranch
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [downstream_branch]
+              properties:
+                downstream_branch:
+                  type: string
+      responses:
+        '200':
+          description: Updated (returns the updated agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (invalid branch name, or soft-locked after publish without confirm)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/review-config:
+    get:
+      summary: Resolved [review] config + live forge auth status for a project
+      operationId: getReviewConfig
+      description: The effective, resolved review settings (provider auto-detected from the remote URL) plus the forge CLI's live auth status, for the Settings Review section and the Create MR dialog prefill.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConfigResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/update-from-base:
     post:
       summary: Update a Hydra agent's branch from its base branch (merge base into head)
@@ -1118,6 +1350,66 @@ paths:
       responses:
         '204':
           description: No Content (auto-merge disarmed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/publish-when-green:
+    post:
+      summary: Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+      description: >
+        Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests
+        settle passing and the agent has finished, an unlinked head auto-opens a
+        draft MR and a linked head auto-pushes (plain push only). Idempotent.
+      operationId: armPublishWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: No Content (publish-when-green armed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Disarm publish-when-green for a head
+      operationId: disarmPublishWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: No Content (publish-when-green disarmed)
         '404':
           description: Not Found
           content:
@@ -2453,6 +2745,113 @@ components:
         merge_when_green:
           type: boolean
           description: True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN #68.
+        publish_when_green:
+          type: boolean
+          description: True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+        downstream_branch:
+          type: string
+          description: The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
+        review:
+          $ref: '#/components/schemas/ReviewLink'
+
+    ReviewLink:
+      type: object
+      description: The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+      required: [url, id, provider]
+      properties:
+        url:
+          type: string
+          description: Forge URL of the MR/PR (deep link for "View MR").
+        id:
+          type: string
+          description: MR/PR identifier on the forge (GitLab IID / GitHub number).
+        provider:
+          type: string
+          description: Resolved forge ("github" | "gitlab").
+        target_branch:
+          type: string
+          description: The MR's target branch.
+        ahead:
+          type: integer
+          description: Commits the local head branch has that the remote downstream branch does not (drives "Push to MR").
+        behind:
+          type: integer
+          description: Commits the remote downstream branch has that the local head branch does not (drives "Pull from MR").
+        state:
+          $ref: '#/components/schemas/ReviewState'
+
+    ReviewConfigResponse:
+      type: object
+      description: Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+      required: [configured, provider, remote, target_branch, auth, default_action]
+      properties:
+        configured:
+          type: boolean
+          description: True when a [review] section exists (or a provider could be resolved) so the Create MR affordance should be offered.
+        provider:
+          type: string
+          description: Resolved provider ("github" | "gitlab" | "") - empty when auto-detection could not decide.
+        provider_setting:
+          type: string
+          description: The raw provider setting ("auto" | "github" | "gitlab").
+        remote:
+          type: string
+        remote_url:
+          type: string
+          description: The URL of the configured remote (what provider detection ran against).
+        browse_url:
+          type: string
+          description: Derived https browse URL for the repo (for the forge web link), or empty.
+        target_branch:
+          type: string
+        auth:
+          type: string
+          description: Auth method ("cli" | "token").
+        auth_status:
+          type: string
+          description: 'Live auth status line (e.g. "gh: logged in as X" / "glab: not authenticated").'
+        authenticated:
+          type: boolean
+          description: Whether the forge CLI is authenticated.
+        default_action:
+          type: string
+          description: Primary head action ("merge" | "create_mr").
+        push_branch_template:
+          type: string
+        draft:
+          type: boolean
+        squash:
+          type: boolean
+        delete_remote_branch:
+          type: boolean
+        require_local_tests:
+          type: boolean
+        publish_when_green:
+          type: boolean
+          description: Default arming for new heads.
+        protected_branches:
+          type: array
+          items: { type: string }
+
+    ReviewState:
+      type: object
+      description: Cached forge MR state from the lifecycle watcher (Phase 3). Absent until the watcher has polled.
+      required: [state]
+      properties:
+        state:
+          type: string
+          description: Normalized MR state (draft | open | merged | closed).
+        ci_status:
+          type: string
+          description: Normalized CI status (success | failed | running | pending | none).
+        approvals:
+          type: integer
+        approvals_required:
+          type: integer
+        unresolved_discussions:
+          type: integer
+        mergeable:
+          type: boolean
 
     TestSummary:
       type: object
@@ -3234,6 +3633,9 @@ components:
         message:
           type: string
           description: Failure detail when state is "error"
+        stale:
+          type: boolean
+          description: '"Latest changes" channel only - the live worktree changed since this server was built, so a build-then-serve preview is out of date (restart to rebuild)'
         log:
           type: array
           items:
@@ -3249,11 +3651,6 @@ components:
           items:
             $ref: '#/components/schemas/PreviewStatus'
           description: One entry per configured server script, for the requested version
-        others:
-          type: array
-          items:
-            $ref: '#/components/schemas/PreviewStatus'
-          description: Still-live instances of those scripts at other versions (e.g. the selection moved on)
 
     ServiceScript:
       type: object
