@@ -11,7 +11,7 @@ func TestRenderSystemdUnit(t *testing.T) {
 		BinPath:     "/home/me/.local/bin/hydra",
 		Description: "hydra",
 		Env: map[string]string{
-			"HYDRA_API_ADDR": "0.0.0.0:26662",
+			"HYDRA_API_ADDR": "0.0.0.0:26600",
 			"HYDRA_PASTA":    "/home/me/code/hydra/.hydra/local/bin/pasta",
 			"PATH":           "/home/me/.local/bin:/usr/bin",
 		},
@@ -20,7 +20,7 @@ func TestRenderSystemdUnit(t *testing.T) {
 	for _, want := range []string{
 		"ExecStart=/home/me/.local/bin/hydra server",
 		"WorkingDirectory=/home/me/code/hydra",
-		"Environment=HYDRA_API_ADDR=0.0.0.0:26662",
+		"Environment=HYDRA_API_ADDR=0.0.0.0:26600",
 		"Environment=HYDRA_PASTA=/home/me/code/hydra/.hydra/local/bin/pasta",
 		"Environment=PATH=/home/me/.local/bin:/usr/bin",
 		"Restart=on-failure",

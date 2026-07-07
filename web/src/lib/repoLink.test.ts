@@ -68,7 +68,7 @@ describe('isTrustedLinkUrl', () => {
   it('trusts listed hosts and their subdomains', () => {
     expect(isTrustedLinkUrl('https://claude.com/cai/oauth/authorize?code=true')).toBe(true)
     expect(isTrustedLinkUrl('https://console.anthropic.com/foo')).toBe(true)
-    expect(isTrustedLinkUrl('http://localhost:26662/x')).toBe(true)
+    expect(isTrustedLinkUrl('http://localhost:26600/x')).toBe(true)
   })
 
   it('trusts the app origin even when not in the host list', () => {

@@ -44,7 +44,7 @@ export function isTrustedLinkUrl(url: string, selfOrigin?: string): boolean {
       if (u.host === new URL(selfOrigin).host) return true
     } catch { /* malformed origin - fall through to the host list */ }
   }
-  // Match the host list against the hostname (no port), so localhost:26662 and
+  // Match the host list against the hostname (no port), so localhost:26600 and
   // any port on a trusted host still count.
   return TRUSTED_LINK_HOSTS.some((t) => hostMatches(u.hostname, t))
 }
