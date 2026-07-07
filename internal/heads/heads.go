@@ -228,8 +228,7 @@ func GetHeadByID(ctx context.Context, reg *session.Registry, store *db.Store, pr
 func ResolveMergeDir(projectRoot, target string) (dir string, cleanup func(), err error) {
 	noop := func() {}
 
-	if strings.HasPrefix(target, "hydra/") {
-		id := strings.TrimPrefix(target, "hydra/")
+	if id, ok := git.AgentIDFromBranch(target); ok {
 		wt := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
 		if _, statErr := os.Stat(wt); statErr == nil {
 			if cur, brErr := git.GetCurrentBranch(wt); brErr == nil && cur == target {
@@ -412,7 +411,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			}
 			replacing = true
 		}
-		if !replacing && (git.BranchExists(projectRoot, "hydra/"+opts.ID) || headWorktreeExists(projectRoot, opts.ID)) {
+		if !replacing && (git.BranchExists(projectRoot, git.BranchName(opts.ID)) || headWorktreeExists(projectRoot, opts.ID)) {
 			return nil, errtrace.Wrap(&HeadExistsError{ID: opts.ID})
 		}
 	}
@@ -430,7 +429,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// sandbox - and especially the pre-spawn script - runs against the same layout
 	// a real agent sees: HYDRA_WORKTREE distinct from HYDRA_PROJECT_ROOT, never the
 	// project root itself. The worktree/branch are torn down when the test closes.
-	branchName := "hydra/" + opts.ID
+	branchName := git.BranchName(opts.ID)
 	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
 
 	opts.PrePrompt = strings.NewReplacer(
@@ -1261,7 +1260,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		}
 
 		if head.Branch != nil && head.ProjectPath != "" {
-			if strings.HasPrefix(*head.Branch, "hydra/") {
+			if git.IsAgentBranch(*head.Branch) {
 				log.Printf("heads: deleting branch %s for agent %s", *head.Branch, head.ID)
 				if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
 					log.Printf("warn: heads: delete branch %s failed for %s: %v", *head.Branch, head.ID, err)
@@ -1415,7 +1414,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		}
 	}
 
-	if head.Branch != nil && head.ProjectPath != "" && strings.HasPrefix(*head.Branch, "hydra/") {
+	if head.Branch != nil && head.ProjectPath != "" && git.IsAgentBranch(*head.Branch) {
 		if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
 			// Expected to fail for archived heads (branch already deleted on kill).
 			log.Printf("heads: purge delete branch %s for %s: %v", *head.Branch, head.ID, err)

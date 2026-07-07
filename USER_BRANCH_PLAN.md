@@ -22,9 +22,9 @@ Workarounds available today, no code changes:
 
 Split each head's branch in two:
 
-- `hydra/worktree/<id>` (naming still open, see below) - the internal branch
-  the head's worktree has checked out. The agent owns it exclusively and is
-  NEVER blocked by anything the user does. All agent commits land here.
+- `hydra-wt/<id>` (naming decided, see below) - the internal branch the head's
+  worktree has checked out. The agent owns it exclusively and is NEVER blocked
+  by anything the user does. All agent commits land here.
 - `hydra/<id>` - the public, user-facing branch. Becomes a best-effort mirror
   that follows the worktree branch. The user may check it out, dirty it, and
   commit on it.
@@ -51,7 +51,7 @@ semantics" and "Rejected alternatives").
 ## Sync state machine
 
 A daemon-side tick compares the mirror tip M (`hydra/<id>`) with the worktree
-branch tip W (`hydra/worktree/<id>`):
+branch tip W (`hydra-wt/<id>`):
 
 1. **M == W**: nothing to do.
 2. **M behind W** (agent committed - the common case): advance the mirror.
@@ -63,7 +63,7 @@ branch tip W (`hydra/worktree/<id>`):
      "is it checked out" check first (`git worktree list --porcelain`), since
      update-ref skips git's safety.
    - If checked out (e.g. in the main repo): run `git merge --ff-only
-     hydra/worktree/<id>` inside that checkout. Succeeds under non-overlapping
+     hydra-wt/<id>` inside that checkout. Succeeds under non-overlapping
      dirty changes; on abort, just retry next tick (self-healing) and surface
      a badge if it stays stuck.
 3. **M ahead of W** (user committed on `hydra/<id>`, agent has not since):
@@ -105,8 +105,12 @@ branch tip W (`hydra/worktree/<id>`):
 
 ## Implementation touchpoints
 
-Step zero: introduce `heads.BranchName(id)` / `heads.WorktreeBranchName(id)`
-helpers - the literal `"hydra/"+id` is inlined, not centralized.
+Step zero (DONE 2026-07-08): centralized branch naming in
+`internal/git/branch.go` - `git.BranchName` / `git.WorktreeBranchName` /
+`git.IsAgentBranch` / `git.AgentIDFromBranch`, and replaced the inlined
+`"hydra/"+id` at every runtime construction/prefix site below. (Display-only
+strings - `cli/spawn.go` attach hint, `internal/http/simulation.go` mock
+fixtures - deliberately left as literals.)
 
 Construction sites and prefix assumptions found by audit:
 
@@ -115,7 +119,8 @@ Construction sites and prefix assumptions found by audit:
   `git worktree add -b`) - spawn creates the worktree on the internal branch
   and additionally creates the mirror branch at the same commit.
 - `internal/heads/id.go:156` HeadExists, `:27,61` error strings.
-- Enumeration/classification that would now double-match `hydra/worktree/*`:
+- Enumeration/classification that must NOT match `hydra-wt/*` (the chosen
+  naming avoids the double-match, but these still need to exclude it):
   `internal/git/worktree.go:38` ListHydraBranches glob,
   `internal/http/repository.go:275` `IsAgent` prefix check (internal branches
   must not leak into the UI branch list),
@@ -150,17 +155,25 @@ Construction sites and prefix assumptions found by audit:
 ## Migration
 
 Existing heads: on resume (or a one-time daemon boot pass),
-`git -C <worktree> checkout -B hydra/worktree/<id>` - instant, same commit,
+`git -C <worktree> checkout -B hydra-wt/<id>` - instant, same commit,
 keeps the working tree - then let the mirror logic take over. `hydra/<id>`
 already exists and becomes the mirror as-is.
 
-## Naming (open decision)
+## Naming (decided: `hydra-wt/<id>`)
 
-`hydra/worktree/<id>` has no git ref-namespace conflict with `hydra/<id>`,
-but every `hydra/*` glob in code and in users' own git aliases double-matches.
-`hydra-wt/<id>` (or similar, outside the `hydra/` namespace) shrinks the
-filtering blast radius and keeps `hydra/*` meaning "one public branch per
-head". Mostly taste; decide before building.
+Chosen 2026-07-08. The internal worktree branch is `hydra-wt/<id>`, deliberately
+outside the `hydra/` namespace so every `hydra/*` glob in code (and in users'
+own git aliases) does NOT double-match it - `hydra/*` keeps meaning "one public
+branch per head" and the filtering blast radius stays small. (Rejected:
+`hydra/worktree/<id>`, which has no ref-namespace conflict but double-matches
+every `hydra/*` glob.)
+
+Centralized in `internal/git/branch.go` as of step zero: `git.BranchName(id)`
+-> `hydra/<id>`, `git.WorktreeBranchName(id)` -> `hydra-wt/<id>`, plus
+`git.IsAgentBranch(name)` / `git.AgentIDFromBranch(name)` (both match only the
+public `hydra/` prefix). Helpers live in `git`, not `heads` as the audit below
+suggests, because `git` cannot import `heads` (import cycle) and `git` itself
+constructs/classifies branch names.
 
 ## Rejected alternatives
 

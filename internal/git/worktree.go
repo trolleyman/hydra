@@ -37,7 +37,7 @@ func GetCurrentBranch(projectRoot string) (string, error) {
 
 // ListHydraBranches returns all branches matching hydra/*.
 func ListHydraBranches(projectRoot string) ([]string, error) {
-	out, err := gitOutput(projectRoot, "branch", "--list", "hydra/*", "--format=%(refname:short)")
+	out, err := gitOutput(projectRoot, "branch", "--list", BranchPrefix+"*", "--format=%(refname:short)")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}

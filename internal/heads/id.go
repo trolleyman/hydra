@@ -58,7 +58,7 @@ type HeadExistsError struct {
 func (e *HeadExistsError) Error() string {
 	switch {
 	case e.ProjectPath == "":
-		return fmt.Sprintf("branch hydra/%s or its worktree already exists in this repository", e.ID)
+		return fmt.Sprintf("branch %s or its worktree already exists in this repository", git.BranchName(e.ID))
 	case !e.SameProject:
 		return fmt.Sprintf("head ID %q is already used by a head in project %s", e.ID, e.ProjectPath)
 	case e.Archived:
@@ -153,7 +153,7 @@ func headIDTaken(store *db.Store, projectRoot, id string) bool {
 			return true
 		}
 	}
-	return git.BranchExists(projectRoot, "hydra/"+id) || headWorktreeExists(projectRoot, id)
+	return git.BranchExists(projectRoot, git.BranchName(id)) || headWorktreeExists(projectRoot, id)
 }
 
 // pickUniqueHeadID derives a free head ID from the prompt for projectRoot,

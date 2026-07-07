@@ -272,7 +272,7 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 	for _, name := range names {
 		branches = append(branches, api.RepositoryBranch{
 			Name:      name,
-			IsAgent:   strings.HasPrefix(name, "hydra/"),
+			IsAgent:   git.IsAgentBranch(name),
 			IsCurrent: name == current,
 		})
 	}

@@ -206,7 +206,7 @@ func MergedHydraBranches(projectRoot string) (map[string]struct{}, error) {
 		if j < 0 {
 			continue
 		}
-		if name := rest[:j]; strings.HasPrefix(name, "hydra/") {
+		if name := rest[:j]; IsAgentBranch(name) {
 			merged[name] = struct{}{}
 		}
 	}
