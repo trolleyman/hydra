@@ -491,12 +491,12 @@ export function SpawnForm({
   }
 
   // Attach a large text paste as a numbered file so it rides along like any
-  // other attachment instead of burying the task description. The extension is
-  // inferred from the clipboard's language (markdown -> .md, code -> its ext),
-  // falling back to .txt, so the agent gets a correctly-typed file to read.
+  // other attachment instead of burying the task description. The extension
+  // comes from the clipboard's declared language (markdown -> .md, code -> its
+  // ext), falling back to .txt, so the agent gets a correctly-typed file.
   function attachPastedText(text: string, dt: DataTransfer | null): number {
     const n = ++pastedTextCounterRef.current
-    const ext = pastedTextExtension(dt, text)
+    const ext = pastedTextExtension(dt)
     return uploadAttachment(new File([text], `pasted-text-${n}.${ext}`, { type: extensionMime(ext) }))
   }
 

@@ -92,17 +92,17 @@ describe('fenceCode', () => {
 describe('pastedTextExtension', () => {
   it('uses the VS Code language, mapped to a file extension', () => {
     const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"python"}' })
-    expect(pastedTextExtension(dt, 'x')).toBe('py')
+    expect(pastedTextExtension(dt)).toBe('py')
   })
   it('passes a language through when it already is the extension', () => {
     const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"go"}' })
-    expect(pastedTextExtension(dt, 'x')).toBe('go')
+    expect(pastedTextExtension(dt)).toBe('go')
   })
   it('maps a VS Code markdown copy to md', () => {
     const dt = fakeDt({ 'text/plain': 'hi', 'vscode-editor-data': '{"mode":"markdown"}' })
-    expect(pastedTextExtension(dt, 'hi')).toBe('md')
+    expect(pastedTextExtension(dt)).toBe('md')
   })
-  it('sniffs markdown from plain text with distinctive markers', () => {
+  it('does not sniff content - undeclared markdown-looking text stays txt', () => {
     const md = [
       '# Heading',
       '',
@@ -111,19 +111,13 @@ describe('pastedTextExtension', () => {
       '| a | b |',
       '| --- | --- |',
     ].join('\n')
-    expect(pastedTextExtension(null, md)).toBe('md')
-  })
-  it('does not mislabel a comment-heavy script as markdown', () => {
-    const script = [
-      '# configure the thing',
-      '# then run it',
-      '# cleanup afterwards',
-      'run --flag value',
-    ].join('\n')
-    expect(pastedTextExtension(null, script)).toBe('txt')
+    expect(pastedTextExtension(fakeDt({ 'text/plain': md }))).toBe('txt')
   })
   it('falls back to txt for plain prose', () => {
-    expect(pastedTextExtension(null, 'just some ordinary words here')).toBe('txt')
+    expect(pastedTextExtension(fakeDt({ 'text/plain': 'just some ordinary words here' }))).toBe('txt')
+  })
+  it('falls back to txt for a null clipboard', () => {
+    expect(pastedTextExtension(null)).toBe('txt')
   })
 })
 

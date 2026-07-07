@@ -98,44 +98,13 @@ const LANG_TO_EXT: Record<string, string> = {
   docker: 'dockerfile',
 }
 
-// A markdown link/image, e.g. [text](url) or ![alt](src). Distinctive enough
-// that it rarely shows up in source code.
-const MD_LINK = /!?\[[^\]]+\]\([^)]+\)/
-// A GitHub-flavored table separator row, e.g. | --- | :--: |. Near-unique to md.
-const MD_TABLE = /^\s*\|?[\s:]*-{3,}[\s:|-]*\|/
-// A task-list item, e.g. - [ ] todo or * [x] done.
-const MD_TASK = /^\s*[-*] \[[ xX]\]\s/
-// Inline bold, e.g. **word** (kept away from `* foo` bullets and `a * b`).
-const MD_BOLD = /(^|\s)\*\*[^*\s][^*]*\*\*/
-
-// Heuristic: does a plain-text block (no editor language metadata) read as
-// Markdown? We only say yes when it carries markers that are DISTINCTIVE to
-// Markdown - links, tables, task lists, bold - so a comment-heavy script (whose
-// `# ...` lines look like headings) isn't mislabeled .md. A single distinctive
-// marker must be backed by structural lines (headings / lists / blockquotes);
-// two distinctive markers stand on their own.
-function looksLikeMarkdown(text: string): boolean {
-  let distinctive = 0
-  let structural = 0
-  for (const line of text.split('\n')) {
-    if (MD_TABLE.test(line)) distinctive += 2
-    if (MD_LINK.test(line)) distinctive++
-    if (MD_TASK.test(line)) distinctive++
-    if (MD_BOLD.test(line)) distinctive++
-    if (/^#{1,6}\s+\S/.test(line)) structural++
-    else if (/^\s*(?:[-*+]|\d+\.)\s+\S/.test(line)) structural++
-    else if (/^>\s+\S/.test(line)) structural++
-  }
-  return distinctive >= 2 || (distinctive >= 1 && structural >= 2)
-}
-
-// The file extension (no leading dot) to save a pasted text block under. Trusts
-// the clipboard's editor language when present (VS Code copies, HTML), then
-// falls back to a conservative Markdown content sniff, else plain 'txt'.
-export function pastedTextExtension(dt: DataTransfer | null, text: string): string {
+// The file extension (no leading dot) to save a pasted text block under. Uses
+// only what the clipboard DECLARES - the editor language (VS Code copies:
+// markdown -> md, python -> py, ...) or an offered HTML representation - with no
+// content sniffing. When the clipboard says nothing, it's plain 'txt'.
+export function pastedTextExtension(dt: DataTransfer | null): string {
   const lang = detectCodeLanguage(dt)
   if (lang) return LANG_TO_EXT[lang] ?? lang
-  if (looksLikeMarkdown(text)) return 'md'
   return 'txt'
 }
 
