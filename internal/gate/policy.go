@@ -35,6 +35,11 @@ const (
 // rather than a generic "needs you" prompt.
 const NotificationPolicyApproval = "policy_approval"
 
+// NotificationAPIError is the status.json notification_type accompanying an
+// `error` status - a chat-mode turn that failed mid-response - so the UI can
+// tell it apart from an ordinary "needs you" prompt.
+const NotificationAPIError = "api_error"
+
 // Policy is the trusted security-gate policy, resolved on the host from the
 // project-root config.toml and seeded into the sandbox read-only. The in-sandbox
 // hook only ever reads this file - it never parses the branch's TOML - so a

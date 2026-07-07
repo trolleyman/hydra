@@ -200,6 +200,46 @@ async function settle(page: import('playwright').Page) {
   })
 }
 
+// waitForStableRect blocks until an element's bounding box stops moving. The
+// lightbox comparator sizes itself from an ASYNC aspect-ratio measurement (a
+// `new Image()` onload in LightboxDiff) plus the displayed image's own decode,
+// so its layout can shift a frame or two AFTER settle() returns - capturing mid
+// shift is what made artifact-lightbox-{ab,onion}-*.png flaky (the image landed
+// larger and clipped instead of fit-and-centred). It polls Node-side because the
+// in-page clock is pinned (Date.now frozen), so a real-time deadline has to live
+// out here; each sample does an in-page rAF first so any pending layout flushes
+// between reads. Best-effort: on timeout it returns and the capture proceeds.
+async function waitForStableRect(
+  page: import('playwright').Page,
+  selector: string,
+  { stableReads = 3, timeoutMs = 3000, epsilon = 0.5 }: { stableReads?: number; timeoutMs?: number; epsilon?: number } = {},
+) {
+  const read = () =>
+    page.evaluate(async (sel) => {
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
+      const el = document.querySelector(sel)
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { x: r.x, y: r.y, w: r.width, h: r.height }
+    }, selector)
+
+  const near = (a: { x: number; y: number; w: number; h: number } | null, b: typeof a) =>
+    a != null && b != null &&
+    Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon &&
+    Math.abs(a.w - b.w) <= epsilon && Math.abs(a.h - b.h) <= epsilon
+
+  const deadline = Date.now() + timeoutMs
+  let prev = await read()
+  let stable = 0
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 32)) // Node-side (real) spacing between samples.
+    const cur = await read()
+    stable = near(cur, prev) ? stable + 1 : 0
+    prev = cur
+    if (stable >= stableReads) return
+  }
+}
+
 // captureWithRetry takes a screenshot, retrying a handful of times on the
 // transient Chromium protocol errors that surface under load. With up to ~32
 // headless contexts capturing in parallel (see the worker pool), a fullPage
@@ -2372,11 +2412,18 @@ try {
             !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
           )
           await settle(page)
+          // The comparator's fit sizing settles a frame or two after the caption
+          // appears (async aspect measurement + image decode), so wait for its
+          // image rect to stop moving before capturing - otherwise the shot can
+          // catch the pre-fit (larger, clipped) layout. See waitForStableRect.
+          await waitForStableRect(page, 'figure img')
           if (pg.lightboxMode) {
             // Switch the in-lightbox comparator to another mode via its selector
-            // (button text === the mode label), then let the new layers decode.
+            // (button text === the mode label), then let the new layers decode
+            // and the comparator re-fit before capturing.
             await page.click(`figure button:text-is("${pg.lightboxMode}")`)
             await settle(page)
+            await waitForStableRect(page, 'figure img')
           }
           if (pg.lightboxZoom) {
             // Magnify the comparator (ZoomPan) so the minimap + "Reset view" chrome

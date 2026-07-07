@@ -501,9 +501,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     // Intercept pastes that carry files (e.g. a screenshot, or a copied file).
     // We upload the file and type its absolute path into the agent's prompt so
-    // the agent can read it - the path is valid inside the sandbox. Plain text
-    // pastes fall through to xterm. Capture phase + stopImmediatePropagation so
-    // xterm never also handles a file paste.
+    // the agent can read it - the path is valid inside the sandbox. Capture
+    // phase + stopImmediatePropagation so xterm never also handles an
+    // intercepted paste.
     async function handlePastedFiles(files: File[]) {
       for (const file of files) {
         showNotice(`Uploading ${file.name || 'file'}...`, false)
@@ -522,10 +522,30 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     }
     const onPaste = (ev: ClipboardEvent) => {
       const files = extractFiles(ev.clipboardData)
-      if (files.length === 0) return // let xterm handle text pastes
+      if (files.length > 0) {
+        ev.preventDefault()
+        ev.stopImmediatePropagation()
+        void handlePastedFiles(files)
+        return
+      }
+      // Text pastes with newlines: xterm normalizes every newline to CR (\r),
+      // and a bare CR submits the agent's prompt - so pasting text that ends
+      // in a newline would send the message immediately. Unless the app has
+      // enabled bracketed paste (in which case it handles pasted newlines
+      // itself), rewrite newlines to LF (\n), which agent prompts treat as a
+      // literal newline (the same trick as Shift+Enter above), and drop
+      // trailing newlines entirely. Shells are left alone: for a shell LF
+      // executes a line just like CR, so rewriting wouldn't help.
+      if (shell || term.modes.bracketedPasteMode) return // let xterm handle it
+      const text = ev.clipboardData?.getData('text') ?? ''
+      if (!/[\r\n]/.test(text)) return // single-line paste, nothing to fix
       ev.preventDefault()
       ev.stopImmediatePropagation()
-      void handlePastedFiles(files)
+      const safe = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+      if (safe && ws.readyState === WebSocket.OPEN) {
+        ws.send(new TextEncoder().encode(safe))
+        term.scrollToBottom()
+      }
     }
     const textarea = term.textarea
     textarea?.addEventListener('paste', onPaste, true)

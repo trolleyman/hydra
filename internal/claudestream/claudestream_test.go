@@ -132,6 +132,41 @@ func TestControlResponseLine(t *testing.T) {
 	}
 }
 
+func TestParseEventAPIError(t *testing.T) {
+	line := []byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}]}}`)
+	ev, ok := ParseEvent(line)
+	if !ok || !ev.IsAPIError {
+		t.Fatalf("ParseEvent IsAPIError = %v (ok=%v), want true", ev.IsAPIError, ok)
+	}
+	if got := APIErrorText(line); got != "API Error: Server error mid-response. The response above may be incomplete." {
+		t.Errorf("APIErrorText = %q", got)
+	}
+
+	// An ordinary assistant message is not flagged.
+	ev, _ = ParseEvent([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`))
+	if ev.IsAPIError {
+		t.Error("ordinary assistant message flagged IsAPIError")
+	}
+}
+
+func TestRingFilterOnAPIError(t *testing.T) {
+	var got []string
+	f := &RingFilter{OnAPIError: func(msg string) { got = append(got, msg) }}
+
+	// A stream_event is dropped (and never an error); a normal assistant line is
+	// kept and does not fire; an api-error line fires exactly once with its text.
+	f.Filter([]byte(`{"type":"stream_event"}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}` + "\n"))
+	kept := f.Filter([]byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"API Error: boom"}]}}` + "\n"))
+
+	if len(got) != 1 || got[0] != "API Error: boom" {
+		t.Fatalf("OnAPIError fired %v, want [\"API Error: boom\"]", got)
+	}
+	if len(kept) == 0 {
+		t.Error("api-error line should still be persisted to the ring")
+	}
+}
+
 func TestLineBufferReassembly(t *testing.T) {
 	lb := &LineBuffer{}
 	var got []string

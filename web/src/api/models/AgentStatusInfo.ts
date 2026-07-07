@@ -30,7 +30,7 @@ export type AgentStatusInfo = {
      */
     last_message_is_suggested_next_message?: boolean;
     /**
-     * Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications.
+     * Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); 'api_error' accompanies an `error` status (the turn failed mid-response); other values come from the agent's own notifications.
      */
     notification_type?: string;
 };

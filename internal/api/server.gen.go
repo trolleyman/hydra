@@ -19,6 +19,7 @@ import (
 // Defines values for AgentStatus.
 const (
 	Building   AgentStatus = "building"
+	Errored    AgentStatus = "errored"
 	Finished   AgentStatus = "finished"
 	Killing    AgentStatus = "killing"
 	Merging    AgentStatus = "merging"
@@ -294,7 +295,7 @@ type AgentResponse struct {
 	WorktreePath *string `json:"worktree_path"`
 }
 
-// AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
+// AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
 type AgentStatus string
 
 // AgentStatusInfo defines model for AgentStatusInfo.
@@ -311,13 +312,13 @@ type AgentStatusInfo struct {
 	// LastMessageIsSuggestedNextMessage True when last_message reads as a suggested next message - a terse instruction you could send straight back to the agent (e.g. 'run it') - rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
 	LastMessageIsSuggestedNextMessage *bool `json:"last_message_is_suggested_next_message,omitempty"`
 
-	// NotificationType Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications.
+	// NotificationType Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); 'api_error' accompanies an `error` status (the turn failed mid-response); other values come from the agent's own notifications.
 	NotificationType *string `json:"notification_type,omitempty"`
 
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 
-	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
 	Status AgentStatus `json:"status"`
 
 	// Timestamp ISO 8601 timestamp of when the status was set
@@ -1309,7 +1310,7 @@ type TerminalSizeEventType string
 
 // TerminalStatusEvent defines model for TerminalStatusEvent.
 type TerminalStatusEvent struct {
-	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
 	Status *AgentStatus            `json:"status,omitempty"`
 	Type   TerminalStatusEventType `json:"type"`
 }

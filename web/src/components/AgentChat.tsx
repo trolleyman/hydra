@@ -107,6 +107,9 @@ interface ClaudeEvent {
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
   apiKeySource?: string
+  // Set by the CLI on the synthesized assistant message it emits when a turn
+  // fails mid-response ("API Error: ... The response above may be incomplete.").
+  isApiErrorMessage?: boolean
   // Raw API event carried by stream_event lines (--include-partial-messages).
   event?: {
     type?: string
@@ -970,6 +973,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
         case 'assistant': {
           const content = ev.message?.content
+          // A turn that failed mid-response comes back as an ordinary assistant
+          // message flagged isApiErrorMessage; render it as an error box (like a
+          // result error) rather than a normal reply so it reads as the failure
+          // it is. The head is also flipped into the `error` status server-side.
+          if (ev.isApiErrorMessage) {
+            const text = Array.isArray(content)
+              ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+              : typeof content === 'string'
+                ? content
+                : ''
+            push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
+            clearStream()
+            return
+          }
           if (!Array.isArray(content)) return
           const msgId = ev.message?.id ?? ''
           let seen = seenBlocks.get(msgId)
