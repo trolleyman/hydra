@@ -2414,6 +2414,28 @@ func isManagedCommentedArrayHeader(line string) bool {
 	return false
 }
 
+// managedExampleTables are the single tables whose commented-out example blocks
+// ("# [review]" followed by "# key = value" lines) Hydra regenerates on every
+// save, mirroring managedArraySections for array-of-tables examples.
+var managedExampleTables = []string{"review", "jira"}
+
+// isManagedCommentedTableHeader reports whether a line is a commented-out header
+// for a managed example table (e.g. "# [review]") - the start of a regenerated
+// example block.
+func isManagedCommentedTableHeader(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
+		return false
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+	for _, s := range managedExampleTables {
+		if t == "["+s+"]" {
+			return true
+		}
+	}
+	return false
+}
+
 // isCommentedSimpleAssign reports whether a line is a commented-out "key = value"
 // where key is a bare TOML key - i.e. an example field line like `# name = "x"`,
 // not prose that merely contains "=". Used to consume the body of a commented
@@ -2462,7 +2484,7 @@ func userComments(comments []string, keys map[string]bool) []string {
 		if isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
 			continue
 		}
-		if isManagedCommentedArrayHeader(c) {
+		if isManagedCommentedArrayHeader(c) || isManagedCommentedTableHeader(c) {
 			inExample = true
 			continue
 		}
@@ -2703,10 +2725,10 @@ func renderConfig(existing []byte, cfg Config) string {
 // config.local.toml; nothing secret goes in either file.
 func reviewExampleLines() []string {
 	return []string{
-		"# [review] configures how Hydra talks to a forge (GitHub/GitLab) and the",
-		"# defaults for the Create MR dialog. There is no mode switch - the head<->MR",
-		"# link is per-head. Personal overrides belong in .hydra/config.local.toml;",
-		"# never put a token here (host-side gh/glab creds or the 0600 secrets file).",
+		docPrefix + " [review] configures how Hydra talks to a forge (GitHub/GitLab) and the",
+		docPrefix + " defaults for the Create MR dialog. There is no mode switch - the head<->MR",
+		docPrefix + " link is per-head. Personal overrides belong in .hydra/config.local.toml;",
+		docPrefix + " never put a token here (host-side gh/glab creds or the 0600 secrets file).",
 		"# [review]",
 		`# provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)`,
 		`# remote = "origin"`,
@@ -2721,7 +2743,7 @@ func reviewExampleLines() []string {
 		"# publish_when_green = false   # arm new heads to auto-open a draft MR when green",
 		`# protected_branches = ["main"] # warn before a direct LOCAL merge into these`,
 		"",
-		"# [jira] powers {ticket} templating and (later) spawn-from-ticket.",
+		docPrefix + " [jira] powers {ticket} templating and (later) spawn-from-ticket.",
 		"# [jira]",
 		`# url = "https://mycorp.atlassian.net"`,
 		`# ticket_pattern = "[A-Z]+-[0-9]+"`,
