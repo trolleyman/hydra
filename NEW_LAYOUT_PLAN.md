@@ -111,9 +111,10 @@ The top of the pane has **two rows of chrome**:
     Previews and Artifacts all show data for the selected target commit/ref.
     It stays put and keeps its value across tab switches.
   - The **view selector** (`Diff | Tests | Previews`) picks which view renders.
-    Only the selected view renders (or stays mounted but hidden to preserve
-    scroll/state). This replaces the current stacked-collapsible-cards
-    approach *inside* the pane.
+    Only the selected view is mounted; switching tabs unmounts the previous one
+    (matching how `CollapsibleCard` unmounts a collapsed body today - see
+    decision #4). This replaces the current stacked-collapsible-cards approach
+    *inside* the pane.
 - **Row 2 - the selected view's own toolbar.** Contextual. For **Diff** it is
   the rest of the "Changes" toolbar: the **base selector** (the left/
   compare-against side, `LeftSelector`), +/- stats, reset,
@@ -238,11 +239,9 @@ its contents; it simply spans both new panes.
 
 ## Split / resize behavior
 
-- New draggable vertical divider between the two panes. No split-pane library
-  today; either add a small one (`react-resizable-panels` is the lightest fit)
-  or hand-roll a pointer-drag mirroring `handleSidebarResizeStart` in
-  `__root.tsx`. Recommendation: hand-roll to match existing patterns and avoid
-  a new dependency, unless we want nested/persisted splits elsewhere later.
+- New draggable vertical divider between the two panes, **hand-rolled** as a
+  pointer-drag mirroring `handleSidebarResizeStart` in `__root.tsx` (decided -
+  no split-pane library, no new dependency).
 - Persist the split ratio (per project or global) in `localStorage` via a new
   `StorageKeys` entry, like `sidebarWidth`.
 - Each pane scrolls independently. This removes the single `[data-main-scroll]`
@@ -303,13 +302,22 @@ selectors today; moving that block into a right panel changes nothing.)
    Diff view - they share the diff's base->head selector (see "Artifacts"
    above). Revisit only if the combined list proves too busy even with a
    filter.
-2. **Split library vs hand-rolled?** Lean hand-rolled to match existing
-   resize code and avoid a dependency.
+2. ~~**Split library vs hand-rolled?**~~ DECIDED: hand-rolled, mirroring
+   `handleSidebarResizeStart` in `__root.tsx`. No new dependency.
 3. **Which pane owns the metadata row?** Proposed: left pane. Alternative:
    a thin strip under the header spanning both.
-4. **Keep panels mounted-but-hidden or unmount on tab switch?** Mounted-but-
-   hidden preserves diff scroll position and avoids refetch, at some memory
-   cost. Lean mounted-but-hidden for diff, lazy for previews (live servers).
+4. ~~**Keep panels mounted-but-hidden or unmount on tab switch?**~~ DECIDED:
+   unmount inactive views - match what happens today. `CollapsibleCard`
+   already unmounts a collapsed body ("the body stays mounted only while open";
+   a collapsed card never renders its heavy children), and diff files
+   lazy mount/unmount by viewport. So only the active tab's view is mounted,
+   and the diff keeps its existing per-file lazy mounting inside. Tradeoff:
+   diff scroll/selected-file resets on return and data refetches - same as
+   reopening a collapsed card today; persist scroll via `agentViewPrefs` if it
+   feels bad. Caveat: unmounting the **Previews** iframe on switch tears down
+   the embedded app (full reload + server wake on return); if that is annoying
+   in practice, special-case previews to stay alive. Start with uniform
+   unmount.
 5. **Default split ratio** - e.g. 40% terminal / 60% inspector? Diff usually
    wants more room.
 
