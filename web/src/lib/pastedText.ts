@@ -78,3 +78,71 @@ export function detectCodeLanguage(dt: DataTransfer | null): string | null {
 export function fenceCode(text: string, lang: string): string {
   return `\`\`\`${lang}\n${text}\n\`\`\``
 }
+
+// Fence/language tags (see detectCodeLanguage) whose file extension isn't just
+// the tag itself. Anything not listed is used verbatim (go, json, html, css,
+// tsx, jsx, sql, java, php, swift, kotlin, toml, xml, scss, ...), which already
+// matches the conventional extension.
+const LANG_TO_EXT: Record<string, string> = {
+  markdown: 'md',
+  bash: 'sh',
+  shellscript: 'sh',
+  python: 'py',
+  ruby: 'rb',
+  rust: 'rs',
+  typescript: 'ts',
+  javascript: 'js',
+  csharp: 'cs',
+  cpp: 'cpp',
+  yaml: 'yml',
+  docker: 'dockerfile',
+}
+
+// A markdown link/image, e.g. [text](url) or ![alt](src). Distinctive enough
+// that it rarely shows up in source code.
+const MD_LINK = /!?\[[^\]]+\]\([^)]+\)/
+// A GitHub-flavored table separator row, e.g. | --- | :--: |. Near-unique to md.
+const MD_TABLE = /^\s*\|?[\s:]*-{3,}[\s:|-]*\|/
+// A task-list item, e.g. - [ ] todo or * [x] done.
+const MD_TASK = /^\s*[-*] \[[ xX]\]\s/
+// Inline bold, e.g. **word** (kept away from `* foo` bullets and `a * b`).
+const MD_BOLD = /(^|\s)\*\*[^*\s][^*]*\*\*/
+
+// Heuristic: does a plain-text block (no editor language metadata) read as
+// Markdown? We only say yes when it carries markers that are DISTINCTIVE to
+// Markdown - links, tables, task lists, bold - so a comment-heavy script (whose
+// `# ...` lines look like headings) isn't mislabeled .md. A single distinctive
+// marker must be backed by structural lines (headings / lists / blockquotes);
+// two distinctive markers stand on their own.
+function looksLikeMarkdown(text: string): boolean {
+  let distinctive = 0
+  let structural = 0
+  for (const line of text.split('\n')) {
+    if (MD_TABLE.test(line)) distinctive += 2
+    if (MD_LINK.test(line)) distinctive++
+    if (MD_TASK.test(line)) distinctive++
+    if (MD_BOLD.test(line)) distinctive++
+    if (/^#{1,6}\s+\S/.test(line)) structural++
+    else if (/^\s*(?:[-*+]|\d+\.)\s+\S/.test(line)) structural++
+    else if (/^>\s+\S/.test(line)) structural++
+  }
+  return distinctive >= 2 || (distinctive >= 1 && structural >= 2)
+}
+
+// The file extension (no leading dot) to save a pasted text block under. Trusts
+// the clipboard's editor language when present (VS Code copies, HTML), then
+// falls back to a conservative Markdown content sniff, else plain 'txt'.
+export function pastedTextExtension(dt: DataTransfer | null, text: string): string {
+  const lang = detectCodeLanguage(dt)
+  if (lang) return LANG_TO_EXT[lang] ?? lang
+  if (looksLikeMarkdown(text)) return 'md'
+  return 'txt'
+}
+
+// The MIME type to stamp on a saved paste of the given extension. Only affects
+// the client-side File object; the backend infers content-type from the name.
+export function extensionMime(ext: string): string {
+  if (ext === 'md') return 'text/markdown'
+  if (ext === 'html') return 'text/html'
+  return 'text/plain'
+}

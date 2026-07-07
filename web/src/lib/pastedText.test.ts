@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   countLines,
   detectCodeLanguage,
+  extensionMime,
   fenceCode,
   getClipboardText,
   isLargePaste,
+  pastedTextExtension,
   PASTE_CHAR_THRESHOLD,
 } from './pastedText'
 
@@ -84,5 +86,51 @@ describe('detectCodeLanguage', () => {
 describe('fenceCode', () => {
   it('wraps text in a tagged fence', () => {
     expect(fenceCode('<div>Test123123</div>', 'html')).toBe('```html\n<div>Test123123</div>\n```')
+  })
+})
+
+describe('pastedTextExtension', () => {
+  it('uses the VS Code language, mapped to a file extension', () => {
+    const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"python"}' })
+    expect(pastedTextExtension(dt, 'x')).toBe('py')
+  })
+  it('passes a language through when it already is the extension', () => {
+    const dt = fakeDt({ 'text/plain': 'x', 'vscode-editor-data': '{"mode":"go"}' })
+    expect(pastedTextExtension(dt, 'x')).toBe('go')
+  })
+  it('maps a VS Code markdown copy to md', () => {
+    const dt = fakeDt({ 'text/plain': 'hi', 'vscode-editor-data': '{"mode":"markdown"}' })
+    expect(pastedTextExtension(dt, 'hi')).toBe('md')
+  })
+  it('sniffs markdown from plain text with distinctive markers', () => {
+    const md = [
+      '# Heading',
+      '',
+      '- [ ] task with a [link](https://example.com)',
+      '',
+      '| a | b |',
+      '| --- | --- |',
+    ].join('\n')
+    expect(pastedTextExtension(null, md)).toBe('md')
+  })
+  it('does not mislabel a comment-heavy script as markdown', () => {
+    const script = [
+      '# configure the thing',
+      '# then run it',
+      '# cleanup afterwards',
+      'run --flag value',
+    ].join('\n')
+    expect(pastedTextExtension(null, script)).toBe('txt')
+  })
+  it('falls back to txt for plain prose', () => {
+    expect(pastedTextExtension(null, 'just some ordinary words here')).toBe('txt')
+  })
+})
+
+describe('extensionMime', () => {
+  it('maps md and html, defaulting to text/plain', () => {
+    expect(extensionMime('md')).toBe('text/markdown')
+    expect(extensionMime('html')).toBe('text/html')
+    expect(extensionMime('ts')).toBe('text/plain')
   })
 })

@@ -14,7 +14,7 @@ import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLoca
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
-import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode } from '../lib/pastedText'
+import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime } from '../lib/pastedText'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
@@ -490,11 +490,14 @@ export function SpawnForm({
     for (const file of rawFiles.map(numberGenericImage)) uploadAttachment(file)
   }
 
-  // Attach a large text paste as a numbered .txt file so it rides along like any
-  // other attachment instead of burying the task description.
-  function attachPastedText(text: string): number {
+  // Attach a large text paste as a numbered file so it rides along like any
+  // other attachment instead of burying the task description. The extension is
+  // inferred from the clipboard's language (markdown -> .md, code -> its ext),
+  // falling back to .txt, so the agent gets a correctly-typed file to read.
+  function attachPastedText(text: string, dt: DataTransfer | null): number {
     const n = ++pastedTextCounterRef.current
-    return uploadAttachment(new File([text], `pasted-text-${n}.txt`, { type: 'text/plain' }))
+    const ext = pastedTextExtension(dt, text)
+    return uploadAttachment(new File([text], `pasted-text-${n}.${ext}`, { type: extensionMime(ext) }))
   }
 
   function removeAttachment(id: number) {
@@ -562,7 +565,7 @@ export function SpawnForm({
 
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
-    const id = attachPastedText(text)
+    const id = attachPastedText(text, e.clipboardData)
     lastPasteRef.current = { text, attachmentId: id, lang: detectCodeLanguage(e.clipboardData) }
   }
 
