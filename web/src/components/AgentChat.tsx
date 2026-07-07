@@ -56,6 +56,20 @@ interface ClaudeEvent {
   total_cost_usd?: number
   result?: string
   is_error?: boolean
+  // Raw API event carried by stream_event lines (--include-partial-messages).
+  event?: {
+    type?: string
+    content_block?: { type?: string }
+    delta?: { type?: string; text?: string; thinking?: string }
+  }
+}
+
+// closeOpenFence appends a virtual closing fence when a streaming text ends
+// inside an open ``` block, so the partial code renders as a code block
+// instead of raw backticks until the real fence arrives.
+function closeOpenFence(text: string): string {
+  const opens = (text.match(/^```/gm) ?? []).length
+  return opens % 2 === 1 ? text + '\n```' : text
 }
 
 // toolResultText flattens a tool_result block's content (string, or an array
@@ -145,6 +159,10 @@ function ThinkingCard({ item }: { item: Extract<ChatItem, { kind: 'thinking' }> 
 
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
+  // The in-flight streamed content block (token streaming via stream_event
+  // deltas), rendered live below the settled items and superseded by the
+  // complete assistant event that follows it.
+  const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
   const [replayDone, setReplayDone] = useState(false)
   const [connected, setConnected] = useState(false)
   const [input, setInput] = useState('')
@@ -167,10 +185,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   useEffect(() => {
     setItems([])
+    setStream(null)
     setReplayDone(false)
     pinnedRef.current = true
 
     let nextId = 1
+    // Until replay_done, everything arriving is history (transcript backfill +
+    // ring replay, possibly thousands of events): buffer it all and commit ONE
+    // state update, instead of a render per event. Live events after that
+    // flush per microtask batch.
+    let replaying = true
     // Assistant events arrive one content block per event but share the API
     // message id; if a CLI version ever re-emits blocks cumulatively, this
     // per-message seen-set keeps the reducer idempotent.
@@ -185,10 +209,32 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
       pending.push({ ...item, id: nextId++ } as ChatItem)
-      if (!flushScheduled) {
+      if (!replaying && !flushScheduled) {
         flushScheduled = true
         queueMicrotask(flush)
       }
+    }
+
+    // Token-streaming buffer. Deltas can arrive far faster than 60fps, so they
+    // accumulate here and the visible state is refreshed on a short timer;
+    // each refresh re-renders (and re-parses the markdown of) only the one
+    // in-flight block, which stays small.
+    let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
+    let streamTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleStreamFlush = () => {
+      if (streamTimer != null) return
+      streamTimer = setTimeout(() => {
+        streamTimer = null
+        setStream(streamBuf ? { ...streamBuf } : null)
+      }, 40)
+    }
+    const clearStream = () => {
+      streamBuf = null
+      if (streamTimer != null) {
+        clearTimeout(streamTimer)
+        streamTimer = null
+      }
+      setStream(null)
     }
     const patchTool = (toolUseId: string, result: string, isError: boolean) => {
       // The tool card may still be in the un-flushed batch or already rendered.
@@ -241,6 +287,33 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
             }
           }
+          // The complete event supersedes any in-flight streamed block (finals
+          // always follow their own deltas). Cleared in the same batch as the
+          // push above, so the text swaps without a flash.
+          clearStream()
+          return
+        }
+        case 'stream_event': {
+          const e = ev.event
+          if (!e) return
+          if (e.type === 'content_block_start') {
+            const bt = e.content_block?.type
+            // tool_use input streaming (input_json_delta) is not rendered; the
+            // tool card appears with the complete assistant event.
+            streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
+            scheduleStreamFlush()
+          } else if (e.type === 'content_block_delta' && streamBuf) {
+            const d = e.delta
+            if (d?.type === 'text_delta' && typeof d.text === 'string') {
+              streamBuf.text += d.text
+              scheduleStreamFlush()
+            } else if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
+              streamBuf.text += d.thinking
+              scheduleStreamFlush()
+            }
+          } else if (e.type === 'message_stop') {
+            clearStream()
+          }
           return
         }
         case 'result': {
@@ -251,11 +324,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             costUsd: ev.total_cost_usd,
             errorText: ev.is_error ? ev.result : undefined,
           })
+          clearStream()
           return
         }
         default:
-          // system/init, stream_event, rate_limit_event, future kinds: not
-          // rendered (yet), deliberately not an error.
+          // system/init, rate_limit_event, future kinds: not rendered (yet),
+          // deliberately not an error.
           return
       }
     }
@@ -282,6 +356,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           if (msg.event) handleClaudeEvent(msg.event)
           return
         case 'replay_done':
+          replaying = false
+          flush()
           setReplayDone(true)
           return
       }
@@ -292,6 +368,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     return () => {
+      if (streamTimer != null) clearTimeout(streamTimer)
       closeWebSocket(ws)
       wsRef.current = null
       setConnected(false)
@@ -302,7 +379,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => {
     const el = scrollRef.current
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
-  }, [items, replayDone])
+  }, [items, stream, replayDone])
 
   // Re-measure the pin and jump to the bottom when the pane becomes visible
   // (display:none panes have no scroll geometry).
@@ -384,6 +461,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               )
           }
         })}
+        {/* The in-flight streamed block: markdown-rendered live (with a virtual
+            closing fence while inside a code block) plus a pulsing caret. */}
+        {stream && stream.kind === 'assistant' && (
+          <div className="max-w-[95%]">
+            {renderMarkdownBlocks(closeOpenFence(stream.text))}
+            <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-blue-400/80" />
+          </div>
+        )}
+        {stream && stream.kind === 'thinking' && (
+          <div className="text-xs italic text-gray-500 whitespace-pre-wrap break-words">
+            {stream.text}
+            <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-gray-500/80" />
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 border-t border-gray-700 dark:border-gray-600 bg-gray-800/60 p-2">

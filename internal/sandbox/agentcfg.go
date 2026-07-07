@@ -450,14 +450,19 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		if chatMode {
 			// stream-json output requires --verbose in -p mode.
 			// --replay-user-messages echoes stdin user turns back onto stdout,
-			// so the session scrollback ring alone reconstructs the whole
-			// conversation for a freshly-attached chat client.
+			// so the session scrollback ring alone reconstructs the recent
+			// conversation for a freshly-attached chat client (older history is
+			// backfilled from the transcript file, see chat_ws.go).
+			// --include-partial-messages adds stream_event token deltas for
+			// live streaming; those are filtered OUT of the scrollback ring
+			// (session.RingFilter) so replay stays compact.
 			argv = append(argv,
 				"-p",
 				"--input-format", "stream-json",
 				"--output-format", "stream-json",
 				"--verbose",
 				"--replay-user-messages",
+				"--include-partial-messages",
 			)
 			if resume {
 				argv = append(argv, "--continue")

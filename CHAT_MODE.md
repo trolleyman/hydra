@@ -1,16 +1,15 @@
 # Chat mode for Claude heads
 
-**Implementation status:** phases 0-2 are implemented, plus the interrupt
-button and per-turn cost footer from phase 3. Key landmarks:
-`internal/claudestream` (protocol), `internal/nshost` Pipes mode,
-`session.KindChat`, `internal/http/chat_ws.go` (WS framing),
-`web/src/components/AgentChat.tsx` (the pane),
+**Implementation status:** phases 0-3 are implemented, plus transcript
+backfill from phase 4. Key landmarks: `internal/claudestream` (protocol,
+ring filter, transcript tail), `internal/nshost` Pipes mode,
+`session.KindChat`, `internal/http/chat_ws.go` (WS framing + backfill),
+`web/src/components/AgentChat.tsx` (the pane, incl. token streaming),
 `renderMarkdownBlocks` in `web/src/lib/markdown.tsx`, the mode chip in
 `AgentDetail.tsx` and the spawn-form toggle in `SpawnForm.tsx`. The simulation
-server serves a chat-mode demo head (`agent-chat`) and the `agent-chat`
-screenshot covers it. Still open: token streaming
-(`--include-partial-messages`), transcript backfill beyond the ring, and
-image attachments in the chat input.
+server serves a chat-mode demo head (`agent-chat`, with a streamed scripted
+reply) and the `agent-chat` screenshot covers it. Still open: image
+attachments in the chat input, richer tool cards.
 
 Design doc for a per-head "chat mode": instead of attaching an xterm to the
 Claude CLI's interactive TUI over a PTY, Hydra drives the CLI's structured
@@ -86,11 +85,15 @@ Notes:
   alive reading user messages from stdin. The head's initial task prompt is
   sent as the **first stdin message** instead of argv, so it shows up as a
   normal user turn in the chat history.
-- `--include-partial-messages` turns on token-level `stream_event` deltas.
-  Deferred to Phase 3 (see Phasing) - without it, output arrives one
-  complete assistant message at a time, which in an agentic loop means an
-  update every few seconds (each text segment between tool calls). Much
-  simpler replay semantics for the MVP.
+- `--include-partial-messages` turns on token-level `stream_event` deltas
+  for live token streaming. To keep replay compact, those delta lines are
+  filtered OUT of the scrollback ring (`claudestream.RingFilter`, applied by
+  the session read loop for chat-kind sessions): attachers still receive
+  them live, but only complete events are persisted - partials would be
+  redundant with the final assistant/user events and would wrap the ring
+  several times faster. The filter only persists whole lines, so a new
+  attacher's snapshot appends the filter's buffered partial line
+  (`Pending()`) to keep the ring->live seam intact.
 - `--replay-user-messages` echoes user messages back into the stdout
   stream. Load-bearing for the replay design below: it puts user turns in
   the scrollback ring, so a freshly attached client reconstructs the whole
@@ -221,8 +224,22 @@ Ring/scrollback in chat mode:
   VT100 scrollback; start with ~2 MB) and replayed verbatim on attach.
 - A wrapped ring can start mid-line; the contract is that the client (and
   the WS handler) discard everything before the first `\n` in the replay.
-- Full history beyond the ring comes later from the on-disk transcript
-  (`~/.claude/projects/<slug>/<session-id>.jsonl`) - Phase 4.
+- The ring only covers the CURRENT process - a resumed process replays
+  nothing on stdout (spike-verified), so on its own the ring would show an
+  empty conversation after any relaunch. Durable history comes from
+  **transcript backfill**: on attach, the WS handler tails the head's
+  newest session `.jsonl` (`~/.claude/projects/<slug>/`; Claude appends
+  resumed turns to the same file, spike-verified) and relays its
+  user/assistant entries - minus sub-agent sidechains - as ordinary
+  claude_event frames, before the ring replay. Dedup is by `uuid`: a
+  stdout event and its transcript line share one (spike-verified), so the
+  ring replay skips anything the backfill already delivered. Backfill is
+  deliberately in-band on the socket rather than a separate REST call:
+  history, ring replay and live events must be merged without gaps or
+  duplicates, and the single ordered socket (with server-side dedup) is
+  the only race-free place to do that - the client stays one dumb reducer.
+  The tail is capped (`DefaultBackfillBytes`, 4 MB); paging further back
+  can become a REST endpoint later if ever needed.
 
 ### 4.4 WebSocket: chat framing on the existing endpoint
 
@@ -358,13 +375,17 @@ model-picker dropdown instead and only chip it in the full-page layout.
 - **Phase 2 - frontend MVP.** `AgentChat` pane (no token streaming),
   toggle chip, spawn-box toggle. Whole-message updates only.
 - **Phase 3 - streaming polish.** `--include-partial-messages` +
-  `stream_event` delta rendering (client dedupes partials against the
-  final `assistant` event by message id), interrupt button, per-turn cost
-  footer.
-- **Phase 4 - depth.** Transcript backfill for history beyond the ring
-  (read the session `.jsonl`), image attachments in chat input, richer
-  tool cards (diffs for Edit/Write), maybe chat mode for other agent types
-  if/when their CLIs grow an equivalent protocol.
+  `stream_event` delta rendering: the client accumulates text/thinking
+  deltas into a single in-flight block (throttled to ~25 refreshes/s),
+  renders it as live markdown (an unclosed ``` fence gets a virtual close
+  so streaming code renders as a code block), and drops it the moment the
+  complete `assistant` event lands. History replay is committed as ONE
+  state update at replay_done rather than a render per event. Interrupt
+  button, per-turn cost footer.
+- **Phase 4 - depth.** Transcript backfill (done - see 4.3), image
+  attachments in chat input, richer tool cards (diffs for Edit/Write),
+  maybe chat mode for other agent types if/when their CLIs grow an
+  equivalent protocol.
 
 ## 7. Risks and open questions
 
@@ -375,8 +396,9 @@ model-picker dropdown instead and only chip it in the full-page layout.
   supervisor currently assumes a PTY for lifecycle (EOF/exit detection).
   Option B (PTY + termios) is the escape hatch if it drags.
 - **Ring replay is lossy at the edges** (wrap mid-line, ring overflow on
-  very long sessions). Acceptable for MVP; Phase 4 transcript backfill is
-  the real fix.
+  very long sessions). Mitigated: transcript backfill (4.3) now provides
+  durable history and the ring only needs to cover the recent tail the
+  transcript may not have flushed yet.
 - **`needs_input` in `-p` mode**: if headless Claude can still park waiting
   for input we cannot deliver (e.g. AskUserQuestion), chat mode needs a UI
   answer or those tools need disabling in chat heads. Spike will tell.

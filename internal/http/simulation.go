@@ -2756,17 +2756,32 @@ func handleSimChatWS(conn *safeConn) {
 			continue
 		}
 		turn++
-		// Echo the user turn (as --replay-user-messages would), then reply.
+		// Echo the user turn (as --replay-user-messages would), then stream the
+		// reply token by token (as --include-partial-messages does live) before
+		// the complete assistant event and the result footer.
 		userEv, _ := json.Marshal(map[string]any{
 			"type":    "user",
 			"message": map[string]any{"role": "user", "content": msg.Content},
 		})
 		sendSimChatEvent(conn, string(userEv))
+
+		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
+		streamEv := func(event map[string]any) {
+			line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": "sim-chat"})
+			sendSimChatEvent(conn, string(line))
+		}
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+		for chunk := range strings.SplitSeq(replyText, " ") {
+			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+			time.Sleep(90 * time.Millisecond)
+		}
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+
 		reply, _ := json.Marshal(map[string]any{
 			"type": "assistant",
 			"message": map[string]any{
 				"id":      fmt.Sprintf("msg_sim_reply_%d", turn),
-				"content": []map[string]any{{"type": "text", "text": "Simulated reply: message received. This mock echoes one assistant turn per user message."}},
+				"content": []map[string]any{{"type": "text", "text": replyText}},
 			},
 		})
 		sendSimChatEvent(conn, string(reply))

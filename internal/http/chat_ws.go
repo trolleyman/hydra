@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/claudestream"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -70,40 +73,90 @@ func (s *Server) handleChatClientMessage(sessionID string, data []byte) {
 	}
 }
 
+// sendChatEventLine relays one stream-json line as a claude_event frame.
+// Returns false once the socket write fails.
+func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
+	frame, err := json.Marshal(chatEventFrame{
+		terminalEvent: terminalEvent{Type: "claude_event"},
+		Event:         json.RawMessage(line),
+	})
+	if err != nil {
+		log.Printf("chat ws: marshal event frame for %q: %v", agentID, err)
+		return true
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		log.Printf("chat ws: error writing to WS for %q: %v", agentID, err)
+		return false
+	}
+	return true
+}
+
 // relayChatChunk feeds one output chunk through the line reassembler and
 // relays each complete stream-json line as a claude_event frame. Non-protocol
 // lines (pre-spawn-script output sharing the stdout pipe, a mid-line ring-wrap
-// fragment at the start of a replay) are skipped. Returns false once the
-// socket write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string) bool {
+// fragment at the start of a replay) are skipped, as are lines whose uuid was
+// already delivered by the transcript backfill. Returns false once the socket
+// write fails.
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}) bool {
 	for _, line := range lb.Feed(chunk) {
-		if _, ok := claudestream.ParseEvent(line); !ok {
+		ev, ok := claudestream.ParseEvent(line)
+		if !ok {
 			if len(line) > 0 {
 				log.Printf("chat ws: skipping non-protocol line for %q (%d bytes)", agentID, len(line))
 			}
 			continue
 		}
-		frame, err := json.Marshal(chatEventFrame{
-			terminalEvent: terminalEvent{Type: "claude_event"},
-			Event:         json.RawMessage(line),
-		})
-		if err != nil {
-			log.Printf("chat ws: marshal event frame for %q: %v", agentID, err)
-			continue
+		if ev.UUID != "" {
+			if _, dup := skip[ev.UUID]; dup {
+				continue
+			}
 		}
-		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
-			log.Printf("chat ws: error writing to WS for %q: %v", agentID, err)
+		if !sendChatEventLine(conn, line, agentID) {
 			return false
 		}
 	}
 	return true
 }
 
+// backfillChatHistory relays the head's conversation history from its Claude
+// transcript file (~/.claude/projects/<cwd-slug>/<session>.jsonl) as
+// claude_event frames. The scrollback ring only covers the current process
+// (and only its recent tail); the transcript is the durable record - notably,
+// a resumed process replays NOTHING on stdout, so without this a reconnect
+// after any relaunch would show an empty conversation. Returns the uuid set
+// of every transcript entry seen, which the ring replay uses to skip lines
+// the backfill already delivered (stdout events and transcript lines share
+// uuids). Best-effort: a missing dir/file (fresh head) backfills nothing.
+func backfillChatHistory(conn *safeConn, agentID, worktree string) map[string]struct{} {
+	home, err := os.UserHomeDir()
+	if err != nil || worktree == "" {
+		return nil
+	}
+	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	transcript := claudestream.LatestTranscript(dir)
+	if transcript == "" {
+		return nil
+	}
+	lines, uuids, err := claudestream.TailTranscript(transcript, claudestream.DefaultBackfillBytes)
+	if err != nil {
+		log.Printf("chat ws: backfill transcript for %q: %v", agentID, err)
+		return nil
+	}
+	for _, line := range lines {
+		if !sendChatEventLine(conn, line, agentID) {
+			return uuids
+		}
+	}
+	return uuids
+}
+
 // pumpChatOutput relays a chat session's output to the socket until the
-// session exits or the socket dies. The scrollback replay (the whole
-// conversation so far, thanks to --replay-user-messages) is relayed first,
-// then replay_done, then live events.
-func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID string) {
+// session exits or the socket dies: transcript backfill first (durable
+// history), then the scrollback-ring replay (recent events the transcript may
+// not carry, deduped by uuid), then replay_done, then live events.
+func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID, worktree string) {
+	skip := backfillChatHistory(conn, agentID, worktree)
+
 	lb := &claudestream.LineBuffer{}
 	// Attach queues the ring snapshot synchronously before returning, so a
 	// non-blocking receive here reliably distinguishes "history exists" from
@@ -111,7 +164,7 @@ func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID string) {
 	// stream starts.
 	select {
 	case data, ok := <-att.Output:
-		if ok && !relayChatChunk(conn, lb, data, agentID) {
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip) {
 			return
 		}
 	default:
@@ -126,7 +179,7 @@ func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID string) {
 			if !ok {
 				return
 			}
-			if !relayChatChunk(conn, lb, data, agentID) {
+			if !relayChatChunk(conn, lb, data, agentID, skip) {
 				return
 			}
 		}

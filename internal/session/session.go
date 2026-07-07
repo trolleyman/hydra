@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -70,6 +71,13 @@ type Session struct {
 	proc    PTY
 	scroll  *ring
 	cleanup func() // releases sandbox temp resources after exit
+
+	// ringFilter (chat sessions only) keeps stream_event partial-delta lines
+	// out of the scrollback ring: attachers still receive them live (token
+	// streaming), but replaying partials is redundant with the complete events
+	// and would wrap the ring several times faster. Guarded by mu, like the
+	// ring it feeds.
+	ringFilter *claudestream.RingFilter
 
 	mu        sync.Mutex
 	attachers map[*attacher]struct{}
@@ -161,7 +169,13 @@ func (s *Session) readLoop(onExit func(*Session)) {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			s.mu.Lock()
-			s.scroll.Write(data)
+			if s.ringFilter != nil {
+				if kept := s.ringFilter.Filter(data); len(kept) > 0 {
+					s.scroll.Write(kept)
+				}
+			} else {
+				s.scroll.Write(data)
+			}
 			for a := range s.attachers {
 				a.send(data)
 			}
@@ -217,6 +231,16 @@ func (s *Session) attach(rows, cols uint16) *Attachment {
 
 	s.mu.Lock()
 	snapshot := s.scroll.Bytes()
+	if s.ringFilter != nil {
+		// The filter only persists COMPLETE lines; the head of the in-flight
+		// line is buffered in the filter, not the ring. The live stream this
+		// attacher is about to receive continues from the reader's current
+		// mid-line position, so append the buffered head or the seam would
+		// corrupt the attacher's first line.
+		if pending := s.ringFilter.Pending(); len(pending) > 0 {
+			snapshot = append(append(make([]byte, 0, len(snapshot)+len(pending)), snapshot...), pending...)
+		}
+	}
 	exited := s.status == StatusExited
 	if !exited {
 		s.attachers[a] = struct{}{}

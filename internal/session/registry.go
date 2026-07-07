@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -108,8 +109,10 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 		kind = KindTerminal
 	}
 	scrollback := defaultScrollback
+	var ringFilter *claudestream.RingFilter
 	if kind == KindChat {
 		scrollback = chatScrollback
+		ringFilter = &claudestream.RingFilter{}
 	}
 	s := &Session{
 		ID:           id,
@@ -119,6 +122,7 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 		Kind:         kind,
 		proc:         proc,
 		scroll:       newRing(scrollback),
+		ringFilter:   ringFilter,
 		cleanup:      cleanup,
 		attachers:    make(map[*attacher]struct{}),
 		rows:         rows,

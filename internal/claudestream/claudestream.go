@@ -17,13 +17,20 @@ import (
 	"braces.dev/errtrace"
 )
 
-// Event is the loosely-parsed envelope of one stream-json stdout line. Fields
-// beyond these are intentionally not modeled; the raw line is what gets
-// relayed.
+// Event is the loosely-parsed envelope of one stream-json stdout line (or one
+// transcript-file line - same shape). Fields beyond these are intentionally
+// not modeled; the raw line is what gets relayed. UUID identifies the logged
+// conversation record: a stdout user/assistant event and its transcript line
+// carry the SAME uuid (spike-verified), which is what makes transcript
+// backfill + ring replay dedupable.
 type Event struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	UUID      string `json:"uuid,omitempty"`
+	// IsSidechain marks transcript entries from a sub-agent (Task tool) run;
+	// those are not part of the main conversation and are skipped by backfill.
+	IsSidechain bool `json:"isSidechain,omitempty"`
 }
 
 // ParseEvent peeks at one stdout line's envelope. ok is false when the line is
@@ -132,4 +139,40 @@ func (b *LineBuffer) Feed(chunk []byte) [][]byte {
 		b.buf = nil
 	}
 	return lines
+}
+
+// RingFilter decides which chat-session output bytes are worth persisting in
+// the scrollback ring. With --include-partial-messages the stdout stream is
+// dominated by stream_event partial-delta lines; they matter live (token
+// streaming) but replaying them is pure waste - the complete assistant/user
+// events carry the same content - and storing them would wrap the ring
+// several times faster, evicting real history. The filter reassembles lines
+// and keeps everything EXCEPT stream_event lines.
+//
+// Not safe for concurrent use; the session read loop calls it under the
+// session lock, and Pending is read under the same lock (see Session.attach).
+type RingFilter struct {
+	lb LineBuffer
+}
+
+// Filter feeds chunk through the line reassembler and returns the bytes to
+// persist (complete non-stream_event lines, newline-terminated).
+func (f *RingFilter) Filter(chunk []byte) []byte {
+	var out []byte
+	for _, line := range f.lb.Feed(chunk) {
+		if ev, ok := ParseEvent(line); ok && ev.Type == "stream_event" {
+			continue
+		}
+		out = append(out, line...)
+		out = append(out, '\n')
+	}
+	return out
+}
+
+// Pending returns the buffered partial line not yet persisted. A new attacher
+// gets ring bytes + Pending as its snapshot, so the live stream that follows
+// (which continues mid-line from the reader's current position) joins without
+// a corrupt seam.
+func (f *RingFilter) Pending() []byte {
+	return f.lb.buf
 }

@@ -416,7 +416,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		if chatMode {
-			pumpChatOutput(conn, att, agentID)
+			worktree := ""
+			if head.Worktree != nil {
+				worktree = *head.Worktree
+			}
+			pumpChatOutput(conn, att, agentID, worktree)
 			return
 		}
 		for {
