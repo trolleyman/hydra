@@ -712,7 +712,7 @@ export class DefaultService {
         });
     }
     /**
-     * List live server previews ([[artifacts]] type = "server") for a head
+     * List live server previews ([artifacts.<name>] type = "server") for a head
      * Returns, per configured server-type artifact script, the preview instance status for the requested version (the head's uncommitted working tree or a specific commit - the same selection contract as the artifacts and tests endpoints), plus any still-running instances of those scripts at other versions. Purely a read: nothing is spawned. Returns an empty list when the project configures no server scripts.
      *
      * @param projectId Project ID
@@ -821,7 +821,7 @@ export class DefaultService {
     }
     /**
      * Get the test-runner verdict(s) for a head's branch
-     * Returns, per configured [[tests]] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided - there is no before/after comparison (PLAN #68).
+     * Returns, per configured [tests.<name>] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided - there is no before/after comparison (PLAN #68).
      *
      * @param projectId Project ID
      * @param id
@@ -1405,7 +1405,7 @@ export class DefaultService {
     }
     /**
      * List the artifact scripts configured at a ref
-     * Lists the names of the enabled [[artifacts]] scripts defined in the ref's .hydra/config.toml. This is cheap - it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
+     * Lists the names of the enabled [artifacts.<name>] scripts defined in the ref's .hydra/config.toml. This is cheap - it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
      * @param projectId Project ID
      * @param ref Git ref whose config to read (defaults to HEAD)
      * @returns RepositoryArtifactsResponse OK
@@ -1432,7 +1432,7 @@ export class DefaultService {
     }
     /**
      * Generate (or load) one artifact script's output for a ref
-     * Runs (or returns the cached result of) the named [[artifacts]] script against a single ref and reports its outputs single-sided (no diff - the repository browser shows one ref at a time). Generation is lazy: this is only called when the user opens the script in the browser.
+     * Runs (or returns the cached result of) the named [artifacts.<name>] script against a single ref and reports its outputs single-sided (no diff - the repository browser shows one ref at a time). Generation is lazy: this is only called when the user opens the script in the browser.
      * @param projectId Project ID
      * @param name The artifact script name
      * @param ref Git ref to generate the artifact for (defaults to HEAD)

@@ -45,7 +45,7 @@ go test ./...
 
 ### Agent test gate — warnings
 
-A project's `[[tests]]` runners write a JUnit-XML or Hydra-native-JSON report into
+A project's `[tests.<name>]` runners write a JUnit-XML or Hydra-native-JSON report into
 `$HYDRA_TEST_OUTPUT`, which Hydra parses into passed/failed/skipped **and warnings**
 counts (`internal/tests`). A *warning* is a non-failing diagnostic (an eslint warning,
 a deprecation, a lint nit): it is surfaced but **never** flips the verdict to failing or
@@ -86,7 +86,7 @@ checkboxes in the changes cog.
 
 ### Streaming results (`type = "stdout"`)
 
-A `[[tests]]` runner with `type = "stdout"` skips report files entirely: Hydra parses
+A `[tests.<name>]` runner with `type = "stdout"` skips report files entirely: Hydra parses
 `::hydra:test:*::` markers live from the command's stdout, counts tick in the panel
 and the sidebar chip while the run is in flight, and the accumulated cases become the
 report at exit (no markers → exit-code fallback). One line per case — location
@@ -104,7 +104,7 @@ echo "::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daem
 
 The diff viewer can run per-project "artifact" commands against both sides of a
 comparison and surface the rendered images/videos that differ. Hydra's own UI is
-exercised this way: a `[[artifacts]]` entry named `screenshots` in
+exercised this way: an `[artifacts.screenshots]` entry in
 `.hydra/config.toml` runs `web/scripts/screenshots/take-screenshots.ts`, which builds
 the frontend, boots `hydra server --simulation` (mock data, no daemon needed) and
 screenshots a list of pages with headless Chromium.
@@ -124,9 +124,12 @@ entry here — not attach an image file.** Concretely:
   the diff grid sizes a tile by its *logical* width (physical px ÷ dpi), so a 2x
   shot lays out the same as a 1x one, only sharper. Absent ⇒ 1.
 - **A whole new artifact command** (e.g. a different generator/script) → add a new
-  `[[artifacts]]` section to `.hydra/config.toml`. See the documented fields there
-  (`name`, `command`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`
-  env contract the command is given.
+  `[artifacts.<name>]` table to `.hydra/config.toml` (the table key is the name;
+  the legacy `[[artifacts]]` array form still parses). See the documented fields
+  there (`command`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`
+  env contract the command is given. Named entries merge by name across the
+  user/project/config.local.toml layers; a legacy-array file replaces the list
+  wholesale.
 
 Run the screenshot generator locally with: `cd web && bun install
 && bun scripts/screenshots/take-screenshots.ts` (it needs `HYDRA_ARTIFACT_OUTPUT` set

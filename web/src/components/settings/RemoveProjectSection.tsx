@@ -60,7 +60,7 @@ export function RemoveProjectSection({ project }: { project: ProjectInfo }) {
         <span className="font-medium">not</span> delete anything on disk: your project folder, code and git history are
         left untouched, and its agents, worktrees and branches are kept (re-adding the same folder brings them back).
         Running agents are not stopped or killed - only the project's background services
-        (<code className="font-mono text-[11px]">[[services]]</code> in config.toml) are stopped.
+        (<code className="font-mono text-[11px]">[services.&lt;name&gt;]</code> in config.toml) are stopped.
       </p>
       <button
         onClick={confirmRemove}

@@ -118,7 +118,7 @@ export function ServicesEditor({
         </button>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
-        Supervised long-running commands, stored as <span className="font-mono">[[services]]</span> in config.toml. Saving applies changes immediately.
+        Supervised long-running commands, stored as <span className="font-mono">[services.&lt;name&gt;]</span> tables in config.toml. Saving applies changes immediately.
       </p>
 
       {anyPaused && (

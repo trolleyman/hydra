@@ -107,8 +107,8 @@ func TestServicesRoundTrip(t *testing.T) {
 	}
 
 	tomlStr := renderConfig(nil, cfg)
-	if !strings.Contains(tomlStr, "[[services]]") {
-		t.Fatalf("rendered config missing [[services]]:\n%s", tomlStr)
+	if !strings.Contains(tomlStr, "[services.emu-pool]") {
+		t.Fatalf("rendered config missing [services.emu-pool]:\n%s", tomlStr)
 	}
 
 	parsed, err := decodeConfig([]byte(tomlStr))
@@ -199,29 +199,30 @@ func TestEmptySectionExampleDoesNotAccumulate(t *testing.T) {
 		}
 		return n
 	}
-	// No services (so the example is emitted) followed by a real [[tests]] block.
+	// No services (so the example is emitted) followed by a real [tests.go] block.
 	existing := strings.Join(servicesExampleLines(), "\n") + "\n" +
-		"[[tests]]\nname = \"go\"\ncommand = \"go test ./...\"\n"
+		"[tests.go]\ncommand = \"go test ./...\"\n"
 	first := renderConfig([]byte(existing), Config{})
 	second := renderConfig([]byte(first), Config{})
-	if got := countHeaders(second, "# [[services]]"); got != 1 {
+	if got := countHeaders(second, "# [services.emu-pool]"); got != 1 {
 		t.Fatalf("services example accumulated across saves: got %d copies, want 1\n%s", got, second)
 	}
 	// The example must remain a valid, uncomment-able template.
-	if countHeaders(second, "# name = \"emu-pool\"") != 1 {
+	if countHeaders(second, "# command = \"scripts/emu-pool.sh up 3 --foreground\"") != 1 {
 		t.Fatalf("services example malformed after save:\n%s", second)
 	}
 
 	// Recognition is structural, not an exact-string match: an example block whose
-	// field VALUES differ from the current canonical example (e.g. carried over from
-	// an older Hydra version) is still consumed, not preserved as a user comment.
+	// field VALUES differ from the current canonical example - including one in
+	// the legacy [[services]] spelling from an older Hydra version - is still
+	// consumed, not preserved as a user comment.
 	drifted := "# [[services]]\n# name = \"old-name\"\n# command = \"legacy up\"\n# max_restarts = 9\n" +
-		"[[tests]]\nname = \"go\"\ncommand = \"go test ./...\"\n"
+		"[tests.go]\ncommand = \"go test ./...\"\n"
 	out := renderConfig([]byte(drifted), Config{})
 	if strings.Contains(out, "old-name") || strings.Contains(out, "legacy up") {
 		t.Fatalf("drifted example preserved as user comment instead of being regenerated:\n%s", out)
 	}
-	if got := countHeaders(out, "# [[services]]"); got != 1 {
+	if got := countHeaders(out, "# [services.emu-pool]"); got != 1 {
 		t.Fatalf("drifted example not collapsed to one canonical example: got %d\n%s", got, out)
 	}
 }

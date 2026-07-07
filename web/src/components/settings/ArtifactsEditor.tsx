@@ -57,7 +57,7 @@ export function ArtifactsEditor({
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
-        Visual artifacts generated for the diff viewer, stored as <span className="font-mono">[[artifacts]]</span> in config.toml.
+        Visual artifacts generated for the diff viewer, stored as <span className="font-mono">[artifacts.&lt;name&gt;]</span> tables in config.toml.
       </p>
 
       <div className="ml-10 mb-5 flex items-end gap-3">

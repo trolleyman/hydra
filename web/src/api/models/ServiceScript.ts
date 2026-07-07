@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+ * A per-project long-running command the daemon supervises while the project is registered ([services.<name>] in config.toml)
  */
 export type ServiceScript = {
     /**

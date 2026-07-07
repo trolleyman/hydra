@@ -59,7 +59,7 @@ export function TestsEditor({
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
-        Test-runner commands whose verdict gates merge, stored as <span className="font-mono">[[tests]]</span> in config.toml.
+        Test-runner commands whose verdict gates merge, stored as <span className="font-mono">[tests.&lt;name&gt;]</span> tables in config.toml.
       </p>
 
       <div className="ml-10 mb-5 flex items-end gap-3">

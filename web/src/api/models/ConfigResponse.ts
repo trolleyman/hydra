@@ -15,15 +15,15 @@ export type ConfigResponse = {
      */
     mcp_servers?: Array<McpServer> | null;
     /**
-     * Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
+     * Per-project visual-artifact generation scripts ([artifacts.<name>] in config.toml)
      */
     artifacts?: Array<ArtifactScript> | null;
     /**
-     * Per-project long-running supervised commands ([[services]] in config.toml)
+     * Per-project long-running supervised commands ([services.<name>] in config.toml)
      */
     services?: Array<ServiceScript> | null;
     /**
-     * Per-project test-runner commands whose verdict gates merge ([[tests]] in config.toml)
+     * Per-project test-runner commands whose verdict gates merge ([tests.<name>] in config.toml)
      */
     tests?: Array<TestScript> | null;
     /**
