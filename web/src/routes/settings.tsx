@@ -150,6 +150,7 @@ function SettingsPage() {
             onTest={handleTest}
             onCloseTestAgent={handleCloseTestAgent}
             projectId={selectedProjectId ?? null}
+            scope="user"
           />
         </div>
       </div>

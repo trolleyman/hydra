@@ -5,7 +5,7 @@ import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, type AgentTypeIconName } from '../AgentTypeIcon'
 import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
-import { SettingSection, type SettingsSection } from './shared'
+import { SettingSection, SettingsGroupHeading, type SettingsSection } from './shared'
 import { ThemeSection } from './ThemeSection'
 import { TerminalSection } from './TerminalSection'
 import { NotificationsSection } from './NotificationsSection'
@@ -84,7 +84,15 @@ export function FloatingSaveBar({
 }
 
 // ── SettingsContent ────────────────────────────────────────────────────────────
-// Shared tab bar + section body + test modal used by both settings pages.
+// Shared section body + test modal used by both settings pages. `scope` decides
+// which sections are shown:
+//   - "project": project-only concerns - icon, review, agent overrides for this
+//     project, and the [[artifacts]]/[[tests]]/[[services]] commands (those are
+//     replaced wholesale by a project that defines its own, and are read from
+//     the compared ref, so they are inherently project things).
+//   - "user": the browser-local preferences (theme / terminal / notifications)
+//     plus the user config (~/.config/hydra/config.toml) agent defaults that
+//     every project inherits.
 export function SettingsContent({
   config,
   setConfig,
@@ -97,7 +105,7 @@ export function SettingsContent({
   onTest,
   onCloseTestAgent,
   projectId,
-  scopeSelector,
+  scope,
   iconSection,
 }: {
   config: ConfigResponse
@@ -111,11 +119,10 @@ export function SettingsContent({
   onTest: (agentType: string) => void
   onCloseTestAgent: () => void
   projectId: string | null
-  // The scope (Project / Global) selector - rendered between Theme and Agent.
-  // Supplied by the project settings page; the global page passes nothing.
-  scopeSelector?: ReactNode
-  // The project-icon editor - a project-scoped concern, rendered next to the
-  // scope selector. Supplied by the project settings page; global passes nothing.
+  // Which config layer is being edited; see the component doc above.
+  scope: 'project' | 'user'
+  // The project-icon editor - a project-scoped concern. Supplied by the project
+  // settings page; the global page passes nothing.
   iconSection?: ReactNode
 }) {
   // Escape closes the test console, matching the X button. We defer to the
@@ -130,14 +137,32 @@ export function SettingsContent({
     return () => window.removeEventListener('keydown', onKey)
   }, [testAgent, onCloseTestAgent])
 
+  // User-scope files can still carry [[artifacts]]/[[tests]]/[[services]] (they
+  // apply to projects that define none of their own). The editors are project-
+  // scope only, so surface a pointer instead of silently hiding them; the values
+  // ride along in `config` untouched, so saving preserves them.
+  const userScopeCommandCount =
+    (config.artifacts?.length ?? 0) + (config.tests?.length ?? 0) + (config.services?.length ?? 0)
+
   return (
     <>
-      <ThemeSection />
-      <TerminalSection />
-      <NotificationsSection />
-      {selectedProject && <ReviewSection projectId={selectedProject.id} />}
-      {scopeSelector}
-      {iconSection}
+      {scope === 'user' && (
+        <>
+          <SettingsGroupHeading
+            title="This browser"
+            description="Preferences stored by this browser only - never written to a config file."
+          />
+          <ThemeSection />
+          <TerminalSection />
+          <NotificationsSection />
+          <SettingsGroupHeading
+            title="User config"
+            description="Stored in ~/.config/hydra/config.toml and inherited by every project on this machine. A project's own settings layer on top: path and host lists combine, other values override per field."
+          />
+        </>
+      )}
+      {scope === 'project' && iconSection}
+      {scope === 'project' && selectedProject && <ReviewSection projectId={selectedProject.id} />}
       <SettingSection
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."
@@ -174,35 +199,48 @@ export function SettingsContent({
         )}
       </div>
 
-      <div className="mt-6">
-        <ArtifactsEditor
-          artifacts={config.artifacts ?? []}
-          onChange={(artifacts) => setConfig({ ...config, artifacts })}
-          concurrency={config.artifact_concurrency}
-          onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
-          prefetch={config.artifact_prefetch}
-          onPrefetchChange={(v) => setConfig({ ...config, artifact_prefetch: v })}
-        />
-      </div>
+      {scope === 'project' && (
+        <>
+          <div className="mt-6">
+            <ArtifactsEditor
+              artifacts={config.artifacts ?? []}
+              onChange={(artifacts) => setConfig({ ...config, artifacts })}
+              concurrency={config.artifact_concurrency}
+              onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
+              prefetch={config.artifact_prefetch}
+              onPrefetchChange={(v) => setConfig({ ...config, artifact_prefetch: v })}
+            />
+          </div>
 
-      <div className="mt-6">
-        <TestsEditor
-          tests={config.tests ?? []}
-          onChange={(tests) => setConfig({ ...config, tests })}
-          concurrency={config.test_concurrency}
-          onConcurrencyChange={(n) => setConfig({ ...config, test_concurrency: n })}
-          prefetch={config.test_prefetch}
-          onPrefetchChange={(v) => setConfig({ ...config, test_prefetch: v })}
-        />
-      </div>
+          <div className="mt-6">
+            <TestsEditor
+              tests={config.tests ?? []}
+              onChange={(tests) => setConfig({ ...config, tests })}
+              concurrency={config.test_concurrency}
+              onConcurrencyChange={(n) => setConfig({ ...config, test_concurrency: n })}
+              prefetch={config.test_prefetch}
+              onPrefetchChange={(v) => setConfig({ ...config, test_prefetch: v })}
+            />
+          </div>
 
-      <div className="mt-6">
-        <ServicesEditor
-          services={config.services ?? []}
-          onChange={(services) => setConfig({ ...config, services })}
-          projectId={projectId}
-        />
-      </div>
+          <div className="mt-6">
+            <ServicesEditor
+              services={config.services ?? []}
+              onChange={(services) => setConfig({ ...config, services })}
+              projectId={projectId}
+            />
+          </div>
+        </>
+      )}
+
+      {scope === 'user' && userScopeCommandCount > 0 && (
+        <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">
+          This user config also defines {userScopeCommandCount} artifact/test/service command
+          {userScopeCommandCount === 1 ? '' : 's'}. Those sections are project concerns (a project
+          defining its own replaces them wholesale), so they are edited per project or by hand in
+          ~/.config/hydra/config.toml; saving here leaves them untouched.
+        </p>
+      )}
 
       {testAgent && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">

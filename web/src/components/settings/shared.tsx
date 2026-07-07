@@ -17,6 +17,17 @@ export function SettingSection({ title, description, action, children }: { title
   )
 }
 
+// A small uppercase heading that groups several SettingSections (e.g. the
+// browser-local preferences vs. the user config file on the User tab).
+export function SettingsGroupHeading({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="mt-8 mb-4 first:mt-0">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{title}</h2>
+      {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{description}</p>}
+    </div>
+  )
+}
+
 // ── EnabledToggle ─────────────────────────────────────────────────────────────
 // A small on/off switch used to enable or disable a single artifact or service
 // without deleting it. Green + "Enabled" when on; muted + "Disabled" when off.

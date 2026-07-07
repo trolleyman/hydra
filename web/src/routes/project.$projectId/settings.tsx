@@ -10,7 +10,6 @@ import { useToastStore } from '../../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
-  SettingSection,
 } from '../../components/SettingsComponents'
 import { PageTopBar } from '../../components/PageTopBar'
 import { ProjectIconSection } from '../../components/settings/ProjectIconSection'
@@ -126,13 +125,17 @@ function ProjectSettingsPage() {
     setTestAgent(null)
   }
 
-  if (loading) return <div className="p-8 text-gray-500">Loading configuration...</div>
-  if (error) return <div className="p-8 text-red-500">Error: {error}</div>
-  if (!config) return <div className="p-8 text-gray-500">No configuration found.</div>
+  // Switching tabs refetches and discards the draft, so guard it the same way
+  // navigation is guarded.
+  function switchScope(s: SettingsScope) {
+    if (s === scope) return
+    if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) return
+    setScope(s)
+  }
 
   const scopeDescription = scope === 'project'
-    ? 'Settings stored in .hydra/config.toml within the project root.'
-    : 'Settings stored in ~/.config/hydra/config.toml for all projects.'
+    ? 'This project only - stored in .hydra/config.toml in the project root and shared with everyone working on it. Layered on top of the user config.'
+    : 'Every project on this machine, plus preferences for this browser.'
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -155,36 +158,54 @@ function ProjectSettingsPage() {
       />
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
-          <SettingsContent
-            config={config}
-            setConfig={setConfig}
-            inheritedConfig={inheritedConfig}
-            activeSection={activeSection}
-            setActiveSection={setActiveSection}
-            selectedProject={selectedProject}
-            testAgent={testAgent}
-            testing={testing}
-            onTest={handleTest}
-            onCloseTestAgent={handleCloseTestAgent}
-            projectId={projectId}
-            iconSection={scope === 'project' && selectedProject ? <ProjectIconSection project={selectedProject} /> : undefined}
-            scopeSelector={
-              <SettingSection title="Scope" description={scopeDescription}>
-                <div className="inline-flex p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  {(['project', 'user'] as SettingsScope[]).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setScope(s)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all cursor-pointer ${scope === s ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                    >
-                      {s === 'project' ? 'Project' : 'Global'}
-                    </button>
-                  ))}
-                </div>
-              </SettingSection>
-            }
-          />
-          {selectedProject && <RemoveProjectSection project={selectedProject} />}
+          {/* Scope tabs: which config layer the page edits. Kept outside the
+              loading swap so the strip doesn't flicker away on tab switch. */}
+          <div className="mb-6">
+            <div className="flex border-b border-gray-200 dark:border-gray-700" role="tablist">
+              {(['project', 'user'] as SettingsScope[]).map((s) => (
+                <button
+                  key={s}
+                  role="tab"
+                  aria-selected={scope === s}
+                  onClick={() => switchScope(s)}
+                  className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+                    scope === s
+                      ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {s === 'project' ? 'Project' : 'User'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{scopeDescription}</p>
+          </div>
+          {loading ? (
+            <div className="py-8 text-gray-500">Loading configuration...</div>
+          ) : error ? (
+            <div className="py-8 text-red-500">Error: {error}</div>
+          ) : !config ? (
+            <div className="py-8 text-gray-500">No configuration found.</div>
+          ) : (
+            <>
+              <SettingsContent
+                config={config}
+                setConfig={setConfig}
+                inheritedConfig={inheritedConfig}
+                activeSection={activeSection}
+                setActiveSection={setActiveSection}
+                selectedProject={selectedProject}
+                testAgent={testAgent}
+                testing={testing}
+                onTest={handleTest}
+                onCloseTestAgent={handleCloseTestAgent}
+                projectId={projectId}
+                scope={scope}
+                iconSection={scope === 'project' && selectedProject ? <ProjectIconSection project={selectedProject} /> : undefined}
+              />
+              {scope === 'project' && selectedProject && <RemoveProjectSection project={selectedProject} />}
+            </>
+          )}
         </div>
       </div>
     </div>
