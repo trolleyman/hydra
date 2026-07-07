@@ -86,6 +86,52 @@ func TestInterruptLine(t *testing.T) {
 	}
 }
 
+func TestSetModelLine(t *testing.T) {
+	line := SetModelLine("hydra-set-model-1", "sonnet")
+	var msg struct {
+		Type      string `json:"type"`
+		RequestID string `json:"request_id"`
+		Request   struct {
+			Subtype string `json:"subtype"`
+			Model   string `json:"model"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if msg.Type != "control_request" || msg.RequestID != "hydra-set-model-1" ||
+		msg.Request.Subtype != "set_model" || msg.Request.Model != "sonnet" {
+		t.Errorf("unexpected set_model line: %s", line)
+	}
+}
+
+func TestControlResponseLine(t *testing.T) {
+	line, err := ControlResponseLine(json.RawMessage(`{"subtype":"success","request_id":"r1","response":{"behavior":"allow"}}`))
+	if err != nil {
+		t.Fatalf("ControlResponseLine: %v", err)
+	}
+	var msg struct {
+		Type     string `json:"type"`
+		Response struct {
+			Subtype   string `json:"subtype"`
+			RequestID string `json:"request_id"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if msg.Type != "control_response" || msg.Response.Subtype != "success" || msg.Response.RequestID != "r1" {
+		t.Errorf("unexpected control_response line: %s", line)
+	}
+
+	if _, err := ControlResponseLine(json.RawMessage(`["not","an","object"]`)); err == nil {
+		t.Error("array control response: expected error")
+	}
+	if _, err := ControlResponseLine(json.RawMessage(`{"broken"`)); err == nil {
+		t.Error("invalid JSON control response: expected error")
+	}
+}
+
 func TestParseEventAPIError(t *testing.T) {
 	line := []byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}]}}`)
 	ev, ok := ParseEvent(line)

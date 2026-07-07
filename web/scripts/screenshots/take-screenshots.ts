@@ -1001,10 +1001,15 @@ try {
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // Chat mode (CHAT_MODE.md): agent-chat renders the chat view instead of a
       // terminal - user bubble, markdown-rich assistant turns, tool cards (the
-      // Bash one expanded via click, showing its red error result), a thinking
-      // disclosure, per-turn cost footers and the input box - plus the
-      // terminal|chat mode chip in the metadata row.
-      { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewportOnly: true, click: 'button:has-text("go test ./internal/artifacts/")' },
+      // Bash one expanded via its description header, showing the ;/&&-split
+      // highlighted command and its red error output), a thinking disclosure,
+      // per-turn footers and the Claude-app composer - plus the terminal|chat
+      // mode chip in the metadata row.
+      { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewportOnly: true, click: 'button:has-text("Vet the package and run the retry test")' },
+      // Native AskUserQuestion (PLAN.md chat item 17): agent-ask is parked on a
+      // live question card - radio + multi-select checkbox options with
+      // descriptions, Other fields and the Submit all button.
+      { name: 'agent-ask-question', path: '/project/sim-project/agent/agent-ask', viewportOnly: true },
       // The "Merge queued" pill's hover hint, on an agent whose queued merge is
       // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
       // (tests already green) but hasn't reached a finished state, so the hint

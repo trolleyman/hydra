@@ -825,8 +825,25 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
   const isWaiting = status === AgentStatus.WAITING
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
+  // While the chat tab is showing, the panel sheds its terminal-window
+  // costume (dark chrome, traffic lights) and follows the app theme like the
+  // chat pane inside it; bash tabs bring the terminal look back.
+  const chatActive = !!chatMode && activeTabId === 'terminal'
+  // Ghost icon-button palette for the title bar, per costume.
+  const ghostBtn = chatActive
+    ? 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 hover:bg-stone-200/60 dark:hover:bg-white/[0.06]'
+    : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+
   return (
-    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
+    <div
+      ref={rootRef}
+      className={`relative rounded-lg overflow-hidden border flex flex-col ${
+        chatActive
+          ? 'border-stone-200 dark:border-stone-700/70 bg-[#faf9f5] dark:bg-[#262624]'
+          : 'border-gray-700 dark:border-gray-600'
+      }`}
+      style={{ ...(chatActive ? {} : { background: '#111827' }), height: `${height}px`, minHeight: '150px' }}
+    >
       {/* Size indicator shown while dragging the resize handle; fades out when
           the drag stops. Snapping keeps rows whole, so this reads cleanly. Inset
           a bit from the top-right corner so it sits clearly inside the terminal. */}
@@ -836,24 +853,36 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
         {dims.cols}×{dims.rows}
       </div>
       {/* Title bar with inline tabs */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-gray-800/80 shrink-0">
-        {/* Traffic lights */}
-        <div className="flex gap-1.5 shrink-0">
-          <span className="w-3 h-3 rounded-full bg-red-500/70" />
-          <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
-          <span className="w-3 h-3 rounded-full bg-green-500/70" />
-        </div>
+      <div
+        className={`flex items-center gap-1 px-3 py-2 border-b shrink-0 ${
+          chatActive
+            ? 'border-stone-200/90 dark:border-white/[0.06] bg-[#f4f2ec] dark:bg-[#2b2b28]'
+            : 'border-gray-700 dark:border-gray-600 bg-gray-800/80'
+        }`}
+      >
+        {/* Traffic lights: terminal-window dressing only */}
+        {!chatActive && (
+          <div className="flex gap-1.5 shrink-0">
+            <span className="w-3 h-3 rounded-full bg-red-500/70" />
+            <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
+            <span className="w-3 h-3 rounded-full bg-green-500/70" />
+          </div>
+        )}
 
         {/* Tabs */}
-        <div className="flex items-center ml-2 gap-0.5">
+        <div className={`flex items-center gap-0.5 ${chatActive ? '' : 'ml-2'}`}>
           {tabs.map(tab => (
             <div key={tab.id} className="flex items-center">
               <button
                 onClick={() => setActiveTabId(tab.id)}
                 className={`px-2.5 py-0.5 text-xs font-mono rounded transition-colors cursor-pointer ${
-                  activeTabId === tab.id
-                    ? 'bg-gray-700 text-gray-200'
-                    : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
+                  chatActive
+                    ? activeTabId === tab.id
+                      ? 'bg-stone-200/80 dark:bg-white/[0.08] text-stone-800 dark:text-stone-100'
+                      : 'text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-200/50 dark:hover:bg-white/[0.05]'
+                    : activeTabId === tab.id
+                      ? 'bg-gray-700 text-gray-200'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                 }`}
               >
                 {tab.id === 'terminal' && chatMode ? 'Chat' : tab.label}
@@ -862,7 +891,7 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
                 <Tooltip content="Close tab" side="bottom">
                   <button
                     onClick={() => closeTab(tab.id)}
-                    className="ml-0.5 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                    className={`ml-0.5 p-0.5 rounded transition-colors cursor-pointer ${ghostBtn}`}
                   >
                     <X className="w-2.5 h-2.5" />
                   </button>
@@ -875,7 +904,7 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
               <Tooltip content="New sandboxed shell" side="bottom">
                 <button
                   onClick={() => addBashTab(true)}
-                  className="p-0.5 rounded-l text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                  className={`p-0.5 rounded-l transition-colors cursor-pointer ${ghostBtn}`}
                 >
                   <Plus className="w-3 h-3" />
                 </button>
@@ -884,7 +913,7 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
               <Tooltip content="Choose shell type" side="bottom">
                 <button
                   onClick={() => setShellMenuOpen(o => !o)}
-                  className="p-0.5 rounded-r text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                  className={`p-0.5 rounded-r transition-colors cursor-pointer ${ghostBtn}`}
                 >
                   <ChevronDown className="w-3 h-3" />
                 </button>
@@ -893,25 +922,39 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
                 <>
                   {/* click-away backdrop */}
                   <div className="fixed inset-0 z-10" onClick={() => setShellMenuOpen(false)} />
-                  <div className="absolute left-0 top-full mt-1 z-20 w-56 rounded-md border border-gray-700 bg-gray-800 shadow-lg py-1 text-xs">
+                  <div
+                    className={`absolute left-0 top-full mt-1 z-20 w-56 rounded-md border shadow-lg py-1 text-xs ${
+                      chatActive
+                        ? 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e]'
+                        : 'border-gray-700 bg-gray-800'
+                    }`}
+                  >
                     <button
                       onClick={() => addBashTab(true)}
-                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gray-200 hover:bg-gray-700 cursor-pointer"
+                      className={`flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer ${
+                        chatActive
+                          ? 'text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.06]'
+                          : 'text-gray-200 hover:bg-gray-700'
+                      }`}
                     >
-                      <Shield className="w-3.5 h-3.5 mt-0.5 text-green-400 shrink-0" />
+                      <Shield className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-green-600 dark:text-green-400' : 'text-green-400'}`} />
                       <span>
                         <span className="block font-medium">Sandboxed shell</span>
-                        <span className="block text-gray-500">Confined to the worktree, like the agent.</span>
+                        <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>Confined to the worktree, like the agent.</span>
                       </span>
                     </button>
                     <button
                       onClick={() => addBashTab(false)}
-                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gray-200 hover:bg-gray-700 cursor-pointer"
+                      className={`flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer ${
+                        chatActive
+                          ? 'text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.06]'
+                          : 'text-gray-200 hover:bg-gray-700'
+                      }`}
                     >
-                      <ShieldOff className="w-3.5 h-3.5 mt-0.5 text-yellow-400 shrink-0" />
+                      <ShieldOff className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-amber-600 dark:text-yellow-400' : 'text-yellow-400'}`} />
                       <span>
                         <span className="block font-medium">Regular shell (host)</span>
-                        <span className="block text-gray-500">Full host access, no sandbox.</span>
+                        <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>Full host access, no sandbox.</span>
                       </span>
                     </button>
                   </div>
@@ -921,13 +964,25 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
         </div>
 
         {/* Status + refresh */}
-        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isNeedsInput ? 'text-red-400' : isWaiting ? 'text-yellow-400' : isLoading ? 'text-blue-400' : 'text-gray-500'}`}>
+        <span
+          className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${
+            isRunning
+              ? chatActive ? 'text-green-600 dark:text-green-400' : 'text-green-400'
+              : isNeedsInput
+                ? chatActive ? 'text-red-600 dark:text-red-400' : 'text-red-400'
+                : isWaiting
+                  ? chatActive ? 'text-amber-600 dark:text-yellow-400' : 'text-yellow-400'
+                  : isLoading
+                    ? chatActive ? 'text-blue-600 dark:text-blue-400' : 'text-blue-400'
+                    : chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'
+          }`}
+        >
           {isRunning || isNeedsInput || isWaiting ? '● ' : '○ '}{status}
         </span>
         <Tooltip content="Refresh" side="bottom">
           <button
             onClick={reconnectActive}
-            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
+            className={`p-1 rounded transition-colors cursor-pointer ${ghostBtn}`}
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>

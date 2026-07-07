@@ -812,3 +812,86 @@
 73. [ ] **[Git]** **Interactive credential prompts for daemon-side git - revisit the blanket `GIT_TERMINAL_PROMPT=0`.** Daemon-side pushes/fetches (`internal/git/push.go`, and the planned publish flow in NON_LOCAL_INTEGRATION.md 3.4) run strictly non-interactively: `GIT_TERMINAL_PROMPT=0` + `GIT_SSH_COMMAND="ssh -oBatchMode=yes"`, mapping auth failures to an actionable UI error ("add your key to ssh-agent, or switch to HTTPS + a credential helper"). That is the safe default, but it means a fixable prompt (HTTPS password, ssh key passphrase after reboot) is a hard failure. Follow-up: forward the prompt to the user instead - git supports this cleanly via `GIT_ASKPASS`/`core.askPass`, ssh via `SSH_ASKPASS` (+ `SSH_ASKPASS_REQUIRE=force`; needs the process detached from a tty, e.g. setsid): point both at a small `hydra __askpass` helper that relays the prompt text over the daemon socket to the web UI as a modal (same parked-approval UX as the security gate) and writes the answer to stdout. Design constraints: the secret is never logged, never persisted by Hydra (at most offered onward to `git credential approve` on explicit opt-in); timeout/cancel fails the push cleanly with the current actionable error as fallback; ssh-agent remains the *recommended* path for passphrase keys - the modal is a rescue hatch, not the story. Do after the publish flow (NON_LOCAL_INTEGRATION.md Phase 2) exists, since that is what multiplies the number of daemon-side credentialed git calls.
 
 74. [ ] **[Notifications]** **Action buttons on the OS notifications (Allow / Always allow / Deny inline; open-from-closed-tab).** The out-of-tab desktop notifications (`web/src/lib/notifyPrefs.ts` `fireNotification`) are fired via the non-persistent `new Notification(...)` constructor, which **ignores the `actions` field entirely** - so they are click-the-whole-thing-to-open only. The security-gate approval notifications in particular would benefit from inline **Allow once / Always allow / Deny** buttons, since they already carry a `reqid` + a decide endpoint (`decideAgentApproval`, wired in `useAgentNotifications.ts`). Buttons require the *persistent* path: **`ServiceWorkerRegistration.showNotification(title, { actions: [...] })`**, whose clicks arrive as a `notificationclick` event (with `event.action`) **inside a service worker**, not on the page. Hydra deliberately has no service worker today (`notifyPrefs.ts:8-9` scopes it out). Scope: (1) register a minimal SW and switch firing to `registration.showNotification` with an `actions` array; (2) handle `notificationclick` in the SW - either `fetch` the decide endpoint directly from the SW (it can carry the ALLOW/DENY + remember decision) or `postMessage` an open client so the existing `decide()` runs; (3) map the retraction work from item-this-thread (`dismissNotification` on state-clear + `autoDismissMs`) onto the SW notifications too. Constraints / gotchas: `actions` are capped at ~2 buttons on most platforms and are **unsupported on Firefox/Safari desktop** (they silently drop to no buttons - the whole-notification click must stay a working fallback); a decide-from-SW path must handle the tab being fully closed. Bonus: a service worker also unlocks notifications for a **fully closed** tab (today's hard limitation, also called out in `notifyPrefs.ts:8-9`) via Web Push, though that is a larger follow-on (push subscription + a daemon-side push sender) and can be deferred. Start with the approval notifications (clearest button semantics); the needs_input / finished ones can stay click-to-open.
+
+---
+
+## Chat mode revamp (branch `hydra/few-things-for-the-chat-mode-1-code`)
+
+Item IDs 1-13 are the original request; 14+ were added during the thread.
+Check items off in the commit that lands them.
+
+1. [x] **Code chip readability.** Inline-code background too light/washed out in
+   dark mode - bordered chip, darker bg.
+2. [x] **Thinking cards.** Thinking must not leak as plain text: Claude-app-style
+   collapsed disclosure - shimmer label + auto-updating tail while streaming,
+   snippet when settled, expand with "Show more" clamp on desktop, bottom-sheet
+   popup on mobile.
+3. [x] **Attachments in chat input.** Paste / drag-drop / picker like the spawn
+   box (chips, lightbox); uploaded paths ride below the message text.
+4. [x] **Nicer tool cards (esp. Bash).** Header shows the description, not the
+   script; expanded shows the full command syntax-highlighted and optimistically
+   split at top-level `;`/`&&`/`||`; labeled Output section; Raw button for the
+   tool-call JSON.
+5. [x] **Animations.** Expand/collapse height animation, entrance rise for live
+   items (replay batch exempt), reduced-motion fallbacks.
+6. [x] **Send button + hint.** Round arrow-up send button with accent bg when
+   sendable; queue icon when the message will queue behind a running turn
+   (stream-json input queues mid-turn messages); "Enter to queue" hint only
+   then, otherwise nothing.
+7. [x] **Newline keybindings.** Alt+Enter always inserts a newline; Ctrl+Enter
+   behaves like Shift+Enter (newline); Enter sends.
+8. [x] **Optimistic + queued messages.** Sent messages appear immediately
+   (pinned under the transcript until the CLI's --replay-user-messages echo
+   supersedes them); queued state clearly labeled. Chat sheds the terminal
+   styling (see 25).
+9. [x] **Auto-growing composer.** Grows line-by-line with content (not
+   pixel-by-pixel) up to a cap; grab bar to force it taller, snapped to whole
+   rows.
+10. [x] **Claude-app theming.** Chat follows the app theme (no forced dark):
+    cream light / warm-gray dark surfaces, borderless user bubbles; terracotta
+    bordered code chips in all markdown (dark like image2, light like image4).
+11. [x] **Ctrl+C interrupts.** When a turn is running, focus is in the chat and
+    no text is selected, Ctrl+C sends interrupt.
+12. [x] **Composer layout + model dropdown.** One rounded card: textarea on
+    top, controls row below (no separator) - "+" attach bottom-left, model
+    dropdown bottom-right wired to the CLI's live set_model control request
+    (spike-verified; persists in the transcript across resumes).
+13. [x] **Slash commands.** `/` autocomplete fed by the init event's
+    slash_commands; commands pass through as plain user text (spike-verified,
+    the CLI executes them).
+14. [x] **Jump to bottom.** Floating circular arrow above the composer when
+    scrolled up; Ctrl+End jumps (Claude Code parity) without stealing the
+    caret shortcut when already pinned.
+15. [x] **Honest cost footer.** total_cost_usd is a notional API-rate figure;
+    on subscription auth (init apiKeySource == "none") no dollars are billed -
+    show the `$` only for API-key heads, duration always.
+16. [x] **Question cards UI.** Interactive question form component: radio /
+    checkbox options with primary+secondary text, "Other" free-text, one
+    submit for all questions; also renders fenced ```question JSON blocks as a
+    fallback path.
+17. [x] **Native AskUserQuestion.** Chat heads launch with
+    --permission-prompt-tool stdio (composes with
+    --dangerously-skip-permissions: only AskUserQuestion routes a can_use_tool
+    control_request - spike-verified, Bash et al run unprompted). The pane
+    renders the request as an interactive question card and answers via a
+    control_response with updatedInput.answers; a simulated agent (agent-ask)
+    has a question pending for manual testing.
+18. [x] **Strip tool_use_error tags.** Show just the inner error text on tool
+    cards (the card is already error-tinted).
+19. [x] **Worktree-relative paths.** Tool summaries and expanded inputs trim
+    the head's worktree prefix from absolute paths.
+20. [x] **Chat scroll memory.** Per-agent (agentViewPrefs) - switching away and
+    back restores the scroll offset when it wasn't pinned to the bottom.
+21. [x] **Fix chat->terminal switch.** Interactive `--continue` refuses
+    -p/stream-json conversations ("No conversation found to continue",
+    spike-verified); resume Claude heads with `--resume <session-id>` from the
+    newest non-sidechain transcript instead, falling back to --continue.
+22. [ ] **Mic / voice input.** TODO (not in this branch): dictation button in
+    the composer like the Claude app.
+23. [x] **Persist composer height.** The dragged composer min-height lives in
+    agentViewPrefs (localStorage) like the terminal height.
+24. [x] **Merge main** into this branch before final verification.
+25. [x] **Direction decision (settled).** claude.ai-style chrome (proportional
+    font, bubbles, cards, app theming) + Claude Code function (tool cards,
+    slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic
+    lights, dark tab bar) themed away when the chat tab is active.

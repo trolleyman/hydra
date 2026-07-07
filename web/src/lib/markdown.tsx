@@ -122,24 +122,29 @@ function trimAroundBlocks(segs: Seg[]): Seg[] {
   return out.filter((s) => !(s.kind === 'text' && s.value === ''))
 }
 
-// Inline-code styling for read-only renders. NOT tinted - it's just the default
-// text colour in a rounded monospace chip. Deliberately uses only HORIZONTAL
-// padding and a slightly smaller (never larger) em size: vertical padding or a
-// bigger font would change the line height, and we want a line with a code span
-// to stay exactly as tall as a plain one. `box-decoration-clone` makes the
-// rounded chip + background repeat cleanly on each fragment when a long code
-// span wraps across lines rather than leaving a broken/clipped box.
+// Inline-code styling for read-only renders: a bordered monospace chip with a
+// warm terracotta tint (Claude-app style) in both themes - the dark background
+// is a shade darker than the surrounding surface so the chip reads clearly.
+// Deliberately uses only HORIZONTAL padding and a slightly smaller (never
+// larger) em size: vertical padding or a bigger font would change the line
+// height, and we want a line with a code span to stay exactly as tall as a
+// plain one (an inline border doesn't grow the line box either).
+// `box-decoration-clone` makes the rounded chip + background repeat cleanly on
+// each fragment when a long code span wraps across lines rather than leaving a
+// broken/clipped box.
 const CODE_CLASS =
-  'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em]'
+  'rounded box-decoration-clone border border-gray-300/60 dark:border-gray-500/30 bg-gray-100/70 dark:bg-black/25 px-1 font-mono text-[0.9em] text-[#a8462d] dark:text-[#eab6a0]'
 
-// Block-code styling for read-only renders. Uses the SAME rounded background as
-// inline code (just block-level with a touch of padding) so the two read as one
-// family. Not tinted either; when the info string names a language highlight.js
-// recognises, its tokens are coloured by the shared `.hljs-*` theme. The
-// `.hljs-*` token classes carry their own colours, so we deliberately do NOT add
-// the `.hljs` root class - that would also pull in github.css's white background.
+// Block-code styling for read-only renders: a bordered panel like the inline
+// chip but block-level, with a near-black warm background in dark mode and a
+// quiet light one in light mode. Body text stays the default colour (blocks are
+// syntax-coloured, not tinted); when the info string names a language
+// highlight.js recognises, its tokens are coloured by the shared `.hljs-*`
+// theme. The `.hljs-*` token classes carry their own colours, so we
+// deliberately do NOT add the `.hljs` root class - that would also pull in
+// github.css's white background.
 const CODEBLOCK_CLASS =
-  'block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words'
+  'block my-1 rounded-md border border-gray-200 dark:border-gray-600/40 bg-gray-50 dark:bg-[#1d1c1a] px-2.5 py-1.5 font-mono text-[0.85em] text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words'
 
 // highlightCode returns highlight.js token HTML for `code` when `lang` names a
 // recognised language, or null to fall back to plain (uncoloured) monospace text.

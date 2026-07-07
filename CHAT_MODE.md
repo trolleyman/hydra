@@ -1,15 +1,23 @@
 # Chat mode for Claude heads
 
-**Implementation status:** phases 0-3 are implemented, plus transcript
-backfill from phase 4. Key landmarks: `internal/claudestream` (protocol,
-ring filter, transcript tail), `internal/nshost` Pipes mode,
-`session.KindChat`, `internal/http/chat_ws.go` (WS framing + backfill),
-`web/src/components/AgentChat.tsx` (the pane, incl. token streaming),
-`renderMarkdownBlocks` in `web/src/lib/markdown.tsx`, the mode chip in
-`AgentDetail.tsx` and the spawn-form toggle in `SpawnForm.tsx`. The simulation
-server serves a chat-mode demo head (`agent-chat`, with a streamed scripted
-reply) and the `agent-chat` screenshot covers it. Still open: image
-attachments in the chat input, richer tool cards.
+**Implementation status:** phases 0-4 are implemented. Key landmarks:
+`internal/claudestream` (protocol, ring filter, transcript tail),
+`internal/nshost` Pipes mode, `session.KindChat`,
+`internal/http/chat_ws.go` (WS framing + backfill + set_model +
+control_response passthrough), `web/src/components/AgentChat.tsx` (the
+Claude-app-styled pane: token streaming, thinking/tool/question cards,
+attachments, optimistic + queued sends, slash-command autocomplete, model
+dropdown, jump-to-bottom, per-agent scroll memory - see the "Chat mode
+revamp" item list at the bottom of PLAN.md), the mode chip in
+`AgentDetail.tsx` and the spawn-form toggle in `SpawnForm.tsx`. Chat heads
+launch with `--permission-prompt-tool stdio`, which exposes the interactive
+`AskUserQuestion` tool headless: its `can_use_tool` control_request renders
+as an answerable question card. Claude heads resume with
+`--resume <session-id>` (newest non-sidechain transcript) because the TUI's
+`--continue` cannot see `-p`-recorded conversations. The simulation server
+serves two chat-mode demo heads: `agent-chat` (streamed scripted reply,
+set_model/slash handling) and `agent-ask` (parked on a live AskUserQuestion
+card); the `agent-chat` screenshot covers the pane.
 
 Design doc for a per-head "chat mode": instead of attaching an xterm to the
 Claude CLI's interactive TUI over a PTY, Hydra drives the CLI's structured

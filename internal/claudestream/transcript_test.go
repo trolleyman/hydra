@@ -95,3 +95,29 @@ func TestLatestTranscript(t *testing.T) {
 		t.Errorf("LatestTranscript(absent) = %q, want empty", got)
 	}
 }
+
+func TestLatestSessionID(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(name, content string, age time.Duration) {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ts := time.Now().Add(-age)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("main-session.jsonl", `{"type":"user","uuid":"u1"}`+"\n", 2*time.Hour)
+	// Newest by mtime, but a sub-agent sidechain - must be skipped so a
+	// freshly-written Task-tool transcript can't hijack a resume.
+	mustWrite("sidechain.jsonl", `{"type":"user","uuid":"u2","isSidechain":true}`+"\n", time.Hour)
+	mustWrite("notes.txt", "not a transcript", 0)
+
+	if got := LatestSessionID(dir); got != "main-session" {
+		t.Errorf("LatestSessionID = %q, want %q", got, "main-session")
+	}
+	if got := LatestSessionID(filepath.Join(dir, "absent")); got != "" {
+		t.Errorf("LatestSessionID(absent) = %q, want empty", got)
+	}
+}

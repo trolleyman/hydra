@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -234,6 +235,33 @@ func simAgentChat() api.AgentResponse {
 	}
 }
 
+// simAgentAskPrompt seeds the AskUserQuestion demo agent (agent-ask), whose
+// chat view is parked on a live native question card (see handleSimAskWS).
+const simAgentAskPrompt = "Refactor the config loader to support per-environment overrides."
+
+// simAgentAsk is the AskUserQuestion demo agent, shared by ListAgents and
+// GetAgent.
+func simAgentAsk() api.AgentResponse {
+	createdAt := simNow().Add(-20 * time.Minute).Unix()
+	return api.AgentResponse{
+		Id:            "agent-ask",
+		Title:         ptr("Per-environment config overrides"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/feat-config-overrides"),
+		SessionPid:    1007,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentAskPrompt,
+		ChatMode:      ptr(true),
+		AgentStatus: &api.AgentStatusInfo{
+			Status:      api.NeedsInput,
+			Timestamp:   simNow().Format(time.RFC3339),
+			LastMessage: ptr("Which override layering should I implement?"),
+		},
+	}
+}
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -293,6 +321,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode demo agent: its detail page renders the chat view instead of
 		// a terminal (CHAT_MODE.md); HandleTerminalWS serves it chat framing.
 		simAgentChat(),
+		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
+		// a live, answerable question card.
+		simAgentAsk(),
 		{
 			// Blocked on the user (AskUserQuestion) while you were away → the red
 			// "needs you" status, which also lights the red needs-input marker on
@@ -509,6 +540,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 	if id == "agent-chat" {
 		api.WriteJSON(w, http.StatusOK, simAgentChat())
+		return
+	}
+	if id == "agent-ask" {
+		api.WriteJSON(w, http.StatusOK, simAgentAsk())
 		return
 	}
 	if id == "agent-approval" {
@@ -2720,13 +2755,18 @@ func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Requ
 // tool_use/tool_result pairs (one of them an error) and a result footer. Kept
 // as verbatim JSON lines to mirror exactly what the real daemon relays.
 var simChatEvents = []string{
-	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-sim"}`,
+	// apiKeySource "none" = subscription auth, so the chat hides the notional
+	// $ figure on turn footers; model + slash_commands feed the composer's
+	// model dropdown and / autocomplete.
+	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"text","text":"I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the ` + "`PUT`" + ` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_2","content":[{"type":"tool_use","id":"toolu_sim_1","name":"Read","input":{"file_path":"internal/artifacts/upload.go"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_1","content":"func (u *Uploader) Put(ctx context.Context, key string, r io.Reader) error {\n\treq, err := u.newRequest(ctx, key, r)\n\t..."}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go test ./internal/artifacts/ -run TestPutRetry -count=1"}}]}}`,
+	// A chained command with a description: the collapsed card shows the
+	// description, the expanded card the ;/&&-split highlighted script.
+	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"FAIL: TestPutRetry (0.02s)\n    upload_test.go:41: expected 5 attempts, got 1","is_error":true}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_4","content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\nfor attempt := 0; attempt < maxAttempts; attempt++ {\n    if err = u.put(ctx, key, r); err == nil {\n        return nil\n    }\n    sleepBackoff(attempt)\n}\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"session_id":"sim-chat"}`,
@@ -2754,54 +2794,209 @@ func handleSimChatWS(conn *safeConn) {
 
 	turn := 0
 	for {
+		msg, ok := readSimChatClientMsg(conn)
+		if !ok {
+			return
+		}
+		switch msg.Type {
+		case "set_model":
+			// The real CLI confirms a set_model control_request with a
+			// local-command echo; that echo is what re-syncs the dropdown.
+			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
+		case "interrupt":
+			sendSimUserText(conn, "sim-chat", "[Request interrupted by user]")
+		case "user_message":
+			turn++
+			// Echo the user turn (as --replay-user-messages would).
+			userEv, _ := json.Marshal(map[string]any{
+				"type":    "user",
+				"message": map[string]any{"role": "user", "content": msg.Content},
+			})
+			sendSimChatEvent(conn, string(userEv))
+			// A slash command executes CLI-side and answers with local output.
+			if text := firstTextBlock(msg.Content); strings.HasPrefix(text, "/") {
+				sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+				continue
+			}
+			// Stream the reply token by token (as --include-partial-messages
+			// does live) before the complete assistant event and the result.
+			const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
+			streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
+		}
+	}
+}
+
+// simChatClientMsg mirrors the chat client -> server frame shapes the
+// simulated chat sockets understand (see chat_ws.go chatClientMsg).
+type simChatClientMsg struct {
+	Type     string          `json:"type"`
+	Content  json.RawMessage `json:"content"`
+	Model    string          `json:"model"`
+	Response json.RawMessage `json:"response"`
+}
+
+// readSimChatClientMsg blocks for the next parseable text frame; ok=false on
+// socket death.
+func readSimChatClientMsg(conn *safeConn) (simChatClientMsg, bool) {
+	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			return
+			return simChatClientMsg{}, false
 		}
 		if msgType != websocket.TextMessage {
 			continue
 		}
-		var msg struct {
-			Type    string          `json:"type"`
-			Content json.RawMessage `json:"content"`
-		}
-		if json.Unmarshal(data, &msg) != nil || msg.Type != "user_message" {
+		var msg simChatClientMsg
+		if json.Unmarshal(data, &msg) != nil || msg.Type == "" {
 			continue
 		}
-		turn++
-		// Echo the user turn (as --replay-user-messages would), then stream the
-		// reply token by token (as --include-partial-messages does live) before
-		// the complete assistant event and the result footer.
-		userEv, _ := json.Marshal(map[string]any{
-			"type":    "user",
-			"message": map[string]any{"role": "user", "content": msg.Content},
-		})
-		sendSimChatEvent(conn, string(userEv))
+		return msg, true
+	}
+}
 
-		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
-		streamEv := func(event map[string]any) {
-			line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": "sim-chat"})
-			sendSimChatEvent(conn, string(line))
+// firstTextBlock extracts the first text block's text from a user_message
+// content array ("" when there is none).
+func firstTextBlock(content json.RawMessage) string {
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return ""
+	}
+	for _, b := range blocks {
+		if b.Type == "text" {
+			return b.Text
 		}
-		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
-		for chunk := range strings.SplitSeq(replyText, " ") {
-			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
-			time.Sleep(90 * time.Millisecond)
-		}
-		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+	}
+	return ""
+}
 
-		reply, _ := json.Marshal(map[string]any{
-			"type": "assistant",
-			"message": map[string]any{
-				"id":      fmt.Sprintf("msg_sim_reply_%d", turn),
-				"content": []map[string]any{{"type": "text", "text": replyText}},
-			},
-		})
-		sendSimChatEvent(conn, string(reply))
-		result, _ := json.Marshal(map[string]any{
-			"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042, "session_id": "sim-chat",
-		})
-		sendSimChatEvent(conn, string(result))
+// sendSimUserText relays a user event whose content is a plain string (the
+// shape the CLI uses for command echoes and interrupt markers).
+func sendSimUserText(conn *safeConn, sessionID, text string) {
+	ev, _ := json.Marshal(map[string]any{
+		"type":       "user",
+		"message":    map[string]any{"role": "user", "content": text},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(ev))
+}
+
+// streamSimReply streams replyText token by token (stream_event deltas), then
+// sends the complete assistant event and a success result footer.
+func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
+	streamEv := func(event map[string]any) {
+		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": sessionID})
+		sendSimChatEvent(conn, string(line))
+	}
+	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+	for chunk := range strings.SplitSeq(replyText, " ") {
+		streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+		time.Sleep(90 * time.Millisecond)
+	}
+	streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+
+	reply, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"id":      msgID,
+			"content": []map[string]any{{"type": "text", "text": replyText}},
+		},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(reply))
+	result, _ := json.Marshal(map[string]any{
+		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042, "session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(result))
+}
+
+// --- Simulated AskUserQuestion agent (agent-ask) ------------------------------
+
+// simAskQuestionInput is the AskUserQuestion input the simulated agent-ask
+// head is blocked on: one single-select and one multi-select question, with
+// option descriptions - exercising the whole question-card surface.
+const simAskQuestionInput = `{"questions":[` +
+	`{"question":"Which override layering should I implement?","header":"Layering","multiSelect":false,"options":[` +
+	`{"label":"Env file per environment","description":"config.<env>.toml next to config.toml; simplest to reason about."},` +
+	`{"label":"Single file, [env.<name>] tables","description":"One file holds every environment; easier to diff, heavier to parse."},` +
+	`{"label":"Environment variables only","description":"12-factor style; no new files, but nothing is reviewable in-repo."}]},` +
+	`{"question":"Which extras should ship in the first cut?","header":"Extras","multiSelect":true,"options":[` +
+	`{"label":"Schema validation","description":"Reject unknown keys at load time."},` +
+	`{"label":"Hot reload","description":"Watch the files and re-apply without a restart."},` +
+	`{"label":"Secrets interpolation","description":"Expand ${VAR} from the process environment."}]}]}`
+
+// simAskEvents is the canned history for agent-ask: the head asked a native
+// AskUserQuestion (tool_use + its paired can_use_tool control_request) and is
+// parked waiting for the answer, so the page renders a live, answerable
+// question card.
+var simAskEvents = []string{
+	`{"type":"system","subtype":"init","session_id":"sim-ask","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentAskPrompt + `"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"thinking","thinking":"The loader currently reads one config.toml. Layering strategy and scope of the first cut are product decisions - ask instead of guessing."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_2","content":[{"type":"tool_use","id":"toolu_ask_1","name":"AskUserQuestion","input":` + simAskQuestionInput + `}]}}`,
+	`{"type":"control_request","request_id":"sim-ask-req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":` + simAskQuestionInput + `,"tool_use_id":"toolu_ask_1","requires_user_interaction":true}}`,
+}
+
+// handleSimAskWS speaks the chat framing for agent-ask: replay the pending
+// question, then answer the control_response with the tool_result +
+// assistant acknowledgement the real CLI would produce.
+func handleSimAskWS(conn *safeConn) {
+	sendStatusUpdate(conn, "needs_input")
+	for _, line := range simAskEvents {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+
+	turn := 0
+	for {
+		msg, ok := readSimChatClientMsg(conn)
+		if !ok {
+			return
+		}
+		switch msg.Type {
+		case "control_response":
+			// Extract the answers map the question card submitted.
+			var payload struct {
+				Response struct {
+					UpdatedInput struct {
+						Answers map[string]string `json:"answers"`
+					} `json:"updatedInput"`
+				} `json:"response"`
+			}
+			_ = json.Unmarshal(msg.Response, &payload)
+			var parts []string
+			for q, a := range payload.Response.UpdatedInput.Answers {
+				parts = append(parts, fmt.Sprintf("%q=%q", q, a))
+			}
+			sort.Strings(parts)
+			sendStatusUpdate(conn, "running")
+			resultText := fmt.Sprintf("Your questions have been answered: %s. You can now continue with these answers in mind.", strings.Join(parts, ", "))
+			toolResult, _ := json.Marshal(map[string]any{
+				"type": "user",
+				"message": map[string]any{"role": "user", "content": []map[string]any{
+					{"type": "tool_result", "tool_use_id": "toolu_ask_1", "content": resultText},
+				}},
+				"session_id": "sim-ask",
+			})
+			sendSimChatEvent(conn, string(toolResult))
+			streamSimReply(conn, "sim-ask", "msg_ask_ack", "Great - going with those choices. This mock stops here; a real head would start implementing now.")
+			sendStatusUpdate(conn, "waiting")
+		case "set_model":
+			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
+		case "interrupt":
+			sendSimUserText(conn, "sim-ask", "[Request interrupted by user]")
+		case "user_message":
+			turn++
+			userEv, _ := json.Marshal(map[string]any{
+				"type":    "user",
+				"message": map[string]any{"role": "user", "content": msg.Content},
+			})
+			sendSimChatEvent(conn, string(userEv))
+			streamSimReply(conn, "sim-ask", fmt.Sprintf("msg_ask_reply_%d", turn), "Simulated reply: noted. The pending question card above stays answerable.")
+		}
 	}
 }
 
@@ -2817,10 +3012,14 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	// The chat-mode demo agent speaks the chat framing, not PTY bytes. Its bash
-	// tabs (shell=true) still get the plain simulated terminal below.
+	// The chat-mode demo agents speak the chat framing, not PTY bytes. Their
+	// bash tabs (shell=true) still get the plain simulated terminal below.
 	if agentID == "agent-chat" && r.URL.Query().Get("shell") != "true" {
 		handleSimChatWS(conn)
+		return
+	}
+	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {
+		handleSimAskWS(conn)
 		return
 	}
 

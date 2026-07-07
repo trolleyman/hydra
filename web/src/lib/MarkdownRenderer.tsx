@@ -127,8 +127,14 @@ const STYLES: Record<Variant, Style> = {
     table: 'border-collapse text-sm',
     th: 'border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold bg-gray-100 dark:bg-gray-700/50 text-left',
     td: 'border border-gray-300 dark:border-gray-600 px-2 py-1',
-    codeInline: 'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em]',
-    codeBlock: 'block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words',
+    // Claude-app-style code (chat items 1/10): bordered terracotta chips for
+    // inline code, a bordered near-black warm panel for blocks in dark mode.
+    // Kept in sync with CODE_CLASS/CODEBLOCK_CLASS in ./markdown (the inline
+    // renderer used for activity lines / prompt previews).
+    codeInline:
+      'rounded box-decoration-clone border border-gray-300/60 dark:border-gray-500/30 bg-gray-100/70 dark:bg-black/25 px-1 font-mono text-[0.9em] text-[#a8462d] dark:text-[#eab6a0]',
+    codeBlock:
+      'block my-1 rounded-md border border-gray-200 dark:border-gray-600/40 bg-gray-50 dark:bg-[#1d1c1a] px-2.5 py-1.5 font-mono text-[0.85em] text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words',
   },
   // Roomier, document-like styling for README previews (mirrors the retired
   // RepositoryView renderer: larger headings with rules, more spacing).
@@ -149,8 +155,12 @@ const STYLES: Record<Variant, Style> = {
     table: 'border-collapse text-sm',
     th: 'border border-gray-300 dark:border-gray-600 px-3 py-1.5 font-semibold bg-gray-50 dark:bg-gray-800/60',
     td: 'border border-gray-300 dark:border-gray-600 px-3 py-1.5',
-    codeInline: 'px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[0.85em] font-mono',
-    codeBlock: 'block my-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 overflow-x-auto text-sm font-mono whitespace-pre',
+    // Doc code stays neutral (a README isn't a chat bubble) but picks up the
+    // same readability fix: a border and a darker dark-mode panel.
+    codeInline:
+      'px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600/40 bg-gray-100 dark:bg-black/25 text-[0.85em] font-mono',
+    codeBlock:
+      'block my-3 p-3 rounded-lg border border-gray-200 dark:border-gray-600/40 bg-gray-50 dark:bg-[#1d1c1a] overflow-x-auto text-sm font-mono whitespace-pre',
   },
 }
 

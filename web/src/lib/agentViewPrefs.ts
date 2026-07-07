@@ -41,6 +41,11 @@ export type AgentViewPrefs = {
   // name → the collapsed tree-node keys within that runner's case tree.
   testCardCollapsed?: Record<string, boolean>
   testTreeCollapsed?: Record<string, string[]>
+  // Chat-pane transcript scroll offset, saved only while the user has scrolled
+  // AWAY from the bottom (a pinned-to-bottom chat just re-pins on return).
+  chatScrollTop?: number
+  // Chat composer minimum height, in whole rows (the drag bar's setting).
+  chatComposerRows?: number
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -64,6 +69,8 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     testUseScope: stored.testUseScope,
     testCardCollapsed: stored.testCardCollapsed,
     testTreeCollapsed: stored.testTreeCollapsed,
+    chatScrollTop: stored.chatScrollTop,
+    chatComposerRows: stored.chatComposerRows,
   }
 }
 
