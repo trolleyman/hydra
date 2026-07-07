@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"braces.dev/errtrace"
 	"context"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ func (f *fakeRunner) run(_ context.Context, _ string, name string, args ...strin
 	cmdline := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, cmdline)
 	if f.response != nil {
-		return f.response(cmdline)
+		return errtrace.Wrap2(f.response(cmdline))
 	}
 	return "", nil
 }
@@ -96,7 +97,7 @@ func TestGithubEnsureMRCreates(t *testing.T) {
 			created = true
 			return "https://gh/pr/99\n", nil
 		case strings.Contains(cmd, "pr view") && !created:
-			return "", &CLIError{Stderr: "no pull requests found for branch"}
+			return "", errtrace.Wrap(&CLIError{Stderr: "no pull requests found for branch"})
 		case strings.Contains(cmd, "pr view") && created:
 			return `{"number":99,"url":"https://gh/pr/99","state":"OPEN","isDraft":true}`, nil
 		}

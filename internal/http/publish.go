@@ -286,14 +286,14 @@ func (s *Server) PushToMr(ctx context.Context, request api.PushToMrRequestObject
 // (plain push, idempotent). Shared by the PushToMr handler and auto-publish.
 func (s *Server) pushHeadToMR(ctx context.Context, projectRoot string, head heads.Head) error {
 	if head.Branch == nil || head.DownstreamBranch == "" {
-		return fmt.Errorf("head is not linked to an MR")
+		return errtrace.Wrap(fmt.Errorf("head is not linked to an MR"))
 	}
 	remote := reviewRemote(projectRoot)
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
 	refspec := *head.Branch + ":refs/heads/" + head.DownstreamBranch
 	_, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil)
-	return err
+	return errtrace.Wrap(err)
 }
 
 // PullFromMr merges the remote downstream ref INTO the head branch (merge, not

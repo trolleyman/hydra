@@ -194,9 +194,9 @@ func cliAvailable(name string) bool {
 func AuthStatus(ctx context.Context, provider string) (loggedIn bool, detail string, err error) {
 	switch provider {
 	case config.ReviewProviderGitHub:
-		return ghAuthStatus(ctx)
+		return errtrace.Wrap3(ghAuthStatus(ctx))
 	case config.ReviewProviderGitLab:
-		return glabAuthStatus(ctx)
+		return errtrace.Wrap3(glabAuthStatus(ctx))
 	default:
 		return false, "", nil
 	}
