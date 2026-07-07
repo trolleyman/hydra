@@ -1,5 +1,42 @@
 # Non-Local Integration Plan
 
+> **Implementation status** (this branch). Phases 1-3 are substantially built;
+> Phase 4 and a few refinements remain. All new UI was verified end-to-end
+> against `hydra server --simulation` with Playwright.
+>
+> **Done:**
+> - **Phase 1**: `git.Push`/`Fetch` hardened non-interactive (+`*git.AuthError`);
+>   `config.local.toml` 4th merge layer (gitignored, in the unsafe_host trusted
+>   set); project-relative `masked_paths` + `.hydraignore` with shipped defaults
+>   (`.hydra/deploy.toml`, `.hydra/config.local.toml`) wired into every sandbox
+>   launch + the gate's credential check; `[review]`/`[jira]` parsing +
+>   validation + provider auto-detection + branch-template expansion +
+>   `BrowseURL`; renderConfig preserves hand-written `[review]`/`[jira]`.
+> - **Phase 2**: DB review fields + `internal/forge` (CLI-first gh/glab provider,
+>   unit-tested); `performPublish`/publishHead, Push to MR / Pull from MR,
+>   downstream-branch editor (soft-locked after publish); API endpoints
+>   (`publishAgent`/`pushToMr`/`pullFromMr`/`setDownstreamBranch`/
+>   `getReviewConfig`); web Create MR dialog + View MR + state chip, ordered by
+>   `default_action`; Settings Review section (resolved values + live auth).
+> - **Phase 3**: `RunReviewWatcher` (poll linked MRs across all projects, refresh
+>   cached state, remote-merge -> fetch/ff/teardown); publish-when-green
+>   (arm/disarm + watcher); `mcp__hydra__get_review_status`/`get_review_comments`
+>   on the seeded hydra MCP server (per-head review file); "Respond to review
+>   comments" canned-prompt button.
+>
+> **Remaining / not yet built:** merge-when-approved arming UI (the forge Merge
+> API + `MergeOptions{Auto}` exist; no arm endpoint/watcher branch yet);
+> linked-head kill/local-merge close-or-detach dialog (3.3c); protected-branches
+> warning (3.2); fetch-fresh spawn base + remote-aware behind-count (3.6);
+> stacked-MR retargeting (3.5); token/REST auth fallback (CLI-only today);
+> a config.local.toml *editor* in Settings (the section is read-only); the small
+> sidebar reorder + forge-link tweak (3.8); Phase 4 spawn-from-ticket + the JIRA
+> ladder beyond `{ticket}` templating (which is wired). The `[[tests]]` vs remote
+> CI drift and rebase-heavy caveats (section 6) are unchanged.
+
+---
+
+
 Hydra today is built around a *local trunk* model: a head's work is landed by a
 plain local `git merge` into its base branch, after which the `hydra/<id>`
 branch and worktree are deleted. That is exactly wrong for a work environment
