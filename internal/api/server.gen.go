@@ -793,6 +793,9 @@ type PreviewStatus struct {
 	// Progress Latest ::hydra:progress:: headline while starting
 	Progress *string `json:"progress,omitempty"`
 
+	// Stale "Latest changes" channel only - the live worktree changed since this server was built, so a build-then-serve preview is out of date (restart to rebuild)
+	Stale *bool `json:"stale,omitempty"`
+
 	// StartedAt When the current child was spawned (null when stopped)
 	StartedAt *time.Time `json:"started_at"`
 

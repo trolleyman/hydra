@@ -2476,6 +2476,12 @@ func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version st
 	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
 	st.Connections = ptr(1)
 	st.Url = ptr("http://" + r.Host + "/")
+	// The "Latest changes" (uncommitted) channel runs in its own checkout that
+	// mirrors the live worktree; show it going stale so the restart affordance
+	// is exercised in the sim.
+	if version == "uncommitted" {
+		st.Stale = ptr(true)
+	}
 	return st
 }
 

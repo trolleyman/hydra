@@ -235,36 +235,49 @@ func (s *slot) promote(p *instance) {
 	}
 }
 
-// newInstance builds a backing instance for a version, materializing an
-// ephemeral detached checkout for commit/tip channels (the head's live worktree
-// is served in place). Caller holds s.mu. The checkout path includes the head
-// and short SHA so two heads pinning the same commit don't collide.
+// newInstance builds a backing instance for a version, always in its own
+// ephemeral detached checkout under the preview scratch dir - so even the
+// worktree channel builds without racing or polluting the agent's live
+// workspace. Caller holds s.mu. The checkout path includes the head so two
+// heads previewing the same script/commit don't collide.
 func (s *slot) newInstance(spec config.ArtifactScript, v Version) (*instance, error) {
-	runDir := v.WorktreeDir
-	ownsCheckout := false
-	if runDir == "" {
-		name := spec.Name + "-" + s.headID + "-" + shortSHA(v.SHA)
-		dir := filepath.Join(previewDir(s.root), "checkouts", name)
-		// Defensively clear any stale worktree at the path before adding.
-		_ = git.RemoveWorktree(s.root, dir)
-		_ = os.RemoveAll(dir)
-		if err := git.AddDetachedWorktree(s.root, dir, v.SHA); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("materialize preview checkout: %w", err))
-		}
-		runDir = dir
-		ownsCheckout = true
+	in := &instance{
+		mgr:        s.mgr,
+		root:       s.root,
+		spec:       spec,
+		version:    v,
+		channel:    v.channelID(),
+		state:      StateStopped,
+		lastActive: time.Now(),
 	}
-	return &instance{
-		mgr:          s.mgr,
-		root:         s.root,
-		spec:         spec,
-		version:      v,
-		runDir:       runDir,
-		ownsCheckout: ownsCheckout,
-		channel:      v.channelID(),
-		state:        StateStopped,
-		lastActive:   time.Now(),
-	}, nil
+	// The base commit the checkout is created at: HEAD of the live worktree for
+	// the worktree channel (its uncommitted changes are then mirrored in), or
+	// the pinned/tip SHA otherwise.
+	baseSHA := v.SHA
+	if v.WorktreeDir != "" {
+		sha, err := git.ResolveRef(v.WorktreeDir, "HEAD")
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("resolve worktree HEAD: %w", err))
+		}
+		baseSHA = sha
+		in.syncFrom = v.WorktreeDir
+		in.syncBaseSHA = sha
+	}
+
+	suffix := shortSHA(v.SHA)
+	if v.WorktreeDir != "" {
+		suffix = "worktree"
+	}
+	dir := filepath.Join(previewDir(s.root), "checkouts", spec.Name+"-"+s.headID+"-"+suffix)
+	// Defensively clear any stale worktree at the path before adding.
+	_ = git.RemoveWorktree(s.root, dir)
+	_ = os.RemoveAll(dir)
+	if err := git.AddDetachedWorktree(s.root, dir, baseSHA); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("materialize preview checkout: %w", err))
+	}
+	in.runDir = dir
+	in.ownsCheckout = true
+	return in, nil
 }
 
 // teardown disposes of the slot: both backing servers killed, checkouts

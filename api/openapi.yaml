@@ -3234,6 +3234,9 @@ components:
         message:
           type: string
           description: Failure detail when state is "error"
+        stale:
+          type: boolean
+          description: '"Latest changes" channel only - the live worktree changed since this server was built, so a build-then-serve preview is out of date (restart to rebuild)'
         log:
           type: array
           items:

@@ -135,6 +135,10 @@ func toAPIPreviewStatus(ctx context.Context, st preview.Status) api.PreviewStatu
 	if st.Message != "" {
 		out.Message = &st.Message
 	}
+	if st.Stale {
+		stale := true
+		out.Stale = &stale
+	}
 	if len(st.Log) > 0 {
 		lines := make([]api.ArtifactLogLine, 0, len(st.Log))
 		for _, l := range st.Log {

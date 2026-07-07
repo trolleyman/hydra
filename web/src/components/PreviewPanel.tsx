@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { ExternalLink, LoaderCircle, MonitorPlay, Play, Square } from 'lucide-react'
+import { ExternalLink, LoaderCircle, MonitorPlay, Play, RotateCcw, Square } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { PreviewStatus } from '../api/models/PreviewStatus'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
@@ -111,6 +111,16 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
     setNonce((n) => n + 1)
   }, [projectId, agentId, headRef, includeUncommitted])
 
+  // Restart = stop then start (no tab): the worktree channel re-mirrors the
+  // live code and rebuilds, so a "code changed" (stale) build gets current.
+  const restart = useCallback(async (name: string) => {
+    try {
+      await api.default.stopAgentPreview(projectId, agentId, name, headRef, includeUncommitted)
+      await api.default.startAgentPreview(projectId, agentId, name, headRef, includeUncommitted)
+    } catch { /* the poll below re-syncs state either way */ }
+    setNonce((n) => n + 1)
+  }, [projectId, agentId, headRef, includeUncommitted])
+
   // Panel section header height, exported as the CSS var card headers stick under.
   const [headerRef, headerH] = useMeasuredHeight(41)
 
@@ -137,8 +147,9 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
         )}
         <InfoTooltip title="Previews" width={520}>
           <p>Live demo servers built from the selected version - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip.</p>
-          <p>Each row is a project-defined <code className="text-blue-300">[[artifacts]]</code> script with <code className="text-blue-300">type = "server"</code> in <code className="text-blue-300">.hydra/config.toml</code>. <strong>Open</strong> spins the server up on its own port (the tab shows the build log live until it is ready) and proxies to it; with no open connections past its idle timeout it shuts down again, and revisiting the link transparently respawns it. Commit previews run in their own checkout, so two versions can be compared side by side in two tabs.</p>
-          <p>The scroll icon shows the captured build log; stop and restart do what they say. A running preview keeps its port, so bookmarks within one session stay valid.</p>
+          <p>Each row is a project-defined <code className="text-blue-300">[[artifacts]]</code> script with <code className="text-blue-300">type = "server"</code> in <code className="text-blue-300">.hydra/config.toml</code>. <strong>Open</strong> spins the server up on its own port (the tab shows the build log live until it is ready) and proxies to it; with no open connections past its idle timeout it shuts down again, and revisiting the link transparently respawns it.</p>
+          <p>There is one server per script, following your <strong>after</strong> selection: pointing at a different version rebuilds it in place - the URL and port never change. On <strong>Latest commit</strong> it tracks the branch tip, building the new commit in the background and hot-swapping it in when ready. On <strong>Latest changes</strong> it runs in its own checkout that mirrors your uncommitted edits; a build-then-serve preview then shows <span className="text-amber-400">code changed - restart</span> so you can rebuild.</p>
+          <p>The card body shows the captured build log; a running preview keeps its port, so bookmarks within one session stay valid.</p>
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
@@ -149,6 +160,7 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
             onOpen={() => { void start(p.name, true) }}
             onStart={() => { void start(p.name, false) }}
             onStop={() => { void stop(p.name) }}
+            onRestart={() => { void restart(p.name) }}
           />
         ))}
       </div>
@@ -158,11 +170,12 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
 
 // PreviewCard is one server row: state dot, name, version chip, Open link and
 // stop/start melt icons, with the captured build log as the collapsible body.
-function PreviewCard({ preview: p, onOpen, onStart, onStop }: {
+function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
   preview: PreviewStatus
   onOpen: () => void
   onStart?: () => void
   onStop: () => void
+  onRestart: () => void
 }) {
   // The log body is collapsed by default; auto-expand when a spawn fails so
   // the failure is visible without hunting for the scroll icon (render-time
@@ -192,10 +205,23 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop }: {
           {p.state === 'error' && p.message && (
             <span className="text-[11px] text-red-500 dark:text-red-400 truncate max-w-64" title={p.message}>{p.message}</span>
           )}
+          {p.state === 'running' && p.stale && (
+            <span className="text-[11px] text-amber-600 dark:text-amber-500" title="The code changed since this server was built. Restart to rebuild.">code changed - restart</span>
+          )}
         </span>
       }
       actions={
         <span className="flex items-center gap-2">
+          {live && p.stale && (
+            <button
+              onClick={onRestart}
+              title="Restart to rebuild from the current code"
+              aria-label={`Restart preview ${p.name}`}
+              className={MELT_BTN}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
           {live && (
             <button
               onClick={onStop}

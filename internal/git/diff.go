@@ -248,6 +248,50 @@ func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]Di
 	return files, nil
 }
 
+// WorktreeChangesSince reports how worktreeDir's working tree differs from
+// baseRef: `changed` are added/modified/type-changed tracked files plus every
+// untracked-but-not-ignored file (all to be copied), `deleted` are tracked
+// files removed since baseRef. Rename detection is off, so a rename surfaces as
+// a delete of the old path and an add of the new one. Paths are repo-relative
+// with forward slashes. Used by the preview worktree channel to mirror a head's
+// live changes into its own checkout.
+func WorktreeChangesSince(worktreeDir, baseRef string) (changed, deleted []string, err error) {
+	if err := ValidateRef(baseRef); err != nil {
+		return nil, nil, errtrace.Wrap(err)
+	}
+	// Tracked changes vs the base commit (working tree, not the index): -z gives
+	// NUL-delimited paths, --no-renames keeps each entry a clean STATUS\0path
+	// pair (a rename becomes a delete + an add).
+	out, err := gitOutput(worktreeDir, "diff", "--name-status", "--no-renames", "-z", baseRef, "--")
+	if err != nil {
+		return nil, nil, errtrace.Wrap(err)
+	}
+	fields := strings.Split(out, "\x00")
+	for i := 0; i+1 < len(fields); i += 2 {
+		status, path := fields[i], fields[i+1]
+		if status == "" || path == "" {
+			continue
+		}
+		if status[0] == 'D' {
+			deleted = append(deleted, path)
+		} else {
+			changed = append(changed, path)
+		}
+	}
+	// Untracked, non-ignored files are copied too (--exclude-standard honors
+	// .gitignore, so build junk does not sync).
+	others, err := gitOutput(worktreeDir, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, nil, errtrace.Wrap(err)
+	}
+	for _, p := range strings.Split(others, "\x00") {
+		if p != "" {
+			changed = append(changed, p)
+		}
+	}
+	return changed, deleted, nil
+}
+
 // GetUntrackedDiffFiles returns DiffFile summary entries for untracked files.
 func GetUntrackedDiffFiles(projectRoot string) ([]DiffFile, error) {
 	out, err := gitOutput(projectRoot, "ls-files", "--others", "--exclude-standard")

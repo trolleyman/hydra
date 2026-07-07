@@ -38,6 +38,11 @@ type instance struct {
 	runDir       string
 	ownsCheckout bool
 	channel      string // the slot channel this instance serves (see Version.channelID)
+	// syncFrom/syncBaseSHA drive the "Latest changes" worktree channel: the
+	// server runs in runDir (an own checkout at syncBaseSHA) while a background
+	// loop mirrors the live worktree's changes in. Empty for commit/tip channels.
+	syncFrom    string
+	syncBaseSHA string
 
 	mu        sync.Mutex
 	spec      config.ArtifactScript
@@ -60,6 +65,11 @@ type instance struct {
 	startedAt  time.Time
 	inflight   int
 	lastActive time.Time
+	// baseFingerprint is the mirrored worktree state this run was built from;
+	// stale latches true once the live worktree diverges from it (worktree
+	// channel only). Both reset at the start of each run.
+	baseFingerprint string
+	stale           bool
 }
 
 // idleTimeout returns the effective idle teardown duration. Caller holds mu.
@@ -99,6 +109,7 @@ func (in *instance) status() Status {
 		StartedAt: in.startedAt,
 		Progress:  in.progress,
 		Message:   in.message,
+		Stale:     in.stale,
 		Log:       append([]LogLine(nil), in.log...),
 	}
 }
@@ -158,6 +169,18 @@ func (in *instance) ensureStarted() {
 func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec config.ArtifactScript, gen int, readyCh chan struct{}) {
 	defer cancel()
 
+	// Worktree channel: bring the own-checkout current with the live worktree
+	// before the build starts, and record the fingerprint this run builds from
+	// (clearing any stale flag left by a previous run).
+	if in.syncFrom != "" {
+		if fp, err := mirrorWorktree(in.syncFrom, in.runDir, in.syncBaseSHA); err == nil {
+			in.mu.Lock()
+			in.baseFingerprint = fp
+			in.stale = false
+			in.mu.Unlock()
+		}
+	}
+
 	childPort, err := freePort()
 	if err != nil {
 		in.settleError(gen, fmt.Sprintf("allocate child port: %v", err))
@@ -215,6 +238,12 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	in.pid = cmd.Process.Pid
 	readyDeadline := in.readyTimeout()
 	in.mu.Unlock()
+
+	// Worktree channel: mirror the live worktree's changes into the checkout
+	// while the server runs (only while it runs - ctx is cancelled on exit).
+	if in.syncFrom != "" {
+		go in.syncLoop(ctx)
+	}
 
 	var wg sync.WaitGroup
 	scan := func(r io.Reader, stream string) {

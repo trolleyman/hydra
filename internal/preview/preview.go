@@ -129,6 +129,7 @@ type Status struct {
 	StartedAt time.Time
 	Progress  string // latest ::hydra:progress:: headline while starting
 	Message   string // error detail when State == StateError
+	Stale     bool   // worktree channel: live code changed since this server built
 	Log       []LogLine
 }
 
