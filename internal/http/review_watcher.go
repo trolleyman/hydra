@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/forge"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/mcpserver"
+	"github.com/trolleyman/hydra/internal/paths"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
@@ -64,8 +68,18 @@ func (s *Server) pollLinkedReviews(ctx context.Context) {
 		if err != nil {
 			continue // transient forge error
 		}
-		// Cache the fresh state on the head.
+		// Cache the fresh state on the head (for the UI chip).
 		s.cacheReviewState(projectRoot, a.ID, st)
+
+		// Fetch unresolved discussions only when the status reports some, then write
+		// the per-head review file the agent's mcp__hydra__* tools read (3.5a).
+		var discussions []forge.Discussion
+		if st.UnresolvedDiscussions > 0 {
+			if d, derr := provider.Discussions(ctx, projectRoot, remote, a.ReviewID); derr == nil {
+				discussions = d
+			}
+		}
+		writeReviewFile(projectRoot, a, st, discussions)
 
 		if st.State == forge.StateMerged {
 			s.handleRemoteMerge(ctx, projectRoot, a.ID)
@@ -83,6 +97,35 @@ func (s *Server) cacheReviewState(projectRoot, headID string, st forge.Status) {
 	}
 	_ = s.DB.SetReviewState(headID, string(data), time.Now().Format(time.RFC3339))
 	s.notifyAgentsChanged(projectRoot, false)
+}
+
+// writeReviewFile writes the per-head review snapshot (status + unresolved
+// discussions) the in-sandbox `hydra mcp` server reads (3.5a). Best-effort.
+func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
+	rf := mcpserver.ReviewFile{
+		Linked:                true,
+		URL:                   a.ReviewURL,
+		ID:                    a.ReviewID,
+		Provider:              a.ReviewProvider,
+		TargetBranch:          a.ReviewTargetBranch,
+		State:                 st.State,
+		CIStatus:              st.CIStatus,
+		Approvals:             st.Approvals,
+		ApprovalsRequired:     st.ApprovalsRequired,
+		UnresolvedDiscussions: st.UnresolvedDiscussions,
+		Mergeable:             st.Mergeable,
+		UpdatedAt:             time.Now().Format(time.RFC3339),
+	}
+	for _, d := range discussions {
+		rf.Comments = append(rf.Comments, mcpserver.ReviewComment{
+			Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
+		})
+	}
+	data, err := json.Marshal(rf)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(paths.GetReviewJsonFromProjectRoot(projectRoot, a.ID), data, 0644)
 }
 
 // handleRemoteMerge tears down a head whose MR reports merged: fetch, fast-forward

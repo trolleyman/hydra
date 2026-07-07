@@ -179,6 +179,16 @@ func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_build.log")
 }
 
+// GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle
+// watcher writes (status + unresolved discussions) and the in-sandbox `hydra mcp`
+// server reads for get_review_status / get_review_comments (NON_LOCAL_INTEGRATION.md
+// 3.5a). Per-head by construction: it is bound only into that head's sandbox, so
+// the agent's identity comes from the channel, never a self-reported id. Sits
+// beside status.json under .hydra/local/status/<id>_review.json.
+func GetReviewJsonFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_review.json")
+}
+
 // GetSubagentsDirFromProjectRoot returns the per-head directory tracking the
 // head's currently-live Claude sub-agents (Task tool). trigger-hook drops a
 // marker file per running sub-agent so the main agent's Stop hook can tell a

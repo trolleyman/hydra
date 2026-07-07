@@ -907,6 +907,56 @@ export class DefaultService {
         });
     }
     /**
+     * Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+     * Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent.
+     *
+     * @param projectId
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public armPublishWhenGreen(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/publish-when-green',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Disarm publish-when-green for a head
+     * @param projectId
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public disarmPublishWhenGreen(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/agents/{id}/publish-when-green',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Send text input to an agent's terminal stdin
      * @param projectId Project ID
      * @param id

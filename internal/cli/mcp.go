@@ -43,7 +43,30 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		ListAvailable: availableMCPServers,
 		RequestAccess: func(name string) (bool, string) { return requestMCPAccess(agentType, name) },
 	}
+	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
+	// is seeded for every head; the file reports linked=false until published).
+	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
+		deps.GetReview = loadReviewFile
+	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
+}
+
+// loadReviewFile reads the per-head review snapshot the MR watcher writes. A
+// missing/unreadable file yields nil (the review tools then report "not linked").
+func loadReviewFile() *mcpserver.ReviewFile {
+	path := os.Getenv("HYDRA_REVIEW_PATH")
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var rf mcpserver.ReviewFile
+	if err := json.Unmarshal(data, &rf); err != nil {
+		return nil
+	}
+	return &rf
 }
 
 // loadMCPCatalog reads the seeded catalog of host-configured MCP servers. Missing

@@ -19,7 +19,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -981,6 +981,18 @@ export function AgentDetail({
     setSavingDownstream(false)
   }
 
+  // respondToReview sends the agent a one-line canned prompt to fetch and address
+  // its MR's unresolved review comments (via the mcp__hydra__* tools) - the same
+  // agent-pull pattern as the diff viewer's "Fix the merge conflicts" action
+  // (NON_LOCAL_INTEGRATION.md 3.5). Data is fetched by the agent when it reads,
+  // so it is fresh at that moment, not at click time.
+  async function respondToReview() {
+    await runWithToast(
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: "Fetch your MR's unresolved review comments with the hydra MCP tools (get_review_comments) and address them, then commit." }),
+      { success: 'Asked the agent to address review comments', errorPrefix: 'Failed to send' },
+    )
+  }
+
   // Archived agents are read-only: render the history view instead of the live
   // terminal/diff. Placed after all hooks above so hook order stays stable when
   // the same mounted component switches between a live and an archived agent.
@@ -1052,6 +1064,7 @@ export function AgentDetail({
             ...(ahead > 0 ? [{ label: `Push to MR (${ahead} ahead)`, description: 'Push local commits to the MR branch.', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }] : []),
             ...(behind > 0 ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote MR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
             { label: 'Push to MR', description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing },
+            ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [{ label: 'Respond to review comments', description: 'Ask the agent to fetch and address the unresolved review comments.', icon: <MessageSquare className="w-4 h-4" />, onClick: () => void respondToReview(), tone: 'neutral' as const, disabled: busy }] : []),
           ] as AgentTopBarMenuItem[],
         }
       : {
