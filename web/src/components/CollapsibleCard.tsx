@@ -24,8 +24,10 @@ const COLLAPSE_MS = 200
 // the tests panel (PLAN #68): a header row whose left half is a click-to-collapse
 // button (chevron + icon + name + an inline `status` slot) and whose right half
 // hosts `actions` - the melt-style icon buttons (see MELT_BTN). The body renders
-// below the header only while expanded, in the same `px-3 pb-2` inset both panels
-// rely on. Every state lives inside the one bordered card so toggling between them
+// below the header only while expanded, in the same symmetric `p-3` inset both
+// panels rely on - so a body child (a log terminal, an image grid) sits with equal
+// breathing room on all four sides. Full-bleed rows opt out with `-mx-3`.
+// Every state lives inside the one bordered card so toggling between them
 // never shifts the layout and the action buttons stay reachable.
 //
 // With `sticky`, the header pins itself flush below the panel's section bar while
@@ -165,7 +167,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >
-        {mounted && <div ref={bodyRef} className="px-3 pb-2">{children}</div>}
+        {mounted && <div ref={bodyRef} className="p-3">{children}</div>}
       </div>
     </div>
   )

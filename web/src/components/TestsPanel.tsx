@@ -548,7 +548,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           (completed cases over the declared total) when the run streams a
           denominator, an indeterminate sliding barber pole otherwise. */}
       {running && (
-        <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
+        <div className="mb-1.5 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
           {liveDenominator(runner) > 0 ? (
             <div
               className="h-full bg-blue-500 transition-[width] duration-300"
@@ -566,7 +566,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 
       {/* Errored with no log to show: surface the captured error text. */}
       {errored && runner.error && !hasLog ? (
-        <div className="my-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
+        <div className="mb-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
           {runner.error}
         </div>
       ) : null}
@@ -576,7 +576,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
-        <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 flex flex-col border-t border-gray-100 dark:border-gray-800">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
             : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
@@ -794,7 +794,7 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const log = running ? runner.log ?? [] : fetched ?? []
   const emptyText = running ? 'starting...' : url ? 'Loading...' : 'No output'
   return (
-    <div className="pt-1.5 pb-1">
+    <div className="pb-1">
       <LogView log={log} emptyText={emptyText} failed={failed} succeeded={!running && !failed} />
     </div>
   )
