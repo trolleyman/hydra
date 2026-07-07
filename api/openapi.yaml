@@ -749,40 +749,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-    post:
-      summary: Save [review] overrides to the project's personal config.local.toml
-      operationId: saveReviewConfig
-      description: Writes the supplied review fields to .hydra/config.local.toml (the .gitignored, per-user, last-wins layer); only the [review] table is rewritten, other sections are preserved. Returns the freshly-resolved config (same shape as GET).
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReviewConfigUpdate'
-      responses:
-        '200':
-          description: Saved (returns the resolved config).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReviewConfigResponse'
-        '400':
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Not Found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 
   /api/projects/{project_id}/agents/{id}/update-from-base:
     post:
@@ -2885,32 +2851,56 @@ components:
           type: array
           items: { type: string }
 
-    ReviewConfigUpdate:
+    ReviewConfig:
       type: object
-      description: Review fields to write to config.local.toml. Every field is optional; an omitted field is left as-is (inherits config.toml / the built-in default).
+      description: >-
+        The raw [review] config for ONE config layer (project / user / local),
+        as edited in the Settings scope tabs. Every field is nullable; a null
+        field is unset at this layer and inherits the layer below (built-in
+        defaults are applied only in the resolved ReviewConfigResponse). Which
+        file a save writes to is chosen by the scope tab, so provider/target/etc.
+        can live in the shared config.toml and personal overrides in config.local.toml.
       properties:
         provider:
           type: string
+          nullable: true
           description: '"auto" | "github" | "gitlab".'
         remote:
           type: string
+          nullable: true
         target_branch:
           type: string
+          nullable: true
+        auth:
+          type: string
+          nullable: true
+          description: '"cli" | "token".'
         default_action:
           type: string
+          nullable: true
           description: '"merge" | "create_mr".'
         push_branch_template:
           type: string
+          nullable: true
         draft:
           type: boolean
+          nullable: true
         squash:
           type: boolean
+          nullable: true
         delete_remote_branch:
           type: boolean
+          nullable: true
         require_local_tests:
           type: boolean
+          nullable: true
         publish_when_green:
           type: boolean
+          nullable: true
+        protected_branches:
+          type: array
+          items: { type: string }
+          nullable: true
 
     ReviewState:
       type: object
@@ -4043,6 +4033,11 @@ components:
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
+        review:
+          # The raw [review] table for this config layer (absent when the layer
+          # sets none). Edited in the Settings Review section; the scope tab
+          # decides which file a save writes to.
+          $ref: '#/components/schemas/ReviewConfig'
 
     ServiceStatus:
       type: object

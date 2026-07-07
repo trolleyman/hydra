@@ -591,6 +591,9 @@ type ConfigResponse struct {
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
 
+	// Review The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
+	Review *ReviewConfig `json:"review,omitempty"`
+
 	// Services Per-project long-running supervised commands ([[services]] in config.toml)
 	Services *[]ServiceScript `json:"services"`
 
@@ -1044,6 +1047,27 @@ type RepositoryUncommittedFile struct {
 	Status string `json:"status"`
 }
 
+// ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
+type ReviewConfig struct {
+	// Auth "cli" | "token".
+	Auth *string `json:"auth"`
+
+	// DefaultAction "merge" | "create_mr".
+	DefaultAction      *string   `json:"default_action"`
+	DeleteRemoteBranch *bool     `json:"delete_remote_branch"`
+	Draft              *bool     `json:"draft"`
+	ProtectedBranches  *[]string `json:"protected_branches"`
+
+	// Provider "auto" | "github" | "gitlab".
+	Provider           *string `json:"provider"`
+	PublishWhenGreen   *bool   `json:"publish_when_green"`
+	PushBranchTemplate *string `json:"push_branch_template"`
+	Remote             *string `json:"remote"`
+	RequireLocalTests  *bool   `json:"require_local_tests"`
+	Squash             *bool   `json:"squash"`
+	TargetBranch       *string `json:"target_branch"`
+}
+
 // ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
 type ReviewConfigResponse struct {
 	// Auth Auth method ("cli" | "token").
@@ -1083,23 +1107,6 @@ type ReviewConfigResponse struct {
 	RequireLocalTests *bool   `json:"require_local_tests,omitempty"`
 	Squash            *bool   `json:"squash,omitempty"`
 	TargetBranch      string  `json:"target_branch"`
-}
-
-// ReviewConfigUpdate Review fields to write to config.local.toml. Every field is optional; an omitted field is left as-is (inherits config.toml / the built-in default).
-type ReviewConfigUpdate struct {
-	// DefaultAction "merge" | "create_mr".
-	DefaultAction      *string `json:"default_action,omitempty"`
-	DeleteRemoteBranch *bool   `json:"delete_remote_branch,omitempty"`
-	Draft              *bool   `json:"draft,omitempty"`
-
-	// Provider "auto" | "github" | "gitlab".
-	Provider           *string `json:"provider,omitempty"`
-	PublishWhenGreen   *bool   `json:"publish_when_green,omitempty"`
-	PushBranchTemplate *string `json:"push_branch_template,omitempty"`
-	Remote             *string `json:"remote,omitempty"`
-	RequireLocalTests  *bool   `json:"require_local_tests,omitempty"`
-	Squash             *bool   `json:"squash,omitempty"`
-	TargetBranch       *string `json:"target_branch,omitempty"`
 }
 
 // ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
@@ -1731,9 +1738,6 @@ type SetProjectIconJSONRequestBody = SetProjectIconRequest
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
 
-// SaveReviewConfigJSONRequestBody defines body for SaveReviewConfig for application/json ContentType.
-type SaveReviewConfigJSONRequestBody = ReviewConfigUpdate
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Chrome DevTools workspace configuration
@@ -1892,9 +1896,6 @@ type ServerInterface interface {
 	// Resolved [review] config + live forge auth status for a project
 	// (GET /api/projects/{project_id}/review-config)
 	GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
-	// Save [review] overrides to the project's personal config.local.toml
-	// (POST /api/projects/{project_id}/review-config)
-	SaveReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
@@ -3922,31 +3923,6 @@ func (siw *ServerInterfaceWrapper) GetReviewConfig(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// SaveReviewConfig operation middleware
-func (siw *ServerInterfaceWrapper) SaveReviewConfig(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SaveReviewConfig(w, r, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetServices operation middleware
 func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
 
@@ -4224,7 +4200,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/sync", wrapper.SyncRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/review-config", wrapper.GetReviewConfig)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/review-config", wrapper.SaveReviewConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -6233,42 +6208,6 @@ func (response GetReviewConfig404JSONResponse) VisitGetReviewConfigResponse(w ht
 	return json.NewEncoder(w).Encode(response)
 }
 
-type SaveReviewConfigRequestObject struct {
-	ProjectId string `json:"project_id"`
-	Body      *SaveReviewConfigJSONRequestBody
-}
-
-type SaveReviewConfigResponseObject interface {
-	VisitSaveReviewConfigResponse(w http.ResponseWriter) error
-}
-
-type SaveReviewConfig200JSONResponse ReviewConfigResponse
-
-func (response SaveReviewConfig200JSONResponse) VisitSaveReviewConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SaveReviewConfig400JSONResponse ErrorResponse
-
-func (response SaveReviewConfig400JSONResponse) VisitSaveReviewConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SaveReviewConfig404JSONResponse ErrorResponse
-
-func (response SaveReviewConfig404JSONResponse) VisitSaveReviewConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
 type GetServicesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -6547,9 +6486,6 @@ type StrictServerInterface interface {
 	// Resolved [review] config + live forge auth status for a project
 	// (GET /api/projects/{project_id}/review-config)
 	GetReviewConfig(ctx context.Context, request GetReviewConfigRequestObject) (GetReviewConfigResponseObject, error)
-	// Save [review] overrides to the project's personal config.local.toml
-	// (POST /api/projects/{project_id}/review-config)
-	SaveReviewConfig(ctx context.Context, request SaveReviewConfigRequestObject) (SaveReviewConfigResponseObject, error)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
@@ -8052,39 +7988,6 @@ func (sh *strictHandler) GetReviewConfig(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReviewConfigResponseObject); ok {
 		if err := validResponse.VisitGetReviewConfigResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// SaveReviewConfig operation middleware
-func (sh *strictHandler) SaveReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
-	var request SaveReviewConfigRequestObject
-
-	request.ProjectId = projectId
-
-	var body SaveReviewConfigJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SaveReviewConfig(ctx, request.(SaveReviewConfigRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SaveReviewConfig")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SaveReviewConfigResponseObject); ok {
-		if err := validResponse.VisitSaveReviewConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

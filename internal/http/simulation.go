@@ -706,70 +706,6 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// SaveReviewConfig echoes the resolved config with the submitted overrides
-// applied, so the Settings editor round-trips in simulation (nothing is written).
-func (s *SimulationServer) SaveReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
-	var body api.ReviewConfigUpdate
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	resp := api.ReviewConfigResponse{
-		Configured:         true,
-		Provider:           forge.ProviderGitLab,
-		ProviderSetting:    ptr("auto"),
-		Remote:             "origin",
-		RemoteUrl:          ptr("git@gitlab.example.com:team/repo.git"),
-		BrowseUrl:          ptr("https://gitlab.example.com/team/repo"),
-		TargetBranch:       "main",
-		Auth:               "cli",
-		AuthStatus:         ptr("glab: logged in to gitlab.example.com as sim-user"),
-		Authenticated:      ptr(true),
-		DefaultAction:      "create_mr",
-		PushBranchTemplate: ptr("feat/{ticket}-{id}"),
-		Draft:              ptr(true),
-		Squash:             ptr(true),
-		DeleteRemoteBranch: ptr(true),
-		RequireLocalTests:  ptr(true),
-		PublishWhenGreen:   ptr(false),
-		ProtectedBranches:  &[]string{"main"},
-	}
-	if body.Provider != nil {
-		resp.ProviderSetting = body.Provider
-		if *body.Provider != "auto" {
-			resp.Provider = *body.Provider
-		}
-	}
-	if body.Remote != nil {
-		resp.Remote = *body.Remote
-	}
-	if body.TargetBranch != nil {
-		resp.TargetBranch = *body.TargetBranch
-	}
-	if body.DefaultAction != nil {
-		resp.DefaultAction = *body.DefaultAction
-	}
-	if body.PushBranchTemplate != nil {
-		resp.PushBranchTemplate = body.PushBranchTemplate
-	}
-	if body.Draft != nil {
-		resp.Draft = body.Draft
-	}
-	if body.Squash != nil {
-		resp.Squash = body.Squash
-	}
-	if body.DeleteRemoteBranch != nil {
-		resp.DeleteRemoteBranch = body.DeleteRemoteBranch
-	}
-	if body.RequireLocalTests != nil {
-		resp.RequireLocalTests = body.RequireLocalTests
-	}
-	if body.PublishWhenGreen != nil {
-		resp.PublishWhenGreen = body.PublishWhenGreen
-	}
-	api.WriteJSON(w, http.StatusOK, resp)
-}
-
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2602,6 +2538,19 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		resp.Services = &[]api.ServiceScript{
 			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
 		}
+	}
+	// Review overrides per scope: the shared forge settings live in the project
+	// config, while a personal preference (default action) lives in the local
+	// override - so the Review section demonstrates the multi-scope story.
+	switch {
+	case params.Scope == nil || *params.Scope == api.GetConfigParamsScopeProject:
+		resp.Review = &api.ReviewConfig{
+			Provider:           ptr("gitlab"),
+			TargetBranch:       ptr("main"),
+			PushBranchTemplate: ptr("feat/{ticket}-{id}"),
+		}
+	case *params.Scope == api.GetConfigParamsScopeLocal:
+		resp.Review = &api.ReviewConfig{DefaultAction: ptr("create_mr")}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }

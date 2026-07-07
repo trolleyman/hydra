@@ -2310,7 +2310,8 @@ type existingAnalysis struct {
 	serviceMeta    map[string]artifactComments // service name -> preserved comments
 	testBlocks     [][]string                  // verbatim [[tests]] blocks, in source order
 	testMeta       map[string]artifactComments // test runner name -> preserved comments
-	reviewBlock    []string                    // verbatim [review] table, preserved on save
+	reviewBlock    []string                    // verbatim [review] table (comments + table), fallback when cfg.Review is unset
+	reviewComments []string                    // just the user comments above [review], kept when the table is regenerated from cfg.Review
 	jiraBlock      []string                    // verbatim [jira] table, preserved on save
 }
 
@@ -2496,11 +2497,13 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		if !inVerbatim {
 			return
 		}
-		block := append([]string{}, userComments(verbLeading, keys)...)
+		comments := userComments(verbLeading, keys)
+		block := append([]string{}, comments...)
 		block = append(block, lines[verbHeaderLine:verbLastLine+1]...)
 		switch verbNorm {
 		case "review":
 			res.reviewBlock = block
+			res.reviewComments = comments
 		case "jira":
 			res.jiraBlock = block
 		}
@@ -2927,11 +2930,16 @@ func renderConfig(existing []byte, cfg Config) string {
 		}
 	}
 
-	// Review / Jira: preserve a hand-written [review]/[jira] table verbatim (the
-	// Settings Review editor writes these to config.local.toml, not here); show a
-	// documented commented example when absent so the section self-documents.
+	// Review: when cfg.Review carries values (edited via the Settings Review
+	// section), regenerate the [review] table from them - keeping any user
+	// comments that sat above it. Otherwise preserve a hand-written table verbatim,
+	// or show a documented commented example so the section self-documents. Jira
+	// is not editor-managed, so it stays verbatim.
 	out = appendBlank(out)
-	if len(prior.reviewBlock) > 0 {
+	if cfg.Review != nil && !cfg.Review.isEmpty() {
+		out = append(out, prior.reviewComments...)
+		out = append(out, reviewFieldLines(*cfg.Review)...)
+	} else if len(prior.reviewBlock) > 0 {
 		out = append(out, prior.reviewBlock...)
 	} else {
 		out = append(out, reviewExampleLines()...)
