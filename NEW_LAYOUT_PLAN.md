@@ -130,7 +130,25 @@ The top of the pane has **two rows of chrome**:
   exactly as `DiffViewer` renders them today.
 - **Tests view** = `TestsPanel` promoted to a first-class view (no longer a
   card buried below the diff).
-- **Previews view** = `PreviewPanel`.
+- **Previews view** = `PreviewPanel`, upgraded to an embedded browser (see
+  "Preview pane: embedded browser" below).
+
+### Framing
+
+This whole redesign is essentially: **take everything currently stacked below
+the terminal (prompt block, tests, previews, artifacts, diff) and move it into a
+right-hand panel**, leaving the terminal/chat in the left pane. That framing
+keeps the scope honest - most components move rather than change.
+
+### The inspector pane is itself a hideable sidebar
+
+The right pane can be collapsed and re-shown, exactly like the global left
+sidebar (copy the `useSidebarStore` pattern in `web/src/lib/sidebar.ts`; persist
+via a new `StorageKeys` entry). A toggle in `AgentTopBar` (mirroring the
+show-sidebar button) hides it so the terminal/chat gets full width. Symmetrically
+the left pane can collapse for a "diff focus" view. So the divider has three
+states: **split / terminal-only / inspector-only**. On narrow screens the
+default is one pane at a time with the tab bar as the switcher.
 
 ### Artifacts - inline in the Diff view (decided)
 
@@ -145,6 +163,60 @@ artifacts under the diff's comparison chrome avoids that and matches how the
 repository view already presents them - rendered images/videos appear alongside
 the file changes. (A filter within the diff view can focus on just the artifact
 entries if the combined list gets busy.)
+
+### Preview pane: embedded browser
+
+Today `PreviewPanel` lists each `type = "server"` entry with Open/Restart/Stop +
+a build log, and **Open just `window.open`s the proxy URL in a new tab** - no
+embedding. Upgrade the Previews view into a mini-browser embedded in the pane:
+
+- **Chrome:** an address/path bar + reload + back/forward + open-in-new-tab
+  (keep `window.open` as the "pop out" escape hatch) + a dropdown of the
+  project's `type = "server"` entries. The split gives the iframe the whole
+  pane's height.
+- **Bonus - responsive testing:** viewport presets (phone/tablet/desktop)
+  framing the iframe, reusing the device sizes the screenshot script already
+  uses (`web/scripts/screenshots/take-screenshots.ts`).
+
+**Talking to the iframe (injected bridge).** A different-port preview iframe is
+cross-origin, so normally the parent can't read its URL or postMessage into it.
+But Hydra **already reverse-proxies the preview** - `in.proxy =
+httputil.NewSingleHostReverseProxy(...)` in `internal/preview/spawn.go`, and
+`internal/preview/proxy.go` already branches on `text/html`. So add a
+`ModifyResponse` hook that, for HTML responses, **injects a small bridge
+`<script>` before `</head>`**. That script runs *inside* the iframe at the app's
+own origin, so it can read everything and `postMessage` up to the parent Hydra
+window. The proxy is the bridge. This dissolves both cross-origin problems:
+
+- **Address bar reflects the real URL.** The injected script patches
+  `history.pushState`/`replaceState` and listens to `popstate`/`hashchange`,
+  posting the current URL + title up on every navigation - SPA soft-nav
+  included. Back/forward too.
+- **Frame-busting is defeated.** The same `ModifyResponse` strips
+  `X-Frame-Options` / CSP `frame-ancestors` from the response so the app can't
+  refuse embedding.
+
+Bridge protocol, both directions:
+
+- **iframe -> parent:** current URL + title per navigation; `load`/ready;
+  **uncaught + console errors** (surface the preview app's runtime errors right
+  in the pane - useful for the agent-testing loop); optional click-to-inspect.
+- **parent -> iframe:** navigate to a path, reload, back/forward, set viewport
+  preset, ping for state.
+
+Implementation caveats:
+
+- **CSP `script-src`:** if the app sends a strict CSP the injected inline script
+  is blocked - inject with a nonce and add it to the CSP, or rewrite/strip CSP
+  in the same hook. Deliberate, preview-only loosening.
+- **Compression:** to splice the body the proxy must handle gzip/br - send
+  `Accept-Encoding: identity` upstream or decompress in `ModifyResponse`.
+- **HTML-only:** injection touches top-level HTML docs; assets/JSON are
+  untouched (nothing to embed). SPA nav is covered by the history patch.
+- **Trust/handshake:** share a per-preview nonce between the injected script and
+  the parent; verify `event.origin`/`event.source` so other frames can't spoof.
+- **Opt-in:** this modifies the user's app responses; gate it behind a
+  preview-only flag even though it is already a Hydra-proxied dev server.
 
 ### Header - unchanged in role
 
@@ -189,6 +261,42 @@ its contents; it simply spans both new panes.
 - Consider letting the user collapse either pane entirely (e.g. a chevron on
   the divider) for a terminal-only or diff-only focus mode.
 
+## Risks and gotchas
+
+1. **Side-by-side diff width (the big one).** Today the diff owns the full
+   width minus the sidebar; splitting halves it, and side-by-side mode is two
+   code columns *plus* the resizable file-list column. In a ~55% pane that gets
+   cramped. Mitigations: auto-fall-back to unified below a width threshold,
+   make the file-list column collapse to an overlay, and lean on the
+   inspector-only / diff-focus collapse to reclaim full width on demand.
+2. **Terminal column count - softened by chat mode.** A raw PTY terminal
+   reflows tighter when the left pane narrows, and a wide terminal was
+   implicitly a feature. But the terminal can run in **chat mode**
+   (`AgentChat`), which reads fine in a narrow column - so this mainly affects
+   raw-terminal users, and the split can even nudge toward chat mode. Not a
+   blocker.
+3. **Sticky-header re-scoping.** Removing the single `[data-main-scroll]`
+   container breaks three things that assume it: the CSS-var docking
+   (`--sticky-changes-h`, `FILE_STICKY_TOP`, `useMeasuredHeight`),
+   `forwardSidebarWheelToMain` (wheel-forwards *to* `[data-main-scroll]`), and
+   per-agent scroll restore in `agentViewPrefs`. All must be re-scoped to the
+   right pane's own scroll container, and there are now two scroll contexts to
+   persist.
+4. **Vertical squeeze on laptops.** Side-by-side panes both live at full page
+   height, so a tall diff scrolls inside a short pane - on a 13" screen
+   vertical space becomes the constraint instead of horizontal. Collapsing the
+   prompt (already planned) and a collapsible metadata row help.
+5. **Divider drag over iframe/xterm.** Pointer-drag resizing across an iframe
+   or the xterm canvas gets swallowed by them - add a transparent full-pane
+   overlay during the drag. The preview iframe reintroduces the same need.
+6. **Handle proliferation.** Four resize handles now: global sidebar, split
+   divider, diff file-list, terminal height. The split divider and file-list
+   handle are both near each other - visually distinguish them.
+
+(Dropped: an earlier "two adjacent base selectors" concern - the metadata
+row's base-*branch* selector already sits beside the diff's comparison
+selectors today; moving that block into a right panel changes nothing.)
+
 ## Open questions / decisions to make
 
 1. ~~**Artifacts: inline-in-diff vs its own tab?**~~ DECIDED: inline in the
@@ -217,10 +325,21 @@ its contents; it simply spans both new panes.
 - New: a split-pane primitive (or hand-rolled divider) + `StorageKeys` entry.
 - `web/src/components/TestsPanel.tsx`, `PreviewPanel.tsx`, `ArtifactsPanel.tsx`
   - adapt from `CollapsibleCard` framing to first-class views.
-- `web/src/components/AgentTopBar.tsx` - unchanged in content; verify it spans
-  the full width above both panes.
+- `web/src/components/AgentTopBar.tsx` - add the inspector-pane hide/show
+  toggle (mirror the show-sidebar button); content otherwise unchanged; verify
+  it spans the full width above both panes.
+- `web/src/lib/sidebar.ts` (pattern to copy) + new store/`StorageKeys` entries
+  for inspector-pane collapse state and split ratio.
 - Add screenshot pages for the new layout in
   `web/scripts/screenshots/take-screenshots.ts` once built.
+
+Preview embedded browser (Go + web):
+- `internal/preview/spawn.go` / `internal/preview/proxy.go` - add a
+  `ModifyResponse` hook to the reverse proxy: inject the bridge `<script>` into
+  HTML, strip `X-Frame-Options` / CSP `frame-ancestors`, handle CSP nonce +
+  `Accept-Encoding: identity` for injection.
+- New: the injected bridge script (served/embedded) + a parent-side
+  `postMessage` client in the Previews view.
 
 ## Non-goals
 
