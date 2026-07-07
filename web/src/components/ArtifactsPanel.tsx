@@ -1265,8 +1265,8 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // ~frame. The key packs both axes so left/right stay separate.
   const { enqueue: enqueueLog, flushNow: flushLogs } = useLogCoalescer<ArtifactLogLine>((batches) => {
     setSets((prev) => prev?.map((s) => {
-      const left = batches.get(`${s.name} left`)
-      const right = batches.get(`${s.name} right`)
+      const left = batches.get(`${s.name}\0left`)
+      const right = batches.get(`${s.name}\0right`)
       if (!left && !right) return s
       return {
         ...s,
@@ -1282,7 +1282,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     // cheap even on a burst of log frames.
     setError(null)
     if (msg.type === 'log') {
-      enqueueLog(`${msg.script} ${msg.side}`, msg.line)
+      enqueueLog(`${msg.script}\0${msg.side}`, msg.line)
       return
     }
     // Any other message may replace/modify a set - apply queued log lines first

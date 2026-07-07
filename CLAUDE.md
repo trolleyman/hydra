@@ -36,6 +36,13 @@ user-facing text (JSX / string literals) *and* code comments. Decorative status
 glyphs already in use (`✓ ⚠ ✗ ▸ │`) are fine; this rule is specifically about dashes
 and ellipses.
 
+### No raw control bytes in source
+
+Never embed raw control characters (NUL etc.) in source files - a single raw NUL
+makes `grep` treat the whole file as binary and silently match nothing. Use escape
+sequences instead (e.g. `'\0'` as a collision-proof string-key separator, as in
+`web/src/lib/testCases.ts` and `ArtifactsPanel.tsx`).
+
 ## Web UI internals - agent page layout
 
 Facts that matter when touching the agent page (`web/src/components/AgentDetail.tsx`
@@ -78,10 +85,6 @@ and `web/src/DiffViewer.tsx`):
   whether to serve Hydra's own loading page while the server boots. `PreviewPanel`'s
   Open button is a `window.open` of the proxy URL; nothing in `web/src` embeds an
   iframe today.
-- Gotcha: `web/src/components/ArtifactsPanel.tsx` contains **raw NUL bytes** (used
-  as a collision-proof key separator in template literals around line 1268), so
-  plain `grep` treats the whole file as binary and silently matches nothing - use
-  `grep -a` (or read the file) when searching it.
 
 ## Testing
 
