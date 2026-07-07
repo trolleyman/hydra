@@ -7,6 +7,8 @@ import type { Attachment } from '../lib/spawnDrafts'
 // other files show a generic icon and aren't clickable. An upload in progress
 // shows a spinner; a failed one is flagged. `className` styles the outer row so
 // each caller can place/pad it to fit its layout. Renders nothing when empty.
+// The row is capped at two chip rows and scrolls beyond that, so a big batch
+// of images can't crowd out the prompt text around it.
 export function AttachmentChips({
   attachments,
   size,
@@ -24,8 +26,10 @@ export function AttachmentChips({
   if (attachments.length === 0) return null
   const thumb = size === 'sm' ? 'w-6 h-6' : 'w-8 h-8'
   const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
+  // Two rows of image chips: 2 * (thumb + py-1 + border) + one gap-1.5.
+  const maxH = size === 'sm' ? 'max-h-[74px]' : 'max-h-[90px]'
   return (
-    <div className={`flex flex-wrap gap-1.5 ${className ?? ''}`}>
+    <div className={`flex flex-wrap gap-1.5 overflow-y-auto ${maxH} ${className ?? ''}`}>
       {attachments.map((a) => {
         const isImage = !!a.previewUrl
         const open = isImage ? () => onOpenImage(a.id) : undefined

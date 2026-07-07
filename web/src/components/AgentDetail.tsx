@@ -89,7 +89,7 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
         <AttachmentChips
           attachments={attachments}
           size="md"
-          className={text ? 'pt-3' : ''}
+          className={text ? 'mt-3' : ''}
           onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
         />
       </div>
