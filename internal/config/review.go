@@ -13,7 +13,7 @@ import (
 // protected branches). Used by renderConfig to fall back to the commented
 // example rather than emitting an empty [review] table.
 func (r ReviewConfig) isEmpty() bool {
-	return r.Provider == nil && r.Remote == nil && r.TargetBranch == nil && r.Auth == nil &&
+	return r.Provider == nil && r.Remote == nil && r.Auth == nil &&
 		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.Draft == nil && r.Squash == nil &&
 		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.PublishWhenGreen == nil &&
 		len(r.ProtectedBranches) == 0
@@ -36,7 +36,6 @@ func reviewFieldLines(r ReviewConfig) []string {
 	}
 	addStr("provider", r.Provider)
 	addStr("remote", r.Remote)
-	addStr("target_branch", r.TargetBranch)
 	addStr("auth", r.Auth)
 	addStr("default_action", r.DefaultAction)
 	addStr("push_branch_template", r.PushBranchTemplate)
@@ -74,7 +73,6 @@ const (
 const (
 	defaultReviewProvider           = ReviewProviderAuto
 	defaultReviewRemote             = "origin"
-	defaultReviewTargetBranch       = "main"
 	defaultReviewAuth               = ReviewAuthCLI
 	defaultReviewDefaultAction      = ReviewActionMerge
 	defaultReviewPushBranchTemplate = "{id}"
@@ -93,8 +91,6 @@ type ReviewConfig struct {
 	Provider *string `toml:"provider"`
 	// Remote is the git remote a publish targets (default "origin").
 	Remote *string `toml:"remote"`
-	// TargetBranch is the default MR target branch (per-head editable; default "main").
-	TargetBranch *string `toml:"target_branch"`
 	// Auth is how Hydra talks to the forge: "cli" (shell out to gh/glab) or "token"
 	// (REST with a token from the secrets file / HYDRA_FORGE_TOKEN). Default "cli".
 	Auth *string `toml:"auth"`
@@ -149,14 +145,6 @@ func (r *ReviewConfig) GetRemote() string {
 		return defaultReviewRemote
 	}
 	return *r.Remote
-}
-
-// GetTargetBranch returns the configured default MR target or "main".
-func (r *ReviewConfig) GetTargetBranch() string {
-	if r == nil || r.TargetBranch == nil || *r.TargetBranch == "" {
-		return defaultReviewTargetBranch
-	}
-	return *r.TargetBranch
 }
 
 // GetAuth returns the configured auth method or "cli".
@@ -234,9 +222,6 @@ func (r *ReviewConfig) Merge(other ReviewConfig) {
 	}
 	if other.Remote != nil {
 		r.Remote = other.Remote
-	}
-	if other.TargetBranch != nil {
-		r.TargetBranch = other.TargetBranch
 	}
 	if other.Auth != nil {
 		r.Auth = other.Auth

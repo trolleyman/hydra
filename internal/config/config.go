@@ -3059,7 +3059,6 @@ func reviewExampleLines() []string {
 		"# [review]",
 		`# provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)`,
 		`# remote = "origin"`,
-		`# target_branch = "main"       # default MR target; per-head editable`,
 		`# auth = "cli"                 # cli (shell out to gh/glab) | token (REST)`,
 		`# default_action = "merge"     # merge (local, as today) | create_mr`,
 		`# push_branch_template = "{id}" # e.g. "feat/{ticket}-{id}"; {id} {ticket} {base}`,

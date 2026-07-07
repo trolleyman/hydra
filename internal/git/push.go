@@ -162,23 +162,6 @@ func RemoteURL(projectRoot, remote string) string {
 	return strings.TrimSpace(out)
 }
 
-// RemoteDefaultBranch returns the remote's default branch (its HEAD), e.g.
-// "main", or "" if it can't be determined. It reads the locally-recorded
-// refs/remotes/<remote>/HEAD (written at clone, or by `git remote set-head`), so
-// it does NO network I/O - a good default for an MR's target branch instead of a
-// hardcoded "main".
-func RemoteDefaultBranch(projectRoot, remote string) string {
-	if remote == "" {
-		return ""
-	}
-	out, err := gitOutput(projectRoot, "symbolic-ref", "--quiet", "refs/remotes/"+remote+"/HEAD")
-	if err != nil {
-		return ""
-	}
-	// out is "refs/remotes/<remote>/<branch>"; strip the prefix to the branch.
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "refs/remotes/"+remote+"/"))
-}
-
 // RemoteNames lists the configured remote names.
 func RemoteNames(projectRoot string) []string {
 	out, err := gitOutput(projectRoot, "remote")

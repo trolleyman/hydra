@@ -973,7 +973,6 @@ func toAPIReviewConfig(r *config.ReviewConfig) *api.ReviewConfig {
 	out := api.ReviewConfig{
 		Provider:           r.Provider,
 		Remote:             r.Remote,
-		TargetBranch:       r.TargetBranch,
 		Auth:               r.Auth,
 		DefaultAction:      r.DefaultAction,
 		PushBranchTemplate: r.PushBranchTemplate,
@@ -998,7 +997,6 @@ func fromAPIReviewConfig(r *api.ReviewConfig) *config.ReviewConfig {
 	out := config.ReviewConfig{
 		Provider:           r.Provider,
 		Remote:             r.Remote,
-		TargetBranch:       r.TargetBranch,
 		Auth:               r.Auth,
 		DefaultAction:      r.DefaultAction,
 		PushBranchTemplate: r.PushBranchTemplate,

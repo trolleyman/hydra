@@ -1065,7 +1065,6 @@ type ReviewConfig struct {
 	Remote             *string `json:"remote"`
 	RequireLocalTests  *bool   `json:"require_local_tests"`
 	Squash             *bool   `json:"squash"`
-	TargetBranch       *string `json:"target_branch"`
 }
 
 // ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
@@ -1106,7 +1105,6 @@ type ReviewConfigResponse struct {
 	RemoteUrl         *string `json:"remote_url,omitempty"`
 	RequireLocalTests *bool   `json:"require_local_tests,omitempty"`
 	Squash            *bool   `json:"squash,omitempty"`
-	TargetBranch      string  `json:"target_branch"`
 }
 
 // ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
@@ -1604,7 +1602,7 @@ type PublishAgentJSONBody struct {
 	// Remote Git remote to push to. Defaults to review.remote.
 	Remote *string `json:"remote,omitempty"`
 
-	// TargetBranch MR target branch. Defaults to review.target_branch.
+	// TargetBranch MR target branch. Defaults to the head's base branch.
 	TargetBranch *string `json:"target_branch,omitempty"`
 	Title        *string `json:"title,omitempty"`
 }

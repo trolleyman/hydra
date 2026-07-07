@@ -17,10 +17,10 @@ func TestRenderConfigEmitsReview(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	cfg := Config{Review: &ReviewConfig{
-		Provider:      ptr("github"),
-		TargetBranch:  ptr("develop"),
-		DefaultAction: ptr("create_mr"),
-		Draft:         bptr(false),
+		Provider:           ptr("github"),
+		PushBranchTemplate: ptr("feat/{id}"),
+		DefaultAction:      ptr("create_mr"),
+		Draft:              bptr(false),
 	}}
 	if err := SaveToFile(path, cfg); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestRenderConfigEmitsReview(t *testing.T) {
 	if err != nil || reload == nil || reload.Review == nil {
 		t.Fatalf("reload: cfg=%v err=%v", reload, err)
 	}
-	if reload.Review.GetProvider() != "github" || reload.Review.GetTargetBranch() != "develop" {
+	if reload.Review.GetProvider() != "github" || reload.Review.GetPushBranchTemplate() != "feat/{id}" {
 		t.Errorf("reloaded review = %+v", reload.Review)
 	}
 	if reload.Review.IsDraft() {
@@ -55,7 +55,7 @@ func TestRenderConfigEmitsReview(t *testing.T) {
 func TestRenderConfigReviewEditRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.local.toml")
-	initial := "[review]\nprovider = \"gitlab\"\ntarget_branch = \"main\"\n"
+	initial := "[review]\nprovider = \"gitlab\"\npush_branch_template = \"feat/{id}\"\n"
 	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestRenderConfigReviewEditRoundTrip(t *testing.T) {
 	if err != nil || reload == nil || reload.Review == nil {
 		t.Fatal(err)
 	}
-	if reload.Review.GetProvider() != "gitlab" || reload.Review.GetTargetBranch() != "main" {
+	if reload.Review.GetProvider() != "gitlab" || reload.Review.GetPushBranchTemplate() != "feat/{id}" {
 		t.Errorf("preserved fields lost: %+v", reload.Review)
 	}
 	if reload.Review.GetDefaultAction() != "create_mr" {

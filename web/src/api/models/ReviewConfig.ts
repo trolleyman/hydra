@@ -11,7 +11,6 @@ export type ReviewConfig = {
      */
     provider?: string | null;
     remote?: string | null;
-    target_branch?: string | null;
     /**
      * "cli" | "token".
      */

@@ -98,12 +98,6 @@ export function ReviewSection({
               {resolved?.remote_url && <span className="text-xs text-gray-400 font-mono truncate">{resolved.remote_url}</span>}
             </div>
           </Row>
-          <Row label="Target branch">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Text value={r.target_branch ?? ''} placeholder={resolved?.target_branch || ''} onChange={(v) => set('target_branch', v || null)} className="w-48" />
-              <Hint>follows {resolved?.remote || 'origin'}&apos;s default branch{resolved?.target_branch ? ` (${resolved.target_branch})` : ''} unless set</Hint>
-            </div>
-          </Row>
           <Row label="Branch template">
             <Text value={r.push_branch_template ?? ''} placeholder={resolved?.push_branch_template || '{id}'} onChange={(v) => set('push_branch_template', v || null)} className="w-64 font-mono" />
           </Row>

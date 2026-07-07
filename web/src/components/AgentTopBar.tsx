@@ -12,7 +12,7 @@ import { IconButton } from './IconButton'
 // borderless inside a shared pill; 'danger' is the red-outlined destructive button;
 // 'muted' is a quiet, non-interactive solid-grey button (the in-flight "Merging..."
 // state). Omitted → a neutral outlined button.
-export type AgentTopBarVariant = 'primary' | 'segment' | 'danger' | 'muted'
+export type AgentTopBarVariant = 'primary' | 'blue' | 'segment' | 'danger' | 'muted'
 
 // One row of a split action's attached dropdown (the merge button's Force / Queue
 // options). Rendered both in the split chevron's popover and, if the action ever
@@ -90,6 +90,11 @@ function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string 
   if (v === 'primary') {
     return `${base} ${shape} bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-700/30 shadow-sm`
   }
+  // 'blue' is the Create MR CTA: a distinct forge-publish colour, set apart from
+  // Merge's green so the two primary actions read as different things.
+  if (v === 'blue') {
+    return `${base} ${shape} bg-blue-600 hover:bg-blue-500 text-white border border-blue-700/30 shadow-sm`
+  }
   // 'muted' is the in-flight "Merging..." state: a solid quiet grey, not dimmed (so it
   // reads as deliberately inert rather than a disabled CTA), and non-interactive.
   if (v === 'muted') {
@@ -132,6 +137,7 @@ function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: '
 function chevBtnClass(v: AgentTopBarVariant | undefined): string {
   const base = 'shrink-0 h-8 px-1 inline-flex items-center justify-center rounded-r-lg border border-l-0 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
   if (v === 'primary') return `${base} bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700/40`
+  if (v === 'blue') return `${base} bg-blue-600 hover:bg-blue-500 text-white border-blue-700/40`
   if (v === 'danger') return `${base} bg-white dark:bg-gray-800 border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`
   return `${base} bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`
 }

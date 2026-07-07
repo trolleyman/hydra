@@ -691,7 +691,6 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 		Remote:             "origin",
 		RemoteUrl:          ptr("git@gitlab.example.com:team/repo.git"),
 		BrowseUrl:          ptr("https://gitlab.example.com/team/repo"),
-		TargetBranch:       "main",
 		Auth:               "cli",
 		AuthStatus:         ptr("glab: logged in to gitlab.example.com as sim-user"),
 		Authenticated:      ptr(true),
@@ -2546,7 +2545,6 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	case params.Scope == nil || *params.Scope == api.GetConfigParamsScopeProject:
 		resp.Review = &api.ReviewConfig{
 			Provider:           ptr("gitlab"),
-			TargetBranch:       ptr("main"),
 			PushBranchTemplate: ptr("feat/{ticket}-{id}"),
 		}
 	case *params.Scope == api.GetConfigParamsScopeLocal:

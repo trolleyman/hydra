@@ -152,7 +152,10 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	review := reviewConfigFor(projectRoot)
 	cfg, _ := config.Load(projectRoot)
 	remote := firstNonEmpty(ov.Remote, review.GetRemote())
-	target := firstNonEmpty(ov.TargetBranch, review.GetTargetBranch())
+	// The MR targets the head's base branch (where its work merges back), unless
+	// the publish request explicitly overrode it. There is no configurable
+	// [review] target_branch - the base branch is the source of truth.
+	target := firstNonEmpty(ov.TargetBranch, head.BaseBranch)
 	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.Jira, head))
 	title := firstNonEmpty(ov.Title, defaultMRTitle(head))
 	description := head.Prompt
@@ -399,16 +402,6 @@ func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot st
 	remoteURL := git.RemoteURL(projectRoot, remote)
 	provider := review.ResolveProvider(remoteURL)
 
-	// Target branch: an explicit [review] target_branch wins; otherwise follow the
-	// remote's own default branch (origin/HEAD) so we don't hardcode "main"; and if
-	// that can't be read locally, fall back to the built-in default.
-	targetBranch := review.GetTargetBranch()
-	if review.TargetBranch == nil {
-		if d := git.RemoteDefaultBranch(projectRoot, remote); d != "" {
-			targetBranch = d
-		}
-	}
-
 	resp := api.ReviewConfigResponse{
 		Configured:         cfg.Review != nil || provider != "",
 		Provider:           provider,
@@ -416,7 +409,6 @@ func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot st
 		Remote:             remote,
 		RemoteUrl:          ptr(remoteURL),
 		BrowseUrl:          ptr(config.BrowseURL(remoteURL)),
-		TargetBranch:       targetBranch,
 		Auth:               review.GetAuth(),
 		DefaultAction:      review.GetDefaultAction(),
 		PushBranchTemplate: ptr(review.GetPushBranchTemplate()),

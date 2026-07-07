@@ -559,7 +559,7 @@ paths:
                   description: Git remote to push to. Defaults to review.remote.
                 target_branch:
                   type: string
-                  description: MR target branch. Defaults to review.target_branch.
+                  description: MR target branch. Defaults to the head's base branch.
                 title:
                   type: string
                 description:
@@ -2801,7 +2801,7 @@ components:
     ReviewConfigResponse:
       type: object
       description: Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
-      required: [configured, provider, remote, target_branch, auth, default_action]
+      required: [configured, provider, remote, auth, default_action]
       properties:
         configured:
           type: boolean
@@ -2820,8 +2820,6 @@ components:
         browse_url:
           type: string
           description: Derived https browse URL for the repo (for the forge web link), or empty.
-        target_branch:
-          type: string
         auth:
           type: string
           description: Auth method ("cli" | "token").
@@ -2866,9 +2864,6 @@ components:
           nullable: true
           description: '"auto" | "github" | "gitlab".'
         remote:
-          type: string
-          nullable: true
-        target_branch:
           type: string
           nullable: true
         auth:

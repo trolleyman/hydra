@@ -28,11 +28,6 @@ export const StorageKeys = {
   // 'true' when the spawn form's chat-mode toggle (Claude only, CHAT_MODE.md)
   // was last on, so the next spawn defaults to the same mode.
   defaultChatMode: 'hydra-default-chat-mode',
-  // Which head action is primary in the agent header ('merge' | 'create_mr'). A
-  // per-device UI preference (set on the Browser settings tab), not a project/
-  // review config value - it only orders the two buttons. Absent = follow the
-  // project's [review] default_action, else 'merge'. See ReviewControls/mrFirst.
-  defaultAction: 'hydra-default-action',
   // '1' when the Settings Review section is collapsed (it starts collapsed).
   settingsReviewCollapsed: 'hydra-settings-review-collapsed',
   spawnHeight: 'hydra-sidebar-spawn-height',

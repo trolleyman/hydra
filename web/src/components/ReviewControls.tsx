@@ -183,7 +183,9 @@ export function CreateMRDialog({
 }) {
   const [branch, setBranch] = useState(agent.downstream_branch || config?.push_branch_template?.replace('{id}', agent.id).replace(/\{[a-z]+\}/g, '') || agent.id)
   const [remote, setRemote] = useState(config?.remote || 'origin')
-  const [target, setTarget] = useState(config?.target_branch || agent.base_branch || 'main')
+  // The MR targets the head's base branch (where its work merges back); editable
+  // here as a per-publish override. There is no configurable [review] target.
+  const [target, setTarget] = useState(agent.base_branch || 'main')
   const [title, setTitle] = useState(agent.title || agent.id)
   const [description, setDescription] = useState(agent.prompt || '')
   const [draft, setDraft] = useState(config?.draft ?? true)
