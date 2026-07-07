@@ -867,7 +867,7 @@ Check items off in the commit that lands them.
     checkbox options with primary+secondary text, "Other" free-text, one
     submit for all questions; also renders fenced ```question JSON blocks as a
     fallback path.
-17. [ ] **Native AskUserQuestion.** Chat heads launch with
+17. [x] **Native AskUserQuestion.** Chat heads launch with
     --permission-prompt-tool stdio (composes with
     --dangerously-skip-permissions: only AskUserQuestion routes a can_use_tool
     control_request - spike-verified, Bash et al run unprompted). The pane
