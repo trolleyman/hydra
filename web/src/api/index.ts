@@ -54,6 +54,7 @@ export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { RepositoryUncommittedChanges } from './models/RepositoryUncommittedChanges';
 export type { RepositoryUncommittedFile } from './models/RepositoryUncommittedFile';
 export type { ReviewConfigResponse } from './models/ReviewConfigResponse';
+export type { ReviewConfigUpdate } from './models/ReviewConfigUpdate';
 export type { ReviewLink } from './models/ReviewLink';
 export type { ReviewState } from './models/ReviewState';
 export type { SandboxConfig } from './models/SandboxConfig';

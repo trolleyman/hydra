@@ -24,6 +24,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
+import type { ReviewConfigUpdate } from '../models/ReviewConfigUpdate';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -525,6 +526,32 @@ export class DefaultService {
                 'project_id': projectId,
             },
             errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Save [review] overrides to the project's personal config.local.toml
+     * Writes the supplied review fields to .hydra/config.local.toml (the .gitignored, per-user, last-wins layer); only the [review] table is rewritten, other sections are preserved. Returns the freshly-resolved config (same shape as GET).
+     * @param projectId
+     * @param requestBody
+     * @returns ReviewConfigResponse Saved (returns the resolved config).
+     * @throws ApiError
+     */
+    public saveReviewConfig(
+        projectId: string,
+        requestBody: ReviewConfigUpdate,
+    ): CancelablePromise<ReviewConfigResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/review-config',
+            path: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
                 404: `Not Found`,
             },
         });

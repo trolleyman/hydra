@@ -749,6 +749,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Save [review] overrides to the project's personal config.local.toml
+      operationId: saveReviewConfig
+      description: Writes the supplied review fields to .hydra/config.local.toml (the .gitignored, per-user, last-wins layer); only the [review] table is rewritten, other sections are preserved. Returns the freshly-resolved config (same shape as GET).
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewConfigUpdate'
+      responses:
+        '200':
+          description: Saved (returns the resolved config).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConfigResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/projects/{project_id}/agents/{id}/update-from-base:
     post:
@@ -2832,6 +2866,33 @@ components:
         protected_branches:
           type: array
           items: { type: string }
+
+    ReviewConfigUpdate:
+      type: object
+      description: Review fields to write to config.local.toml. Every field is optional; an omitted field is left as-is (inherits config.toml / the built-in default).
+      properties:
+        provider:
+          type: string
+          description: '"auto" | "github" | "gitlab".'
+        remote:
+          type: string
+        target_branch:
+          type: string
+        default_action:
+          type: string
+          description: '"merge" | "create_mr".'
+        push_branch_template:
+          type: string
+        draft:
+          type: boolean
+        squash:
+          type: boolean
+        delete_remote_branch:
+          type: boolean
+        require_local_tests:
+          type: boolean
+        publish_when_green:
+          type: boolean
 
     ReviewState:
       type: object

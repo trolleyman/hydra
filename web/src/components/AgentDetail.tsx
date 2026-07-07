@@ -5,7 +5,6 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
-import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
@@ -29,6 +28,7 @@ import { renderMarkdown } from '../lib/markdown'
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
 
@@ -331,8 +331,11 @@ export function AgentDetail({
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
-  const [reviewConfig, setReviewConfig] = useState<ReviewConfigResponse | null>(null)
-  const [remotes, setRemotes] = useState<string[]>(['origin'])
+  // Review config is project-scoped, cached in the project store so it is
+  // fetched once per project (not per agent) and shared with the Settings editor.
+  const reviewConfig = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] ?? null : null))
+  const setReviewConfigInStore = useProjectStore((s) => s.setReviewConfig)
+  const remotes = reviewConfig?.remote ? [reviewConfig.remote] : ['origin']
   const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -917,25 +920,22 @@ export function AgentDetail({
 
   // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
 
-  // refreshReviewConfig loads the resolved review config + remotes into state.
-  // Called on mount (so the dialog can open instantly, already prefilled) and
-  // again when the dialog is opened (to pick up host-side changes).
+  // refreshReviewConfig loads the resolved review config into the project store.
   const refreshReviewConfig = useCallback(async () => {
     if (!projectId) return
     try {
-      const cfg = await api.default.getReviewConfig(projectId)
-      setReviewConfig(cfg)
-      setRemotes(cfg.remote ? [cfg.remote] : ['origin'])
+      setReviewConfigInStore(projectId, await api.default.getReviewConfig(projectId))
     } catch {
       // Leave any previously-loaded config in place on a transient failure.
     }
-  }, [projectId])
+  }, [projectId, setReviewConfigInStore])
 
-  // Prefetch the review config once the head is on screen so clicking "Create
-  // MR" opens the dialog instantly (the fetch no longer gates the popup).
+  // Fetch the review config once per project (if not already cached) as soon as
+  // the head is on screen, so clicking "Create MR" opens the dialog instantly
+  // with prefilled values - the fetch no longer gates the popup.
   useEffect(() => {
-    void refreshReviewConfig()
-  }, [refreshReviewConfig])
+    if (projectId && !reviewConfig) void refreshReviewConfig()
+  }, [projectId, reviewConfig, refreshReviewConfig])
 
   // openCreateMR opens the Create MR dialog immediately, refreshing the config
   // in the background rather than blocking the popup on a network round-trip.

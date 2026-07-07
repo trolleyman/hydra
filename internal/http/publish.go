@@ -383,6 +383,13 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	return api.GetReviewConfig200JSONResponse(s.resolveReviewConfigResponse(ctx, projectRoot)), nil
+}
+
+// resolveReviewConfigResponse builds the resolved [review] config response
+// (defaults applied, provider auto-detected, live forge auth checked) for a
+// project root. Shared by GetReviewConfig and SaveReviewConfig.
+func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot string) api.ReviewConfigResponse {
 	cfg, _ := config.Load(projectRoot)
 	review := cfg.Review
 	if review == nil {
@@ -418,7 +425,44 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 			resp.AuthStatus = ptr(detail)
 		}
 	}
-	return api.GetReviewConfig200JSONResponse(resp), nil
+	return resp
+}
+
+// SaveReviewConfig writes the supplied review fields to the project's personal
+// config.local.toml (the .gitignored, last-wins layer) and returns the freshly
+// resolved config. Only the fields present in the body are written; the rest are
+// left to config.toml / built-in defaults.
+func (s *Server) SaveReviewConfig(ctx context.Context, request api.SaveReviewConfigRequestObject) (api.SaveReviewConfigResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if request.Body == nil {
+		return api.SaveReviewConfig400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "missing request body"}, nil
+	}
+	b := request.Body
+	update := config.ReviewConfig{
+		Provider:           b.Provider,
+		Remote:             b.Remote,
+		TargetBranch:       b.TargetBranch,
+		DefaultAction:      b.DefaultAction,
+		PushBranchTemplate: b.PushBranchTemplate,
+		Draft:              b.Draft,
+		Squash:             b.Squash,
+		DeleteRemoteBranch: b.DeleteRemoteBranch,
+		RequireLocalTests:  b.RequireLocalTests,
+		PublishWhenGreen:   b.PublishWhenGreen,
+	}
+	// Reject bad enum values (provider / default_action) before writing.
+	if err := update.Validate(); err != nil {
+		return api.SaveReviewConfig400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: err.Error()}, nil
+	}
+	if err := config.SaveReviewLocal(projectRoot, update); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	// Nudge connected clients to re-read (mirrors SaveConfig).
+	s.Events.PushStatusChanged(projectRoot)
+	return api.SaveReviewConfig200JSONResponse(s.resolveReviewConfigResponse(ctx, projectRoot)), nil
 }
 
 // ArmPublishWhenGreen arms publish-when-green for a head (3.5).
