@@ -810,3 +810,86 @@
 72. [x] **[Diff viewer]** **URL-addressable line selection for the branch-compare diff.** The repository file view syncs its gutter-number selection to the URL hash (`#L<n>` / `#L<a>-L<b>`, GitHub-style — clickable numbers, ranges, shift-click extend), so a selection is shareable and survives reload. The diff viewer got the *same* click/range/shift-click interaction (both unified and side-by-side, on either the old or new gutter) but as **local per-file state**, deliberately not URL-synced: the agent diff page has no per-file route, and the repository branch-compare diff keeps its diff state (`compareRef`) out of the URL by design, so there was nothing to hang a `#L…` hash on. Follow-up: make the selection deep-linkable for the **repository compare-diff** (the one diff surface that has a URL). Design points to settle: (a) a diff line reference needs a **side** — encode old-vs-new (e.g. GitHub's `L<n>`/`R<n>` prefixes, or a `path` + side + range tuple); (b) it's **per-file** in a multi-file diff, so the hash must name the file too (or the selection rides on the single-file view); (c) the compare ref is currently ephemeral state, so a shareable selection URL likely means promoting `compareRef` (and possibly the selected file) into the URL first — a prerequisite refactor of the repo diff's routing. The agent diff has no URL and stays local. Built on the local-selection work in commit `55243e9` (`DiffViewer.tsx` `DiffLineSelection` / `selectLine` / `LineNumCell`); the file-view URL model to mirror lives in `web/src/lib/lineRange.ts` + `RepositoryView.tsx`.
 
 73. [ ] **[Git]** **Interactive credential prompts for daemon-side git - revisit the blanket `GIT_TERMINAL_PROMPT=0`.** Daemon-side pushes/fetches (`internal/git/push.go`, and the planned publish flow in NON_LOCAL_INTEGRATION.md 3.4) run strictly non-interactively: `GIT_TERMINAL_PROMPT=0` + `GIT_SSH_COMMAND="ssh -oBatchMode=yes"`, mapping auth failures to an actionable UI error ("add your key to ssh-agent, or switch to HTTPS + a credential helper"). That is the safe default, but it means a fixable prompt (HTTPS password, ssh key passphrase after reboot) is a hard failure. Follow-up: forward the prompt to the user instead - git supports this cleanly via `GIT_ASKPASS`/`core.askPass`, ssh via `SSH_ASKPASS` (+ `SSH_ASKPASS_REQUIRE=force`; needs the process detached from a tty, e.g. setsid): point both at a small `hydra __askpass` helper that relays the prompt text over the daemon socket to the web UI as a modal (same parked-approval UX as the security gate) and writes the answer to stdout. Design constraints: the secret is never logged, never persisted by Hydra (at most offered onward to `git credential approve` on explicit opt-in); timeout/cancel fails the push cleanly with the current actionable error as fallback; ssh-agent remains the *recommended* path for passphrase keys - the modal is a rescue hatch, not the story. Do after the publish flow (NON_LOCAL_INTEGRATION.md Phase 2) exists, since that is what multiplies the number of daemon-side credentialed git calls.
+
+---
+
+## Chat mode revamp (branch `hydra/few-things-for-the-chat-mode-1-code`)
+
+Item IDs 1-13 are the original request; 14+ were added during the thread.
+Check items off in the commit that lands them.
+
+1. [ ] **Code chip readability.** Inline-code background too light/washed out in
+   dark mode - bordered chip, darker bg.
+2. [ ] **Thinking cards.** Thinking must not leak as plain text: Claude-app-style
+   collapsed disclosure - shimmer label + auto-updating tail while streaming,
+   snippet when settled, expand with "Show more" clamp on desktop, bottom-sheet
+   popup on mobile.
+3. [ ] **Attachments in chat input.** Paste / drag-drop / picker like the spawn
+   box (chips, lightbox); uploaded paths ride below the message text.
+4. [ ] **Nicer tool cards (esp. Bash).** Header shows the description, not the
+   script; expanded shows the full command syntax-highlighted and optimistically
+   split at top-level `;`/`&&`/`||`; labeled Output section; Raw button for the
+   tool-call JSON.
+5. [ ] **Animations.** Expand/collapse height animation, entrance rise for live
+   items (replay batch exempt), reduced-motion fallbacks.
+6. [ ] **Send button + hint.** Round arrow-up send button with accent bg when
+   sendable; queue icon when the message will queue behind a running turn
+   (stream-json input queues mid-turn messages); "Enter to queue" hint only
+   then, otherwise nothing.
+7. [ ] **Newline keybindings.** Alt+Enter always inserts a newline; Ctrl+Enter
+   behaves like Shift+Enter (newline); Enter sends.
+8. [ ] **Optimistic + queued messages.** Sent messages appear immediately
+   (pinned under the transcript until the CLI's --replay-user-messages echo
+   supersedes them); queued state clearly labeled. Chat sheds the terminal
+   styling (see 25).
+9. [ ] **Auto-growing composer.** Grows line-by-line with content (not
+   pixel-by-pixel) up to a cap; grab bar to force it taller, snapped to whole
+   rows.
+10. [ ] **Claude-app theming.** Chat follows the app theme (no forced dark):
+    cream light / warm-gray dark surfaces, borderless user bubbles; terracotta
+    bordered code chips in all markdown (dark like image2, light like image4).
+11. [ ] **Ctrl+C interrupts.** When a turn is running, focus is in the chat and
+    no text is selected, Ctrl+C sends interrupt.
+12. [ ] **Composer layout + model dropdown.** One rounded card: textarea on
+    top, controls row below (no separator) - "+" attach bottom-left, model
+    dropdown bottom-right wired to the CLI's live set_model control request
+    (spike-verified; persists in the transcript across resumes).
+13. [ ] **Slash commands.** `/` autocomplete fed by the init event's
+    slash_commands; commands pass through as plain user text (spike-verified,
+    the CLI executes them).
+14. [ ] **Jump to bottom.** Floating circular arrow above the composer when
+    scrolled up; Ctrl+End jumps (Claude Code parity) without stealing the
+    caret shortcut when already pinned.
+15. [ ] **Honest cost footer.** total_cost_usd is a notional API-rate figure;
+    on subscription auth (init apiKeySource == "none") no dollars are billed -
+    show the `$` only for API-key heads, duration always.
+16. [ ] **Question cards UI.** Interactive question form component: radio /
+    checkbox options with primary+secondary text, "Other" free-text, one
+    submit for all questions; also renders fenced ```question JSON blocks as a
+    fallback path.
+17. [ ] **Native AskUserQuestion.** Chat heads launch with
+    --permission-prompt-tool stdio (composes with
+    --dangerously-skip-permissions: only AskUserQuestion routes a can_use_tool
+    control_request - spike-verified, Bash et al run unprompted). The pane
+    renders the request as an interactive question card and answers via a
+    control_response with updatedInput.answers; a simulated agent (agent-ask)
+    has a question pending for manual testing.
+18. [ ] **Strip tool_use_error tags.** Show just the inner error text on tool
+    cards (the card is already error-tinted).
+19. [ ] **Worktree-relative paths.** Tool summaries and expanded inputs trim
+    the head's worktree prefix from absolute paths.
+20. [ ] **Chat scroll memory.** Per-agent (agentViewPrefs) - switching away and
+    back restores the scroll offset when it wasn't pinned to the bottom.
+21. [ ] **Fix chat->terminal switch.** Interactive `--continue` refuses
+    -p/stream-json conversations ("No conversation found to continue",
+    spike-verified); resume Claude heads with `--resume <session-id>` from the
+    newest non-sidechain transcript instead, falling back to --continue.
+22. [ ] **Mic / voice input.** TODO (not in this branch): dictation button in
+    the composer like the Claude app.
+23. [ ] **Persist composer height.** The dragged composer min-height lives in
+    agentViewPrefs (localStorage) like the terminal height.
+24. [ ] **Merge main** into this branch before final verification.
+25. [ ] **Direction decision (settled).** claude.ai-style chrome (proportional
+    font, bubbles, cards, app theming) + Claude Code function (tool cards,
+    slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic
+    lights, dark tab bar) themed away when the chat tab is active.
