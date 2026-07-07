@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { ExternalLink, LoaderCircle, MonitorPlay, RotateCcw, ScrollText, Square } from 'lucide-react'
+import { ExternalLink, LoaderCircle, MonitorPlay, Play, Square } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { PreviewStatus } from '../api/models/PreviewStatus'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
@@ -224,11 +224,11 @@ function PreviewCard({ preview: p, otherVersion, onOpen, onStart, onStop }: {
           {!live && !otherVersion && onStart && (
             <button
               onClick={onStart}
-              title="Start the preview server without opening a tab"
+              title="Start the server"
               aria-label={`Start preview ${p.name}`}
               className={MELT_BTN}
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <Play className="w-3.5 h-3.5" />
             </button>
           )}
           {p.url && live ? (
@@ -257,10 +257,6 @@ function PreviewCard({ preview: p, otherVersion, onOpen, onStart, onStop }: {
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed(!collapsed)}
     >
-      <div className="flex items-center gap-1.5 mb-1 text-[11px] text-gray-400 dark:text-gray-500">
-        <ScrollText className="w-3 h-3" />
-        Build log
-      </div>
       <LogView log={p.log ?? []} failed={p.state === 'error'} succeeded={p.state === 'running'} />
     </CollapsibleCard>
   )
