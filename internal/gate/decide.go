@@ -463,6 +463,18 @@ func (p Policy) isCredentialPath(path string) bool {
 			return true
 		}
 	}
+	// Project-relative secret files Hydra creates (mirrors the sandbox mask
+	// defaults, sandbox.ProjectRelativeMaskDefaults). Checked here as
+	// defense-in-depth for the Read tool even though they are also masked on disk.
+	if p.ProjectRoot != "" {
+		root := filepath.Clean(p.ProjectRoot)
+		for _, rel := range projectCredentialRels {
+			target := filepath.Join(root, rel)
+			if abs == target || strings.HasPrefix(abs, target+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -478,6 +490,15 @@ var credentialRels = []string{
 	".gemini/google_accounts.json",
 	".codex/auth.json",
 	".copilot/apps.json",
+}
+
+// projectCredentialRels are PROJECT-root-relative secret/per-machine-state files
+// Hydra itself creates and no head should read. They mirror
+// sandbox.ProjectRelativeMaskDefaults (kept in sync by hand - both lists are tiny
+// and the gate package must not import sandbox).
+var projectCredentialRels = []string{
+	".hydra/deploy.toml",
+	".hydra/config.local.toml",
 }
 
 // resolve makes path absolute, expanding a leading ~ against the policy's Home.

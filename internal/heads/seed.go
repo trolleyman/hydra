@@ -335,6 +335,7 @@ func mcpKeepSet(serversAllowed, toolsAllowed []string) []string {
 func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, home string, policy gate.Policy) error {
 	policy.Home = home
 	policy.WorktreePath = worktreePath
+	policy.ProjectRoot = projectRoot
 
 	policyHost := filepath.Join(cacheDir, id+"-gate-policy.json")
 	if err := policy.Save(policyHost); err != nil {
