@@ -11,8 +11,8 @@ import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompareArrows, MoveRight, PanelLeftOpen, Menu,
-  LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
+  GitBranch, GitCompareArrows, ArrowRightLeft, PanelLeftOpen, Menu,
+  LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
@@ -534,7 +534,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
           : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
           }`}
       >
-        <Settings className="w-3.5 h-3.5" />
+        <Settings2 className="w-3.5 h-3.5" />
       </button>
 
       {open && (
@@ -641,7 +641,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
           : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
           }`}
       >
-        <Settings className="w-3.5 h-3.5" />
+        <Settings2 className="w-3.5 h-3.5" />
       </button>
 
       {open && (
@@ -1591,7 +1591,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           // mode active before the branch list arrives, and the head selector
           // needs it (it looks the ref up in the list).
           <>
-            <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+            <ArrowRightLeft className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
             <div className="flex min-w-0 max-w-[11rem] shrink">
               <BranchSelector
                 branches={branches}
