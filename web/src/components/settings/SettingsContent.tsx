@@ -5,10 +5,7 @@ import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, type AgentTypeIconName } from '../AgentTypeIcon'
 import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
-import { SettingSection, SettingsGroupHeading, type SettingsSection } from './shared'
-import { ThemeSection } from './ThemeSection'
-import { TerminalSection } from './TerminalSection'
-import { NotificationsSection } from './NotificationsSection'
+import { SettingSection, type SettingsSection } from './shared'
 import { ReviewSection } from './ReviewSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
@@ -90,9 +87,9 @@ export function FloatingSaveBar({
 //     project, and the [[artifacts]]/[[tests]]/[[services]] commands (those are
 //     replaced wholesale by a project that defines its own, and are read from
 //     the compared ref, so they are inherently project things).
-//   - "user": the browser-local preferences (theme / terminal / notifications)
-//     plus the user config (~/.config/hydra/config.toml) agent defaults that
+//   - "user": the user config (~/.config/hydra/config.toml) agent defaults that
 //     every project inherits.
+// The browser-local preferences live on their own tab (BrowserSections), not here.
 export function SettingsContent({
   config,
   setConfig,
@@ -146,21 +143,6 @@ export function SettingsContent({
 
   return (
     <>
-      {scope === 'user' && (
-        <>
-          <SettingsGroupHeading
-            title="This browser"
-            description="Preferences stored by this browser only - never written to a config file."
-          />
-          <ThemeSection />
-          <TerminalSection />
-          <NotificationsSection />
-          <SettingsGroupHeading
-            title="User config"
-            description="Stored in ~/.config/hydra/config.toml and inherited by every project on this machine. A project's own settings layer on top: path and host lists combine, other values override per field."
-          />
-        </>
-      )}
       {scope === 'project' && iconSection}
       {scope === 'project' && selectedProject && <ReviewSection projectId={selectedProject.id} />}
       <SettingSection

@@ -272,7 +272,7 @@ export function ConfigForm({
               ) : (
                 <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>
               )}
-              <p className="mt-1.5 text-gray-400 italic">Pre-prompts are merged in order: default → all agents → agent-specific.</p>
+              <p className="mt-1.5 text-gray-400 italic">Pre-prompts are merged in order: default → all agents → agent-specific. User-config and project-config values combine too (project appended after user), so setting one here does not replace the other scope's.</p>
             </InfoTooltip>
           </div>
         )}
