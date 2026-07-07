@@ -61,6 +61,7 @@ claude --dangerously-skip-permissions \
     --append-system-prompt <preprompt> \
     [--model <model>] \
     -p --input-format stream-json --output-format stream-json --verbose \
+    --replay-user-messages \
     [--include-partial-messages] \
     [--continue]
 ```
@@ -78,9 +79,19 @@ Notes:
   complete assistant message at a time, which in an agentic loop means an
   update every few seconds (each text segment between tool calls). Much
   simpler replay semantics for the MVP.
-- `--continue` composes with `-p` for resume; the conversation and
-  `session_id` persist in `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
+- `--replay-user-messages` echoes user messages back into the stdout
+  stream. Load-bearing for the replay design below: it puts user turns in
+  the scrollback ring, so a freshly attached client reconstructs the whole
+  conversation from the ring alone. (Without it the WS handler would have
+  to inject forwarded user messages into the ring itself.)
+- `--continue` and `--resume <session-id>` compose with `-p` and the
+  stream-json flags (docs-verified): a resumed process keeps the same
+  `session_id` and can be driven over stream-json stdin/stdout. The
+  conversation persists in `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`
   (Hydra already manages those dirs in `internal/paths`).
+  `--fork-session` exists for branching a conversation (new session id);
+  not needed here. `--include-hook-events` can surface hook executions in
+  the stream if the chat view ever wants to show gate denials inline.
 - `--dangerously-skip-permissions` sidesteps the whole interactive
   permission problem: no permission prompts ever need surfacing in the chat
   UI. The `PreToolUse` `hydra gate` hook still enforces policy exactly as
@@ -361,3 +372,14 @@ model-picker dropdown instead and only chip it in the full-page layout.
   chat-mode resume inherits that behavior (fine, but worth stating).
 - **Windows**: sessions are stubbed on Windows anyway; `model_windows.go`
   just needs the mirrored column.
+- **Billing exposure for subscription users.** Interactive Claude Code and
+  `-p` currently draw from the same subscription usage pool, but Anthropic
+  announced (May 2026, then paused before the June 15 effective date) a
+  plan to move headless `-p` / Agent SDK usage onto a separate, much
+  smaller monthly credit pool billed at API rates. If that change ever
+  lands, toggling a head to chat mode would silently move its usage into
+  that pool for OAuth-subscription users, while terminal mode stays on
+  normal subscription limits. Re-check the billing status before shipping;
+  if the change is live, chat mode needs a visible warning (or gating) for
+  subscription-authed installs. API-key users are unaffected (same
+  per-token rates either way).
