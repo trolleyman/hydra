@@ -20,18 +20,18 @@ func (p *gitlabProvider) Name() string { return ProviderGitLab }
 // glabMR is the subset of `glab mr view -F json` output we read. GitLab's API is
 // the source, so field names are snake_case.
 type glabMR struct {
-	IID                       int    `json:"iid"`
-	WebURL                    string `json:"web_url"`
-	State                     string `json:"state"` // opened | merged | closed | locked
-	Draft                     bool   `json:"draft"`
-	WorkInProgress            bool   `json:"work_in_progress"`
-	MergeStatus               string `json:"merge_status"` // can_be_merged | cannot_be_merged | ...
-	DetailedMergeStatus       string `json:"detailed_merge_status"`
-	HasConflicts              bool   `json:"has_conflicts"`
-	BlockingDiscussionsResolved bool `json:"blocking_discussions_resolved"`
-	UserNotesCount            int    `json:"user_notes_count"`
-	Upvotes                   int    `json:"upvotes"`
-	Pipeline                  *struct {
+	IID                         int    `json:"iid"`
+	WebURL                      string `json:"web_url"`
+	State                       string `json:"state"` // opened | merged | closed | locked
+	Draft                       bool   `json:"draft"`
+	WorkInProgress              bool   `json:"work_in_progress"`
+	MergeStatus                 string `json:"merge_status"` // can_be_merged | cannot_be_merged | ...
+	DetailedMergeStatus         string `json:"detailed_merge_status"`
+	HasConflicts                bool   `json:"has_conflicts"`
+	BlockingDiscussionsResolved bool   `json:"blocking_discussions_resolved"`
+	UserNotesCount              int    `json:"user_notes_count"`
+	Upvotes                     int    `json:"upvotes"`
+	Pipeline                    *struct {
 		Status string `json:"status"` // success | failed | running | pending | canceled
 	} `json:"pipeline"`
 	HeadPipeline *struct {

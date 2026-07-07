@@ -22,7 +22,7 @@ func (p *githubProvider) Name() string { return ProviderGitHub }
 type ghPR struct {
 	Number         int    `json:"number"`
 	URL            string `json:"url"`
-	State          string `json:"state"`   // OPEN | MERGED | CLOSED
+	State          string `json:"state"` // OPEN | MERGED | CLOSED
 	IsDraft        bool   `json:"isDraft"`
 	Mergeable      string `json:"mergeable"` // MERGEABLE | CONFLICTING | UNKNOWN
 	ReviewDecision string `json:"reviewDecision"`

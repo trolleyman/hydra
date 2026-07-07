@@ -91,6 +91,35 @@ func revListCount(projectRoot string, args ...string) (int, error) {
 	return n, nil
 }
 
+// AheadBehind reports how many commits `ours` has that `theirs` lacks (ahead) and
+// how many `theirs` has that `ours` lacks (behind), from the last-known refs (no
+// fetch). ok is false when either ref can't be resolved - e.g. the remote
+// downstream branch doesn't exist yet - so callers can distinguish "unpublished"
+// from "in sync". Used for the Push to MR / Pull from MR affordances (3.3b).
+func AheadBehind(projectRoot, ours, theirs string) (ahead, behind int, ok bool) {
+	for _, ref := range []string{ours, theirs} {
+		if _, err := gitOutput(projectRoot, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			return 0, 0, false
+		}
+	}
+	// `--left-right --count theirs...ours` prints "<left>\t<right>": left = commits
+	// in theirs not ours (behind), right = commits in ours not theirs (ahead).
+	out, err := gitOutput(projectRoot, "rev-list", "--left-right", "--count", theirs+"..."+ours)
+	if err != nil {
+		return 0, 0, false
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, 0, false
+	}
+	behind, err1 := strconv.Atoi(fields[0])
+	ahead, err2 := strconv.Atoi(fields[1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return ahead, behind, true
+}
+
 // TrackingRef returns the remote-tracking ref a push/pull compares against: the
 // configured upstream if any, else "<remote>/<branch>" when that ref exists,
 // else "" (the branch isn't on the remote yet).
@@ -119,6 +148,27 @@ func Fetch(ctx context.Context, projectRoot, remote string) error {
 		return errtrace.Wrap(classifyGitNetworkError("fetch "+remote, err, string(out)))
 	}
 	return nil
+}
+
+// RemoteURL returns the fetch URL configured for remote, or "" if it has none.
+func RemoteURL(projectRoot, remote string) string {
+	if remote == "" {
+		return ""
+	}
+	out, err := gitOutput(projectRoot, "remote", "get-url", remote)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// RemoteNames lists the configured remote names.
+func RemoteNames(projectRoot string) []string {
+	out, err := gitOutput(projectRoot, "remote")
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(out)
 }
 
 // resolveRemote picks the remote a push should target: the upstream's remote if
