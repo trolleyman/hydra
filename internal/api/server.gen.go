@@ -808,9 +808,6 @@ type PreviewStatus struct {
 
 // PreviewsResponse defines model for PreviewsResponse.
 type PreviewsResponse struct {
-	// Others Still-live instances of those scripts at other versions (e.g. the selection moved on)
-	Others *[]PreviewStatus `json:"others,omitempty"`
-
 	// Previews One entry per configured server script, for the requested version
 	Previews []PreviewStatus `json:"previews"`
 }

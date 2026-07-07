@@ -3249,11 +3249,6 @@ components:
           items:
             $ref: '#/components/schemas/PreviewStatus'
           description: One entry per configured server script, for the requested version
-        others:
-          type: array
-          items:
-            $ref: '#/components/schemas/PreviewStatus'
-          description: Still-live instances of those scripts at other versions (e.g. the selection moved on)
 
     ServiceScript:
       type: object

@@ -24,8 +24,11 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
-// instance is one live-preview slot: a persistent proxy listener plus an
-// on-demand child server process for a specific (project, script, version).
+// instance is one backing server for a slot: an on-demand child server process
+// running a specific checkout (worktree, or an ephemeral commit checkout). The
+// slot owns the proxy listener/port and forwards requests to whichever instance
+// is currently its front (see slot.serveHTTP); an instance never binds a
+// listener of its own, so it can be spawned in the background and hot-swapped in.
 type instance struct {
 	mgr *Manager
 
@@ -34,9 +37,7 @@ type instance struct {
 	version      Version
 	runDir       string
 	ownsCheckout bool
-	ln           net.Listener
-	srv          *http.Server
-	port         int
+	channel      string // the slot channel this instance serves (see Version.channelID)
 
 	mu        sync.Mutex
 	spec      config.ArtifactScript
@@ -84,7 +85,8 @@ func (in *instance) touch() {
 	in.mu.Unlock()
 }
 
-// status snapshots the instance for the API.
+// status snapshots the instance for the API. Port is left 0; the slot fills in
+// its own proxy port (the instance owns no listener).
 func (in *instance) status() Status {
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -92,7 +94,6 @@ func (in *instance) status() Status {
 		Name:      in.spec.Name,
 		State:     in.state,
 		Version:   in.version.Label(),
-		Port:      in.port,
 		Pid:       in.pid,
 		Inflight:  in.inflight,
 		StartedAt: in.startedAt,
@@ -100,6 +101,13 @@ func (in *instance) status() Status {
 		Message:   in.message,
 		Log:       append([]LogLine(nil), in.log...),
 	}
+}
+
+// setSpec adopts a possibly-updated spec (timeouts, command) for future spawns.
+func (in *instance) setSpec(spec config.ArtifactScript) {
+	in.mu.Lock()
+	in.spec = spec
+	in.mu.Unlock()
 }
 
 // appendLog adds a line to the bounded log ring and captures markers. Caller
@@ -358,12 +366,11 @@ func (in *instance) stopChild(finalState State, message string) {
 	}
 }
 
-// remove fully tears the instance down: child killed, listener closed, and the
-// ephemeral checkout (commit instances) deleted. The instance must already be
-// out of the manager map.
-func (in *instance) remove() {
+// teardown fully disposes of the instance: child killed and, for a commit-style
+// instance, its ephemeral checkout deleted. The slot owns the listener, so
+// nothing is closed here. The instance must already be detached from its slot.
+func (in *instance) teardown() {
 	in.stopChild(StateStopped, "")
-	_ = in.srv.Close()
 	if in.ownsCheckout {
 		_ = git.RemoveWorktree(in.root, in.runDir)
 		_ = os.RemoveAll(in.runDir)

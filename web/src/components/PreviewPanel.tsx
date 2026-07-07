@@ -52,7 +52,6 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [previews, setPreviews] = useState<PreviewStatus[] | null>(null)
-  const [others, setOthers] = useState<PreviewStatus[]>([])
   // Bumped after start/stop actions so the poll effect re-runs immediately.
   const [nonce, setNonce] = useState(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,7 +62,6 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
   if (prevConnKey !== connKey) {
     setPrevConnKey(connKey)
     setPreviews(null)
-    setOthers([])
   }
 
   useEffect(() => {
@@ -73,7 +71,6 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
         const resp = await api.default.getAgentPreviews(projectId, agentId, headRef, includeUncommitted)
         if (cancelled) return
         setPreviews(resp.previews ?? [])
-        setOthers(resp.others ?? [])
         if (timerRef.current) clearTimeout(timerRef.current)
         timerRef.current = setTimeout(tick, pollDelay(resp.previews ?? []))
       } catch {
@@ -154,27 +151,15 @@ export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, 
             onStop={() => { void stop(p.name) }}
           />
         ))}
-        {others.map((p) => (
-          <PreviewCard
-            key={`${agentId}::${p.name}::${p.version}`}
-            preview={p}
-            otherVersion
-            onOpen={() => { if (p.url) window.open(p.url, '_blank') }}
-            onStop={() => { void stop(p.name) }}
-          />
-        ))}
       </div>
     </div>
   )
 }
 
-// PreviewCard is one instance row: state dot, name, version chip, Open link and
-// stop/restart melt icons, with the captured build log as the collapsible body.
-// Rows for other still-running versions (the selection moved on) are read-only
-// apart from open/stop.
-function PreviewCard({ preview: p, otherVersion, onOpen, onStart, onStop }: {
+// PreviewCard is one server row: state dot, name, version chip, Open link and
+// stop/start melt icons, with the captured build log as the collapsible body.
+function PreviewCard({ preview: p, onOpen, onStart, onStop }: {
   preview: PreviewStatus
-  otherVersion?: boolean
   onOpen: () => void
   onStart?: () => void
   onStop: () => void
@@ -197,7 +182,7 @@ function PreviewCard({ preview: p, otherVersion, onOpen, onStart, onStop }: {
       status={
         <span className="flex items-center gap-2 min-w-0">
           <StateChip state={p.state} />
-          <span className={`text-[11px] ${otherVersion ? 'text-amber-600 dark:text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>{p.version}</span>
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">{p.version}</span>
           {p.state === 'starting' && p.progress && (
             <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{p.progress}</span>
           )}
@@ -221,7 +206,7 @@ function PreviewCard({ preview: p, otherVersion, onOpen, onStart, onStop }: {
               <Square className="w-3.5 h-3.5" />
             </button>
           )}
-          {!live && !otherVersion && onStart && (
+          {!live && onStart && (
             <button
               onClick={onStart}
               title="Start the server"
