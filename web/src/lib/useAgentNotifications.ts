@@ -5,7 +5,7 @@ import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
-import { fireNotification } from './notifyPrefs'
+import { fireNotification, dismissNotification } from './notifyPrefs'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
@@ -16,6 +16,14 @@ const NEEDS_INPUT_TOAST_MS = 20_000
 // "Finished" is informational rather than blocking, so it auto-dismisses sooner
 // than a needs-input nudge but still lingers well past the generic 3s toast.
 const FINISHED_TOAST_MS = 14_000
+// Sticky OS notifications (needs input / approval) set `requireInteraction`, so
+// the browser never expires them on its own. We bound that with an app-level
+// auto-dismiss: a prompt the out-of-tab user never gets to is closed after this
+// long instead of sitting in the tray forever. Comfortably longer than the
+// in-tab toasts, since the OS channel is exactly for when you're not watching.
+// Retraction when the condition actually clears (see dismissNotification calls
+// below) is the primary path; this is just the never-answered backstop.
+const OS_STICKY_DISMISS_MS = 120_000
 
 // useAgentNotifications watches the live agent list for the current project and
 // surfaces three kinds of toasts:
@@ -92,6 +100,10 @@ export function useAgentNotifications(
 
   // agentId → last-observed status, for transition detection.
   const lastStatus = useRef<Map<string, string>>(new Map())
+  // agentId → last-observed has_unread_changes flag. When it drops true → false
+  // (the user read the agent's changes) we retract the "finished" OS notification
+  // we fired for it, the same way leaving needs_input retracts its prompt.
+  const lastUnread = useRef<Map<string, boolean>>(new Map())
   // agentId → reqid → toast id, so a resolved/withdrawn approval can dismiss the
   // matching toast (silently) without denying it.
   const approvalToasts = useRef<Map<string, Map<string, number>>>(new Map())
@@ -109,12 +121,29 @@ export function useAgentNotifications(
     // --- 1. needs_input / finished transition toasts ---
     const prev = lastStatus.current
     const next = new Map<string, string>()
+    const prevUnread = lastUnread.current
+    const nextUnread = new Map<string, boolean>()
     for (const agent of agents) {
+      // Unread flag drop (true → false): the user read this agent's changes, so
+      // retract any "finished" OS notification still in the tray for it. Tracked
+      // independently of status so it fires even when the status didn't move.
+      const unread = agent.has_unread_changes ?? false
+      nextUnread.set(agent.id, unread)
+      if (prevUnread.get(agent.id) === true && !unread) {
+        dismissNotification(`finished:${agent.id}`)
+      }
+
       const status = agent.agent_status?.status
       if (!status) continue
       next.set(agent.id, status)
       const before = prev.get(agent.id)
       if (before === undefined || before === status) continue
+
+      // Leaving needs_input (the user answered, or the agent moved on): retract
+      // any "needs input" OS notification we fired so it doesn't outlive the wait.
+      if (before === 'needs_input' && status !== 'needs_input') {
+        dismissNotification(`needs-input:${agent.id}`)
+      }
 
       const notifType = agent.agent_status?.notification_type
       const name = agent.title || agent.id
@@ -137,6 +166,7 @@ export function useAgentNotifications(
             body: 'The agent is blocked waiting on you.',
             tag: `needs-input:${agent.id}`,
             sticky: true,
+            autoDismissMs: OS_STICKY_DISMISS_MS,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -161,6 +191,7 @@ export function useAgentNotifications(
       }
     }
     lastStatus.current = next
+    lastUnread.current = nextUnread
 
     // --- 2. security-gate approval toasts ---
     const decide = async (agentId: string, reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) => {
@@ -177,7 +208,11 @@ export function useAgentNotifications(
     )
     for (const [agentId, reqMap] of approvalToasts.current) {
       if (approvalAgentIds.has(agentId)) continue
-      for (const toastId of reqMap.values()) toast.dismiss(toastId, { silent: true })
+      for (const [reqid, toastId] of reqMap) {
+        toast.dismiss(toastId, { silent: true })
+        // The gate wait is over, so retract its OS notification too.
+        dismissNotification(`approval:${agentId}:${reqid}`)
+      }
       approvalToasts.current.delete(agentId)
       approvalStamp.current.delete(agentId)
     }
@@ -210,6 +245,7 @@ export function useAgentNotifications(
         for (const [reqid, toastId] of reqMap) {
           if (liveReqids.has(reqid)) continue
           toast.dismiss(toastId, { silent: true })
+          dismissNotification(`approval:${agentId}:${reqid}`)
           reqMap.delete(reqid)
         }
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
@@ -283,6 +319,7 @@ export function useAgentNotifications(
               body: a.summary,
               tag: `approval:${agentId}:${a.reqid}`,
               sticky: true,
+              autoDismissMs: OS_STICKY_DISMISS_MS,
               onClick: () => openAgent(currentProjectId, agentId),
             })
           }
@@ -342,9 +379,15 @@ export function useAgentNotifications(
               body: `In project "${projectName}" - the agent is blocked waiting on you.`,
               tag: `needs-input:${a.id}`,
               sticky: true,
+              autoDismissMs: OS_STICKY_DISMISS_MS,
               onClick: () => openAgent(pid, a.id),
             })
           }
+        }
+        // Agents that were blocked last time but no longer are have left the
+        // wait - retract their (out-of-tab) "needs input" OS notification.
+        for (const id of seenBlocked) {
+          if (!blockedIds.has(id)) dismissNotification(`needs-input:${id}`)
         }
         // Record the current blocked set so an agent that unblocks then blocks
         // again later re-toasts, while still-blocked agents don't.
@@ -385,10 +428,16 @@ export function useAgentNotifications(
             })
           }
         }
+        // Agents whose unread flag cleared since last time (the user read them)
+        // - retract their "finished" OS notification.
+        const unreadIds = new Set(unread.map((a) => a.id))
+        for (const id of seenUnread) {
+          if (!unreadIds.has(id)) dismissNotification(`finished:${id}`)
+        }
         // Record every currently-unread agent (whatever its status), so a flag
         // that clears (the user reads it) and is later re-raised re-toasts,
         // while still-unread agents don't repeat.
-        bgUnread.current.set(pid, new Set(unread.map((a) => a.id)))
+        bgUnread.current.set(pid, unreadIds)
       })()
     }
     lastBgCounts.current = next

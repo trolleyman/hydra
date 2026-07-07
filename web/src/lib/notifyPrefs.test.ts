@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { loadNotifyEnabled, useNotifyStore, fireNotification } from './notifyPrefs'
+import { loadNotifyEnabled, useNotifyStore, fireNotification, dismissNotification } from './notifyPrefs'
 import { StorageKeys, readLocal } from './storage'
 
 // A stand-in for the browser Notification API. jsdom doesn't implement it, so
@@ -8,7 +8,12 @@ class StubNotification {
   static permission: NotificationPermission = 'granted'
   static requestPermission = vi.fn(async () => StubNotification.permission)
   onclick: (() => void) | null = null
-  close = vi.fn()
+  onclose: (() => void) | null = null
+  close = vi.fn(function (this: StubNotification) {
+    // Mirror the browser: closing fires the close event (which our helper uses
+    // to forget the notification).
+    this.onclose?.()
+  })
   constructor(
     public title: string,
     public options?: NotificationOptions,
@@ -108,5 +113,90 @@ describe('fireNotification', () => {
     expect(focus).toHaveBeenCalled()
     expect(n.close).toHaveBeenCalled()
     expect(onClick).toHaveBeenCalled()
+  })
+})
+
+describe('dismissNotification', () => {
+  beforeEach(() => {
+    StubNotification.permission = 'granted'
+    StubNotification.reset()
+    vi.stubGlobal('Notification', StubNotification)
+    useNotifyStore.setState({ enabled: true, permission: 'granted' })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('closes an OS notification previously fired under the same tag', () => {
+    fireNotification({ title: 't', body: 'b', tag: 'needs-input:a1', sticky: true, onClick: vi.fn() })
+    const n = StubNotification.instances[0]
+
+    dismissNotification('needs-input:a1')
+    expect(n.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('is a no-op for a tag that was never fired', () => {
+    expect(() => dismissNotification('needs-input:never')).not.toThrow()
+  })
+
+  it('does not close again once the notification was dismissed', () => {
+    fireNotification({ title: 't', body: 'b', tag: 'approval:a1:r1', sticky: true, onClick: vi.fn() })
+    const n = StubNotification.instances[0]
+
+    dismissNotification('approval:a1:r1')
+    dismissNotification('approval:a1:r1')
+    expect(n.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('tracks only the newest notification when a tag is re-fired', () => {
+    fireNotification({ title: 't1', body: 'b', tag: 'needs-input:a1', sticky: true, onClick: vi.fn() })
+    fireNotification({ title: 't2', body: 'b', tag: 'needs-input:a1', sticky: true, onClick: vi.fn() })
+    const [first, second] = StubNotification.instances
+
+    dismissNotification('needs-input:a1')
+    // The replacement is the one on screen, so it (not the retired first) is closed.
+    expect(second.close).toHaveBeenCalledTimes(1)
+    expect(first.close).not.toHaveBeenCalled()
+  })
+
+  it('auto-dismisses after autoDismissMs and stops tracking it', () => {
+    vi.useFakeTimers()
+    fireNotification({
+      title: 't',
+      body: 'b',
+      tag: 'needs-input:a1',
+      sticky: true,
+      autoDismissMs: 120_000,
+      onClick: vi.fn(),
+    })
+    const n = StubNotification.instances[0]
+
+    expect(n.close).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(120_000)
+    expect(n.close).toHaveBeenCalledTimes(1)
+
+    // Already gone: a later dismiss is a no-op (no second close).
+    dismissNotification('needs-input:a1')
+    expect(n.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels the auto-dismiss timer when dismissed early', () => {
+    vi.useFakeTimers()
+    fireNotification({
+      title: 't',
+      body: 'b',
+      tag: 'needs-input:a1',
+      sticky: true,
+      autoDismissMs: 120_000,
+      onClick: vi.fn(),
+    })
+    const n = StubNotification.instances[0]
+
+    dismissNotification('needs-input:a1')
+    expect(n.close).toHaveBeenCalledTimes(1)
+    // The pending timer must not fire a second close after early dismissal.
+    vi.advanceTimersByTime(120_000)
+    expect(n.close).toHaveBeenCalledTimes(1)
   })
 })
