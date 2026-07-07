@@ -21,12 +21,14 @@ export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
 })
 
-type SettingsScope = 'project' | 'user'
+type SettingsScope = 'project' | 'local' | 'user'
 type SettingsTab = SettingsScope | 'browser'
 
 const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
   project:
     'This project only - stored in .hydra/config.toml in the project root and shared with everyone working on it. Layered on top of the user config: path and host lists combine and pre-prompts append; other values override.',
+  local:
+    'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
 }
@@ -80,16 +82,17 @@ function ProjectSettingsPage() {
       setLoading(true)
       setError(null)
       try {
+        const editCfg = await api.default.getConfig(projectId, scope)
+        setConfig(editCfg)
+        setBaseConfig(JSON.stringify(editCfg))
+        // The "Inherited:" hints show the layer directly underneath the one
+        // being edited: user for the project tab, project for the local tab.
+        // The user tab is the bottom config layer, so nothing is shown.
         if (scope === 'project') {
-          const editCfg = await api.default.getConfig(projectId, 'project')
-          setConfig(editCfg)
-          setBaseConfig(JSON.stringify(editCfg))
-          const userCfg = await api.default.getConfig(projectId, 'user')
-          setInheritedConfig(userCfg)
+          setInheritedConfig(await api.default.getConfig(projectId, 'user'))
+        } else if (scope === 'local') {
+          setInheritedConfig(await api.default.getConfig(projectId, 'project'))
         } else {
-          const editCfg = await api.default.getConfig(projectId, 'user')
-          setConfig(editCfg)
-          setBaseConfig(JSON.stringify(editCfg))
           setInheritedConfig(null)
         }
       } catch (err) {
@@ -179,6 +182,7 @@ function ProjectSettingsPage() {
           <ScopeTabs
             tabs={[
               { id: 'project' as SettingsTab, label: 'Project' },
+              { id: 'local' as SettingsTab, label: 'Local' },
               { id: 'user' as SettingsTab, label: 'User' },
               { id: 'browser' as SettingsTab, label: 'Browser' },
             ]}

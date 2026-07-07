@@ -735,12 +735,15 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		// Load only the raw config for the requested scope (not merged).
 		var path string
 		var err error
-		if *request.Params.Scope == api.GetConfigParamsScopeUser {
+		switch *request.Params.Scope {
+		case api.GetConfigParamsScopeUser:
 			path, err = config.GetUserConfigPath()
 			if err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-		} else {
+		case api.GetConfigParamsScopeLocal:
+			path = paths.GetProjectConfigLocalPath(projectRoot)
+		default:
 			path = config.GetProjectConfigPath(projectRoot)
 		}
 		raw, err := config.LoadFile(path)
@@ -994,7 +997,12 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			GateEnabled:      p.GateEnabled,
 			McpAllowed:       &p.MCPAllowed,
 			McpToolsAllowed:  &p.MCPToolsAllowed,
+			McpBlocked:       &p.MCPBlocked,
+			McpToolsBlocked:  &p.MCPToolsBlocked,
 			McpAutoAllowRead: p.MCPAutoAllowRead,
+			// known_tools is not edited by the Settings UI, but must ride along in
+			// the response so a round-tripped save preserves a hand-edited value.
+			KnownTools: &p.KnownTools,
 		}
 	}
 	return out
@@ -1053,6 +1061,15 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Policy.McpToolsAllowed != nil {
 			p.MCPToolsAllowed = *a.Policy.McpToolsAllowed
+		}
+		if a.Policy.McpBlocked != nil {
+			p.MCPBlocked = *a.Policy.McpBlocked
+		}
+		if a.Policy.McpToolsBlocked != nil {
+			p.MCPToolsBlocked = *a.Policy.McpToolsBlocked
+		}
+		if a.Policy.KnownTools != nil {
+			p.KnownTools = *a.Policy.KnownTools
 		}
 		out.Policy = p
 	}
@@ -1133,13 +1150,16 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 
 	var savePath string
-	if scope == api.SaveConfigParamsScopeUser {
+	switch scope {
+	case api.SaveConfigParamsScopeUser:
 		var err error
 		savePath, err = config.GetUserConfigPath()
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-	} else {
+	case api.SaveConfigParamsScopeLocal:
+		savePath = paths.GetProjectConfigLocalPath(projectRoot)
+	default:
 		savePath = config.GetProjectConfigPath(projectRoot)
 	}
 
@@ -1148,10 +1168,10 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 
 	// Restart the project's services so config changes (added/removed/edited
-	// [[services]]) take effect immediately. Only for project-scope saves: a
-	// user-scope save would have to restart every registered project, and the
-	// merged result is reloaded from disk by RestartProject anyway.
-	if s.Services != nil && scope == api.SaveConfigParamsScopeProject {
+	// [[services]]) take effect immediately. Project and local scopes both feed
+	// this project's merged config; a user-scope save would have to restart
+	// every registered project, so it is left to the next natural restart.
+	if s.Services != nil && scope != api.SaveConfigParamsScopeUser {
 		s.Services.RestartProject(projectRoot)
 	}
 

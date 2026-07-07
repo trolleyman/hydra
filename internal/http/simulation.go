@@ -2498,6 +2498,8 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 				Policy: &api.PolicyConfig{
 					McpAllowed:       ptr([]string{"github", "linear"}),
 					McpToolsAllowed:  ptr([]string{"sentry__list_issues"}),
+					McpBlocked:       ptr([]string{"playwright"}),
+					McpToolsBlocked:  ptr([]string{"github__delete_repo"}),
 					McpAutoAllowRead: ptr(true),
 				},
 			},

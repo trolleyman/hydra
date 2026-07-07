@@ -87,6 +87,9 @@ export function FloatingSaveBar({
 //     project, and the [[artifacts]]/[[tests]]/[[services]] commands (those are
 //     replaced wholesale by a project that defines its own, and are read from
 //     the compared ref, so they are inherently project things).
+//   - "local": the untracked per-user .hydra/config.local.toml overlay - agent
+//     settings only; the array-section editors stay on the project tab (a local
+//     file can still override entries by hand via tests_merge etc.).
 //   - "user": the user config (~/.config/hydra/config.toml) agent defaults that
 //     every project inherits.
 // The browser-local preferences live on their own tab (BrowserSections), not here.
@@ -117,7 +120,7 @@ export function SettingsContent({
   onCloseTestAgent: () => void
   projectId: string | null
   // Which config layer is being edited; see the component doc above.
-  scope: 'project' | 'user'
+  scope: 'project' | 'local' | 'user'
   // The project-icon editor - a project-scoped concern. Supplied by the project
   // settings page; the global page passes nothing.
   iconSection?: ReactNode
@@ -134,11 +137,12 @@ export function SettingsContent({
     return () => window.removeEventListener('keydown', onKey)
   }, [testAgent, onCloseTestAgent])
 
-  // User-scope files can still carry [[artifacts]]/[[tests]]/[[services]] (they
-  // apply to projects that define none of their own). The editors are project-
-  // scope only, so surface a pointer instead of silently hiding them; the values
-  // ride along in `config` untouched, so saving preserves them.
-  const userScopeCommandCount =
+  // User/local-scope files can still carry [[artifacts]]/[[tests]]/[[services]]
+  // (user-level ones apply to projects that define none of their own; local ones
+  // replace or - with the *_merge opt-ins - patch the project's). The editors are
+  // project-scope only, so surface a pointer instead of silently hiding them; the
+  // values ride along in `config` untouched, so saving preserves them.
+  const offScopeCommandCount =
     (config.artifacts?.length ?? 0) + (config.tests?.length ?? 0) + (config.services?.length ?? 0)
 
   return (
@@ -215,12 +219,12 @@ export function SettingsContent({
         </>
       )}
 
-      {scope === 'user' && userScopeCommandCount > 0 && (
+      {scope !== 'project' && offScopeCommandCount > 0 && (
         <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">
-          This user config also defines {userScopeCommandCount} artifact/test/service command
-          {userScopeCommandCount === 1 ? '' : 's'}. Those sections are project concerns (a project
-          defining its own replaces them wholesale), so they are edited per project or by hand in
-          ~/.config/hydra/config.toml; saving here leaves them untouched.
+          This {scope} config also defines {offScopeCommandCount} artifact/test/service command
+          {offScopeCommandCount === 1 ? '' : 's'}. Those sections are edited on the Project tab or by
+          hand in {scope === 'user' ? '~/.config/hydra/config.toml' : '.hydra/config.local.toml'};
+          saving here leaves them untouched.
         </p>
       )}
 

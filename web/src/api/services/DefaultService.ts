@@ -1090,13 +1090,13 @@ export class DefaultService {
     /**
      * Get the merged configuration
      * @param projectId Project ID
-     * @param scope Load only a specific scope's raw config instead of the merged config
+     * @param scope Load only a specific scope's raw config instead of the merged config (local = the untracked per-user .hydra/config.local.toml)
      * @returns ConfigResponse OK
      * @throws ApiError
      */
     public getConfig(
         projectId: string,
-        scope?: 'project' | 'user',
+        scope?: 'project' | 'user' | 'local',
     ): CancelablePromise<ConfigResponse> {
         return this.httpRequest.request({
             method: 'GET',
@@ -1117,14 +1117,14 @@ export class DefaultService {
      * Save configuration changes
      * @param projectId Project ID
      * @param requestBody
-     * @param scope Whether to save to the project or user config file (defaults to project)
+     * @param scope Which config file to save to - project (.hydra/config.toml), user (~/.config/hydra/config.toml) or local (the untracked per-user .hydra/config.local.toml). Defaults to project.
      * @returns any OK
      * @throws ApiError
      */
     public saveConfig(
         projectId: string,
         requestBody: ConfigResponse,
-        scope?: 'project' | 'user',
+        scope?: 'project' | 'user' | 'local',
     ): CancelablePromise<any> {
         return this.httpRequest.request({
             method: 'POST',
