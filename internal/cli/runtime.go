@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/events"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
@@ -63,6 +65,34 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		// agent's netns or run unfiltered.
 		if info.Ephemeral {
 			heads.StopShellEgress(info.ID)
+		}
+	})
+	// A chat-mode turn that fails mid-response (Claude's "API Error: ... The
+	// response above may be incomplete.") emits an isApiErrorMessage assistant
+	// line but fires no hook, so the head would otherwise sit silently in
+	// "running" with a truncated reply. Flip it into the error status by writing
+	// status.json exactly as the in-sandbox hook would; the JSON poller picks it
+	// up within a tick, updates the DB, raises the unread flag and broadcasts, and
+	// the web surfaces it (red status + a toast/OS notification). It clears itself
+	// when the user's next message resumes the agent (its UserPromptSubmit hook
+	// writes "running" with a newer timestamp).
+	reg.SetOnChatAPIError(func(id, msg string) {
+		agent, err := store.GetAgent(id)
+		if err != nil || agent == nil {
+			return // unknown or archived head - nothing to flag.
+		}
+		nt := gate.NotificationAPIError
+		text := msg
+		if text == "" {
+			text = "The agent's turn failed mid-response - the reply may be incomplete."
+		}
+		if err := heads.WriteAgentStatus(agent.ProjectPath, id, &api.AgentStatusInfo{
+			Status:           api.Errored,
+			Timestamp:        time.Now().Format(time.RFC3339Nano),
+			LastMessage:      &text,
+			NotificationType: &nt,
+		}); err != nil {
+			log.Printf("warn: write api-error status for %s: %v", id, err)
 		}
 	})
 

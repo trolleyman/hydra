@@ -33,9 +33,10 @@ type StartOptions struct {
 
 // Registry owns all live agent sessions for the daemon.
 type Registry struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	onExit   func(Info)
+	mu             sync.RWMutex
+	sessions       map[string]*Session
+	onExit         func(Info)
+	onChatAPIError func(id, msg string)
 }
 
 // NewRegistry returns an empty registry.
@@ -48,6 +49,16 @@ func NewRegistry() *Registry {
 func (r *Registry) SetOnExit(fn func(Info)) {
 	r.mu.Lock()
 	r.onExit = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatAPIError registers a callback invoked (off the read goroutine) when a
+// chat-mode session's stdout carries an API-error assistant message - the CLI's
+// signal that a turn failed mid-response. The daemon wires it to flip the head
+// into an error status. id is the session/head id; msg is the error text.
+func (r *Registry) SetOnChatAPIError(fn func(id, msg string)) {
+	r.mu.Lock()
+	r.onChatAPIError = fn
 	r.mu.Unlock()
 }
 
@@ -113,6 +124,17 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 	if kind == KindChat {
 		scrollback = chatScrollback
 		ringFilter = &claudestream.RingFilter{}
+		// An API-error line in the live stdout flips the head into an error
+		// status. The filter runs under the session lock, so dispatch the real
+		// work (a DB/status write) on its own goroutine.
+		ringFilter.OnAPIError = func(msg string) {
+			r.mu.RLock()
+			fn := r.onChatAPIError
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, msg)
+			}
+		}
 	}
 	s := &Session{
 		ID:           id,

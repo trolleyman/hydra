@@ -13,6 +13,7 @@ package claudestream
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 
 	"braces.dev/errtrace"
 )
@@ -31,6 +32,37 @@ type Event struct {
 	// IsSidechain marks transcript entries from a sub-agent (Task tool) run;
 	// those are not part of the main conversation and are skipped by backfill.
 	IsSidechain bool `json:"isSidechain,omitempty"`
+	// IsAPIError marks a synthesized assistant message the CLI emits when a turn
+	// fails mid-response (e.g. "API Error: Server error mid-response. The response
+	// above may be incomplete."). It carries the same shape on stdout as in the
+	// transcript, so the daemon can detect it live and flip the head into an error
+	// status. The text of the error is in the message's single text block.
+	IsAPIError bool `json:"isApiErrorMessage,omitempty"`
+}
+
+// apiErrorMessage is the minimal decode of an isApiErrorMessage assistant line,
+// used to pull out the human-readable error text.
+type apiErrorMessage struct {
+	Message struct {
+		Content []textBlock `json:"content"`
+	} `json:"message"`
+}
+
+// APIErrorText extracts the error text from a stream-json line that ParseEvent
+// flagged IsAPIError (its message's text blocks, joined). Returns "" if the line
+// carries no text, so callers can fall back to a generic message.
+func APIErrorText(line []byte) string {
+	var m apiErrorMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range m.Message.Content {
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 // ParseEvent peeks at one stdout line's envelope. ok is false when the line is
@@ -153,15 +185,26 @@ func (b *LineBuffer) Feed(chunk []byte) [][]byte {
 // session lock, and Pending is read under the same lock (see Session.attach).
 type RingFilter struct {
 	lb LineBuffer
+	// OnAPIError, if set, is called (synchronously, once per line) with the error
+	// text whenever a complete assistant line flagged isApiErrorMessage passes
+	// through - the signal that a turn failed mid-response. It runs under the
+	// session lock, so the callback must be cheap (the session dispatches the real
+	// work - writing the head's error status - off the read goroutine).
+	OnAPIError func(msg string)
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
-// persist (complete non-stream_event lines, newline-terminated).
+// persist (complete non-stream_event lines, newline-terminated). A line the CLI
+// flagged as an API error fires OnAPIError as a side effect.
 func (f *RingFilter) Filter(chunk []byte) []byte {
 	var out []byte
 	for _, line := range f.lb.Feed(chunk) {
-		if ev, ok := ParseEvent(line); ok && ev.Type == "stream_event" {
+		ev, ok := ParseEvent(line)
+		if ok && ev.Type == "stream_event" {
 			continue
+		}
+		if ok && ev.IsAPIError && f.OnAPIError != nil {
+			f.OnAPIError(APIErrorText(line))
 		}
 		out = append(out, line...)
 		out = append(out, '\n')
