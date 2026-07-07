@@ -188,25 +188,21 @@ func TestResolveFilterHosts(t *testing.T) {
 	}
 }
 
-// TestResolveNetworkMode covers the resolved Mode/Strict/BlockedHosts fields for
-// the mode-based config, including the strict flag and the block-list carry.
+// TestResolveNetworkMode covers the resolved Mode/BlockedHosts fields for the
+// mode-based config, including the "on" synonym and the block-list carry.
 func TestResolveNetworkMode(t *testing.T) {
-	tru := true
-	fls := false
 	cases := []struct {
-		name       string
-		network    *NetworkConfig
-		wantMode   sandbox.NetworkMode
-		wantStrict bool
-		wantBlock  int
+		name      string
+		network   *NetworkConfig
+		wantMode  sandbox.NetworkMode
+		wantBlock int
 	}{
-		{"default (nil) is hard + strict", nil, sandbox.NetHard, true, 0},
-		{"explicit advisory", &NetworkConfig{Mode: strp("advisory")}, sandbox.NetAdvisory, true, 0},
-		{"hard strict", &NetworkConfig{Mode: strp("hard"), Strict: &tru}, sandbox.NetHard, true, 0},
-		{"strict opt-out", &NetworkConfig{Mode: strp("hard"), Strict: &fls}, sandbox.NetHard, false, 0},
-		{`"on" is a synonym for hard`, &NetworkConfig{Mode: strp("on")}, sandbox.NetHard, true, 0},
-		{"blocked hosts carried", &NetworkConfig{BlockedHosts: []string{"evil.com", "*.tracker.io"}}, sandbox.NetHard, true, 2},
-		{"legacy enabled=false is off", &NetworkConfig{Enabled: new(bool)}, sandbox.NetOff, true, 0},
+		{"default (nil) is hard", nil, sandbox.NetHard, 0},
+		{"explicit advisory", &NetworkConfig{Mode: strp("advisory")}, sandbox.NetAdvisory, 0},
+		{"explicit hard", &NetworkConfig{Mode: strp("hard")}, sandbox.NetHard, 0},
+		{`"on" is a synonym for hard`, &NetworkConfig{Mode: strp("on")}, sandbox.NetHard, 0},
+		{"blocked hosts carried", &NetworkConfig{BlockedHosts: []string{"evil.com", "*.tracker.io"}}, sandbox.NetHard, 2},
+		{"legacy enabled=false is off", &NetworkConfig{Enabled: new(bool)}, sandbox.NetOff, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,9 +210,6 @@ func TestResolveNetworkMode(t *testing.T) {
 			_, _, _, _, net, _ := cfg.ResolveSandboxOptions("claude")
 			if net.Mode != tc.wantMode {
 				t.Errorf("Mode = %q, want %q", net.Mode, tc.wantMode)
-			}
-			if net.Strict != tc.wantStrict {
-				t.Errorf("Strict = %v, want %v", net.Strict, tc.wantStrict)
 			}
 			if len(net.BlockedHosts) != tc.wantBlock {
 				t.Errorf("len(BlockedHosts) = %d, want %d", len(net.BlockedHosts), tc.wantBlock)

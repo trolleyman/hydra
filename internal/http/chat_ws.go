@@ -14,7 +14,7 @@ import (
 	"github.com/trolleyman/hydra/internal/session"
 )
 
-// Chat-mode framing for the terminal WebSocket (CHAT_MODE.md). A chat-mode
+// Chat-mode framing for the terminal WebSocket. A chat-mode
 // head shares /ws/.../terminal with terminal heads, but every frame is text:
 //
 //	server -> client: the shared control events (status, diff_refresh), plus

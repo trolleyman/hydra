@@ -47,7 +47,7 @@ type Head struct {
 	BaseBranch    string
 	Ephemeral     bool
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	// renders a chat view instead of a terminal (Claude only).
 	ChatMode bool
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
@@ -341,7 +341,7 @@ type SpawnHeadOptions struct {
 	BaseBranch string            // empty = current HEAD branch
 	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	// renders a chat view instead of a terminal (Claude only).
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
 	Resume   bool // if true, resume the agent's prior conversation

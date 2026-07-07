@@ -346,7 +346,7 @@ export function ConfigForm({
                 Network Egress
               </label>
               <InfoTooltip title="Network Egress">
-                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft) where the host supports it - otherwise it degrades to advisory (the running head shows which is active).</p>
+                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft). When the host can't build the boundary, the head <strong>fails closed</strong> (no network) - hard never degrades to a weaker posture.</p>
                 <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy - every honest client is filtered, though a determined process can bypass it.</p>
                 <p className="mt-1.5"><strong>Unrestricted</strong>: network on, every host reachable. <strong>Off</strong>: no network at all.</p>
                 <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
@@ -362,25 +362,6 @@ export function ConfigForm({
               ))}
             </select>
           </div>
-          {mode === 'hard' && (
-            <div className="flex items-center justify-between ml-0.5">
-              <div className="flex items-center gap-1.5">
-                <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict (fail closed)</label>
-                <InfoTooltip title="Strict hard egress">
-                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable - e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering. <strong>On by default</strong>; turn off to allow the advisory degrade.</p>
-                </InfoTooltip>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={network.strict !== false}
-                  onChange={(e) => updateNetwork({ strict: e.target.checked ? null : false })}
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
-          )}
           {showHosts && (
             <div className="space-y-3 ml-0.5">
               <div className="space-y-1">

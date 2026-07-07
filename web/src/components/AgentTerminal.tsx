@@ -660,8 +660,8 @@ interface Props {
   agentId: string
   projectId: string | null
   isEphemeral?: boolean
-  // chatMode renders the agent tab as a chat view (stream-json framing,
-  // CHAT_MODE.md) instead of an xterm. Bash tabs stay terminals either way.
+  // chatMode renders the agent tab as a chat view (stream-json framing)
+  // instead of an xterm. Bash tabs stay terminals either way.
   chatMode?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void

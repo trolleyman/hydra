@@ -429,7 +429,7 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // each model has its own prompt cache, trigger a full cache-missing re-read of
 // the conversation. Empty model inherits the CLI's own default.
 //
-// chatMode (Claude only, CHAT_MODE.md) drives the CLI's structured stream-json
+// chatMode (Claude only) drives the CLI's structured stream-json
 // interface instead of the interactive TUI: the process stays alive reading
 // user turns from stdin, and the task prompt is sent as the first stdin
 // message (see SpawnHead) rather than as argv.

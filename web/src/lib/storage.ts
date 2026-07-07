@@ -25,7 +25,7 @@ export const StorageKeys = {
   // spawn form seeds the next spawn of that same agent type. '' / absent = the
   // CLI's own default.
   defaultModel: 'hydra-default-model',
-  // 'true' when the spawn form's chat-mode toggle (Claude only, CHAT_MODE.md)
+  // 'true' when the spawn form's chat-mode toggle (Claude only)
   // was last on, so the next spawn defaults to the same mode.
   defaultChatMode: 'hydra-default-chat-mode',
   // '1' when the Settings Review section is collapsed (it starts collapsed).

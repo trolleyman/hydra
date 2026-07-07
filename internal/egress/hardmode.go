@@ -47,8 +47,8 @@ var (
 // binary, and - decisively - a SMOKE TEST that actually spins up the pasta netns +
 // nft ruleset and confirms it works. The smoke test means hard mode only ever
 // activates when it genuinely functions on this host (so an old pasta, a kernel
-// without unprivileged userns, or a missing capability all fall back cleanly to
-// the advisory proxy rather than wedging a head at launch).
+// without unprivileged userns, or a missing capability are all detected up front
+// and hard-mode heads fail closed - no network - rather than wedging at launch).
 func DetectHardMode() HardMode {
 	hardOnce.Do(func() { hardRes = detectHardMode() })
 	return hardRes
@@ -57,22 +57,22 @@ func DetectHardMode() HardMode {
 func detectHardMode() HardMode {
 	pasta := lookPasta()
 	if pasta == "" {
-		log.Printf("hydra egress: hard mode unavailable - pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - pasta not found (set HYDRA_PASTA or install pasta); hard-mode heads will fail closed with no network")
 		return HardMode{}
 	}
 	nft := lookNft()
 	if nft == "" {
-		log.Printf("hydra egress: hard mode unavailable - nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - nft not found (looked on PATH + /usr/sbin,/sbin); hard-mode heads will fail closed with no network")
 		return HardMode{}
 	}
 	// --map-host-loopback is required for a deterministic proxy address; older
 	// pasta builds lack it, so don't even smoke-test those.
 	if !pastaHasMapHostLoopback(pasta) {
-		log.Printf("hydra egress: hard mode unavailable - pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
+		log.Printf("hydra egress: hard mode unavailable - pasta at %q lacks --map-host-loopback (too old); hard-mode heads will fail closed with no network", pasta)
 		return HardMode{}
 	}
 	if reason := smokeTest(pasta, nft); reason != "" {
-		log.Printf("hydra egress: hard mode unavailable - smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
+		log.Printf("hydra egress: hard mode unavailable - smoke test failed: %s (pasta=%q nft=%q); hard-mode heads will fail closed with no network", reason, pasta, nft)
 		return HardMode{}
 	}
 	log.Printf("hydra egress: hard mode AVAILABLE - proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)

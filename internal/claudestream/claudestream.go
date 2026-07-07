@@ -1,5 +1,5 @@
 // Package claudestream holds the Go side of the Claude Code CLI's stream-json
-// protocol, used by chat-mode heads (see CHAT_MODE.md): building the stdin
+// protocol, used by chat-mode heads: building the stdin
 // lines Hydra writes to the CLI and minimally decoding the stdout lines it
 // relays to the web client.
 //

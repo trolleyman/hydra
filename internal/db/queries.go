@@ -303,8 +303,8 @@ func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateAgentChatMode flips the head's chat-mode flag (Claude only,
-// CHAT_MODE.md). Metadata only; the live session is restarted separately so
+// UpdateAgentChatMode flips the head's chat-mode flag (Claude only).
+// Metadata only; the live session is restarted separately so
 // the new mode takes effect.
 func (s *Store) UpdateAgentChatMode(id string, chatMode bool) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("chat_mode", chatMode)

@@ -83,8 +83,8 @@ func TestStartCommandEgressModes(t *testing.T) {
 	}
 
 	// Hard: with tooling available the wrap must be set (and carry the inbound
-	// forward); without it a strict policy fails closed (Enabled flipped off).
-	hard := sandbox.NetworkPolicy{Enabled: true, FilterHosts: true, Mode: sandbox.NetHard, Strict: true}
+	// forward); without it the policy fails closed (Enabled flipped off).
+	hard := sandbox.NetworkPolicy{Enabled: true, FilterHosts: true, Mode: sandbox.NetHard}
 	s = StartCommandEgress("t", sandbox.AgentTypeBash, &hard, 38913, nil)
 	if DetectHardMode().Available {
 		if s.Wrap == nil {
@@ -95,7 +95,7 @@ func TestStartCommandEgressModes(t *testing.T) {
 			t.Errorf("hard wrap missing inbound forward: %v", argv)
 		}
 	} else if hard.Enabled {
-		t.Fatal("strict hard without tooling must fail closed (Enabled=false)")
+		t.Fatal("hard without tooling must fail closed (Enabled=false)")
 	}
 	s.Close()
 }

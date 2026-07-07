@@ -45,10 +45,10 @@ func (s *Session) Close() {
 //   - unrestricted / unfiltered: no proxy, open host network.
 //   - advisory: filtering proxy on host loopback, enforced via proxy env only.
 //   - hard: pasta netns + nft lock + CONNECT proxy (Wrap non-nil). When the
-//     tooling is unavailable, degrades to advisory - or fails closed
-//     (netPol.Enabled set false, like heads) when the policy is Strict.
+//     boundary can't be built (tooling unavailable, proxy failed) it fails
+//     closed (netPol.Enabled set false, like heads) - never degrades.
 //
-// netPol is taken by pointer because a strict-hard failure must flip Enabled
+// netPol is taken by pointer because a hard-mode failure must flip Enabled
 // off before the caller hands the policy to sandbox.BuildSpec.
 //
 // inboundPort > 0 forwards that host-loopback TCP port into the hard-mode
@@ -68,8 +68,8 @@ func StartCommandEgress(id string, agentType sandbox.AgentType, netPol *sandbox.
 	allowed := append(sandbox.DefaultAllowedHosts(agentType), netPol.AllowedHosts...)
 	p, err := Start(id, 0, allowed, netPol.BlockedHosts, approve)
 	if err != nil {
-		if netPol.Mode == sandbox.NetHard && netPol.Strict {
-			log.Printf("hydra egress[%s]: STRICT hard egress but proxy failed to start; failing closed (no network): %v", id, err)
+		if netPol.Mode == sandbox.NetHard {
+			log.Printf("hydra egress[%s]: hard egress but proxy failed to start; failing closed (no network): %v", id, err)
 			netPol.Enabled = false
 			return &Session{}
 		}
@@ -91,16 +91,15 @@ func StartCommandEgress(id string, agentType sandbox.AgentType, netPol *sandbox.
 				proxy: p,
 			}
 		}
-		if netPol.Strict {
-			log.Printf("hydra egress[%s]: STRICT hard egress requested but pasta/nft unavailable; failing closed (no network)", id)
-			_ = p.Close()
-			netPol.Enabled = false
-			return &Session{}
-		}
-		log.Printf("hydra egress[%s]: hard egress requested but pasta/nft unavailable; DEGRADED to advisory filtering", id)
+		// No inescapable boundary available → fail closed. Hard never degrades
+		// to the escapable advisory posture.
+		log.Printf("hydra egress[%s]: hard egress requested but pasta/nft unavailable; failing closed (no network)", id)
+		_ = p.Close()
+		netPol.Enabled = false
+		return &Session{}
 	}
 
-	// Advisory mode (chosen, or a non-strict hard degrade): shared host net,
-	// proxy reachable on loopback, filtering via HTTP(S)_PROXY only.
+	// Advisory mode (explicitly chosen): shared host net, proxy reachable on
+	// loopback, filtering via HTTP(S)_PROXY only.
 	return &Session{Env: ProxyEnv("http://" + p.Addr()), proxy: p}
 }

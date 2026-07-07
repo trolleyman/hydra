@@ -42,10 +42,10 @@ const (
 	// client is filtered, but a determined process can bypass it. Chosen when the
 	// user explicitly wants proxy-only filtering (no pasta/nft netns).
 	NetAdvisory NetworkMode = "advisory"
-	// NetHard requests an inescapable pasta-netns + nft boundary. When the tooling
-	// is unavailable it fails closed (no network) if Strict (the default), or
-	// degrades to advisory with a visible warning when Strict is explicitly off.
-	// The config synonym "on" resolves to NetHard.
+	// NetHard requests an inescapable pasta-netns + nft boundary. When the
+	// boundary can't be built (pasta/nft unavailable, proxy failed to start) it
+	// fails closed (no network) - it never degrades to a weaker posture. The
+	// config synonym "on" resolves to NetHard.
 	NetHard NetworkMode = "hard"
 )
 
@@ -82,12 +82,9 @@ type NetworkPolicy struct {
 	// false, every host is reachable (subject to Enabled). Derived from Mode.
 	FilterHosts bool
 	// Mode is the resolved egress posture (off/unrestricted/advisory/hard). It
-	// decides whether startEgress attempts the hard pasta+nft boundary.
+	// decides whether startEgress attempts the hard pasta+nft boundary; hard
+	// fails closed (no network) when that boundary can't be built.
 	Mode NetworkMode
-	// Strict, with Mode == NetHard, fails closed (blocks all egress) when the hard
-	// boundary can't be built, instead of degrading to advisory filtering. On by
-	// default (see resolveNetworkPolicy).
-	Strict bool
 	// AllowedHosts is the user's outbound host allow-list, unioned on top of
 	// DefaultAllowedHosts and enforced by the egress proxy when FilterHosts is true
 	// (exact host or *.suffix wildcard).
@@ -279,7 +276,7 @@ type Options struct {
 	Argv []string
 	// StdioPipes runs the process on plain stdin/stdout pipes instead of a PTY
 	// (stderr folds into the daemon log). Used by chat-mode heads, whose stdout
-	// is a JSONL protocol stream (CHAT_MODE.md) that must not pass through a
+	// is a JSONL protocol stream that must not pass through a
 	// terminal device (echo and CRLF translation would corrupt it). Honoured by
 	// the namespace-host spawn path; resize is a no-op for such sessions.
 	StdioPipes bool

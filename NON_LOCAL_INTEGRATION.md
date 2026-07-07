@@ -1,38 +1,52 @@
 # Non-Local Integration Plan
 
-> **Implementation status** (this branch). Phases 1-3 are substantially built;
-> Phase 4 and a few refinements remain. All new UI was verified end-to-end
-> against `hydra server --simulation` with Playwright.
->
-> **Done:**
-> - **Phase 1**: `git.Push`/`Fetch` hardened non-interactive (+`*git.AuthError`);
->   `config.local.toml` 4th merge layer (gitignored, in the unsafe_host trusted
->   set); project-relative `masked_paths` + `.hydraignore` with shipped defaults
->   (`.hydra/deploy.toml`, `.hydra/config.local.toml`) wired into every sandbox
->   launch + the gate's credential check; `[review]`/`[jira]` parsing +
->   validation + provider auto-detection + branch-template expansion +
->   `BrowseURL`; renderConfig preserves hand-written `[review]`/`[jira]`.
-> - **Phase 2**: DB review fields + `internal/forge` (CLI-first gh/glab provider,
->   unit-tested); `performPublish`/publishHead, Push to MR / Pull from MR,
->   downstream-branch editor (soft-locked after publish); API endpoints
->   (`publishAgent`/`pushToMr`/`pullFromMr`/`setDownstreamBranch`/
->   `getReviewConfig`); web Create MR dialog + View MR + state chip, ordered by
->   `default_action`; Settings Review section (resolved values + live auth).
-> - **Phase 3**: `RunReviewWatcher` (poll linked MRs across all projects, refresh
->   cached state, remote-merge -> fetch/ff/teardown); publish-when-green
->   (arm/disarm + watcher); `mcp__hydra__get_review_status`/`get_review_comments`
->   on the seeded hydra MCP server (per-head review file); "Respond to review
->   comments" canned-prompt button.
->
-> **Remaining / not yet built:** merge-when-approved arming UI (the forge Merge
-> API + `MergeOptions{Auto}` exist; no arm endpoint/watcher branch yet);
-> linked-head kill/local-merge close-or-detach dialog (3.3c); protected-branches
-> warning (3.2); fetch-fresh spawn base + remote-aware behind-count (3.6);
-> stacked-MR retargeting (3.5); token/REST auth fallback (CLI-only today);
-> a config.local.toml *editor* in Settings (the section is read-only); the small
-> sidebar reorder + forge-link tweak (3.8); Phase 4 spawn-from-ticket + the JIRA
-> ladder beyond `{ticket}` templating (which is wired). The `[[tests]]` vs remote
-> CI drift and rebase-heavy caveats (section 6) are unchanged.
+## WHAT'S LEFT TO DO
+
+(Status audited against the code 2026-07-08. Phases 1-3 are substantially
+built - see the Done summary below - but the following are verifiably NOT
+implemented yet:)
+
+- [ ] **Merge-when-approved arming** (3.5). `forge.Provider.Merge` and
+  `MergeOptions{Auto}` exist but have zero callers; the only arm endpoint is
+  the local-tests `ArmMergeWhenGreen`. Needs an arm endpoint/UI + a review
+  watcher branch that merges (or enables forge auto-merge) when
+  approvals/CI are satisfied.
+- [ ] **Linked-head kill / local-merge close-or-detach dialog** (3.3c).
+  Killing or locally merging a head with a linked MR does nothing about the
+  MR/remote branch; there is no Close/Detach flow in `KillAgent` /
+  `performClaimedMerge` / `AgentDetail.tsx`.
+- [ ] **Protected-branches warning** (3.2). `protected_branches` is parsed
+  and echoed through the config API but the local-merge path never checks it.
+- [ ] **Fetch-fresh spawn base + remote-aware behind-count** (3.6).
+  `SpawnHead` still defaults to `git.GetCurrentBranch(projectRoot)`; no
+  fetch-before-spawn, no `<remote>/<target>` base resolution.
+- [ ] **Stacked-MR retargeting** (3.5). When a parent MR merges, the child MR
+  is not retargeted at trunk (`handleRemoteMerge` only fetch/ff/tears down).
+- [ ] **Token/REST auth fallback** (3.4). `auth = "token"` returns
+  NotConfiguredError; forge access is CLI-only (`gh`/`glab`) today.
+- [ ] **Sidebar reorder + forge web-link icon** (3.8). Repository row still
+  sits below the spawn box; `browse_url` is returned by the API but no
+  component renders a forge link.
+- [ ] **Phase 4: spawn-from-ticket / JIRA fetch.** Only the `{ticket}`
+  branch-template rung is wired (`ExtractTicket`, `ticket_pattern`); there is
+  no JIRA REST client, no ticket-summary-into-prompt, no "my open tickets"
+  picker.
+- Section 6 caveats (local `[[tests]]` vs remote CI drift; rebase-heavy flows)
+  remain out of scope.
+
+> **Done** (spot-checked in code): **Phase 1** - hardened non-interactive
+> `git.Push`/`Fetch` (+`*git.AuthError`); `config.local.toml` 4th merge layer;
+> project-relative `masked_paths` + `.hydraignore`; `[review]`/`[jira]`
+> parsing/validation/provider auto-detection/branch templates/`BrowseURL`.
+> **Phase 2** - DB review fields; `internal/forge` (CLI-first gh/glab);
+> `performPublish`, Push/Pull to MR, downstream-branch editor; API + web
+> Create MR dialog / View MR / state chip; Settings Review section (now with
+> a working config.local.toml editor - the "read-only local scope" note in
+> older revisions of this doc is stale). **Phase 3** - `RunReviewWatcher`
+> (remote-merge -> fetch/ff/teardown), publish-when-green,
+> `mcp__hydra__get_review_status`/`get_review_comments`, "Respond to review
+> comments" button. All new UI was verified end-to-end against
+> `hydra server --simulation` with Playwright.
 
 ---
 
