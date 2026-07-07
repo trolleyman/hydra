@@ -277,6 +277,12 @@ type Options struct {
 	Env []string
 	// Argv is the command to run inside the sandbox (e.g. claude --resume).
 	Argv []string
+	// StdioPipes runs the process on plain stdin/stdout pipes instead of a PTY
+	// (stderr folds into the daemon log). Used by chat-mode heads, whose stdout
+	// is a JSONL protocol stream (CHAT_MODE.md) that must not pass through a
+	// terminal device (echo and CRLF translation would corrupt it). Honoured by
+	// the namespace-host spawn path; resize is a no-op for such sessions.
+	StdioPipes bool
 	// PreSpawnScript is an optional shell script run inside the sandbox via
 	// /bin/bash immediately before Argv (same worktree, env and confinement). The
 	// real command execs after it returns; an explicit non-zero `exit` (or a

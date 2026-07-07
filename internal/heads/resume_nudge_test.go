@@ -80,7 +80,7 @@ func (p *fakePTY) Signal(os.Signal) error         { p.shut(); return nil }
 func TestNudgeResumedAgentTypesMessageAndEnter(t *testing.T) {
 	reg := session.NewRegistry()
 	pty := newFakePTY([]byte("Resuming previous conversation...\n"))
-	if _, err := reg.StartWithProc("agent1", sandbox.AgentTypeClaude, t.TempDir(), 24, 80, false, pty); err != nil {
+	if _, err := reg.StartWithProc("agent1", sandbox.AgentTypeClaude, t.TempDir(), 24, 80, false, session.KindTerminal, pty); err != nil {
 		t.Fatalf("StartWithProc: %v", err)
 	}
 	defer reg.Kill("agent1")
@@ -102,7 +102,7 @@ func TestNudgeResumedAgentTypesMessageAndEnter(t *testing.T) {
 func TestNudgeResumedAgentAbortsWhenSessionDies(t *testing.T) {
 	reg := session.NewRegistry()
 	pty := newFakePTY(nil)
-	if _, err := reg.StartWithProc("agent2", sandbox.AgentTypeClaude, t.TempDir(), 24, 80, false, pty); err != nil {
+	if _, err := reg.StartWithProc("agent2", sandbox.AgentTypeClaude, t.TempDir(), 24, 80, false, session.KindTerminal, pty); err != nil {
 		t.Fatalf("StartWithProc: %v", err)
 	}
 

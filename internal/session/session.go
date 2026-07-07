@@ -22,6 +22,23 @@ const (
 // defaultScrollback is the per-session scrollback ring capacity.
 const defaultScrollback = 512 * 1024
 
+// chatScrollback is the ring capacity for chat-kind sessions. Their byte
+// stream is Claude stream-json JSONL (bulkier than VT100 scrollback), and the
+// ring replay is what reconstructs the conversation for a freshly-attached
+// chat client, so it gets more room.
+const chatScrollback = 2 * 1024 * 1024
+
+// Kind distinguishes what a session's byte stream carries.
+type Kind string
+
+const (
+	// KindTerminal is a VT100 byte stream from a PTY (the default).
+	KindTerminal Kind = "terminal"
+	// KindChat is Claude stream-json JSONL from a pipes-backed chat-mode head
+	// (CHAT_MODE.md). Resize is a no-op for these sessions.
+	KindChat Kind = "chat"
+)
+
 // PTY is the terminal-attached process backing a session. It is satisfied both
 // by a locally-launched sandbox process (ptyProcess) and by a child spawned
 // inside a shared namespace host whose master fd was passed back to the daemon
@@ -46,6 +63,9 @@ type Session struct {
 	AgentType    sandbox.AgentType
 	WorktreePath string
 	StartedAt    time.Time
+	// Kind says what the byte stream carries: VT100 terminal output (the
+	// default) or stream-json JSONL for chat-mode heads.
+	Kind Kind
 
 	proc    PTY
 	scroll  *ring
