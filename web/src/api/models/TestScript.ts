@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project test-runner command whose pass/fail verdict gates the merge button ([[tests]] in config.toml, PLAN
+ * A per-project test-runner command whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
  */
 export type TestScript = {
     /**

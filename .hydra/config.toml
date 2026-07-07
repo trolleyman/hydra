@@ -4,8 +4,8 @@
 ## isolated worktree and OS sandbox, supervised by a per-project daemon. This file
 ## configures those agents and the daemon: the default pre-prompt, the sandbox
 ## policy (what agents may read, write and reach over the network), the decision
-## gate, per-agent ([claude], [gemini], ...) overrides, and the [[artifacts]],
-## [[services]] and [[tests]] commands run per project.
+## gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],
+## [services.<name>] and [tests.<name>] commands run per project.
 ##
 ## Reading this file:
 ##   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit
@@ -14,7 +14,8 @@
 ##   # your note     a single-# comment is yours and is preserved across saves.
 ## Most settings are also editable from the Settings screen in the web UI.
 
-## extra instructions appended to every agent's system prompt.
+## extra instructions appended to every agent's system prompt. Layers combine:
+## a user-config pre_prompt stays in force and a project's is appended after it.
 pre_prompt = '''
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
@@ -143,6 +144,12 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ## individual MCP tools ("<server>__<tool>") allowed even when the whole server is not; the server is kept (spawned) so those tools work, other tools park for approval (default none).
 # mcp_tools_allowed = []
 
+## MCP server names refused outright: stripped before launch and every call DENIED at runtime (never parked for approval). Block overrides allow; since the allow-lists union across config layers, this is how a project or config.local.toml removes a server a broader layer granted (default none).
+# mcp_blocked = []
+
+## individual MCP tools ("<server>__<tool>") denied outright even when their server is allowed. Block overrides allow (default none).
+# mcp_tools_blocked = []
+
 ## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic - off by default.
 # mcp_auto_allow_read = false
 
@@ -163,10 +170,10 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ## Codex-specific overrides: any of the settings above, applied only to codex agents.
 # [codex]
 
-## [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)
-## of a checkout. The diff viewer runs each against both sides of a comparison and
-## shows the outputs that differ. Fields:
-##   name         unique label, also used as the cache directory (required).
+## [artifacts.<name>]: per-project commands that render visual artifacts (e.g.
+## screenshots) of a checkout. The diff viewer runs each against both sides of a
+## comparison and shows the outputs that differ. The <name> table key is the unique
+## label, also used as the cache directory. Fields:
 ##   command      shell command run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
 ##   unsafe_host  run on the host with NO sandbox - full access to your machine and
@@ -211,21 +218,24 @@ allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.
 ## logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.
 ## For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff
 ## viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).
-[[artifacts]]
+## Layering: [artifacts.<name>] entries merge by name across config layers (user ->
+## project -> config.local.toml) - set fields patch the same-named inherited entry,
+## new names append. (The legacy [[artifacts]] array syntax still parses, but a file
+## using it replaces the inherited list wholesale.)
+[artifacts.screenshots]
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
 # screenshots several pages (home, the repository browser, agent diff views).
 # It also records the repository view's loading spinner to a lossless,
 # byte-deterministic .webm (project-local ffmpeg-static, libvpx-vp9 -lossless 1
-# in bitexact mode) so the video diff viewer is exercised too — see the [[artifacts]]
+# in bitexact mode) so the video diff viewer is exercised too - see the [artifacts.<name>]
 # docs above on why video must be lossless. Building Go + the frontend is slow, so
 # allow a generous timeout (results are cached per resolved ref).
-name = "screenshots"
 command = "cd web && bun install && bun scripts/screenshots/take-screenshots.ts"
 timeout_sec = 900
 
-[[artifacts]]
+[artifacts.demo]
 # Live preview (type = "server"): builds the checkout's frontend and boots the
 # simulation server (mock data, no daemon) on the port Hydra hands it, so a
 # head's UI changes can be clicked through at a real rendered app via the
@@ -233,17 +243,15 @@ timeout_sec = 900
 # the build log while it starts, and tears it down when idle; the first visit
 # after that transparently respawns it. The frontend build dominates spawn
 # time, hence the generous ready timeout.
-name = "demo"
 type = "server"
 command = "cd web && bun install && bun run build && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
-## [[services]]: per-project long-running commands the daemon supervises while the
-## project is registered. Each is started on daemon boot (and when the project is
-## added), restarted with capped backoff if it exits unexpectedly, and
+## [services.<name>]: per-project long-running commands the daemon supervises while
+## the project is registered. Each is started on daemon boot (and when the project
+## is added), restarted with capped backoff if it exits unexpectedly, and
 ## process-group-killed on daemon shutdown, project removal, or a config save.
-## Fields:
-##   name          unique label, shown in the UI and logs (required).
+## The <name> table key is the unique label shown in the UI and logs. Fields:
 ##   command       shell command run via `bash -c` from the project root (required).
 ##   host          run on the host with NO sandbox - full machine/credential access;
 ##                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).
@@ -251,16 +259,19 @@ ready_timeout_sec = 900
 ##   strict        run the command under `set -eo pipefail` so a failed startup step
 ##                 surfaces as a crash instead of a healthy process (default true).
 ##   enabled       set false to stop the daemon supervising this service (default true).
-# [[services]]
-# name = "emu-pool"
+## Layering: [services.<name>] entries merge by name across config layers (user ->
+## project -> config.local.toml) - set fields patch the same-named inherited entry,
+## new names append. (The legacy [[services]] array syntax still parses, but a file
+## using it replaces the inherited list wholesale.)
+# [services.emu-pool]
 # command = "scripts/emu-pool.sh up 3 --foreground"
 # host = true
 # max_restarts = 3
 
-## [[tests]]: per-project test-runner commands. Hydra runs each against a head's
-## branch and parses the report into a pass/fail verdict that gates the merge
-## button (failing/errored soft-block merge; force always available). Fields:
-##   name         unique label, also used as the cache directory (required).
+## [tests.<name>]: per-project test-runner commands. Hydra runs each against a
+## head's branch and parses the report into a pass/fail verdict that gates the
+## merge button (failing/errored soft-block merge; force always available). The
+## <name> table key is the unique label, also used as the cache directory. Fields:
 ##   command      shell command run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
 ##   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;
@@ -299,7 +310,14 @@ ready_timeout_sec = 900
 ## backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return
 ## (so a multi-line stack trace fits on the one line) - and a doubled backslash
 ## becomes one literal backslash. Any other escape is left as-is.
-[[tests]]
+## Layering: [tests.<name>] entries merge by name across config layers (user ->
+## project -> config.local.toml) - set fields patch the same-named inherited entry,
+## new names append. E.g. config.local.toml can disable one runner with just
+##   [tests.lint]
+##   enabled = false
+## without restating its command. (The legacy [[tests]] array syntax still parses,
+## but a file using it replaces the inherited list wholesale.)
+[tests.go]
 # Go test suite (type = "stdout": streams per-case results into the panel live via
 # ::hydra:test:*:: markers). A first `go test -json -list '.*'` pass is counted by
 # `gotest-markers -total` into the ::hydra:test:total:: progress denominator (the
@@ -317,12 +335,11 @@ ready_timeout_sec = 900
 # head's live worktree) emits ⚠ warn markers for what `mage tidy` would still
 # change — unwrapped error returns and unused //errtrace:skip directives —
 # informational only; they never gate the merge.
-name = "go"
 command = "{ go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total && go test -json ./... | go run ./scripts/gotest-markers && go run ./scripts/errtrace-report"
 timeout_sec = 900
 type = "stdout"
 
-[[tests]]
+[tests.web]
 # Frontend vitest suite (type = "stdout": streams per-spec results into the panel
 # live via ::hydra:test:*:: markers) using the scripts/hydra-reporter.ts vitest
 # reporter — it also declares a ::hydra:test:total:: denominator as modules are
@@ -331,7 +348,29 @@ type = "stdout"
 # eslint-report.ts emits fail markers for errors (which gate the merge like a
 # failing test) and ⚠ warn markers for warnings (informational only). Lint runs
 # only once the specs pass (the merge is already blocked when they don't).
-name = "web"
 command = "cd web && bun install && bun x vitest run --reporter=./scripts/hydra-reporter.ts && bun scripts/eslint-report.ts"
 timeout_sec = 600
 type = "stdout"
+
+## [review] configures how Hydra talks to a forge (GitHub/GitLab) and the
+## defaults for the Create MR dialog. There is no mode switch - the head<->MR
+## link is per-head. Personal overrides belong in .hydra/config.local.toml;
+## never put a token here (host-side gh/glab creds or the 0600 secrets file).
+# [review]
+# provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)
+# remote = "origin"
+# target_branch = "main"       # default MR target; per-head editable
+# auth = "cli"                 # cli (shell out to gh/glab) | token (REST)
+# default_action = "merge"     # merge (local, as today) | create_mr
+# push_branch_template = "{id}" # e.g. "feat/{ticket}-{id}"; {id} {ticket} {base}
+# draft = true                 # open MRs as draft
+# squash = true                # request squash-on-merge
+# delete_remote_branch = true  # tell the forge to delete on merge
+# require_local_tests = true   # gate Publish on local [[tests]] like merge is
+# publish_when_green = false   # arm new heads to auto-open a draft MR when green
+# protected_branches = ["main"] # warn before a direct LOCAL merge into these
+
+## [jira] powers {ticket} templating and (later) spawn-from-ticket.
+# [jira]
+# url = "https://mycorp.atlassian.net"
+# ticket_pattern = "[A-Z]+-[0-9]+"

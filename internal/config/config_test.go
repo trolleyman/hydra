@@ -284,7 +284,7 @@ echo hi
 	for _, want := range []string{
 		"# Render the screenshot tests and collect the PNGs.",
 		"# Second line of the user comment.",
-		`name = "screenshots"`,
+		"[artifacts.screenshots]",
 	} {
 		if !strings.Contains(string(saved), want) {
 			t.Errorf("saved config missing %q:\n%s", want, saved)
@@ -376,25 +376,77 @@ func TestTestsMergeReplaces(t *testing.T) {
 	}
 }
 
-// TestTestsMergeOptIn verifies the tests_merge = true opt-in: the overriding
-// layer's entries merge by name into the inherited list - set fields patch the
-// same-named entry (a command-less enabled=false disables a runner without
-// restating it), new names append, and base order is preserved.
-func TestTestsMergeOptIn(t *testing.T) {
+// TestNamedTestsDecode verifies the canonical [tests.<name>] form decodes with
+// the table key as the name (an explicit name field overriding it), preserves
+// document order, and marks the section named so it layer-merges by name.
+func TestNamedTestsDecode(t *testing.T) {
+	cfg, err := decodeConfig([]byte(`
+[tests.go]
+command = "go test ./..."
+timeout_sec = 600
+
+[tests."web lint"]
+command = "eslint ."
+
+[tests.aliased]
+name = "real-name"
+command = "x"
+`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cfg.TestsNamed {
+		t.Error("TestsNamed not set for named-table syntax")
+	}
+	if len(cfg.Tests) != 3 {
+		t.Fatalf("expected 3 tests, got %+v", cfg.Tests)
+	}
+	if cfg.Tests[0].Name != "go" || cfg.Tests[0].TimeoutSec != 600 {
+		t.Errorf("tests[0] mismatch: %+v", cfg.Tests[0])
+	}
+	if cfg.Tests[1].Name != "web lint" || cfg.Tests[1].Command != "eslint ." {
+		t.Errorf("tests[1] (quoted key) mismatch: %+v", cfg.Tests[1])
+	}
+	if cfg.Tests[2].Name != "real-name" {
+		t.Errorf("explicit name field should override the key: %+v", cfg.Tests[2])
+	}
+
+	// The legacy array form still parses and is NOT marked named.
+	legacy, err := decodeConfig([]byte("[[tests]]\nname = \"go\"\ncommand = \"go test ./...\"\n"))
+	if err != nil {
+		t.Fatalf("decode legacy: %v", err)
+	}
+	if legacy.TestsNamed || len(legacy.Tests) != 1 || legacy.Tests[0].Name != "go" {
+		t.Errorf("legacy [[tests]] decode wrong: named=%t %+v", legacy.TestsNamed, legacy.Tests)
+	}
+}
+
+// TestNamedTestsMergeByName verifies the layering rule the named syntax buys:
+// entries merge by name across layers - set fields patch the same-named entry
+// (a command-less enabled=false disables a runner without restating it), new
+// names append, base order is preserved - while a legacy-array layer still
+// replaces wholesale.
+func TestNamedTestsMergeByName(t *testing.T) {
 	base := Config{Tests: []TestScript{
 		{Name: "go", Command: "go test ./...", TimeoutSec: 600},
 		{Name: "lint", Command: "eslint ."},
 	}}
-	base.Merge(Config{
-		TestsMerge: boolPtr(true),
-		Tests: []TestScript{
-			{Name: "lint", Enabled: boolPtr(false)},       // patch: disable, keep command
-			{Name: "e2e", Command: "playwright test"},     // append
-			{Name: "go", Command: "go test -short ./..."}, // patch: override command
-		},
-	})
+	over, err := decodeConfig([]byte(`
+[tests.lint]
+enabled = false
+
+[tests.e2e]
+command = "playwright test"
+
+[tests.go]
+command = "go test -short ./..."
+`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	base.Merge(over)
 	if len(base.Tests) != 3 {
-		t.Fatalf("expected 3 tests after opt-in merge, got %+v", base.Tests)
+		t.Fatalf("expected 3 tests after named merge, got %+v", base.Tests)
 	}
 	if base.Tests[0].Name != "go" || base.Tests[0].Command != "go test -short ./..." || base.Tests[0].TimeoutSec != 600 {
 		t.Errorf("go entry not patched (command overridden, timeout inherited): %+v", base.Tests[0])
@@ -406,51 +458,74 @@ func TestTestsMergeOptIn(t *testing.T) {
 		t.Errorf("e2e entry not appended: %+v", base.Tests[2])
 	}
 
-	// A subsequent layer WITHOUT the flag still replaces wholesale: the opt-in
-	// is per overriding file, not sticky.
+	// A subsequent legacy-array layer still replaces wholesale.
 	base.Merge(Config{Tests: []TestScript{{Name: "only", Command: "z"}}})
 	if len(base.Tests) != 1 || base.Tests[0].Name != "only" {
-		t.Errorf("flag leaked across layers; expected wholesale replace, got %+v", base.Tests)
+		t.Errorf("legacy layer should replace wholesale, got %+v", base.Tests)
 	}
 }
 
-// TestArtifactsServicesMergeOptIn spot-checks the artifacts_merge and
-// services_merge counterparts of TestTestsMergeOptIn.
-func TestArtifactsServicesMergeOptIn(t *testing.T) {
+// TestNamedArtifactsServicesMergeByName spot-checks the artifacts/services
+// counterparts of TestNamedTestsMergeByName.
+func TestNamedArtifactsServicesMergeByName(t *testing.T) {
 	cfg := Config{
 		Artifacts: []ArtifactScript{{Name: "shots", Command: "run shots", TimeoutSec: 900}},
 		Services:  []ServiceScript{{Name: "emu", Command: "emu up", MaxRestarts: intPtr(3)}},
 	}
 	cfg.Merge(Config{
-		ArtifactsMerge: boolPtr(true),
+		ArtifactsNamed: true,
 		Artifacts:      []ArtifactScript{{Name: "shots", Enabled: boolPtr(false)}, {Name: "vids", Command: "run vids"}},
-		ServicesMerge:  boolPtr(true),
+		ServicesNamed:  true,
 		Services:       []ServiceScript{{Name: "emu", Enabled: boolPtr(false)}},
 	})
 	if len(cfg.Artifacts) != 2 || cfg.Artifacts[0].IsEnabled() || cfg.Artifacts[0].Command != "run shots" || cfg.Artifacts[1].Name != "vids" {
-		t.Errorf("artifacts opt-in merge wrong: %+v", cfg.Artifacts)
+		t.Errorf("artifacts named merge wrong: %+v", cfg.Artifacts)
 	}
 	if len(cfg.Services) != 1 || cfg.Services[0].IsEnabled() || cfg.Services[0].Command != "emu up" || *cfg.Services[0].MaxRestarts != 3 {
-		t.Errorf("services opt-in merge wrong: %+v", cfg.Services)
+		t.Errorf("services named merge wrong: %+v", cfg.Services)
 	}
 }
 
-// TestArrayMergeFlagRoundTrip guards that a hand-set tests_merge = true survives
-// a Settings-UI-style save (which does not carry the flag) and decodes back.
-func TestArrayMergeFlagRoundTrip(t *testing.T) {
-	existing := "tests_merge = true\n\n[[tests]]\nname = \"lint\"\nenabled = false\n"
-	out := renderConfig([]byte(existing), Config{Tests: []TestScript{{Name: "lint", Command: "", Enabled: boolPtr(false)}}})
+// TestNamedTestsRenderRoundTrip guards that the renderer emits the canonical
+// named-table form and that it decodes back identically (including a name that
+// needs a quoted key).
+func TestNamedTestsRenderRoundTrip(t *testing.T) {
+	out := renderConfig(nil, Config{Tests: []TestScript{
+		{Name: "go", Command: "go test ./...", TimeoutSec: 600},
+		{Name: "web lint", Command: "eslint .", Enabled: boolPtr(false)},
+	}})
+	if !contains(out, "[tests.go]") || !contains(out, "[tests.\"web lint\"]") {
+		t.Fatalf("expected named-table headers:\n%s", out)
+	}
+	if contains(out, "\n[[tests]]") {
+		t.Errorf("legacy [[tests]] header still emitted:\n%s", out)
+	}
 	cfg, err := decodeConfig([]byte(out))
 	if err != nil {
 		t.Fatalf("re-decode: %v\n%s", err, out)
 	}
-	if cfg.TestsMerge == nil || !*cfg.TestsMerge {
-		t.Errorf("tests_merge dropped by a save that did not carry it:\n%s", out)
+	if !cfg.TestsNamed || len(cfg.Tests) != 2 {
+		t.Fatalf("round-trip lost entries: named=%t %+v", cfg.TestsNamed, cfg.Tests)
 	}
-	// And a second render (still without the flag in cfg) keeps it stable.
-	out2 := renderConfig([]byte(out), Config{})
-	if strings.Count(out2, "\ntests_merge = true\n") != 1 {
-		t.Errorf("tests_merge not stable across renders:\n%s", out2)
+	if cfg.Tests[0].Name != "go" || cfg.Tests[0].TimeoutSec != 600 {
+		t.Errorf("tests[0] mismatch: %+v", cfg.Tests[0])
+	}
+	if cfg.Tests[1].Name != "web lint" || cfg.Tests[1].IsEnabled() {
+		t.Errorf("tests[1] mismatch: %+v", cfg.Tests[1])
+	}
+
+	// Duplicate names stay representable: the second key is uniquified and an
+	// explicit name field carries the real name back through a decode.
+	dup := renderConfig(nil, Config{Tests: []TestScript{
+		{Name: "go", Command: "a"},
+		{Name: "go", Command: "b"},
+	}})
+	dcfg, err := decodeConfig([]byte(dup))
+	if err != nil {
+		t.Fatalf("re-decode duplicates: %v\n%s", err, dup)
+	}
+	if len(dcfg.Tests) != 2 || dcfg.Tests[0].Name != "go" || dcfg.Tests[1].Name != "go" {
+		t.Errorf("duplicate names not preserved: %+v\n%s", dcfg.Tests, dup)
 	}
 }
 
@@ -855,7 +930,7 @@ command = "bun shots.ts"
 	if len(loaded.Artifacts) != 0 {
 		t.Errorf("expected artifacts cleared, got %+v", loaded.Artifacts)
 	}
-	if !strings.Contains(out, "# [[artifacts]]") {
+	if !strings.Contains(out, "# [artifacts.screenshots]") {
 		t.Errorf("commented example should appear after clearing:\n%s", out)
 	}
 }
@@ -1054,9 +1129,9 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 		docPrefix + " Codex-specific overrides",
 		"# [codex]",
 		// Artifacts documentation + commented example are always present.
-		docPrefix + " [[artifacts]]:",
-		"# [[artifacts]]",
-		`# name = "screenshots"`,
+		docPrefix + " [artifacts.<name>]:",
+		"# [artifacts.screenshots]",
+		`# command = "bun run screenshots.ts"`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {

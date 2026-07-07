@@ -581,7 +581,7 @@ type ConfigResponse struct {
 	// ArtifactPrefetch Whether the daemon proactively pre-generates a head's artifacts in the background once its working tree settles, so a diff is ready before it is opened (artifact_prefetch in config.toml). When false, artifacts are generated only when a diff is viewed; foreground generation and artifact_concurrency still apply. null/absent uses the built-in default (enabled).
 	ArtifactPrefetch *bool `json:"artifact_prefetch"`
 
-	// Artifacts Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
+	// Artifacts Per-project visual-artifact generation scripts ([artifacts.<name>] in config.toml)
 	Artifacts *[]ArtifactScript `json:"artifacts"`
 
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
@@ -594,7 +594,7 @@ type ConfigResponse struct {
 	// Review The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
 	Review *ReviewConfig `json:"review,omitempty"`
 
-	// Services Per-project long-running supervised commands ([[services]] in config.toml)
+	// Services Per-project long-running supervised commands ([services.<name>] in config.toml)
 	Services *[]ServiceScript `json:"services"`
 
 	// TestConcurrency Max test-runner generations that run at once (test_concurrency in config.toml). 0 = unlimited; null/absent uses the built-in default.
@@ -603,7 +603,7 @@ type ConfigResponse struct {
 	// TestPrefetch Whether the daemon proactively re-runs a head's test suites in the background when its branch-tip verdict is missing or stale (a cached result computed for an older commit), so the verdict is ready before the tests panel is opened or the merge gate runs (test_prefetch in config.toml). When false, tests run only on open / at merge; foreground runs and test_concurrency still apply. null/absent uses the built-in default (enabled).
 	TestPrefetch *bool `json:"test_prefetch"`
 
-	// Tests Per-project test-runner commands whose verdict gates merge ([[tests]] in config.toml)
+	// Tests Per-project test-runner commands whose verdict gates merge ([tests.<name>] in config.toml)
 	Tests *[]TestScript `json:"tests"`
 }
 
@@ -1163,7 +1163,7 @@ type SandboxConfig struct {
 	WritablePaths  *[]string `json:"writable_paths"`
 }
 
-// ServiceScript A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+// ServiceScript A per-project long-running command the daemon supervises while the project is registered ([services.<name>] in config.toml)
 type ServiceScript struct {
 	// Command Shell command run via `bash -c` from the project root
 	Command string `json:"command"`
@@ -1396,7 +1396,7 @@ type TestRunResult struct {
 	Warnings *int `json:"warnings,omitempty"`
 }
 
-// TestScript A per-project test-runner command whose pass/fail verdict gates the merge button ([[tests]] in config.toml, PLAN
+// TestScript A per-project test-runner command whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
 type TestScript struct {
 	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
@@ -1809,7 +1809,7 @@ type ServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// List live server previews ([[artifacts]] type = "server") for a head
+	// List live server previews ([artifacts.<name>] type = "server") for a head
 	// (GET /api/projects/{project_id}/agents/{id}/previews)
 	GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams)
 	// Start (or ensure) a live server preview instance
@@ -6399,7 +6399,7 @@ type StrictServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
-	// List live server previews ([[artifacts]] type = "server") for a head
+	// List live server previews ([artifacts.<name>] type = "server") for a head
 	// (GET /api/projects/{project_id}/agents/{id}/previews)
 	GetAgentPreviews(ctx context.Context, request GetAgentPreviewsRequestObject) (GetAgentPreviewsResponseObject, error)
 	// Start (or ensure) a live server preview instance

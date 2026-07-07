@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,7 +55,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `pre_prompt` - the standing instructions you are reading now.\n" +
 	"\n" +
 	"These are read from `.hydra/config.toml` in the project root - the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but for most settings the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it. This holds for everything above (sandbox policy, network, services, `pre_*` scripts, ...).\n" +
-	"Two sections are the exception - `[[tests]]` and `[[artifacts]]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
+	"Two sections are the exception - `[tests.<name>]` and `[artifacts.<name>]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
@@ -470,19 +471,25 @@ type Config struct {
 	// Tests are per-project test-runner commands whose pass/fail verdict gates a
 	// head's merge button (see internal/tests, PLAN #68).
 	Tests []TestScript `toml:"tests"`
-	// ArtifactsMerge / ServicesMerge / TestsMerge opt THIS file's array section
-	// into merging by name into the list inherited from earlier config layers
-	// (internal defaults -> user -> project -> config.local.toml) instead of
-	// replacing it wholesale (the default). Under merge, an entry whose name
-	// matches an inherited one patches it - set fields override, zero/absent
-	// fields inherit, so `[[tests]] name = "lint" enabled = false` in
-	// config.local.toml disables one runner without restating its command - and
-	// an entry with a new name appends. The flag is read from the overriding
-	// layer, per file: a project setting tests_merge does not change how a later
-	// config.local.toml [[tests]] applies.
-	ArtifactsMerge *bool `toml:"artifacts_merge"`
-	ServicesMerge  *bool `toml:"services_merge"`
-	TestsMerge     *bool `toml:"tests_merge"`
+	// ArtifactsNamed / ServicesNamed / TestsNamed record which SYNTAX this
+	// file's section used, because the syntax selects the layer-merge behavior:
+	//
+	//   [tests.go]      named-table form (canonical): entries MERGE by name into
+	//                   the list inherited from earlier config layers (internal
+	//                   defaults -> user -> project -> config.local.toml). A
+	//                   same-named entry patches the inherited one - set fields
+	//                   override, zero/absent fields inherit, so a local
+	//                   `[tests.lint]` with just `enabled = false` disables one
+	//                   runner without restating its command - and a new name
+	//                   appends.
+	//   [[tests]]       legacy array form: replaces the inherited list wholesale,
+	//                   as it always has.
+	//
+	// Set by decodeConfig, not by a TOML key (toml:"-" keeps a literal
+	// artifacts_named key from masquerading as the real thing).
+	ArtifactsNamed bool `toml:"-"`
+	ServicesNamed  bool `toml:"-"`
+	TestsNamed     bool `toml:"-"`
 	// Icon is an optional custom project icon shown in the web UI's project
 	// switcher and dropdown, in place of the default folder glyph. A single string
 	// interpreted by its content: an emoji (e.g. "🚀") renders as-is; a lucide-react
@@ -649,22 +656,21 @@ type rawConfig struct {
 	PrePrompt *string        `toml:"pre_prompt"`
 	Sandbox   *SandboxConfig `toml:"sandbox"`
 	Policy    *PolicyConfig  `toml:"policy"`
-	// Shared.
-	Artifacts           []ArtifactScript `toml:"artifacts"`
-	Services            []ServiceScript  `toml:"services"`
-	Tests               []TestScript     `toml:"tests"`
-	ArtifactsMerge      *bool            `toml:"artifacts_merge"`
-	ServicesMerge       *bool            `toml:"services_merge"`
-	TestsMerge          *bool            `toml:"tests_merge"`
-	Icon                *string          `toml:"icon"`
-	ResumePrompt        *string          `toml:"resume_prompt"`
-	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
-	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
-	TestConcurrency     *int             `toml:"test_concurrency"`
-	TestPrefetch        *bool            `toml:"test_prefetch"`
-	PreviewPorts        *string          `toml:"preview_ports"`
-	Review              *ReviewConfig    `toml:"review"`
-	Jira                *JiraConfig      `toml:"jira"`
+	// Shared. The three script sections accept two shapes - the canonical named
+	// tables ([tests.go]) and the legacy array-of-tables ([[tests]]) - so they
+	// are captured as primitives and decoded by decodeScriptSection.
+	Artifacts           toml.Primitive `toml:"artifacts"`
+	Services            toml.Primitive `toml:"services"`
+	Tests               toml.Primitive `toml:"tests"`
+	Icon                *string        `toml:"icon"`
+	ResumePrompt        *string        `toml:"resume_prompt"`
+	ArtifactConcurrency *int           `toml:"artifact_concurrency"`
+	ArtifactPrefetch    *bool          `toml:"artifact_prefetch"`
+	TestConcurrency     *int           `toml:"test_concurrency"`
+	TestPrefetch        *bool          `toml:"test_prefetch"`
+	PreviewPorts        *string        `toml:"preview_ports"`
+	Review              *ReviewConfig  `toml:"review"`
+	Jira                *JiraConfig    `toml:"jira"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -675,8 +681,7 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
-	"tests":           true,
-	"artifacts_merge": true, "services_merge": true, "tests_merge": true,
+	"tests":         true,
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true, "preview_ports": true,
@@ -804,16 +809,26 @@ func decodeConfig(data []byte) (Config, error) {
 	}
 	// Pass 2: decode the reserved keys with their full nested typing.
 	var raw rawConfig
-	if _, err := toml.Decode(string(data), &raw); err != nil {
+	md2, err := toml.Decode(string(data), &raw)
+	if err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
 
-	cfg.Artifacts = raw.Artifacts
-	cfg.Services = raw.Services
-	cfg.Tests = raw.Tests
-	cfg.ArtifactsMerge = raw.ArtifactsMerge
-	cfg.ServicesMerge = raw.ServicesMerge
-	cfg.TestsMerge = raw.TestsMerge
+	cfg.Artifacts, cfg.ArtifactsNamed, err = decodeScriptSection(md2, raw.Artifacts, "artifacts",
+		func(a *ArtifactScript) *string { return &a.Name })
+	if err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	cfg.Services, cfg.ServicesNamed, err = decodeScriptSection(md2, raw.Services, "services",
+		func(s *ServiceScript) *string { return &s.Name })
+	if err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	cfg.Tests, cfg.TestsNamed, err = decodeScriptSection(md2, raw.Tests, "tests",
+		func(t *TestScript) *string { return &t.Name })
+	if err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
 	cfg.Icon = raw.Icon
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
@@ -960,41 +975,33 @@ func (c *Config) Merge(other Config) {
 		}
 	}
 
-	// Artifact/service/test scripts are replaced wholesale when the other config
-	// sets any - unless that config opts into name-keyed merging via its
-	// artifacts_merge / services_merge / tests_merge root key (see Config).
+	// Artifact/service/test scripts: the overriding file's SYNTAX selects the
+	// behavior (see the Named fields on Config). The canonical named-table form
+	// ([tests.go]) merges by name into the inherited list; the legacy array form
+	// ([[tests]]) replaces it wholesale.
 	if other.Artifacts != nil {
-		if other.ArtifactsMerge != nil && *other.ArtifactsMerge {
+		if other.ArtifactsNamed {
 			c.Artifacts = mergeByName(c.Artifacts, other.Artifacts,
 				func(a ArtifactScript) string { return a.Name }, patchArtifactScript)
 		} else {
 			c.Artifacts = other.Artifacts
 		}
 	}
-	if other.ArtifactsMerge != nil {
-		c.ArtifactsMerge = other.ArtifactsMerge
-	}
 	if other.Services != nil {
-		if other.ServicesMerge != nil && *other.ServicesMerge {
+		if other.ServicesNamed {
 			c.Services = mergeByName(c.Services, other.Services,
 				func(s ServiceScript) string { return s.Name }, patchServiceScript)
 		} else {
 			c.Services = other.Services
 		}
 	}
-	if other.ServicesMerge != nil {
-		c.ServicesMerge = other.ServicesMerge
-	}
 	if other.Tests != nil {
-		if other.TestsMerge != nil && *other.TestsMerge {
+		if other.TestsNamed {
 			c.Tests = mergeByName(c.Tests, other.Tests,
 				func(t TestScript) string { return t.Name }, patchTestScript)
 		} else {
 			c.Tests = other.Tests
 		}
-	}
-	if other.TestsMerge != nil {
-		c.TestsMerge = other.TestsMerge
 	}
 	// Test concurrency is overridden only when the other config sets it (non-nil).
 	if other.TestConcurrency != nil {
@@ -1175,8 +1182,55 @@ func unionStrings(a, b []string) []string {
 	return out
 }
 
-// mergeByName merges override entries into base by name for the opt-in
-// artifacts_merge / services_merge / tests_merge behavior: an override entry
+// decodeScriptSection decodes one of the artifacts/services/tests sections,
+// which accepts two shapes:
+//
+//   - named tables (canonical): [tests.go] / [artifacts."web shots"] - the
+//     table key is the entry's name, and named entries MERGE by name across
+//     config layers (see Config.Merge). An explicit name field inside the
+//     table overrides the key (tolerated for copy-pasted entries, and used by
+//     the renderer to keep duplicate names representable).
+//   - the legacy array-of-tables: [[tests]] with a name field - kept parseable
+//     forever (old commits' config.toml are read at-ref), replacing the
+//     inherited list wholesale as it always has.
+//
+// Entries are returned in document order (via the decode metadata's ordered
+// key list); named reports which shape was used.
+func decodeScriptSection[T any](md toml.MetaData, prim toml.Primitive, section string, name func(*T) *string) ([]T, bool, error) {
+	if !md.IsDefined(section) {
+		return nil, false, nil
+	}
+	var arr []T
+	if err := md.PrimitiveDecode(prim, &arr); err == nil {
+		return arr, false, nil
+	}
+	var m map[string]toml.Primitive
+	if err := md.PrimitiveDecode(prim, &m); err != nil {
+		return nil, false, errtrace.Wrap(fmt.Errorf("decode [%s]: neither [[%s]] entries nor [%s.<name>] tables: %w", section, section, section, err))
+	}
+	var out []T
+	for _, k := range md.Keys() {
+		if len(k) != 2 || k[0] != section {
+			continue
+		}
+		p, ok := m[k[1]]
+		if !ok {
+			continue
+		}
+		var t T
+		if err := md.PrimitiveDecode(p, &t); err != nil {
+			return nil, false, errtrace.Wrap(fmt.Errorf("decode [%s.%s]: %w", section, k[1], err))
+		}
+		if n := name(&t); *n == "" {
+			*n = k[1]
+		}
+		out = append(out, t)
+	}
+	return out, true, nil
+}
+
+// mergeByName merges override entries into base by name - the layering rule
+// for the named-table script sections ([tests.go] etc.): an override entry
 // whose name matches a base entry patches it in place (see the patch functions
 // below), an unmatched (or unnamed) one appends. Base order is preserved; new
 // entries append in their own order. Always returns a fresh slice.
@@ -1956,10 +2010,6 @@ func managedKeySet() map[string]bool {
 	// preview_ports is Config-level (emitPreviewPorts); its regenerated
 	// "# preview_ports = ..." default line is recognised and dropped too.
 	m["preview_ports"] = true
-	// The array-section merge opt-ins are Config-level (emitArrayMergeFlag).
-	m["artifacts_merge"] = true
-	m["services_merge"] = true
-	m["tests_merge"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1972,10 +2022,10 @@ func managedKeySet() map[string]bool {
 // replaced (kept current) on each save.
 func artifactsDocLines() []string {
 	return []string{
-		docPrefix + " [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)",
-		docPrefix + " of a checkout. The diff viewer runs each against both sides of a comparison and",
-		docPrefix + " shows the outputs that differ. Fields:",
-		docPrefix + "   name         unique label, also used as the cache directory (required).",
+		docPrefix + " [artifacts.<name>]: per-project commands that render visual artifacts (e.g.",
+		docPrefix + " screenshots) of a checkout. The diff viewer runs each against both sides of a",
+		docPrefix + " comparison and shows the outputs that differ. The <name> table key is the unique",
+		docPrefix + " label, also used as the cache directory. Fields:",
 		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - full access to your machine and",
@@ -2020,17 +2070,17 @@ func artifactsDocLines() []string {
 		docPrefix + " logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.",
 		docPrefix + ` For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff`,
 		docPrefix + " viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).",
-		docPrefix + " Layering: a file that defines any [[artifacts]] replaces the inherited list",
-		docPrefix + " wholesale, unless it sets the root key artifacts_merge = true - then its entries",
-		docPrefix + " merge by name (set fields patch the same-named entry, new names append).",
+		docPrefix + " Layering: [artifacts.<name>] entries merge by name across config layers (user ->",
+		docPrefix + " project -> config.local.toml) - set fields patch the same-named inherited entry,",
+		docPrefix + " new names append. (The legacy [[artifacts]] array syntax still parses, but a file",
+		docPrefix + " using it replaces the inherited list wholesale.)",
 	}
 }
 
 // artifactsExampleLines is a commented-out example shown when no artifacts exist.
 func artifactsExampleLines() []string {
 	return []string{
-		"# [[artifacts]]",
-		`# name = "screenshots"`,
+		"# [artifacts.screenshots]",
 		`# command = "bun run screenshots.ts"`,
 		"# timeout_sec = 900",
 	}
@@ -2044,11 +2094,42 @@ type artifactComments struct {
 	interior []string
 }
 
-// artifactFieldLines renders the field assignments of one artifact.
-func artifactFieldLines(a ArtifactScript) []string {
-	out := []string{
-		"name = " + tomlStringValue(a.Name),
+// sectionEntryHeader renders the named-table header for one artifacts/
+// services/tests entry, e.g. `[tests.go]` or `[artifacts."web shots"]`.
+func sectionEntryHeader(section, key string) string {
+	if isBareTOMLKey(key) {
+		return "[" + section + "." + key + "]"
 	}
+	return "[" + section + "." + strconv.Quote(key) + "]"
+}
+
+// uniqueSectionKey returns a table key for name that is unique within seen,
+// suffixing "-2", "-3", ... on a collision (duplicate names are representable
+// because an explicit name field inside the table overrides the key).
+func uniqueSectionKey(seen map[string]bool, name string) string {
+	key := name
+	for i := 2; seen[key]; i++ {
+		key = fmt.Sprintf("%s-%d", name, i)
+	}
+	seen[key] = true
+	return key
+}
+
+// emitSectionEntryHeader appends the named-table header for an entry, plus an
+// explicit name field when the (uniquified) key does not spell the name.
+func emitSectionEntryHeader(out *[]string, section, name string, seen map[string]bool, interior []string) {
+	key := uniqueSectionKey(seen, name)
+	*out = append(*out, sectionEntryHeader(section, key))
+	*out = append(*out, interior...)
+	if key != name {
+		*out = append(*out, "name = "+tomlStringValue(name))
+	}
+}
+
+// artifactFieldLines renders the field assignments of one artifact (its name
+// lives in the [artifacts.<name>] header, not a field).
+func artifactFieldLines(a ArtifactScript) []string {
+	var out []string
 	if a.Type != "" {
 		out = append(out, "type = "+tomlStringValue(a.Type))
 	}
@@ -2082,6 +2163,7 @@ func artifactFieldLines(a ArtifactScript) []string {
 // falls back to the commented example so the documentation never stands alone.
 func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[string]artifactComments) {
 	rendered := 0
+	seen := map[string]bool{}
 	for _, a := range arts {
 		if a.Name == "" && a.Command == "" {
 			continue
@@ -2092,8 +2174,7 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 		rendered++
 		m := meta[a.Name]
 		*out = append(*out, m.leading...)
-		*out = append(*out, "[[artifacts]]")
-		*out = append(*out, m.interior...)
+		emitSectionEntryHeader(out, "artifacts", a.Name, seen, m.interior)
 		*out = append(*out, artifactFieldLines(a)...)
 	}
 	if rendered == 0 {
@@ -2106,12 +2187,11 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 // replaced (kept current) on each save.
 func servicesDocLines() []string {
 	return []string{
-		docPrefix + " [[services]]: per-project long-running commands the daemon supervises while the",
-		docPrefix + " project is registered. Each is started on daemon boot (and when the project is",
-		docPrefix + " added), restarted with capped backoff if it exits unexpectedly, and",
+		docPrefix + " [services.<name>]: per-project long-running commands the daemon supervises while",
+		docPrefix + " the project is registered. Each is started on daemon boot (and when the project",
+		docPrefix + " is added), restarted with capped backoff if it exits unexpectedly, and",
 		docPrefix + " process-group-killed on daemon shutdown, project removal, or a config save.",
-		docPrefix + " Fields:",
-		docPrefix + "   name          unique label, shown in the UI and logs (required).",
+		docPrefix + " The <name> table key is the unique label shown in the UI and logs. Fields:",
 		docPrefix + "   command       shell command run via `bash -c` from the project root (required).",
 		docPrefix + "   host          run on the host with NO sandbox - full machine/credential access;",
 		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
@@ -2119,17 +2199,17 @@ func servicesDocLines() []string {
 		docPrefix + "   strict        run the command under `set -eo pipefail` so a failed startup step",
 		docPrefix + "                 surfaces as a crash instead of a healthy process (default true).",
 		docPrefix + "   enabled       set false to stop the daemon supervising this service (default true).",
-		docPrefix + " Layering: a file that defines any [[services]] replaces the inherited list",
-		docPrefix + " wholesale, unless it sets the root key services_merge = true - then its entries",
-		docPrefix + " merge by name (set fields patch the same-named entry, new names append).",
+		docPrefix + " Layering: [services.<name>] entries merge by name across config layers (user ->",
+		docPrefix + " project -> config.local.toml) - set fields patch the same-named inherited entry,",
+		docPrefix + " new names append. (The legacy [[services]] array syntax still parses, but a file",
+		docPrefix + " using it replaces the inherited list wholesale.)",
 	}
 }
 
 // servicesExampleLines is a commented-out example shown when no services exist.
 func servicesExampleLines() []string {
 	return []string{
-		"# [[services]]",
-		`# name = "emu-pool"`,
+		"# [services.emu-pool]",
 		`# command = "scripts/emu-pool.sh up 3 --foreground"`,
 		"# host = true",
 		"# max_restarts = 3",
@@ -2139,7 +2219,6 @@ func servicesExampleLines() []string {
 // serviceFieldLines renders the field assignments of one service.
 func serviceFieldLines(svc ServiceScript) []string {
 	out := []string{
-		"name = " + tomlStringValue(svc.Name),
 		"command = " + tomlStringValue(svc.Command),
 	}
 	if svc.Host {
@@ -2162,6 +2241,7 @@ func serviceFieldLines(svc ServiceScript) []string {
 // falls back to the commented example so the documentation never stands alone.
 func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[string]artifactComments) {
 	rendered := 0
+	seen := map[string]bool{}
 	for _, svc := range svcs {
 		if svc.Name == "" && svc.Command == "" {
 			continue
@@ -2172,8 +2252,7 @@ func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[str
 		rendered++
 		m := meta[svc.Name]
 		*out = append(*out, m.leading...)
-		*out = append(*out, "[[services]]")
-		*out = append(*out, m.interior...)
+		emitSectionEntryHeader(out, "services", svc.Name, seen, m.interior)
 		*out = append(*out, serviceFieldLines(svc)...)
 	}
 	if rendered == 0 {
@@ -2185,10 +2264,10 @@ func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[str
 // [[tests]] section.
 func testsDocLines() []string {
 	return []string{
-		docPrefix + " [[tests]]: per-project test-runner commands. Hydra runs each against a head's",
-		docPrefix + " branch and parses the report into a pass/fail verdict that gates the merge",
-		docPrefix + " button (failing/errored soft-block merge; force always available). Fields:",
-		docPrefix + "   name         unique label, also used as the cache directory (required).",
+		docPrefix + " [tests.<name>]: per-project test-runner commands. Hydra runs each against a",
+		docPrefix + " head's branch and parses the report into a pass/fail verdict that gates the",
+		docPrefix + " merge button (failing/errored soft-block merge; force always available). The",
+		docPrefix + " <name> table key is the unique label, also used as the cache directory. Fields:",
 		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
@@ -2227,28 +2306,29 @@ func testsDocLines() []string {
 		docPrefix + " backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return",
 		docPrefix + " (so a multi-line stack trace fits on the one line) - and a doubled backslash",
 		docPrefix + " becomes one literal backslash. Any other escape is left as-is.",
-		docPrefix + " Layering: a file that defines any [[tests]] replaces the inherited list",
-		docPrefix + " wholesale, unless it sets the root key tests_merge = true - then its entries",
-		docPrefix + " merge by name (set fields patch the same-named entry, new names append - e.g.",
-		docPrefix + ` config.local.toml can disable one runner with tests_merge = true plus`,
-		docPrefix + `   [[tests]] / name = "lint" / enabled = false, without restating its command).`,
+		docPrefix + " Layering: [tests.<name>] entries merge by name across config layers (user ->",
+		docPrefix + " project -> config.local.toml) - set fields patch the same-named inherited entry,",
+		docPrefix + " new names append. E.g. config.local.toml can disable one runner with just",
+		docPrefix + "   [tests.lint]",
+		docPrefix + "   enabled = false",
+		docPrefix + " without restating its command. (The legacy [[tests]] array syntax still parses,",
+		docPrefix + " but a file using it replaces the inherited list wholesale.)",
 	}
 }
 
 // testsExampleLines is a commented-out example shown when no tests exist.
 func testsExampleLines() []string {
 	return []string{
-		"# [[tests]]",
-		`# name = "go"`,
+		"# [tests.go]",
 		`# command = "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./..."`,
 		"# timeout_sec = 600",
 	}
 }
 
-// testFieldLines renders the field assignments of one test runner.
+// testFieldLines renders the field assignments of one test runner (its name
+// lives in the [tests.<name>] header, not a field).
 func testFieldLines(t TestScript) []string {
 	out := []string{
-		"name = " + tomlStringValue(t.Name),
 		"command = " + tomlStringValue(t.Command),
 	}
 	if t.TimeoutSec > 0 {
@@ -2276,6 +2356,7 @@ func testFieldLines(t TestScript) []string {
 // hand-written comments matched to an existing runner by name.
 func emitTestsAuthoritative(out *[]string, tests []TestScript, meta map[string]artifactComments) {
 	rendered := 0
+	seen := map[string]bool{}
 	for _, t := range tests {
 		if t.Name == "" && t.Command == "" {
 			continue
@@ -2286,8 +2367,7 @@ func emitTestsAuthoritative(out *[]string, tests []TestScript, meta map[string]a
 		rendered++
 		m := meta[t.Name]
 		*out = append(*out, m.leading...)
-		*out = append(*out, "[[tests]]")
-		*out = append(*out, m.interior...)
+		emitSectionEntryHeader(out, "tests", t.Name, seen, m.interior)
 		*out = append(*out, testFieldLines(t)...)
 	}
 	if rendered == 0 {
@@ -2524,6 +2604,17 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		case unstable.Table:
 			flushArray()
 			flushVerbatim()
+			// A named script entry ([artifacts.<x>] / [services.<x>] / [tests.<x>])
+			// is accumulated exactly like a [[section]] block: preserved verbatim in
+			// preserve mode, comments keyed by the entry's effective name otherwise.
+			if sec, key, ok := splitSectionEntry(it.norm); ok {
+				inArray = true
+				curArray = sec
+				artLeading = g
+				artName = key
+				artHeaderLine, artLastLine = it.startLine, it.endLine
+				break
+			}
 			if isVerbatimTable(it.norm) {
 				inVerbatim = true
 				verbNorm = it.norm
@@ -2544,7 +2635,9 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 						artInterior = append(artInterior, ln)
 					}
 				}
-				if it.key == "name" && artName == "" {
+				// An explicit name field overrides a named table's key (mirroring
+				// decodeScriptSection), and names a legacy [[section]] entry.
+				if it.key == "name" && it.strVal != "" {
 					artName = it.strVal
 				}
 				artLastLine = it.endLine
@@ -2609,9 +2702,24 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 // commented "# [[name]]" header followed by commented "# key = value" fields).
 var managedArraySections = []string{"artifacts", "services", "tests"}
 
+// splitSectionEntry reports whether a normalized table name is a named script
+// entry of one of the managed sections - "tests.go" -> ("tests", "go", true).
+// The key may itself contain dots (a quoted [tests."a.b"] normalizes to
+// "tests.a.b"), so only the first segment is split off.
+func splitSectionEntry(norm string) (section, key string, ok bool) {
+	sec, rest, found := strings.Cut(norm, ".")
+	if !found || rest == "" {
+		return "", "", false
+	}
+	if slices.Contains(managedArraySections, sec) {
+		return sec, rest, true
+	}
+	return "", "", false
+}
+
 // isManagedCommentedArrayHeader reports whether a line is a commented-out header
-// for a managed array section (e.g. "# [[services]]") - the start of a regenerated
-// example block.
+// for a managed script section - the legacy "# [[services]]" form or a named
+// "# [services.emu-pool]" entry - i.e. the start of a regenerated example block.
 func isManagedCommentedArrayHeader(line string) bool {
 	t := strings.TrimSpace(line)
 	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
@@ -2620,6 +2728,9 @@ func isManagedCommentedArrayHeader(line string) bool {
 	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
 	for _, s := range managedArraySections {
 		if t == "[["+s+"]]" {
+			return true
+		}
+		if strings.HasPrefix(t, "["+s+".") && strings.HasSuffix(t, "]") {
 			return true
 		}
 	}
@@ -2720,8 +2831,8 @@ func configHeaderLines() []string {
 		docPrefix + " isolated worktree and OS sandbox, supervised by a per-project daemon. This file",
 		docPrefix + " configures those agents and the daemon: the default pre-prompt, the sandbox",
 		docPrefix + " policy (what agents may read, write and reach over the network), the decision",
-		docPrefix + " gate, per-agent ([claude], [gemini], ...) overrides, and the [[artifacts]],",
-		docPrefix + " [[services]] and [[tests]] commands run per project.",
+		docPrefix + " gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],",
+		docPrefix + " [services.<name>] and [tests.<name>] commands run per project.",
 		docPrefix + "",
 		docPrefix + " Reading this file:",
 		docPrefix + "   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit",
@@ -2800,24 +2911,6 @@ func renderConfig(existing []byte, cfg Config) string {
 			previewPorts = prev.PreviewPorts
 		}
 	}
-	// The artifacts_merge / services_merge / tests_merge opt-ins aren't in the
-	// Settings editor either, so a save that doesn't carry them preserves the
-	// file's existing hand-edited values rather than dropping them.
-	artifactsMerge, servicesMerge, testsMerge := cfg.ArtifactsMerge, cfg.ServicesMerge, cfg.TestsMerge
-	if artifactsMerge == nil || servicesMerge == nil || testsMerge == nil {
-		if prev, err := decodeConfig(existing); err == nil {
-			if artifactsMerge == nil {
-				artifactsMerge = prev.ArtifactsMerge
-			}
-			if servicesMerge == nil {
-				servicesMerge = prev.ServicesMerge
-			}
-			if testsMerge == nil {
-				testsMerge = prev.TestsMerge
-			}
-		}
-	}
-
 	var out []string
 	spec := defaultsSpec()
 
@@ -2836,9 +2929,6 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitTestConcurrency(&out, testConcurrency, keyComments)
 	emitTestPrefetch(&out, testPrefetch, keyComments)
 	emitPreviewPorts(&out, previewPorts, keyComments)
-	emitArrayMergeFlag(&out, "artifacts_merge", artifactsMerge, keyComments)
-	emitArrayMergeFlag(&out, "services_merge", servicesMerge, keyComments)
-	emitArrayMergeFlag(&out, "tests_merge", testsMerge, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
@@ -3111,25 +3201,6 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 	} else {
 		*out = append(*out, "# test_prefetch = true")
 	}
-}
-
-// emitArrayMergeFlag renders one of the top-level artifacts_merge /
-// services_merge / tests_merge opt-ins (Config-level booleans; TOML root keys,
-// so they must precede any table header even though they govern the array
-// sections at the bottom of the file). Unlike the other root scalars they are
-// emitted only when set: the section doc blocks already document them, and
-// three more commented defaults at the top of every config would be noise.
-func emitArrayMergeFlag(out *[]string, key string, v *bool, keyComments map[string][]string) {
-	if v == nil {
-		return
-	}
-	*out = appendSettingBlank(*out)
-	if uc := keyComments["\x00"+key]; len(uc) > 0 {
-		*out = append(*out, uc...)
-	}
-	section := "[[" + strings.TrimSuffix(key, "_merge") + "]]"
-	*out = append(*out, docPrefix+" merge this file's "+section+" by name into those inherited from earlier config layers instead of replacing the whole list: set fields patch the same-named entry, new names append (default false).")
-	*out = append(*out, fmt.Sprintf("%s = %t", key, *v))
 }
 
 // emitPreviewPorts renders the top-level preview_ports key (a Config-level
