@@ -956,7 +956,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         </button>
         {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className="font-mono text-xs min-w-0 truncate cursor-pointer hover:underline">
+          {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
+          <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
             {file.change_type === 'renamed' && file.old_path ? (
               <>
                 <PathName path={file.old_path} />
@@ -1613,7 +1614,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
                       {conflictFiles.map((f) => (
                         <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
                           <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
-                          <span className="font-mono text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
+                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
                         </div>
                       ))}
                     </div>
@@ -1778,7 +1779,8 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip content={file.path} className="min-w-0">
-        <span className="font-mono text-[10px] truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
+        {/* File names read as sans (item 2), not monospace. */}
+        <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
@@ -1809,7 +1811,7 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
             ? <FolderOpen className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
             : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
           }
-          <span className="font-mono text-[10px] text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
+          <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
         {isOpen && node.children.map((child) => (

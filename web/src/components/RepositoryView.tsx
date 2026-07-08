@@ -660,7 +660,7 @@ function FileContent({
         <div className="space-y-1">
           <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Unresolved symbolic link</p>
           {file.symlink_target && (
-            <p className="text-xs font-mono break-all">→ {file.symlink_target}</p>
+            <p className="text-xs break-all">→ {file.symlink_target}</p>
           )}
           <p className="text-xs">The target doesn’t exist at this ref, points outside the repository, or is a directory.</p>
         </div>
@@ -720,7 +720,7 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
       <FileQuestion className="w-12 h-12 text-gray-300 dark:text-gray-600" />
       <div className="space-y-1">
         <p className="text-sm font-medium text-gray-700 dark:text-gray-300">File not found</p>
-        <p className="text-xs font-mono text-gray-500 dark:text-gray-400 break-all">{path}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 break-all">{path}</p>
         <p className="text-xs text-gray-400 dark:text-gray-500">
           This file doesn’t exist at <span className="font-mono">{refStr}</span>.
         </p>
@@ -753,7 +753,7 @@ function FilePathLabel({ path }: { path: string }) {
       <button
         type="button"
         onClick={() => setExpanded(false)}
-        className="min-w-0 text-left text-sm font-mono break-all cursor-pointer"
+        className="min-w-0 text-left text-sm break-all cursor-pointer"
       >
         {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
         <span className="text-gray-700 dark:text-gray-300">{name}</span>
@@ -766,7 +766,7 @@ function FilePathLabel({ path }: { path: string }) {
       type="button"
       onClick={() => setExpanded(true)}
       title={path}
-      className="flex items-center min-w-0 text-sm font-mono cursor-pointer"
+      className="flex items-center min-w-0 text-sm cursor-pointer"
     >
       {dir && (
         // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
@@ -1443,7 +1443,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     {folder && (
                       <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50">
                         <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
-                        <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
                       </div>
                     )}
                     {groupFiles.map((f) => (
@@ -1513,7 +1513,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <>
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
                 {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path ? (
-                  <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
+                  <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                     {selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}
                   </span>
                 ) : (
@@ -1566,7 +1566,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                   : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
               <FilePathLabel path={viewPath} />
               {file?.symlink && file.symlink_target && (
-                <span className="flex items-center gap-1 text-xs font-mono text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
+                <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
                   <CornerDownRight className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{file.symlink_target}</span>
                 </span>

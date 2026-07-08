@@ -585,7 +585,12 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const summary = mem
     ? `memory ${mem}`
     : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
-  const summaryMono = !mem && !(isBash && description)
+  // File paths render in the UI sans font (item 23/2); code-like summaries (a
+  // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
+  // description are prose (sans) already.
+  const isPathSummary =
+    !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
+  const summaryMono = !mem && !isPathSummary && !(isBash && description)
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header. Bash shows its Command panel unlabelled (item 13).
   const hideInput = simpleRead
