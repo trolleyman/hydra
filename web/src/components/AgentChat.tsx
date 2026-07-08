@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -112,6 +112,9 @@ interface ClaudeContentBlock {
 interface ClaudeEvent {
   type: string
   subtype?: string
+  // The durable conversation-record id (transcript + stdout share it). Tracked
+  // as the anchor for load-older history paging (item 25).
+  uuid?: string
   message?: { id?: string; content?: ClaudeContentBlock[] | string }
   duration_ms?: number
   total_cost_usd?: number
@@ -991,6 +994,117 @@ function QuestionCard({
   )
 }
 
+// reduceHistoryEvents reduces a batch of older (settled) conversation events -
+// the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
+// the live reducer's settled-event handling (no streaming, model or
+// control_request state): user turns (classified like routeUserText),
+// assistant text/thinking/tool_use/question blocks with tool_result patching,
+// and result footers. A TodoWrite is dropped (the plan panel already holds the
+// latest state, not this older one). allocId hands out ids for the batch.
+function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): ChatItem[] {
+  const items: ChatItem[] = []
+  const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
+    items.push({ ...item, id: allocId() } as ChatItem)
+  }
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+        it.result = text
+        it.isError = isError
+        it.resultImages = images.length ? images : undefined
+        return
+      }
+      if (it.kind === 'question' && it.toolUseId === toolUseId) {
+        it.result = text
+        return
+      }
+    }
+  }
+  const routeUser = (text: string) => {
+    const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
+    if (cmd) {
+      const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+      push({ kind: 'command', name: cmd[1].trim(), args })
+      return
+    }
+    const stdout = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)
+    if (stdout) {
+      const body = stdout[1].trim()
+      if (body) push({ kind: 'cmdout', text: body })
+      return
+    }
+    if (text.startsWith('[Request interrupted by user')) {
+      push({ kind: 'interrupted' })
+      return
+    }
+    if (text.includes('<task-notification>')) {
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      return
+    }
+    push({ kind: 'user', text })
+  }
+  const seenBlocks = new Map<string, Set<string>>()
+  for (const ev of events) {
+    if (ev.type === 'user') {
+      const content = ev.message?.content
+      if (typeof content === 'string') {
+        if (content.trim()) routeUser(content)
+        continue
+      }
+      for (const block of content ?? []) {
+        if (block.type === 'text' && block.text?.trim()) routeUser(block.text)
+        else if (block.type === 'tool_result' && block.tool_use_id) {
+          const p = parseToolResult(block.content)
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
+        }
+      }
+    } else if (ev.type === 'assistant') {
+      const content = ev.message?.content
+      if (ev.isApiErrorMessage) {
+        const text = Array.isArray(content)
+          ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+          : typeof content === 'string'
+            ? content
+            : ''
+        push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
+        continue
+      }
+      if (!Array.isArray(content)) continue
+      const msgId = ev.message?.id ?? ''
+      let seen = seenBlocks.get(msgId)
+      if (!seen) {
+        seen = new Set()
+        seenBlocks.set(msgId, seen)
+      }
+      for (const block of content) {
+        const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
+        if (msgId && seen.has(key)) continue
+        if (msgId) seen.add(key)
+        if (block.type === 'text' && block.text?.trim()) push({ kind: 'assistant', text: block.text })
+        else if (block.type === 'thinking' && block.thinking?.trim()) push({ kind: 'thinking', text: block.thinking })
+        else if (block.type === 'tool_use' && block.id) {
+          const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
+          const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
+          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+          else if (todos) { /* older plan state - the panel already shows the latest */ }
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+        }
+      }
+    } else if (ev.type === 'result') {
+      push({
+        kind: 'result',
+        isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
+        durationMs: ev.duration_ms,
+        costUsd: ev.total_cost_usd,
+        errorText: ev.is_error ? ev.result : undefined,
+      })
+    }
+  }
+  return items
+}
+
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // The in-flight streamed content block (token streaming via stream_event
@@ -1019,6 +1133,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
   const optimisticTextsRef = useRef<string[]>([])
+  // Load-older infinite scroll (item 25): the uuid of the current oldest history
+  // line (the paging anchor), a decreasing id space for prepended history (kept
+  // well below the optimistic range so it never collides), an in-flight guard,
+  // whether the transcript start has been reached, and the scrollHeight snapshot
+  // used to keep the viewport anchored across a prepend.
+  const oldestUuidRef = useRef<string | null>(null)
+  const historyIdRef = useRef(-1_000_000)
+  const loadingOlderRef = useRef(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
+  const pendingPrependRef = useRef<number | null>(null)
   // Composer attachments (same upload flow as the spawn box).
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -1082,6 +1207,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setPendingSends([])
     optimisticTextsRef.current = []
     optimisticIdRef.current = -1
+    // Reset load-older paging for the fresh backfill.
+    oldestUuidRef.current = null
+    historyIdRef.current = -1_000_000
+    loadingOlderRef.current = false
+    setLoadingOlder(false)
+    setAllHistoryLoaded(false)
+    pendingPrependRef.current = null
     pinnedRef.current = true
 
     let nextId = 1
@@ -1219,6 +1351,26 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       })
     }
 
+    // handleHistoryBefore prepends an older-history batch (item 25): reduce the
+    // events, snapshot the scroll height so the viewport can be re-anchored
+    // after the prepend (a layout effect does the adjust), advance the oldest
+    // anchor, and mark the end reached.
+    const handleHistoryBefore = (events: ClaudeEvent[], done: boolean) => {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+      if (events.length > 0) {
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--)
+        // Advance the anchor to the oldest event of this batch.
+        const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
+        if (anchor) oldestUuidRef.current = anchor
+        if (older.length > 0) {
+          pendingPrependRef.current = scrollRef.current?.scrollHeight ?? 0
+          setItems((prev) => [...older, ...prev])
+        }
+      }
+      if (done) setAllHistoryLoaded(true)
+    }
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
@@ -1278,6 +1430,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // The first event carrying a uuid is the oldest loaded so far - the anchor
+      // for load-older paging (item 25). Only set once (backfill is oldest-first;
+      // a prepend updates it to something older).
+      if (ev.uuid && oldestUuidRef.current === null) oldestUuidRef.current = ev.uuid
       switch (ev.type) {
         case 'system': {
           if (ev.subtype === 'init') {
@@ -1424,6 +1580,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         head_moved?: boolean
         event?: ClaudeEvent
         messages?: { id?: string; content?: unknown }[]
+        events?: ClaudeEvent[]
+        done?: boolean
       }
       try {
         msg = JSON.parse(e.data)
@@ -1454,6 +1612,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // reload-after-navigate case, where local state was reset).
           reconcileQueue(msg.messages ?? [])
           return
+        case 'history_before':
+          // A load-older page (item 25): older conversation events to prepend.
+          handleHistoryBefore(msg.events ?? [], msg.done === true)
+          return
       }
     }
     ws.onclose = () => {
@@ -1477,6 +1639,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  // Keep the viewport anchored across a load-older prepend (item 25): before
+  // paint, grow scrollTop by however much taller the content got, so the lines
+  // the user was reading stay put instead of jumping down. Runs before the
+  // auto-scroll effect below, which no-ops here (a user loading older history is
+  // scrolled up, not pinned).
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && pendingPrependRef.current != null) {
+      el.scrollTop += el.scrollHeight - pendingPrependRef.current
+      pendingPrependRef.current = null
+    }
+  }, [items])
 
   // Auto-scroll to the bottom on new content while pinned.
   useEffect(() => {
@@ -1540,9 +1715,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     [projectId, agentId],
   )
 
+  // requestOlderHistory asks the daemon for the batch older than the current
+  // oldest line, when the user scrolls near the top (item 25).
+  function requestOlderHistory() {
+    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !oldestUuidRef.current) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
+  }
+
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
+    if (el.scrollTop < 300) requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     pinnedRef.current = nearBottom
     setPinned(nearBottom)
@@ -2035,6 +2222,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           {!replayDone && items.length === 0 && (
             <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
               {connected ? 'Loading conversation...' : 'Connecting...'}
+            </div>
+          )}
+          {/* Load-older affordance at the very top (item 25). */}
+          {replayDone && loadingOlder && (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              Loading older messages...
+            </div>
+          )}
+          {replayDone && allHistoryLoaded && items.length > 0 && (
+            <div className="text-center py-1 text-[11px] text-stone-300 dark:text-stone-600 select-none">
+              Beginning of conversation
             </div>
           )}
           {visibleItems.map((item) => (

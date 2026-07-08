@@ -101,6 +101,58 @@ func firstLineIsSidechain(path string) bool {
 	return false
 }
 
+// HistoryBatchBytes is how much older conversation one load-older request pulls.
+const HistoryBatchBytes = 512 * 1024
+
+// HistoryBefore returns the batch of conversation lines (user/assistant, minus
+// sub-agent sidechains) immediately older than the line carrying beforeUUID -
+// the "load older" page for the chat view's infinite scroll. Lines are returned
+// oldest-first (ready to prepend). done is true once the batch reaches the start
+// of the transcript (or nothing older exists), so the client can stop asking.
+// A missing/anchorless transcript yields an empty, done result.
+func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, done bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, errtrace.Wrap(err)
+	}
+	all := bytes.Split(data, []byte{'\n'})
+	// Locate the anchor (the client's current oldest line).
+	anchor := -1
+	for i, line := range all {
+		if ev, ok := ParseEvent(line); ok && ev.UUID != "" && ev.UUID == beforeUUID {
+			anchor = i
+			break
+		}
+	}
+	if anchor <= 0 {
+		return nil, true, nil // not found, or already at the first line
+	}
+	// Walk backward from just before the anchor, collecting conversation lines
+	// (newest-first) until the byte budget, then reverse to oldest-first.
+	var batch [][]byte
+	var used int64
+	i := anchor - 1
+	for ; i >= 0; i-- {
+		ev, ok := ParseEvent(all[i])
+		if !ok || ev.IsSidechain || (ev.Type != "user" && ev.Type != "assistant") {
+			continue
+		}
+		cp := make([]byte, len(all[i]))
+		copy(cp, all[i])
+		batch = append(batch, cp)
+		used += int64(len(cp))
+		if used >= maxBytes {
+			break
+		}
+	}
+	for l, r := 0, len(batch)-1; l < r; l, r = l+1, r-1 {
+		batch[l], batch[r] = batch[r], batch[l]
+	}
+	// done when we reached the start, or found nothing more to give (so the
+	// client doesn't loop forever on an unchanged anchor).
+	return batch, i < 0 || len(batch) == 0, nil
+}
+
 // TailTranscript reads (up to) the last maxBytes of a session transcript and
 // returns the conversation lines to backfill - user/assistant entries, minus
 // sub-agent sidechains - plus the uuid set of EVERY entry seen. The uuid set

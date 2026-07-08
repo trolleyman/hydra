@@ -74,6 +74,65 @@ func TestTailTranscript(t *testing.T) {
 	}
 }
 
+func TestHistoryBefore(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	line := func(uuid, text string) string {
+		return `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]},"uuid":"` + uuid + `"}`
+	}
+	content := strings.Join([]string{
+		line("u1", "oldest"),
+		line("u2", "second"),
+		`{"type":"user","uuid":"side","isSidechain":true,"message":{"content":[]}}`, // skipped
+		line("u3", "third"),
+		line("u4", "newest"),
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Everything older than u4 (large budget): u1, u2, u3 - oldest-first, no
+	// sidechain - and done (reached the start).
+	lines, done, err := HistoryBefore(path, "u4", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done {
+		t.Error("expected done=true when the batch reaches the start")
+	}
+	var got []string
+	for _, l := range lines {
+		ev, _ := ParseEvent(l)
+		got = append(got, ev.UUID)
+	}
+	if strings.Join(got, ",") != "u1,u2,u3" {
+		t.Fatalf("older-than-u4 = %v, want [u1 u2 u3]", got)
+	}
+
+	// Anchored at the oldest line: nothing older, done.
+	lines, done, err = HistoryBefore(path, "u1", 1<<20)
+	if err != nil || len(lines) != 0 || !done {
+		t.Fatalf("older-than-u1 = (%d lines, done=%v, err=%v), want (0, true, nil)", len(lines), done, err)
+	}
+
+	// A tiny budget returns a partial batch (just u3) and NOT done.
+	lines, done, err = HistoryBefore(path, "u4", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || done {
+		t.Fatalf("tiny budget = (%d lines, done=%v), want (1, false)", len(lines), done)
+	}
+	if ev, _ := ParseEvent(lines[0]); ev.UUID != "u3" {
+		t.Fatalf("tiny budget returned %q, want the nearest-older u3", ev.UUID)
+	}
+
+	// Unknown anchor -> empty, done.
+	if lines, done, _ := HistoryBefore(path, "nope", 1<<20); len(lines) != 0 || !done {
+		t.Fatalf("unknown anchor = (%d, %v), want (0, true)", len(lines), done)
+	}
+}
+
 func TestLatestTranscript(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "old.jsonl")
