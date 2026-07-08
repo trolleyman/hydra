@@ -895,3 +895,17 @@ Check items off in the commit that lands them.
     font, bubbles, cards, app theming) + Claude Code function (tool cards,
     slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic
     lights, dark tab bar) themed away when the chat tab is active.
+26. [ ] **Per-head state files: folder-per-type.** TODO (not in this branch):
+    the per-head state files under `.hydra/local/status/` are keyed
+    `<id>_<suffix>` (status.json is the un-suffixed base), so a suffixed file of
+    head `foo` (e.g. `foo_review.json`) can theoretically collide with the
+    status file of a head literally named `foo_review` - head ids allow `_`
+    (`headIDRe`), even though auto-generated slugs use only `-`. The chat queue
+    already dodges this by living in its own `.hydra/local/queue/<id>.json` dir
+    (bare id = whole filename, like `ns/<id>` and `approvals/<id>`). Reorganise
+    the rest of the `status/` tree the same way (one dir per file type keyed by
+    bare id) to make it collision-proof. Deferred because it means moving the
+    load-bearing `status.json` - bound into each sandbox at a fixed path,
+    written by the in-sandbox hooks, read by the poller, and present on disk for
+    existing heads - so it needs a careful path + hook-contract migration, not
+    worth bundling with the chat work.
