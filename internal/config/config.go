@@ -75,15 +75,11 @@ const DefaultResumePrompt = "Continue"
 type NetworkConfig struct {
 	// Mode is the egress posture: "off" (no network), "unrestricted" (network, no
 	// filtering), "advisory" (proxy-only host filtering, escapable), or "hard"
-	// (inescapable pasta+nft netns, degrading to advisory with a warning when the
-	// tooling is unavailable - unless Strict). "on" is an accepted synonym for
-	// "hard". nil/"" = default ("hard"). When set, Mode is authoritative and
-	// supersedes the legacy Enabled/FilterEnabled booleans.
+	// (inescapable pasta+nft netns, failing closed - no network - when the
+	// boundary can't be built; it never degrades to advisory). "on" is an
+	// accepted synonym for "hard". nil/"" = default ("hard"). When set, Mode is
+	// authoritative and supersedes the legacy Enabled/FilterEnabled booleans.
 	Mode *string `toml:"mode"`
-	// Strict, with Mode == "hard", fails closed (blocks all egress) when the hard
-	// boundary can't be built, rather than degrading to advisory. nil = true (strict
-	// is on by default); set false to opt into the advisory degrade.
-	Strict *bool `toml:"strict"`
 	// Enabled toggles outbound network access. nil = inherit/default (enabled).
 	// Legacy: honoured only when Mode is unset.
 	Enabled *bool `toml:"enabled"`
@@ -1127,9 +1123,6 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		if other.Network.Mode != nil {
 			s.Network.Mode = other.Network.Mode
 		}
-		if other.Network.Strict != nil {
-			s.Network.Strict = other.Network.Strict
-		}
 		if other.Network.Enabled != nil {
 			s.Network.Enabled = other.Network.Enabled
 		}
@@ -1476,21 +1469,16 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 // resolveNetworkPolicy turns the (possibly nil) config into the effective
 // sandbox.NetworkPolicy. The explicit `mode` is authoritative when set; otherwise
 // it falls back to the legacy enabled/filter_enabled booleans, and when NOTHING is
-// specified it defaults to hard (network on, deny-by-default filtering, preferring
-// the inescapable pasta+nft boundary and degrading to advisory where unavailable).
+// specified it defaults to hard (network on, deny-by-default filtering behind the
+// inescapable pasta+nft boundary, failing closed where that can't be built).
 func resolveNetworkPolicy(nc *NetworkConfig) sandbox.NetworkPolicy {
-	// Strict is on by default: an unbuildable hard boundary fails closed (no
-	// network) rather than silently degrading to escapable advisory filtering.
-	net := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, Strict: true}
+	net := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true}
 	if nc == nil {
 		return net
 	}
 	net.AllowedHosts = nc.AllowedHosts
 	net.BlockedHosts = nc.BlockedHosts
 	net.AllowedLoopbackPorts = nc.AllowedLoopbackPorts
-	if nc.Strict != nil {
-		net.Strict = *nc.Strict
-	}
 
 	switch {
 	case nc.Mode != nil && *nc.Mode != "":
@@ -1848,22 +1836,11 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "mode",
-			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
+			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed - no network - when the boundary can't be built; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
 			def: func() string { return `"hard"` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Mode != nil && *a.Sandbox.Network.Mode != "" {
 					return tomlStringValue(*a.Sandbox.Network.Mode), true
-				}
-				return "", false
-			},
-		},
-		{
-			table: "sandbox.network", key: "strict",
-			doc: `with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default true).`,
-			def: func() string { return "true" },
-			get: func(a AgentConfig) (string, bool) {
-				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Strict != nil {
-					return fmt.Sprintf("%t", *a.Sandbox.Network.Strict), true
 				}
 				return "", false
 			},
@@ -3377,9 +3354,6 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 		if nw.Mode != nil && *nw.Mode != "" {
 			emitSetField(out, name+".sandbox.network", "mode", tomlStringValue(*nw.Mode), true, keyComments)
 		}
-		if nw.Strict != nil {
-			emitSetField(out, name+".sandbox.network", "strict", fmt.Sprintf("%t", *nw.Strict), true, keyComments)
-		}
 		if nw.Enabled != nil {
 			emitSetField(out, name+".sandbox.network", "enabled", fmt.Sprintf("%t", *nw.Enabled), true, keyComments)
 		}
@@ -3394,7 +3368,7 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 
 // networkHasContent reports whether a NetworkConfig has any field worth emitting.
 func networkHasContent(nw *NetworkConfig) bool {
-	return nw.Mode != nil || nw.Strict != nil || nw.Enabled != nil ||
+	return nw.Mode != nil || nw.Enabled != nil ||
 		nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0 || len(nw.BlockedHosts) > 0 ||
 		len(nw.AllowedLoopbackPorts) > 0
 }

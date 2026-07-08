@@ -21,6 +21,15 @@ html, body {
 
 body {
   @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+  /* Keep the app shell out of phone display cutouts (notch, punch-hole,
+     rounded corners, iOS home indicator). viewport-fit=cover (index.html)
+     lets the page extend edge-to-edge; this padding pulls the fixed
+     full-height layout back inside the safe area, with the body background
+     showing behind the cutouts. Zero on devices without insets. */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 @keyframes gradient-shift {

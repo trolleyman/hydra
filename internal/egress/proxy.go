@@ -12,9 +12,9 @@
 //
 // The inescapable boundary is HARD mode (internal/egress/hardmode.go + pasta.go):
 // pasta puts the agent in its own network namespace whose nft ruleset drops all
-// egress except TCP to this proxy, so a raw socket has nowhere to go. Hard mode is
-// selected automatically when a smoke test confirms pasta+nft work on the host,
-// and otherwise degrades to advisory (surfaced via heads.EgressMode). The proxy
+// egress except TCP to this proxy, so a raw socket has nowhere to go. Hard mode
+// requires a smoke test confirming pasta+nft work on the host, and otherwise
+// fails closed - no network (surfaced via heads.EgressMode). The proxy
 // code below is identical for both modes - only the reachability of a bypass
 // differs. `network mode = "off"` remains the absolute hard off-switch.
 //

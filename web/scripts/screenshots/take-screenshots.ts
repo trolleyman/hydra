@@ -999,7 +999,7 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
-      // Chat mode (CHAT_MODE.md): agent-chat renders the chat view instead of a
+      // Chat mode: agent-chat renders the chat view instead of a
       // terminal - user bubble, markdown-rich assistant turns, tool cards (the
       // Bash one expanded via its description header, showing the ;/&&-split
       // highlighted command and its red error output), a thinking disclosure,

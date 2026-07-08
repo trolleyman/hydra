@@ -7,6 +7,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -40,18 +41,38 @@ func TestStartEgressMode(t *testing.T) {
 		}
 	})
 
-	t.Run("filtering on: starts proxy in a filtered mode", func(t *testing.T) {
+	t.Run("advisory: starts the filtering proxy", func(t *testing.T) {
 		id := "test-egress-filtered"
 		defer stopEgressProxy(id)
-		env, _ := startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+		env, _ := startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetAdvisory, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
 		if len(env) == 0 {
 			t.Errorf("expected proxy env to be injected when filtering, got none")
 		}
-		switch got := EgressModeFor(id); got {
-		case EgressHard, EgressAdvisory:
-			// Either is valid depending on pasta/nft availability on the host.
-		default:
-			t.Errorf("mode = %q, want a filtered mode (%q or %q)", got, EgressHard, EgressAdvisory)
+		if got := EgressModeFor(id); got != EgressAdvisory {
+			t.Errorf("mode = %q, want %q", got, EgressAdvisory)
+		}
+	})
+
+	t.Run("hard: locked boundary, or fail closed without the tooling", func(t *testing.T) {
+		id := "test-egress-hard"
+		defer stopEgressProxy(id)
+		pol := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}}
+		env, wrap := startEgress("", id, sandbox.AgentTypeClaude, &pol)
+		if egress.DetectHardMode().Available {
+			if len(env) == 0 || wrap == nil {
+				t.Errorf("hard mode with tooling: expected proxy env + wrap, got env=%v wrap!=nil=%v", env, wrap != nil)
+			}
+			if got := EgressModeFor(id); got != EgressHard {
+				t.Errorf("mode = %q, want %q", got, EgressHard)
+			}
+		} else {
+			// Hard never degrades: without pasta/nft the head fails closed.
+			if env != nil || wrap != nil || pol.Enabled {
+				t.Errorf("hard mode without tooling must fail closed, got env=%v wrap!=nil=%v Enabled=%v", env, wrap != nil, pol.Enabled)
+			}
+			if got := EgressModeFor(id); got != EgressOff {
+				t.Errorf("mode = %q, want %q", got, EgressOff)
+			}
 		}
 	})
 
@@ -93,7 +114,7 @@ func TestEgressProxyEnvFor(t *testing.T) {
 	t.Run("filtered: routes through the running proxy", func(t *testing.T) {
 		id := "test-proxyenv-filtered"
 		defer stopEgressProxy(id)
-		startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+		startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetAdvisory, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
 		env := EgressProxyEnvFor(id)
 		if !hasHTTPProxy(env) {
 			t.Errorf("expected HTTP_PROXY in co-tenant env for a filtered head, got %v", env)
@@ -106,13 +127,11 @@ func TestEgressProxyEnvFor(t *testing.T) {
 // the head id, and that StopShellEgress tears it down.
 func TestStartEgressKeyedSeparatesProxyFromApproval(t *testing.T) {
 	shellID, headID := "h1-shell-tab1", "h1"
-	startEgressKeyed("", shellID, headID, sandbox.AgentTypeBash, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+	startEgressKeyed("", shellID, headID, sandbox.AgentTypeBash, &sandbox.NetworkPolicy{Mode: sandbox.NetAdvisory, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
 
 	// The proxy/mode live under the shell id, not the head id.
-	switch EgressModeFor(shellID) {
-	case EgressHard, EgressAdvisory: // either, per pasta/nft availability
-	default:
-		t.Errorf("shell mode = %q, want a filtered mode", EgressModeFor(shellID))
+	if got := EgressModeFor(shellID); got != EgressAdvisory {
+		t.Errorf("shell mode = %q, want %q", got, EgressAdvisory)
 	}
 	if got := EgressModeFor(headID); got != EgressNone {
 		t.Errorf("head id must not carry the shell's proxy, got mode %q", got)

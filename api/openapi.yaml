@@ -2608,8 +2608,7 @@ components:
           description: >-
             Drive the head via the Claude CLI's stream-json interface and render
             a chat view instead of a terminal (Claude only; rejected for other
-            agent types). The prompt is delivered as the first chat turn. See
-            CHAT_MODE.md.
+            agent types). The prompt is delivered as the first chat turn.
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
@@ -2651,7 +2650,7 @@ components:
             rejected for other agent types). When the value actually changes
             and a session is live, the Claude process is stopped and relaunched
             in the new mode with --continue - the conversation is preserved
-            (terminal and chat mode share one transcript). See CHAT_MODE.md.
+            (terminal and chat mode share one transcript).
 
     AgentStatus:
       type: string
@@ -2738,7 +2737,7 @@ components:
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
         chat_mode:
           type: boolean
-          description: True when the head runs in chat mode (stream-json + chat view; Claude only). See CHAT_MODE.md.
+          description: True when the head runs in chat mode (stream-json + chat view; Claude only).
         created_at:
           type: integer
           format: int64
@@ -3467,16 +3466,9 @@ components:
             Egress posture: "off" (no network), "unrestricted" (network, no host
             filtering), "advisory" (proxy-only host filtering - every honest
             client is filtered, but escapable), or "hard" (inescapable pasta+nft
-            netns, failing closed where the tooling is unavailable unless
-            strict=false; "on" is a synonym for "hard"). Null/unset = default
+            netns, failing closed - no network - when the boundary can't be
+            built; "on" is a synonym for "hard"). Null/unset = default
             ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
-        strict:
-          type: boolean
-          nullable: true
-          description: >-
-            With mode "hard", fail closed (block all egress) when the inescapable
-            boundary can't be built, instead of degrading to advisory (default
-            true).
         enabled:
           type: boolean
           nullable: true

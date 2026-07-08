@@ -211,7 +211,7 @@ const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Matc
 	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
 
 // simAgentChatPrompt seeds the chat-mode demo agent (agent-chat), whose detail
-// page renders the chat view instead of a terminal (CHAT_MODE.md).
+// page renders the chat view instead of a terminal.
 const simAgentChatPrompt = "Add a retry with exponential backoff to the artifact uploader, and cover the giving-up path with a test."
 
 // simAgentChat is the chat-mode demo agent, shared by ListAgents and GetAgent.
@@ -319,7 +319,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 		// Chat-mode demo agent: its detail page renders the chat view instead of
-		// a terminal (CHAT_MODE.md); HandleTerminalWS serves it chat framing.
+		// a terminal; HandleTerminalWS serves it chat framing.
 		simAgentChat(),
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.

@@ -27,7 +27,7 @@ type Agent struct {
 	Title     string
 	Ephemeral bool `gorm:"default:false"`
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only, CHAT_MODE.md).
+	// renders a chat view instead of a terminal (Claude only).
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
 

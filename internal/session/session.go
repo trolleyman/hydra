@@ -35,8 +35,8 @@ type Kind string
 const (
 	// KindTerminal is a VT100 byte stream from a PTY (the default).
 	KindTerminal Kind = "terminal"
-	// KindChat is Claude stream-json JSONL from a pipes-backed chat-mode head
-	// (CHAT_MODE.md). Resize is a no-op for these sessions.
+	// KindChat is Claude stream-json JSONL from a pipes-backed chat-mode head.
+	// Resize is a no-op for these sessions.
 	KindChat Kind = "chat"
 )
 

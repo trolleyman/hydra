@@ -200,7 +200,7 @@ export function SpawnForm({
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
-  // Chat mode (Claude only, CHAT_MODE.md): drive the head via stream-json and
+  // Chat mode (Claude only): drive the head via stream-json and
   // show a chat view instead of a terminal. Remembered like the agent/model.
   const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
   const [loading, setLoading] = useState(false)
@@ -664,7 +664,7 @@ export function SpawnForm({
 
   // The chat-mode toggle pill, next to the agent/model picker. Claude-only
   // (other CLIs have no stream-json interface); lights up when on. The spawned
-  // head then opens as a chat view instead of a terminal (CHAT_MODE.md).
+  // head then opens as a chat view instead of a terminal.
   function renderChatToggle(compactSel: boolean) {
     if (agentType !== 'claude') return null
     return (

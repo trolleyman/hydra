@@ -15,7 +15,7 @@ export type UpdateAgentRequest = {
      */
     base_branch?: string;
     /**
-     * Switch the head between terminal and chat mode (Claude only; rejected for other agent types). When the value actually changes and a session is live, the Claude process is stopped and relaunched in the new mode with --continue - the conversation is preserved (terminal and chat mode share one transcript). See CHAT_MODE.md.
+     * Switch the head between terminal and chat mode (Claude only; rejected for other agent types). When the value actually changes and a session is live, the Claude process is stopped and relaunched in the new mode with --continue - the conversation is preserved (terminal and chat mode share one transcript).
      */
     chat_mode?: boolean;
 };

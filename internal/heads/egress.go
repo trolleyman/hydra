@@ -50,15 +50,15 @@ var egressProxies = struct {
 // startEgress sets up a head's egress filtering from its resolved network policy
 // and returns the proxy env to inject plus, for hard mode, the bwrap-wrapping
 // closure to put on sandbox.Options.EgressWrap. It may set net.Enabled = false
-// (via the pointer) when a strict hard policy can't build its boundary, so the
+// (via the pointer) when a hard policy can't build its boundary, so the
 // sandbox falls back to no network at all.
 //
 //   - mode off / !Enabled → no proxy, no network.
 //   - mode unrestricted → no proxy, unrestricted egress.
 //   - mode advisory → proxy-only filtering (escapable), no hard boundary attempted.
-//   - mode hard → attempt the pasta+nft netns (inescapable); if the tooling is
-//     unavailable, degrade to advisory with a warning, unless Strict, in which
-//     case fail closed (no network).
+//   - mode hard → the pasta+nft netns (inescapable); if the boundary can't be
+//     built (tooling unavailable, proxy failed) it fails closed (no network) -
+//     hard never downgrades to a weaker posture.
 //
 // The proxy enforces the effective allow-list - the built-in DefaultAllowedHosts
 // unioned with net.AllowedHosts - minus net.BlockedHosts, which overrides it.
@@ -109,8 +109,8 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 		p, err = egress.Start(id, 0, allowed, net.BlockedHosts, approver.approve)
 	}
 	if err != nil {
-		if net.Mode == sandbox.NetHard && net.Strict {
-			log.Printf("hydra egress[%s]: STRICT hard egress but proxy failed to start; failing closed (no network): %v", id, err)
+		if net.Mode == sandbox.NetHard {
+			log.Printf("hydra egress[%s]: hard egress but proxy failed to start; failing closed (no network): %v", id, err)
 			net.Enabled = false
 			setEgressMode(id, EgressOff)
 			return nil, nil
@@ -138,19 +138,17 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 			}
 			return env, wrap
 		}
-		if net.Strict {
-			// Strict: no inescapable boundary available → fail closed.
-			log.Printf("hydra egress[%s]: STRICT hard egress requested but pasta/nft unavailable; failing closed (no network)", id)
-			_ = p.Close()
-			net.Enabled = false
-			setEgressMode(id, EgressOff)
-			return nil, nil
-		}
-		log.Printf("hydra egress[%s]: hard egress requested but pasta/nft unavailable; DEGRADED to advisory filtering", id)
+		// No inescapable boundary available → fail closed. Hard never degrades
+		// to the escapable advisory posture.
+		log.Printf("hydra egress[%s]: hard egress requested but pasta/nft unavailable; failing closed (no network)", id)
+		_ = p.Close()
+		net.Enabled = false
+		setEgressMode(id, EgressOff)
+		return nil, nil
 	}
 
-	// Advisory mode (chosen, or a non-strict hard degrade): shared host net, proxy
-	// reachable on loopback, filtering via HTTP(S)_PROXY only.
+	// Advisory mode (explicitly chosen): shared host net, proxy reachable on
+	// loopback, filtering via HTTP(S)_PROXY only.
 	storeEgress(id, p, EgressAdvisory)
 	log.Printf("hydra egress[%s]: advisory egress filtering (proxy only), %d allow-listed host(s)", id, len(allowed))
 	return egress.ProxyEnv("http://" + p.Addr()), nil

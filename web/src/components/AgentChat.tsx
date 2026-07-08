@@ -32,7 +32,7 @@ import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 
-// ChatPane renders a chat-mode head (CHAT_MODE.md): it speaks the chat framing
+// ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
 // verbatim Claude stream-json events out, {"type":"user_message"|"interrupt"|
 // "set_model"} frames in - and reduces the event stream into a message list.

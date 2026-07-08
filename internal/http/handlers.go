@@ -1030,7 +1030,6 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 		if c.Sandbox.Network != nil {
 			n := c.Sandbox.Network
 			out.Sandbox.Network = &api.NetworkConfig{
-				Strict:               n.Strict,
 				Enabled:              n.Enabled,
 				FilterEnabled:        n.FilterEnabled,
 				AllowedHosts:         &n.AllowedHosts,
@@ -1086,7 +1085,6 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		if a.Sandbox.Network != nil {
 			n := a.Sandbox.Network
 			sb.Network = &config.NetworkConfig{
-				Strict:        n.Strict,
 				Enabled:       n.Enabled,
 				FilterEnabled: n.FilterEnabled,
 			}

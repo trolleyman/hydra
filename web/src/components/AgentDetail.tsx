@@ -218,10 +218,11 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 }
 
 // NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3):
-// the green "locked" hard boundary, the amber advisory (proxy-respecting) fallback,
+// the green "locked" hard boundary, the amber advisory (proxy-respecting) mode,
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
-// (mode absent).
+// (mode absent). Advisory only ever appears when explicitly configured - a hard
+// head whose boundary can't be built fails closed and shows "no network".
 // mergeQueueWaitingOn describes what an armed (merge-when-green) head's queued
 // merge is currently blocked on, for the pill's tooltip. Reaching a finished
 // state is the dominant gate - the head can't merge mid-work - so any not-yet-
@@ -284,13 +285,13 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
       label: 'egress filtered (advisory)',
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
-      tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list - but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
+      tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list - but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Set network.mode = "hard" for an inescapable boundary (needs passt/pasta with --map-host-loopback), or "off" to block egress entirely.',
     },
     unrestricted: {
       label: 'unrestricted network access',
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
-      tip: 'Host filtering is off, so this head can reach any host on the network - a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] filter_enabled = true with an allowed_hosts list to restrict it, or network.enabled = false to block egress entirely.',
+      tip: 'Host filtering is off, so this head can reach any host on the network - a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] mode = "hard" to restrict it to the allow-list, or "off" to block egress entirely.',
     },
     off: {
       label: 'no network',
@@ -721,12 +722,20 @@ export function AgentDetail({
     const parentWarning = parent && parent.session_status === 'running'
       ? `Parent agent "${parent.id}" is running - merging will change its working files.`
       : undefined
+    // Warn before a direct local merge into a branch listed in the [review]
+    // protected_branches config (NON_LOCAL_INTEGRATION.md 3.2): the branch is
+    // protected on the forge, so the local merge would land commits the server
+    // will refuse on push - the MR path is the intended route.
+    const reviewCfg = useProjectStore.getState().reviewConfigs[projectId ?? '']
+    const protectedWarning = reviewCfg?.protected_branches?.includes(toBranch)
+      ? `${toBranch} is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
+      : undefined
     const lead = parent
       ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
       : `Merges this agent’s work into ${toBranch}${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
     // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
     // uncommitted-changes note the background check would otherwise add.
-    const caution = opts.caution ?? parentWarning
+    const caution = opts.caution ?? protectedWarning ?? parentWarning
 
     // Show the dialog immediately so it never lags behind a slow git query.
     // The diff stats + uncommitted-changes check run in the background and fold
@@ -919,7 +928,7 @@ export function AgentDetail({
     setSavingBase(false)
   }
 
-  // Toggling chat mode (CHAT_MODE.md) relaunches the Claude process in the new
+  // Toggling chat mode relaunches the Claude process in the new
   // mode: the backend stops the live session and the pane's reconnect
   // lazy-resumes it with --continue, so the conversation itself is preserved
   // (terminal and chat mode share one transcript). Confirm first when the
@@ -1234,7 +1243,7 @@ export function AgentDetail({
                 </span>
               )}
             </span>
-            {/* Terminal/chat mode toggle (Claude only, CHAT_MODE.md). Switching
+            {/* Terminal/chat mode toggle (Claude only). Switching
                 restarts the Claude process in the new mode; the conversation is
                 preserved via --continue. */}
             {agent.agent_type === 'claude' && !agent.archived && (
