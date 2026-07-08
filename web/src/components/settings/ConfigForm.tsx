@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, AlertTriangle } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -10,11 +10,55 @@ import { ResizeHandle } from '../../lib/ResizeHandle'
 // The four egress postures, mirroring sandbox.NetworkMode on the backend.
 type NetworkMode = 'off' | 'unrestricted' | 'advisory' | 'hard'
 
+// Segment order (safest -> most open, then fully off) and the short pill labels.
+const NETWORK_MODES: NetworkMode[] = ['hard', 'advisory', 'unrestricted', 'off']
 const NETWORK_MODE_LABELS: Record<NetworkMode, string> = {
-  hard: 'Hard - inescapable filtering',
-  advisory: 'Advisory - proxy filtering',
-  unrestricted: 'Unrestricted - no filtering',
-  off: 'Off - no network',
+  hard: 'Hard',
+  advisory: 'Advisory',
+  unrestricted: 'Unrestricted',
+  off: 'Off',
+}
+
+// Amber caution shown below the selector for any non-default posture. Hard (the
+// secure default) needs none; the other three each weaken or drop the boundary.
+const NETWORK_MODE_WARNINGS: Partial<Record<NetworkMode, string>> = {
+  advisory: 'Advisory filtering is enforced only by the per-head proxy - a determined process can bypass it. Not an inescapable boundary.',
+  unrestricted: 'No filtering: the agent can reach any host on the network. Only use for fully trusted work.',
+  off: 'No network access at all - tools that fetch dependencies or call APIs will fail.',
+}
+
+// Animated segmented control for the egress mode. A single "thumb" slides under
+// the active pill (transform-based so it's GPU-cheap and honours reduced-motion
+// via the CSS class); the labels themselves just cross-fade their colour.
+function NetworkModeSelector({ value, onChange }: { value: NetworkMode; onChange: (m: NetworkMode) => void }) {
+  const activeIndex = Math.max(0, NETWORK_MODES.indexOf(value))
+  return (
+    <div className="relative flex w-full rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-900/40">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-md bg-white dark:bg-gray-700 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/5 motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{ width: `calc((100% - 0.5rem) / ${NETWORK_MODES.length})`, transform: `translateX(${activeIndex * 100}%)` }}
+      />
+      {NETWORK_MODES.map((m) => {
+        const isActive = m === value
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(m)}
+            aria-pressed={isActive}
+            className={`relative z-10 flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+              isActive
+                ? 'text-gray-900 dark:text-gray-100'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            {NETWORK_MODE_LABELS[m]}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
@@ -339,29 +383,25 @@ export function ConfigForm({
 
         {/* Network */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
-              <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
-                Network Egress
-              </label>
-              <InfoTooltip title="Network Egress">
-                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft). When the host can't build the boundary, the head <strong>fails closed</strong> (no network) - hard never degrades to a weaker posture.</p>
-                <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy - every honest client is filtered, though a determined process can bypass it.</p>
-                <p className="mt-1.5"><strong>Unrestricted</strong>: network on, every host reachable. <strong>Off</strong>: no network at all.</p>
-                <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
-              </InfoTooltip>
-            </div>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as NetworkMode)}
-              className="text-[11px] font-medium rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-            >
-              {(['hard', 'advisory', 'unrestricted', 'off'] as NetworkMode[]).map((m) => (
-                <option key={m} value={m}>{NETWORK_MODE_LABELS[m]}</option>
-              ))}
-            </select>
+          <div className="flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
+              Network Egress
+            </label>
+            <InfoTooltip title="Network Egress">
+              <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft). When the host can't build the boundary, the head <strong>fails closed</strong> (no network) - hard never degrades to a weaker posture.</p>
+              <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy - every honest client is filtered, though a determined process can bypass it.</p>
+              <p className="mt-1.5"><strong>Unrestricted</strong>: network on, every host reachable. <strong>Off</strong>: no network at all.</p>
+              <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
+            </InfoTooltip>
           </div>
+          <NetworkModeSelector value={mode} onChange={setMode} />
+          {NETWORK_MODE_WARNINGS[mode] && (
+            <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5 motion-safe:animate-egress-warn-in">
+              <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+              <span>{NETWORK_MODE_WARNINGS[mode]}</span>
+            </div>
+          )}
           {showHosts && (
             <div className="space-y-3 ml-0.5">
               <div className="space-y-1">
