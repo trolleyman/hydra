@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
@@ -14,7 +14,9 @@ function shortSha(ref: string): string {
 // agent detail header's base-branch editor. `activeRef` is the currently
 // selected branch/commit; `isKnownBranch` says whether it appears in `branches`
 // (so a bare commit SHA renders as a short SHA rather than a missing branch).
-export function BranchSelector({
+// memo: hosted in the spawn composer (re-renders per keystroke) and the agent
+// header (re-renders per live status tick); its props are stable across both.
+export const BranchSelector = memo(function BranchSelector({
   branches, activeRef, isKnownBranch, onSelect, title = 'Switch branch',
   triggerIcon: TriggerIcon, triggerActive = false, flexible = false,
   onOpen,
@@ -198,4 +200,4 @@ export function BranchSelector({
       )}
     </div>
   )
-}
+})

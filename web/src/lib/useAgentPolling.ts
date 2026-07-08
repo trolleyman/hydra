@@ -19,6 +19,9 @@ export function useAgentPolling(currentProjectId: string | null): { refetchAgent
     {
       intervalMs: EVENT_FALLBACK_MS,
       initial: [],
+      // Nobody reads `loading` here and the data lives in the store - skip the
+      // loading-state churn so a background refetch doesn't re-render RootLayout.
+      trackLoading: false,
       // Tag each list with its project so the store can spot a background merge
       // (an armed agent vanishing on a same-project refresh) without mistaking a
       // project switch for one.

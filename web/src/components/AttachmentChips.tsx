@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { X, FileText, LoaderCircle } from 'lucide-react'
 import type { Attachment } from '../lib/spawnDrafts'
 
@@ -9,7 +10,10 @@ import type { Attachment } from '../lib/spawnDrafts'
 // each caller can place/pad it to fit its layout. Renders nothing when empty.
 // The row is capped at two chip rows and scrolls beyond that, so a big batch
 // of images can't crowd out the prompt text around it.
-export function AttachmentChips({
+// memo: rendered inside the spawn composer, which re-renders on every
+// keystroke; the attachments array identity only changes when a chip is
+// actually added/removed/patched, so typing skips this row entirely.
+export const AttachmentChips = memo(function AttachmentChips({
   attachments,
   size,
   onRemove,
@@ -67,4 +71,4 @@ export function AttachmentChips({
       })}
     </div>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, FolderOpen, Plus } from 'lucide-react'
 import type { ProjectInfo } from '../api'
@@ -17,7 +17,10 @@ const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
 // ── Project Dropdown ───────────────────────────────────────────────────────────
 
-export function ProjectDropdown({
+// memo: lives in the RootLayout sidebar header, which re-renders on every
+// project/agent refresh; the props are stable across those (the project store
+// preserves list identity on no-op refetches), so the dropdown skips them.
+export const ProjectDropdown = memo(function ProjectDropdown({
   projects,
   selectedId,
   onSelect,
@@ -323,4 +326,4 @@ export function ProjectDropdown({
       )}
     </div>
   )
-}
+})

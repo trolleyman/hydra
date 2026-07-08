@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
@@ -77,7 +77,9 @@ function readModelMap(): Record<string, string> {
 // SpawnForm layouts. The menu is `fixed`-positioned + anchored to the trigger's
 // rect because the spawn cards clip their content (overflow-hidden for the
 // rounded gradient border).
-function AgentModelPicker({
+// memo: the composer re-renders per keystroke; agent/model/onChange are stable
+// across typing, so the picker (and its dropdown) skip those renders.
+const AgentModelPicker = memo(function AgentModelPicker({
   agent,
   model,
   onChange,
@@ -176,9 +178,12 @@ function AgentModelPicker({
       )}
     </div>
   )
-}
+})
 
-export function SpawnForm({
+// memo: the compact variant lives in the RootLayout sidebar, which re-renders
+// whenever project/agent state refreshes; all four props are stable across
+// those, so the whole composer (textarea, chips, pickers) skips them.
+export const SpawnForm = memo(function SpawnForm({
   projectId,
   onSpawned,
   compact = false,
@@ -300,6 +305,16 @@ export function SpawnForm({
 
   useEffect(() => {
     void refreshBranches(true)
+  }, [refreshBranches])
+
+  // Stable handlers for the memo'd picker/selector children, so typing in the
+  // textarea (which re-renders the form) doesn't re-render them too.
+  const handleAgentModelChange = useCallback((a: AgentTypeOption, m: string) => {
+    setAgentType(a)
+    setModel(m)
+  }, [])
+  const handleBranchOpen = useCallback(() => {
+    void refreshBranches(false)
   }, [refreshBranches])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -507,14 +522,22 @@ export function SpawnForm({
     return uploadAttachment(new File([text], `pasted-text-${n}.${ext}`, { type: extensionMime(ext) }))
   }
 
-  function removeAttachment(id: number) {
+  // Stable (memo'd AttachmentChips takes it as a prop): `commit` never changes.
+  const removeAttachment = useCallback((id: number) => {
     // Don't revoke the preview URL here - an undo can bring this chip back. URLs
     // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
     commit(
       (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
       false,
     )
-  }
+  }, [commit])
+
+  // Stable lightbox opener: resolves the clicked chip to its index in the
+  // image-only list at click time (via the attachments mirror ref), so the
+  // callback identity survives every attachment/typing change.
+  const openImageLightbox = useCallback((id: number) => {
+    setLightboxIndex(attachmentsRef.current.filter((a) => a.previewUrl).findIndex((img) => img.id === id))
+  }, [])
 
   function handlePaste(e: React.ClipboardEvent) {
     // Consume the "paste literally" flag a Ctrl/Cmd+Shift+V keystroke set, so
@@ -657,7 +680,7 @@ export function SpawnForm({
         size={size}
         className={`mx-3 ${size === 'sm' ? 'mb-1.5' : 'mb-2'}`}
         onRemove={removeAttachment}
-        onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+        onOpenImage={openImageLightbox}
       />
     )
   }
@@ -703,7 +726,7 @@ export function SpawnForm({
         activeRef={baseBranch}
         isKnownBranch={branches.some((b) => b.name === baseBranch)}
         onSelect={setBaseBranch}
-        onOpen={() => void refreshBranches(false)}
+        onOpen={handleBranchOpen}
         title={compactSel
           ? `Base branch: ${baseBranch || 'current'} - pick an agent branch to stack on it`
           : 'Base branch to create the agent from (pick an agent branch to stack on it)'}
@@ -821,7 +844,7 @@ export function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} size="sm" />
+                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
                 {renderChatToggle(true)}
               </div>
               {renderBranchSelector(true)}
@@ -901,7 +924,7 @@ export function SpawnForm({
                     </button>
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
-                  <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} />
+                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
                   {renderChatToggle(false)}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
@@ -941,4 +964,4 @@ export function SpawnForm({
     {lightbox}
     </>
   )
-}
+})

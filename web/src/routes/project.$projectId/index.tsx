@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useAgentStore } from '../../stores/agentStore'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useShortcutsStore } from '../../stores/shortcutsStore'
@@ -13,13 +13,17 @@ export const Route = createFileRoute('/project/$projectId/')({
 
 function ProjectHomePage() {
   const { projectId } = useParams({ from: '/project/$projectId/' })
-  const { addAgent } = useAgentStore()
+  // Selector (not a whole-store subscribe): the agent store refreshes about
+  // once a second while agents work, and this page hosts the full-page
+  // SpawnForm - a whole-store subscription re-rendered the composer per tick.
+  const addAgent = useAgentStore((s) => s.addAgent)
   const navigate = useNavigate()
 
-  function handleSpawned(agent: AgentResponse) {
+  // Stable so the memo()'d SpawnForm doesn't re-render when this page does.
+  const handleSpawned = useCallback((agent: AgentResponse) => {
     addAgent(agent)
     navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: agent.id } })
-  }
+  }, [addAgent, navigate, projectId])
 
   // With no agent open, Alt+↑/↓ jumps into the list: Alt+↓ selects the first
   // agent, Alt+↑ the last. This mirrors AgentDetail's Alt+arrow navigation
