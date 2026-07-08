@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from 'react'
+import { memo, type ReactNode, useMemo } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -246,7 +246,11 @@ export interface MarkdownProps {
 // Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
 // whitespace-pre-wrap container - block elements manage their own spacing and
 // remark-breaks already preserves single newlines as <br>.
-export function Markdown({ text, variant = 'chat', linkCtx, className }: MarkdownProps): ReactNode {
+//
+// memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
+// of these. Without memo, typing in the chat composer (a sibling state change)
+// re-parses every rendered message on each keystroke, which is visibly laggy.
+export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className }: MarkdownProps): ReactNode {
   const components = useMemo(
     () => buildComponents(STYLES[variant], linkCtx),
     [variant, linkCtx],
@@ -258,4 +262,4 @@ export function Markdown({ text, variant = 'chat', linkCtx, className }: Markdow
       </ReactMarkdown>
     </div>
   )
-}
+})

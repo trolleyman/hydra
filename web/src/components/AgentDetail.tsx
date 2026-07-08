@@ -1298,8 +1298,10 @@ export function AgentDetail({
 
         </div>
 
-        {/* Prompt */}
-        {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
+        {/* Prompt. Chat-mode heads echo the task as the first message in the
+            chat pane below (--replay-user-messages), so the separate prompt box
+            is redundant there - the user can just scroll up to see it. */}
+        {agent.prompt && agent.chat_mode !== true && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
 
         {/* Security-gate approvals are surfaced as global toasts (see
             useAgentNotifications) rather than an inline card. */}

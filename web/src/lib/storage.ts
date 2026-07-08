@@ -31,6 +31,10 @@ export const StorageKeys = {
   // '1' when the Settings Review section is collapsed (it starts collapsed).
   settingsReviewCollapsed: 'hydra-settings-review-collapsed',
   spawnHeight: 'hydra-sidebar-spawn-height',
+  // 'sans' when the user has turned OFF the serif font for chat-mode agent
+  // messages (the default is serif, Claude-app style). User text stays sans
+  // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
+  chatSerif: 'hydra-chat-serif',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
