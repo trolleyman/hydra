@@ -57,8 +57,12 @@ type Server struct {
 	ProjectsManager *projects.Manager
 	Sessions        *session.Registry
 	DB              *db.Store
-	StartTime       time.Time
-	Development     bool // set when running under mage dev / mage DevAutoReload
+	// ChatQueues holds chat-mode heads' queued (not-yet-sent) user messages,
+	// daemon-side and disk-persisted (see heads.ChatQueueManager). nil disables
+	// queueing (messages always send straight through).
+	ChatQueues  *heads.ChatQueueManager
+	StartTime   time.Time
+	Development bool // set when running under mage dev / mage DevAutoReload
 	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
 	// handed to detached best-effort work started by a request - e.g. async title
 	// refinement - so that work outlives the request but still dies on shutdown.

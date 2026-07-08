@@ -60,7 +60,11 @@ interface ChatProps {
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 type ChatItem =
-  | { kind: 'user'; id: number; text: string }
+  // sending marks a message shown optimistically in-flow (item 26): it appears
+  // the instant it's sent - above the thinking/response it triggers - and the
+  // flag clears when the CLI's echo confirms it (which can arrive after the
+  // response, so we render our own copy rather than wait for it).
+  | { kind: 'user'; id: number; text: string; sending?: boolean }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -83,8 +87,11 @@ type ChatItem =
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
 // message sent mid-turn stays here - visibly queued - until the turn ends).
+// clientId is the id sent to the daemon so a queued message can be reconciled
+// against the server's authoritative `queue` frame and targeted by a dequeue.
 interface PendingSend {
   id: number
+  clientId: string
   text: string
   queued: boolean
 }
@@ -145,6 +152,19 @@ function formatDuration(ms: number): string {
   if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`
   const d = Math.floor(h / 24)
   return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
+}
+
+// contentText flattens a user_message content-block array (or plain string) to
+// its display text, for rendering a queued message replayed by the daemon.
+function contentText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : ''))
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
 }
 
 // closeOpenFence appends a virtual closing fence when a streaming text ends
@@ -671,6 +691,11 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   // couple of lines of the thought so far, auto-updating as tokens arrive.
   const tailLines = trimmed.split('\n').filter((l) => l.trim() !== '')
   const tail = tailLines.slice(-2).join('\n')
+  // An empty thought (some models - e.g. Opus/Fable turns - reason silently, so
+  // the thinking block streams no visible text) has nothing to reveal: show the
+  // live "Thinking..." indicator but no disclosure, and don't render a settled
+  // empty card at all (item 26).
+  const empty = trimmed === ''
 
   // Only offer "Show more" when the clamped body actually overflows.
   useEffect(() => {
@@ -680,6 +705,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   }, [open, showAll, text])
 
   function toggle() {
+    if (empty) return
     // On phones an inline expansion is cramped; pop the thought up from the
     // bottom instead.
     if (window.matchMedia('(max-width: 639px)').matches) {
@@ -689,9 +715,17 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
     setOpen((o) => !o)
   }
 
+  // A settled empty thought renders nothing (only the transient streaming
+  // indicator is worth showing).
+  if (empty && !streaming) return null
+
   return (
     <div className="text-xs">
-      <button onClick={toggle} className="group flex w-full items-center gap-1.5 text-left cursor-pointer">
+      <button
+        onClick={toggle}
+        disabled={empty}
+        className={`group flex w-full items-center gap-1.5 text-left ${empty ? 'cursor-default' : 'cursor-pointer'}`}
+      >
         {streaming ? (
           <span className="chat-text-shimmer font-medium shrink-0 text-stone-500">Thinking...</span>
         ) : (
@@ -702,11 +736,13 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
         {!streaming && !open && snippet && (
           <span className="truncate italic text-stone-400/80 dark:text-stone-500/80">{snippet}</span>
         )}
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
+        {!empty && (
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+        )}
       </button>
-      {streaming && !open && tail && (
+      {streaming && !open && !empty && tail && (
         <div className="mt-1 italic text-stone-400 dark:text-stone-500 whitespace-pre-wrap break-words line-clamp-2">
           {tail}
         </div>
@@ -977,6 +1013,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
   const sendSeqRef = useRef(1)
+  // Optimistically-shown user messages (item 26): a decreasing id counter (kept
+  // negative so it never collides with the reducer's positive ids) and the
+  // texts still awaiting their CLI echo, so a late echo is deduped rather than
+  // rendered a second time.
+  const optimisticIdRef = useRef(-1)
+  const optimisticTextsRef = useRef<string[]>([])
   // Composer attachments (same upload flow as the spawn box).
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -997,10 +1039,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
-  // Whether this head's usage is actually billed in dollars (API-key auth).
-  // Subscription heads (init apiKeySource == "none") draw from usage limits,
-  // so showing the CLI's notional total_cost_usd as money would be wrong.
-  const [costBilled, setCostBilled] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1038,10 +1076,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setTodos([])
     setReplayDone(false)
     setLiveFromId(null)
-    // Anything still pending was written to the CLI's stdin; its echo will be
-    // part of the replay this new connection delivers, so keeping the pending
-    // copy would double it.
+    // The transcript replay + the daemon's queue frame are authoritative for
+    // this new connection, so drop the optimistic copies (queued bubbles and
+    // in-flight "sending" messages) that would otherwise double them.
     setPendingSends([])
+    optimisticTextsRef.current = []
+    optimisticIdRef.current = -1
     pinnedRef.current = true
 
     let nextId = 1
@@ -1159,6 +1199,26 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       })
     }
 
+    // reconcileQueue merges the daemon's authoritative queued-message snapshot
+    // into the optimistic pending bubbles: keep in-flight "sending" bubbles and
+    // any queued bubble the server still lists, and add server-queued messages
+    // we don't have (on reconnect, local pending was reset, so this restores the
+    // whole queue - item 21's survive-navigation guarantee).
+    const reconcileQueue = (messages: { id?: string; content?: unknown }[]) => {
+      const server = messages
+        .filter((m): m is { id: string; content?: unknown } => typeof m.id === 'string')
+        .map((m) => ({ clientId: m.id, text: contentText(m.content) }))
+      const serverIds = new Set(server.map((s) => s.clientId))
+      setPendingSends((prev) => {
+        const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
+        const keptIds = new Set(kept.map((p) => p.clientId))
+        const added = server
+          .filter((s) => !keptIds.has(s.clientId))
+          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true }))
+        return [...kept, ...added]
+      })
+    }
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
@@ -1190,6 +1250,29 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
         return
       }
+      // The echo of a message we already showed optimistically (item 26): just
+      // confirm that copy (clear its sending flag) instead of rendering a
+      // duplicate. The echo can arrive after the turn's response, so relying on
+      // it for placement would put the user message below its own reply.
+      const oi = optimisticTextsRef.current.indexOf(text)
+      if (oi >= 0) {
+        optimisticTextsRef.current.splice(oi, 1)
+        setItems((prev) => {
+          let j = -1
+          for (let k = prev.length - 1; k >= 0; k--) {
+            const it = prev[k]
+            if (it.kind === 'user' && it.sending && it.text === text) {
+              j = k
+              break
+            }
+          }
+          if (j < 0) return prev
+          const next = [...prev]
+          next[j] = { ...next[j], sending: false } as ChatItem
+          return next
+        })
+        return
+      }
       settlePendingSend(text)
       push({ kind: 'user', text })
     }
@@ -1202,7 +1285,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (Array.isArray(ev.slash_commands)) {
               setSlashCommands(ev.slash_commands.filter((c): c is string => typeof c === 'string'))
             }
-            if (typeof ev.apiKeySource === 'string') setCostBilled(ev.apiKeySource !== 'none')
           }
           return
         }
@@ -1336,7 +1418,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.onopen = () => setConnected(true)
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data !== 'string') return
-      let msg: { type?: string; status?: string; head_moved?: boolean; event?: ClaudeEvent }
+      let msg: {
+        type?: string
+        status?: string
+        head_moved?: boolean
+        event?: ClaudeEvent
+        messages?: { id?: string; content?: unknown }[]
+      }
       try {
         msg = JSON.parse(e.data)
       } catch {
@@ -1357,6 +1445,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           flush()
           setLiveFromId(nextId)
           setReplayDone(true)
+          return
+        case 'queue':
+          // The daemon's authoritative snapshot of still-queued messages (sent
+          // after replay_done and on reconnect). Reconcile the optimistic
+          // bubbles: keep in-flight "sending" ones and any queued bubble the
+          // server still has, and add server-queued messages we're missing (the
+          // reload-after-navigate case, where local state was reset).
+          reconcileQueue(msg.messages ?? [])
           return
       }
     }
@@ -1460,34 +1556,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
     }, 250)
   }
-
-  // Live mirror of pendingSends + the previous turn-running flag, so the
-  // flush-on-turn-end effect (item 21) can read the queue and edge-detect
-  // without re-subscribing.
-  const pendingSendsRef = useRef<PendingSend[]>([])
-  useEffect(() => {
-    pendingSendsRef.current = pendingSends
-  }, [pendingSends])
-  const prevTurnRunningRef = useRef(isTurnRunning)
-
-  // A message typed while a turn is running is held client-side (queued) rather
-  // than handed to the CLI immediately - so it stays editable/recallable (Up
-  // arrow). When the turn ends, flush the held queue to the socket in order.
-  useEffect(() => {
-    const was = prevTurnRunningRef.current
-    prevTurnRunningRef.current = isTurnRunning
-    if (!was || isTurnRunning) return
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    const held = pendingSendsRef.current.filter((p) => p.queued)
-    if (held.length === 0) return
-    for (const p of held) {
-      ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text: p.text }] }))
-    }
-    setPendingSends((prev) => prev.map((p) => (p.queued ? { ...p, queued: false } : p)))
-    useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
-    onStatusUpdateRef.current?.(AgentStatus.RUNNING)
-  }, [isTurnRunning, agentId])
 
   // --- Composer: attachments ------------------------------------------------
 
@@ -1614,33 +1682,39 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Sending ----------------------------------------------------------------
 
-  // sendUserText hands one user turn to the socket and tracks it as an
-  // optimistic pending bubble until the CLI's echo supersedes it. While a turn
-  // is running (and the agent isn't waiting on our answer) the message is
-  // instead HELD client-side as a queued bubble - not handed to the CLI yet -
-  // so it stays editable/recallable (Up arrow, item 21); the flush effect sends
-  // it when the turn ends. Returns false when the socket isn't usable.
+  // sendUserText hands one user turn to the socket, tagged with a client id and
+  // whether a turn is currently running (queued). The daemon HOLDS a queued
+  // message (draining it when the turn ends) or delivers it immediately, and
+  // replays the held queue on reconnect (item 21) - so the queue survives
+  // closing the window / navigating away, and stays editable (Up arrow). The
+  // bubble is added optimistically; the CLI's echo (or a `queue` frame on
+  // reattach) is the source of truth. Returns false when the socket isn't usable.
   function sendUserText(text: string): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
     setPinned(true)
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
-    // not RUNNING/STARTING), so a running turn means hold-and-queue.
-    const hold = isTurnRunning
-    if (hold) {
-      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: true }])
-      return true
-    }
-    ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text }] }))
-    // Optimistic: the bubble appears immediately (sending) and is replaced by
-    // the CLI's echo of the processed turn (routeUserText).
-    setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: false }])
-    // Status is nudged optimistically exactly like the terminal's Enter
-    // handling - but not while the agent is asking a question (needs_input).
-    if (status !== AgentStatus.NEEDS_INPUT) {
-      useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
-      onStatusUpdateRef.current?.(AgentStatus.RUNNING)
+    // not RUNNING/STARTING), so a running turn means the daemon should queue it.
+    const queued = isTurnRunning
+    const clientId = crypto.randomUUID()
+    ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
+    if (queued) {
+      // A held message shows as a queued bubble pinned under the transcript
+      // (reconciled against the server's queue frame on reconnect).
+      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued }])
+    } else {
+      // A message that goes straight through appears immediately, in-flow, above
+      // the thinking/response it triggers (item 26); the CLI's echo (which can
+      // arrive after that response) is deduped by optimisticTextsRef.
+      setItems((prev) => [...prev, { kind: 'user', id: optimisticIdRef.current--, text, sending: true }])
+      optimisticTextsRef.current.push(text)
+      // It starts a turn; nudge the status optimistically (like the terminal's
+      // Enter handling), unless the agent is answering our question.
+      if (status !== AgentStatus.NEEDS_INPUT) {
+        useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+        onStatusUpdateRef.current?.(AgentStatus.RUNNING)
+      }
     }
     return true
   }
@@ -1740,11 +1814,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     // Up arrow on an empty composer dequeues the most recent still-queued
     // (unsent) message back into the box to edit (item 21). Only queued holds
-    // qualify - a message already handed to the CLI can't be recalled.
+    // qualify - a message already handed to the CLI can't be recalled. Tell the
+    // daemon to drop it from the server queue too.
     if (e.key === 'ArrowUp' && input === '' && slashMatches.length === 0) {
       const last = [...pendingSends].reverse().find((p) => p.queued)
       if (last) {
         e.preventDefault()
+        const ws = wsRef.current
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
+        }
         setPendingSends((prev) => prev.filter((p) => p.id !== last.id))
         setInput(last.text)
         return
@@ -1838,10 +1917,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     switch (item.kind) {
       case 'user':
         return (
-          <div className="flex justify-end">
-            <div className={USER_BUBBLE_CLASS}>
+          <div className="flex flex-col items-end gap-1">
+            <div className={`${USER_BUBBLE_CLASS}${item.sending ? ' opacity-75' : ''}`}>
               <Markdown text={item.text} />
             </div>
+            {item.sending && (
+              <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                <LoaderCircle className="w-3 h-3 animate-spin" />
+                Sending...
+              </div>
+            )}
           </div>
         )
       case 'command': {
@@ -1898,6 +1983,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           />
         )
       case 'result':
+        // A failed turn still surfaces its error; a successful one renders
+        // nothing - the per-turn duration/cost footer was noise (item 27).
         if (item.isError) {
           return (
             <div className="rounded-lg border border-red-300/70 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">
@@ -1905,15 +1992,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )
         }
-        return (
-          <div className="text-center text-[10px] text-stone-400/80 dark:text-stone-500/80 select-none">
-            {item.durationMs != null ? formatDuration(item.durationMs) : ''}
-            {/* total_cost_usd is a notional API-rate figure; only heads authed
-                with a real API key are billed it, so only they show it
-                (item 15 - subscription usage isn't money). */}
-            {costBilled && item.costUsd != null ? ` · $${item.costUsd.toFixed(4)}` : ''}
-          </div>
-        )
+        return null
     }
   }
 

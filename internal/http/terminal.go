@@ -384,7 +384,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 			case websocket.TextMessage:
 				if chatMode {
-					s.handleChatClientMessage(sessionID, data)
+					s.handleChatClientMessage(projectRoot, sessionID, data)
 					continue
 				}
 				var msg termResizeMsg
@@ -420,7 +420,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if head.Worktree != nil {
 				worktree = *head.Worktree
 			}
-			pumpChatOutput(conn, att, agentID, worktree)
+			s.pumpChatOutput(conn, att, projectRoot, agentID, worktree)
 			return
 		}
 		for {
