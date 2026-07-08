@@ -21,6 +21,9 @@ Status of making Hydra's web UI usable on phones and other narrow viewports.
   (`touch-none`), so they work with touch.
 - **Header/dropdowns**: overflow menus + responsive padding
   (`HeaderOverflowMenu`, `SpawnForm.tsx`); viewport meta is present.
+- **Safe-area insets**: `viewport-fit=cover` + `env(safe-area-inset-*)`
+  padding on `body` (`web/index.html`, `web/src/index.css`) keep the app
+  shell clear of notches / punch-holes / the iOS home indicator.
 - **Screenshots**: phone/tablet portrait+landscape and collapsed states are
   captured and tagged with `viewport::` axes in
   `web/scripts/screenshots/take-screenshots.ts`.
@@ -35,12 +38,10 @@ Status of making Hydra's web UI usable on phones and other narrow viewports.
 ## Remaining
 
 1. **Terminal height on mobile**: `AgentTerminal.tsx` uses a fixed 450px
-   default. Use viewport-relative sizing (`dvh`) and a shorter default on
-   small screens so the soft keyboard does not bury the composer.
-2. **Safe-area insets**: add `viewport-fit=cover` + `env(safe-area-inset-*)`
-   padding for notched phones.
-3. **Chat for Gemini / Copilot**: `chat_mode` is Claude-only (rejected for
+   default. Deliberately deprioritised: chat mode is the phone experience,
+   so this only affects deliberate raw-terminal use on a phone.
+2. **Chat for Gemini / Copilot**: `chat_mode` is Claude-only (rejected for
    other agent types in `internal/http/handlers.go`). Needs per-CLI structured
    stream support; bash stays terminal-only by nature.
-4. **Remote access/auth** for using the UI off the local machine remains out
+3. **Remote access/auth** for using the UI off the local machine remains out
    of scope here (see `[deploy]` / ngrok tooling).
