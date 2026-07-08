@@ -533,10 +533,11 @@ export function AgentDetail({
   }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // The relative "created Xs ago" labels update via the two `live` SeparatedRows
-  // in the header (see SeparatedRow / useNowTick) - each re-renders only itself
-  // once a second, instead of a page-wide setInterval re-rendering the whole
-  // agent view (diff viewer, terminal, panels) every second.
+  // The relative "created Xs ago" labels update via their own <RelativeTime>
+  // leaves (see LiveTime / useNowTick) - each re-renders only itself once a
+  // second, instead of a page-wide setInterval re-rendering the whole agent view
+  // (diff viewer, terminal, panels) every second. The metadata rows themselves
+  // are no longer `live`, so they don't re-render/re-measure on the clock.
 
   // Load the repo's branch list for the base-branch selector. Cheap (`git
   // branch`); failures just leave the selector showing the current base as
