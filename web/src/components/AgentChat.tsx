@@ -2307,9 +2307,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               {renderChatItem(item)}
             </div>
           ))}
-          {/* Optimistic sends: pinned under the transcript (above the agent's
-              in-flight reply / thinking - item 12) until the CLI echoes the
-              processed turn back, visibly queued while a turn is running. */}
+          {/* The in-flight streamed block: markdown-rendered live (with a
+              virtual closing fence while inside a code block) plus a pulsing
+              caret; streamed thinking uses the same collapsed card as settled
+              thoughts, its preview auto-updating as tokens arrive. It's the
+              current turn's response, so it sits ABOVE any queued (held-for-
+              later) messages (item 33). */}
+          {stream && stream.kind === 'assistant' && (
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
+              <Markdown text={closeOpenFence(stream.text)} />
+              <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
+            </div>
+          )}
+          {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
+          {/* Queued messages: held for later, so pinned at the very bottom under
+              the in-flight reply. (A "sending" message is an optimistic item in
+              the flow above; only queued holds land here now.) */}
           {pendingSends.map((p) => (
             <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
               <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
@@ -2330,17 +2343,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               </div>
             </div>
           ))}
-          {/* The in-flight streamed block: markdown-rendered live (with a
-              virtual closing fence while inside a code block) plus a pulsing
-              caret; streamed thinking uses the same collapsed card as settled
-              thoughts, its preview auto-updating as tokens arrive. */}
-          {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} />
-              <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
-            </div>
-          )}
-          {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user
