@@ -14,6 +14,7 @@ import {
   Globe,
   ListChecks,
   ListEnd,
+  ListPlus,
   LoaderCircle,
   Plus,
   Search,
@@ -251,7 +252,13 @@ function summarizeToolInput(input: unknown): string {
   if (input == null) return ''
   if (typeof input !== 'object') return String(input)
   const obj = input as Record<string, unknown>
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt']) {
+  // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
+  if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
+    const status = typeof obj.status === 'string' ? obj.status : ''
+    const subj = typeof obj.subject === 'string' ? obj.subject : ''
+    return `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`
+  }
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt']) {
     if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
   }
   try {
@@ -614,6 +621,8 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Task: Bot,
   Agent: Bot,
+  TaskCreate: ListPlus,
+  TaskUpdate: ListChecks,
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
@@ -1289,10 +1298,11 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
         else if (block.type === 'tool_use' && block.id) {
           const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
-          const isTask = block.name === 'TaskCreate' || block.name === 'TaskUpdate'
           if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
           else if (todos) { /* older plan state - the panel already shows the latest */ }
-          else if (isTask) { /* older Task* plan op - dropped like TodoWrite (panel holds latest) */ }
+          // Task* ops fall through to a normal tool card (like any other tool);
+          // only the panel state is latest-wins, and that is driven by the live
+          // reducer's replay, not this older page.
           else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
         }
       }
@@ -1465,37 +1475,33 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
       setTodos(list)
     }
-    // applyTaskTool folds one Task* tool_use into the plan. Returns true when the
-    // block was a Task* op (so the caller shows no tool card, like TodoWrite) and
-    // false when it wasn't one / was malformed (fall back to a normal card).
-    const applyTaskTool = (name: string | undefined, input: unknown): boolean => {
+    // applyTaskTool folds one Task* tool_use into the plan panel (TaskCreate
+    // appends a pending task; TaskUpdate mutates one by id, or drops it on status
+    // "deleted"). Non-Task tools and malformed inputs are ignored. The block is
+    // still rendered as a normal tool card by the caller, so the task-list
+    // mutation stays visible in the conversation flow too.
+    const applyTaskTool = (name: string | undefined, input: unknown) => {
       if (name === 'TaskCreate') {
         const t = parseTaskCreate(input)
-        if (!t) return false
+        if (!t) return
         taskSeq += 1
         taskItems.set(String(taskSeq), { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
         publishTasks()
-        return true
-      }
-      if (name === 'TaskUpdate') {
+      } else if (name === 'TaskUpdate') {
         const u = parseTaskUpdate(input)
-        if (!u) return false
-        const cur = taskItems.get(u.taskId)
+        if (!u) return
         // A TaskUpdate for a task we never saw created (e.g. its create predates
-        // the replay window) is still a plan op, not a card - just nothing to
-        // reflect yet.
-        if (cur) {
-          if (u.status === 'deleted') taskItems.delete(u.taskId)
-          else {
-            if (u.status) cur.status = u.status
-            if (u.content) cur.content = u.content
-            if (u.activeForm !== undefined) cur.activeForm = u.activeForm
-          }
-          publishTasks()
+        // the replay window) has nothing to reflect yet.
+        const cur = taskItems.get(u.taskId)
+        if (!cur) return
+        if (u.status === 'deleted') taskItems.delete(u.taskId)
+        else {
+          if (u.status) cur.status = u.status
+          if (u.content) cur.content = u.content
+          if (u.activeForm !== undefined) cur.activeForm = u.activeForm
         }
-        return true
+        publishTasks()
       }
-      return false
     }
 
     const pending: ChatItem[] = []
@@ -1912,17 +1918,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
-              // control_request (patchQuestionRequest). TodoWrite and the Task*
-              // family feed the floating plan panel instead of a card (item 17).
+              // control_request (patchQuestionRequest). TodoWrite feeds the
+              // floating plan panel instead of a card (item 17); the Task* family
+              // feeds the panel too but still shows its card, so each individual
+              // task-list mutation is visible in the flow.
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
               const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
                 push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
               } else if (todos) {
                 setTodos(todos)
-              } else if (applyTaskTool(block.name, block.input)) {
-                // Task* op folded into the plan panel; no tool card.
               } else {
+                applyTaskTool(block.name, block.input)
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
             }
