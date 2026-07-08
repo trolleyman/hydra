@@ -15,19 +15,17 @@ func TestKillHeadNoLock_RemovesLogs(t *testing.T) {
 	projectRoot := tmpDir
 	agentID := "test-agent"
 
-	// Create the status directory
-	statusDir := paths.GetStatusDirFromProjectRoot(projectRoot)
-	if err := os.MkdirAll(statusDir, 0755); err != nil {
-		t.Fatalf("failed to create status dir: %v", err)
-	}
-
-	// Create dummy files
+	// Each per-type file lives in its own dir now (PLAN #26); create dummies.
 	statusJson := paths.GetStatusJsonFromProjectRoot(projectRoot, agentID)
 	statusLog := paths.GetStatusLogFromProjectRoot(projectRoot, agentID)
 	buildLog := paths.GetBuildLogFromProjectRoot(projectRoot, agentID)
+	reviewJson := paths.GetReviewJsonFromProjectRoot(projectRoot, agentID)
 
-	files := []string{statusJson, statusLog, buildLog}
+	files := []string{statusJson, statusLog, buildLog, reviewJson}
 	for _, f := range files {
+		if err := os.MkdirAll(filepath.Dir(f), 0755); err != nil {
+			t.Fatalf("failed to create dir for %s: %v", f, err)
+		}
 		if err := os.WriteFile(f, []byte("dummy"), 0644); err != nil {
 			t.Fatalf("failed to create dummy file %s: %v", f, err)
 		}
