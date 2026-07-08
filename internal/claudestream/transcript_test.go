@@ -96,6 +96,68 @@ func TestLatestTranscript(t *testing.T) {
 	}
 }
 
+func TestTailSubagentTranscripts(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "session-1"
+	// Main transcript alongside the per-session subagents/ dir.
+	if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte(`{"type":"user","uuid":"u1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(dir, sessionID, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One sub-agent: its transcript entries are all sidechain (must be KEPT here,
+	// unlike the main-transcript backfill which drops them) plus a non-relayable
+	// attachment line, and a meta sidecar linking it to its Task tool_use.
+	subLines := strings.Join([]string{
+		`{"type":"user","isSidechain":true,"agentId":"a1f2","uuid":"su1","message":{"role":"user","content":[{"type":"text","text":"go look"}]}}`,
+		`{"type":"attachment","isSidechain":true,"agentId":"a1f2","uuid":"sat1"}`,
+		`{"type":"assistant","isSidechain":true,"agentId":"a1f2","uuid":"sa1","message":{"id":"m","content":[{"type":"text","text":"done"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(subDir, "agent-a1f2.jsonl"), []byte(subLines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-a1f2.meta.json"), []byte(`{"agentType":"Explore","description":"go look","toolUseId":"toolu_x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	subs, uuids := TailSubagentTranscripts(dir, sessionID, 0)
+	if len(subs) != 1 {
+		t.Fatalf("got %d sub-agents, want 1", len(subs))
+	}
+	s := subs[0]
+	if s.AgentID != "a1f2" {
+		t.Errorf("AgentID = %q, want a1f2", s.AgentID)
+	}
+	if s.Meta == nil || s.Meta.ToolUseID != "toolu_x" || s.Meta.AgentType != "Explore" {
+		t.Errorf("meta = %+v, want toolUseId toolu_x / Explore", s.Meta)
+	}
+	// user + assistant kept (sidechain preserved), attachment dropped.
+	if len(s.Lines) != 2 {
+		t.Fatalf("relayed %d lines, want 2 (user + assistant, no attachment): %s", len(s.Lines), s.Lines)
+	}
+	// Every entry's uuid (incl. the dropped attachment) is reported for ring dedup.
+	for _, u := range []string{"su1", "sat1", "sa1"} {
+		if _, ok := uuids[u]; !ok {
+			t.Errorf("uuid set missing %q", u)
+		}
+	}
+
+	// Absent subagents/ dir: nothing, no panic.
+	if subs, _ := TailSubagentTranscripts(dir, "no-such-session", 0); subs != nil {
+		t.Errorf("TailSubagentTranscripts(absent) = %v, want nil", subs)
+	}
+
+	// ReadSubagentMeta reads the sidecar directly; missing id -> not ok.
+	if m, ok := ReadSubagentMeta(dir, sessionID, "a1f2"); !ok || m.ToolUseID != "toolu_x" {
+		t.Errorf("ReadSubagentMeta = %+v, %v", m, ok)
+	}
+	if _, ok := ReadSubagentMeta(dir, sessionID, "missing"); ok {
+		t.Errorf("ReadSubagentMeta(missing) ok = true, want false")
+	}
+}
+
 func TestLatestSessionID(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite := func(name, content string, age time.Duration) {

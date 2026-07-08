@@ -83,6 +83,28 @@ type ChatItem =
   // result is the tool_result once answered.
   | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
   | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; errorText?: string }
+  // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
+  // no Task card to fold into and renders as a standalone card in the flow. The
+  // common case - a sub-agent linked to its Task card - needs no item: the Task
+  // ToolCard upgrades into a SubagentCard in place (see renderChatItem).
+  | { kind: 'subagent'; id: number; agentId: string }
+
+// A sub-agent (Claude Task tool) run, assembled from its sidechain events.
+// Keyed by agentId in the `subagents` map. `toolUseId` (from the meta frame)
+// links it to the parent Task tool card, which upgrades into a SubagentCard;
+// `items` is the sub-agent's own inner timeline (its thinking, tool calls and
+// replies) and `prompt` its opening instruction.
+interface SubagentView {
+  agentId: string
+  toolUseId?: string
+  agentType?: string
+  description?: string
+  prompt?: string
+  // 'running' until a sidechain result (or the turn's result) settles it; for a
+  // Task-linked sub the parent tool_result is the more precise done signal.
+  status: 'running' | 'done'
+  items: ChatItem[]
+}
 
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
@@ -127,6 +149,13 @@ interface ClaudeEvent {
   // Set by the CLI on the synthesized assistant message it emits when a turn
   // fails mid-response ("API Error: ... The response above may be incomplete.").
   isApiErrorMessage?: boolean
+  // Sub-agent (Task tool) markers: a sidechain event is one of a sub-agent's
+  // own inner steps, not part of the main conversation; agentId names which
+  // sub-agent. The reducer routes these into that sub-agent's card instead of
+  // the main flow (so a sub-agent's prompt no longer masquerades as a user
+  // message). Both fields ride verbatim on the stream-json lines.
+  isSidechain?: boolean
+  agentId?: string
   // Raw API event carried by stream_event lines (--include-partial-messages).
   event?: {
     type?: string
@@ -801,6 +830,128 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   )
 })
 
+// SubagentCard renders one sub-agent (Task tool) run: its inner timeline
+// (thinking / tool calls / replies), folded into a single collapsible card so a
+// sub-agent's steps - and especially its opening prompt - never leak into the
+// main conversation as stray user/assistant messages. When a Task tool card
+// spawned it (`tool` set), the card upgrades that tool card in place and shows
+// the tool_result as the sub-agent's final report; an unlinked sub-agent
+// renders standalone. Auto-expanded while running, then collapses once done
+// (unless the user pinned it open).
+const SubagentCard = memo(function SubagentCard({
+  sub,
+  tool,
+  worktree,
+  serif,
+}: {
+  sub: SubagentView
+  tool?: Extract<ChatItem, { kind: 'tool' }>
+  worktree: string | null
+  serif: boolean
+}) {
+  const running = tool ? tool.result === undefined : sub.status === 'running'
+  const [open, setOpen] = useState(running)
+  const [userToggled, setUserToggled] = useState(false)
+  // Auto-collapse when the run finishes (unless the user pinned it open), via
+  // the render-phase state-adjustment pattern React endorses over an effect.
+  const [prevRunning, setPrevRunning] = useState(running)
+  if (prevRunning !== running) {
+    setPrevRunning(running)
+    if (!running && !userToggled) setOpen(false)
+  }
+
+  const toolInput = (typeof tool?.input === 'object' && tool?.input !== null ? tool.input : null) as
+    | Record<string, unknown>
+    | null
+  const description =
+    sub.description ||
+    (typeof toolInput?.description === 'string' ? (toolInput.description as string) : '') ||
+    (sub.prompt ? sub.prompt.split('\n')[0] : '')
+  const label = sub.agentType || (typeof toolInput?.subagent_type === 'string' ? (toolInput.subagent_type as string) : '') || 'Sub-agent'
+  const report = tool?.result
+  const steps = sub.items.length
+
+  return (
+    <div
+      className={`rounded-lg border text-xs overflow-hidden ${
+        tool?.isError
+          ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+      }`}
+    >
+      <button
+        onClick={() => {
+          setUserToggled(true)
+          setOpen((o) => !o)
+        }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
+        <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+        <span className="font-medium shrink-0">{label}</span>
+        {description && <span className="truncate text-stone-400 dark:text-stone-500">{description}</span>}
+        {running ? (
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
+            <LoaderCircle className="w-3 h-3 animate-spin" />
+            working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
+          </span>
+        ) : (
+          steps > 0 && (
+            <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
+              {steps} step{steps === 1 ? '' : 's'}
+            </span>
+          )
+        )}
+      </button>
+      <Expandable open={open}>
+        <div className="px-2.5 pb-2 space-y-2 border-t border-stone-200/70 dark:border-white/[0.05] pt-2">
+          {sub.prompt && (
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                Prompt
+              </div>
+              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+                {sub.prompt}
+              </div>
+            </div>
+          )}
+          {sub.items.length > 0 && (
+            <div className="space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
+              {sub.items.map((it) =>
+                it.kind === 'thinking' ? (
+                  <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+                ) : it.kind === 'tool' ? (
+                  <ToolCard key={it.id} item={it} worktree={worktree} />
+                ) : it.kind === 'assistant' ? (
+                  <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+                    <Markdown text={it.text} />
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
+          {report !== undefined && report !== '' && (
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                Report
+              </div>
+              {tool?.isError ? (
+                <OutputPanel text={report} lang="" isError />
+              ) : (
+                <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+                  <Markdown text={report} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Expandable>
+    </div>
+  )
+})
+
 // --- Question cards (AskUserQuestion) ----------------------------------------
 //
 // Chat-mode heads launch with --permission-prompt-tool stdio, which is what
@@ -1000,6 +1151,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
   const [todos, setTodos] = useState<TodoItem[]>([])
+  // Sub-agents (Task tool runs) keyed by agentId, each assembled from its
+  // sidechain events. A linked sub folds into its Task card; an unlinked one
+  // renders via a 'subagent' item. Reset per connection like `items`.
+  const [subagents, setSubagents] = useState<Record<string, SubagentView>>({})
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -1074,6 +1229,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setItems([])
     setStream(null)
     setTodos([])
+    setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
     // The transcript replay + the daemon's queue frame are authoritative for
@@ -1141,6 +1297,117 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       setStream(null)
     }
+
+    // --- Sub-agent (Task tool) routing -------------------------------------
+    // Sidechain events are a sub-agent's own inner steps; they must not land in
+    // the main flow (that is the bug where a sub-agent's prompt showed as a user
+    // message). We accumulate each sub-agent in `subLocal`, keyed by agentId,
+    // and commit to the `subagents` state on the same replay-vs-live cadence as
+    // the main items (one batch during replay, microtask-coalesced when live).
+    const subLocal: Record<string, SubagentView> = {}
+    // Per-sub id counter (for inner item React keys) + seen-block set (idempotent
+    // block handling, mirroring the main reducer's seenBlocks).
+    const subMeta = new Map<string, { nextId: number; seen: Map<string, Set<string>> }>()
+    let subFlushScheduled = false
+    const flushSubagents = () => {
+      subFlushScheduled = false
+      // Fresh object + fresh item arrays so React re-renders the changed subs.
+      const snap: Record<string, SubagentView> = {}
+      for (const k in subLocal) snap[k] = { ...subLocal[k], items: [...subLocal[k].items] }
+      setSubagents(snap)
+    }
+    const scheduleSubFlush = () => {
+      if (replaying || subFlushScheduled) return
+      subFlushScheduled = true
+      queueMicrotask(flushSubagents)
+    }
+    const ensureSubagent = (agentId: string): SubagentView => {
+      let sub = subLocal[agentId]
+      if (!sub) {
+        sub = { agentId, status: 'running', items: [] }
+        subLocal[agentId] = sub
+        subMeta.set(agentId, { nextId: 1, seen: new Map() })
+      }
+      return sub
+    }
+    // A subagent_meta frame links a sub-agent to its Task tool_use (so the Task
+    // card upgrades into the SubagentCard in place) and labels it. A frame
+    // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
+    // into, so it gets a standalone 'subagent' item instead.
+    const markedStandalone = new Set<string>()
+    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string) => {
+      if (!agentId) return
+      const sub = ensureSubagent(agentId)
+      if (agentType) sub.agentType = agentType
+      if (description) sub.description = description
+      if (toolUseId) sub.toolUseId = toolUseId
+      else if (!markedStandalone.has(agentId)) {
+        markedStandalone.add(agentId)
+        push({ kind: 'subagent', agentId })
+      }
+      scheduleSubFlush()
+    }
+    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[]) => {
+      const resultImages = images.length > 0 ? images : undefined
+      for (const it of sub.items) {
+        if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+          it.result = result
+          it.isError = isError
+          it.resultImages = resultImages
+          return
+        }
+      }
+    }
+    // routeSidechain folds one sub-agent stream event into its card. Mirrors the
+    // main user/assistant handling, minus the specialisations that can't occur
+    // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
+    // the queue) - those render as plain items or are ignored.
+    const routeSidechain = (ev: ClaudeEvent) => {
+      const agentId = ev.agentId || '_sub'
+      const sub = ensureSubagent(agentId)
+      const meta = subMeta.get(agentId)!
+      if (ev.type === 'user') {
+        const content = ev.message?.content
+        const takePrompt = (t: string) => {
+          if (!sub.prompt && t.trim()) sub.prompt = t
+        }
+        if (typeof content === 'string') takePrompt(content)
+        else
+          for (const block of content ?? []) {
+            if (block.type === 'text' && block.text) takePrompt(block.text)
+            else if (block.type === 'tool_result' && block.tool_use_id) {
+              const parsed = parseToolResult(block.content)
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
+            }
+          }
+      } else if (ev.type === 'assistant') {
+        const content = ev.message?.content
+        if (Array.isArray(content)) {
+          const msgId = ev.message?.id ?? ''
+          let seen = meta.seen.get(msgId)
+          if (!seen) {
+            seen = new Set()
+            meta.seen.set(msgId, seen)
+          }
+          for (const block of content) {
+            const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
+            if (msgId && seen.has(key)) continue
+            if (msgId) seen.add(key)
+            if (block.type === 'text' && block.text?.trim()) {
+              sub.items.push({ kind: 'assistant', id: meta.nextId++, text: block.text })
+            } else if (block.type === 'thinking' && block.thinking?.trim()) {
+              sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking })
+            } else if (block.type === 'tool_use' && block.id) {
+              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+            }
+          }
+        }
+      } else if (ev.type === 'result') {
+        sub.status = 'done'
+      }
+      scheduleSubFlush()
+    }
+
     const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[]) => {
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
@@ -1278,6 +1545,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // A sub-agent's inner step: route it into that sub-agent's card, never the
+      // main flow. This is the fix for sub-agent prompts showing as user
+      // messages (they arrive as sidechain `user` events).
+      if (ev.isSidechain) {
+        routeSidechain(ev)
+        return
+      }
       switch (ev.type) {
         case 'system': {
           if (ev.subtype === 'init') {
@@ -1403,6 +1677,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             costUsd: ev.total_cost_usd,
             errorText: ev.is_error ? ev.result : undefined,
           })
+          // A turn ends only once all its sub-agents have; settle any still
+          // marked running (a sub whose own result line we never saw).
+          let changed = false
+          for (const k in subLocal) {
+            if (subLocal[k].status === 'running') {
+              subLocal[k].status = 'done'
+              changed = true
+            }
+          }
+          if (changed) scheduleSubFlush()
           clearStream()
           return
         }
@@ -1424,6 +1708,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         head_moved?: boolean
         event?: ClaudeEvent
         messages?: { id?: string; content?: unknown }[]
+        agentId?: string
+        toolUseId?: string
+        agentType?: string
+        description?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -1440,9 +1728,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         case 'claude_event':
           if (msg.event) handleClaudeEvent(msg.event)
           return
+        case 'subagent_meta':
+          // Links a sub-agent to its Task tool_use (folding it into that card)
+          // and labels it; arrives ahead of the sub's events live, and per-sub
+          // during backfill. Tolerates arriving after events too.
+          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
+          return
         case 'replay_done':
           replaying = false
           flush()
+          flushSubagents()
           setLiveFromId(nextId)
           setReplayDone(true)
           return
@@ -1968,8 +2263,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         return <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
-      case 'tool':
+      case 'tool': {
+        // A Task tool card whose sub-agent we've linked upgrades into the
+        // richer SubagentCard (its inner timeline + report) in place.
+        const sub = subByToolUse[item.toolUseId]
+        if (sub) return <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} />
         return <ToolCard item={item} worktree={worktreePath} />
+      }
+      case 'subagent': {
+        // A sub-agent with no parent Task card (its meta lacked a tool_use id).
+        const sub = subagents[item.agentId]
+        if (!sub) return null
+        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} />
+      }
       case 'question':
         return (
           <QuestionCard
@@ -2007,6 +2313,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
     [items],
   )
+
+  // toolUseId -> sub-agent, so a Task tool card upgrades into a SubagentCard in
+  // place (correct position, live and on backfill) without any marker item.
+  const subByToolUse = useMemo(() => {
+    const m: Record<string, SubagentView> = {}
+    for (const s of Object.values(subagents)) if (s.toolUseId) m[s.toolUseId] = s
+    return m
+  }, [subagents])
 
   return (
     <div

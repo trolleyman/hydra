@@ -1006,6 +1006,12 @@ try {
       // per-turn footers and the Claude-app composer - plus the terminal|chat
       // mode chip in the metadata row.
       { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewportOnly: true, click: 'button:has-text("Vet the package and run the retry test")' },
+      // Sub-agent (Task tool) handling: a sub-agent's steps fold into a single
+      // SubagentCard on its Task card (Bot icon, "Explore" type, description,
+      // step count) instead of leaking its prompt into the flow as a user
+      // message. Expanded here to show the folded Prompt, inner timeline and
+      // Report.
+      { name: 'agent-chat-subagent', path: '/project/sim-project/agent/agent-chat', viewportOnly: true, click: 'button:has-text("Audit upload retry tests")' },
       // Native AskUserQuestion (PLAN.md chat item 17): agent-ask is parked on a
       // live question card - radio + multi-select checkbox options with
       // descriptions, Other fields and the Submit all button.
