@@ -39,34 +39,21 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 	return errtrace.Wrap(os.WriteFile(path, data, 0644))
 }
 
-// RemoveAgentStatusFiles removes the status JSON, status log, and build log files for an agent.
+// RemoveAgentStatusFiles removes a head's per-type state files: the status JSON,
+// status log, build log, review file, sub-agents dir, and any unsent chat queue.
 func RemoveAgentStatusFiles(projectRoot, id string) {
-	statusJson := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
-	if _, err := os.Stat(statusJson); err == nil {
-		if err := os.Remove(statusJson); err != nil {
-			log.Printf("warn: heads: remove status json %s failed for %s: %v", statusJson, id, err)
+	removeState := func(what, path string) {
+		if _, err := os.Stat(path); err != nil {
+			return // absent - nothing to remove
+		}
+		if err := os.RemoveAll(path); err != nil {
+			log.Printf("warn: heads: remove %s %s failed for %s: %v", what, path, id, err)
 		}
 	}
-
-	statusLog := paths.GetStatusLogFromProjectRoot(projectRoot, id)
-	if _, err := os.Stat(statusLog); err == nil {
-		if err := os.Remove(statusLog); err != nil {
-			log.Printf("warn: heads: remove status log %s failed for %s: %v", statusLog, id, err)
-		}
-	}
-
-	buildLog := paths.GetBuildLogFromProjectRoot(projectRoot, id)
-	if _, err := os.Stat(buildLog); err == nil {
-		if err := os.Remove(buildLog); err != nil {
-			log.Printf("warn: heads: remove build log %s failed for %s: %v", buildLog, id, err)
-		}
-	}
-
-	// A chat head's queued (not-yet-sent) messages, if any survived unsent.
-	chatQueue := paths.GetChatQueueJsonFromProjectRoot(projectRoot, id)
-	if _, err := os.Stat(chatQueue); err == nil {
-		if err := os.Remove(chatQueue); err != nil {
-			log.Printf("warn: heads: remove chat queue %s failed for %s: %v", chatQueue, id, err)
-		}
-	}
+	removeState("status json", paths.GetStatusJsonFromProjectRoot(projectRoot, id))
+	removeState("status log", paths.GetStatusLogFromProjectRoot(projectRoot, id))
+	removeState("build log", paths.GetBuildLogFromProjectRoot(projectRoot, id))
+	removeState("review json", paths.GetReviewJsonFromProjectRoot(projectRoot, id))
+	removeState("subagents dir", paths.GetSubagentsDirFromProjectRoot(projectRoot, id))
+	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
 }

@@ -266,6 +266,22 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 
 /* --- Chat mode (AgentChat) ------------------------------------------------ */
 
+/* Serif agent prose (item 9/29). A controlled serif stack - Georgia leads
+   because its regular and bold faces share metrics, so bold text keeps the same
+   size and line box as the surrounding text (the generic `ui-serif` maps to a
+   system serif whose synthesized 600 weight rendered noticeably larger). A
+   touch larger than the 13px pane base, with its own line-height so bold and
+   regular lines stay even. Code inside keeps its own mono class + em sizing. */
+.chat-serif {
+  font-family: Georgia, Cambria, 'Times New Roman', Times, serif;
+  font-size: 0.9375rem; /* 15px */
+  line-height: 1.6;
+}
+.chat-serif strong,
+.chat-serif b {
+  font-weight: 700; /* Georgia's real bold face - no synthesized-weight size drift */
+}
+
 /* New live chat items (messages, tool cards, the streamed block) ease in with
    a small rise; replayed history is committed in one batch without this class
    so loading a long conversation doesn't strobe. */

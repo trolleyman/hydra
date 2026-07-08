@@ -1,8 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { CircleCheck, CircleX, RotateCcw } from 'lucide-react'
-import { api } from '../../stores/apiClient'
+import { ensureReviewConfig, useProjectStore } from '../../stores/projectStore'
 import type { ReviewConfig } from '../../api/models/ReviewConfig'
-import type { ReviewConfigResponse } from '../../api/models/ReviewConfigResponse'
 import { StorageKeys } from '../../lib/storage'
 import { SettingSection } from './shared'
 import { ProviderIcon } from '../ReviewControls'
@@ -36,20 +35,13 @@ export function ReviewSection({
   projectId: string | null
   scope: 'project' | 'local' | 'user'
 }) {
-  const [resolved, setResolved] = useState<ReviewConfigResponse | null>(null)
+  // The resolved (effective) config comes from the shared project-store cache,
+  // filled once per project by whichever consumer asks first - not refetched on
+  // every mount of this section. The settings save handler force-refreshes it,
+  // so the "effective" hints below track a saved [review] change.
+  const resolved = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] : undefined)) ?? null
   useEffect(() => {
-    let alive = true
-    if (projectId) {
-      api.default
-        .getReviewConfig(projectId)
-        .then((c) => {
-          if (alive) setResolved(c)
-        })
-        .catch(() => {})
-    }
-    return () => {
-      alive = false
-    }
+    if (projectId) void ensureReviewConfig(projectId)
   }, [projectId])
 
   const r = review ?? {}

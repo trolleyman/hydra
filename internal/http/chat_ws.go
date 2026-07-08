@@ -37,6 +37,10 @@ type chatClientMsg struct {
 	// the daemon HOLDS it (queues) rather than delivering it now, and drains it
 	// when the turn ends. False (or absent) delivers it immediately.
 	Queued bool `json:"queued,omitempty"`
+	// Before is the uuid of the client's current oldest history line on a
+	// load_before (infinite scroll) request - the daemon returns the batch
+	// older than it.
+	Before string `json:"before,omitempty"`
 	// Content is the content-block array of a user_message, forwarded to the
 	// CLI verbatim (the client owns the block shapes; the daemon only wraps
 	// them in the stdin envelope).
@@ -130,14 +134,20 @@ func sendSubagentMeta(conn *safeConn, agentID string, meta *claudestream.Subagen
 var chatInterruptSeq atomic.Uint64
 
 // handleChatClientMessage services one text frame from a chat client.
-// projectRoot locates the head's on-disk message queue.
-func (s *Server) handleChatClientMessage(projectRoot, sessionID string, data []byte) {
+// projectRoot locates the head's on-disk message queue; worktree locates its
+// transcript for load-older; conn is needed to answer a load_before.
+func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, sessionID string, data []byte) {
 	var msg chatClientMsg
 	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Printf("chat ws: bad client frame for %q: %v", sessionID, err)
 		return
 	}
 	switch msg.Type {
+	case "load_before":
+		// Infinite scroll: send the batch of conversation history older than the
+		// client's current oldest line (msg.Before is that line's uuid).
+		sendChatHistoryBefore(conn, worktree, sessionID, msg.Before)
+		return
 	case "user_message":
 		if !json.Valid(msg.Content) {
 			log.Printf("chat ws: bad user_message content for %q", sessionID)
@@ -304,6 +314,50 @@ func backfillChatHistory(conn *safeConn, agentID, worktree string, subs *subagen
 		}
 	}
 	return uuids
+}
+
+// chatTranscriptPath resolves the head's newest Claude transcript file, or ""
+// when there's no worktree/dir/file yet.
+func chatTranscriptPath(worktree string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || worktree == "" {
+		return ""
+	}
+	return claudestream.LatestTranscript(filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree)))
+}
+
+// chatHistoryFrame answers a load_before: a batch of older conversation lines
+// (oldest-first, ready to prepend) plus done=true once the transcript start is
+// reached. Sent as raw claude_event lines so the client reduces them exactly
+// like the initial replay.
+type chatHistoryFrame struct {
+	terminalEvent
+	Events []json.RawMessage `json:"events"`
+	Done   bool              `json:"done"`
+}
+
+// sendChatHistoryBefore relays the conversation batch older than beforeUUID (the
+// client's current oldest line) for infinite scroll. A missing transcript or
+// empty before-uuid yields an empty, done frame so the client stops asking.
+func sendChatHistoryBefore(conn *safeConn, worktree, agentID, beforeUUID string) {
+	frame := chatHistoryFrame{terminalEvent: terminalEvent{Type: "history_before"}, Done: true}
+	transcript := chatTranscriptPath(worktree)
+	if transcript != "" && beforeUUID != "" {
+		lines, done, err := claudestream.HistoryBefore(transcript, beforeUUID, claudestream.HistoryBatchBytes)
+		if err != nil {
+			log.Printf("chat ws: history before for %q: %v", agentID, err)
+		} else {
+			frame.Done = done
+			for _, line := range lines {
+				frame.Events = append(frame.Events, json.RawMessage(line))
+			}
+		}
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
 // pumpChatOutput relays a chat session's output to the socket until the

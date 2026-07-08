@@ -895,17 +895,26 @@ Check items off in the commit that lands them.
     font, bubbles, cards, app theming) + Claude Code function (tool cards,
     slash commands, Ctrl+C, jump-to-bottom); terminal-panel chrome (traffic
     lights, dark tab bar) themed away when the chat tab is active.
-26. [ ] **Per-head state files: folder-per-type.** TODO (not in this branch):
-    the per-head state files under `.hydra/local/status/` are keyed
-    `<id>_<suffix>` (status.json is the un-suffixed base), so a suffixed file of
-    head `foo` (e.g. `foo_review.json`) can theoretically collide with the
-    status file of a head literally named `foo_review` - head ids allow `_`
-    (`headIDRe`), even though auto-generated slugs use only `-`. The chat queue
-    already dodges this by living in its own `.hydra/local/queue/<id>.json` dir
-    (bare id = whole filename, like `ns/<id>` and `approvals/<id>`). Reorganise
-    the rest of the `status/` tree the same way (one dir per file type keyed by
-    bare id) to make it collision-proof. Deferred because it means moving the
-    load-bearing `status.json` - bound into each sandbox at a fixed path,
-    written by the in-sandbox hooks, read by the poller, and present on disk for
-    existing heads - so it needs a careful path + hook-contract migration, not
-    worth bundling with the chat work.
+26. [x] **Per-head state files: folder-per-type.** The per-head companion files
+    that used to sit under `.hydra/local/status/` as `<id>_<suffix>` siblings of
+    `status.json` now each live in their OWN type-keyed dir, keyed by the bare id:
+    `status-log/<id>.jsonl`, `build-log/<id>.log`, `review/<id>.json`,
+    `subagents/<id>/`, `queue/<id>.json`. `status.json` stays the base name in
+    `status/` (nothing else shares that dir now, so it can't collide). This is
+    collision-proof: a head id may contain `_` (`headIDRe`), so the old
+    `status/<id>_review.json` could alias the status file of a head literally
+    named `<id>_review`; a bare-id filename in its own dir can't. Turned out
+    NOT to need moving `status.json` and to be low-risk: the in-sandbox side finds
+    these files via env vars (`HYDRA_STATUS_LOG_PATH`, `HYDRA_REVIEW_PATH`,
+    `HYDRA_SUBAGENTS_DIR`) whose values come from the path helpers, and the
+    writable binds come from `WritablePaths` (also the helpers) - so changing a
+    helper propagates to the daemon, the sandbox bind and the hook together;
+    `seed.go` just ensures the new dirs exist. No on-disk migration: an existing
+    head's old files orphan harmlessly (status.json itself is unchanged, so the
+    displayed status is unaffected; logs/review/subagents are transient and are
+    recreated at the new paths on the next spawn) - and a migration couldn't
+    safely disambiguate `foo_review.json` (foo's review vs foo_review's status)
+    without the DB, which isn't open yet at migration time. The sandbox
+    *writable-bind* itself is the same mechanism as before, unchanged, so it's
+    low-risk but unverified here (bwrap blocked); worth a real-daemon smoke test
+    like the chat queue.

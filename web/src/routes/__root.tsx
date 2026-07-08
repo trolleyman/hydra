@@ -1,7 +1,7 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
 import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
-import { useProjectStore } from '../stores/projectStore'
+import { ensureReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
 import { useEventStream } from '../lib/useEventStream'
@@ -136,7 +136,6 @@ function RootLayout() {
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
   const setProjects = useProjectStore((s) => s.setProjects)
   const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
-  const setReviewConfig = useProjectStore((s) => s.setReviewConfig)
   const agents = useAgentStore((s) => s.agents)
   const addAgent = useAgentStore((s) => s.addAgent)
   const markRead = useAgentStore((s) => s.markRead)
@@ -157,19 +156,14 @@ function RootLayout() {
     if (currentProjectId) touchProject(currentProjectId)
   }, [currentProjectId])
   // Resolved [review] config for the current project, cached in the project
-  // store (the agent page loads it too - whichever runs first wins). The
-  // sidebar uses its browse_url for the forge web link next to Repository
+  // store (the agent page and settings load it too - ensureReviewConfig dedupes
+  // concurrent fetches, so only one request runs). The sidebar uses its
+  // browse_url for the forge web link next to Repository
   // (NON_LOCAL_INTEGRATION.md 3.8).
   const reviewConfig = useProjectStore((s) => (currentProjectId ? s.reviewConfigs[currentProjectId] : undefined))
   useEffect(() => {
-    if (!currentProjectId || reviewConfig) return
-    let cancelled = false
-    api.default.getReviewConfig(currentProjectId).then(
-      (cfg) => { if (!cancelled) setReviewConfig(currentProjectId, cfg) },
-      () => { /* no forge link; harmless - the agent page retries on open */ },
-    )
-    return () => { cancelled = true }
-  }, [currentProjectId, reviewConfig, setReviewConfig])
+    if (currentProjectId && !reviewConfig) void ensureReviewConfig(currentProjectId)
+  }, [currentProjectId, reviewConfig])
   // Whether the user actually has this page in front of them (foreground tab +
   // focused window). Gates the unread auto-clear so a backgrounded page doesn't
   // silently dismiss agents the user hasn't actually looked at.
