@@ -4,12 +4,15 @@ import {
   ArrowUp,
   Bot,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Circle,
   CircleStop,
   FilePen,
   FileText,
   Globe,
+  ListChecks,
   ListEnd,
   LoaderCircle,
   Plus,
@@ -128,6 +131,19 @@ interface ClaudeEvent {
   // require user interaction.
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
+}
+
+// formatDuration renders a millisecond span compactly, rolling up into
+// m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`
+  const d = Math.floor(h / 24)
+  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
 }
 
 // closeOpenFence appends a virtual closing fence when a streaming text ends
@@ -252,6 +268,96 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
     return ''
   }
   return { text: stripToolUseError(collect(content)), images }
+}
+
+// --- Plan / to-do panel (TodoWrite) -----------------------------------------
+
+// One entry of the agent's TodoWrite list. `activeForm` is the present-tense
+// label the CLI shows while a step is in progress ("Running tests").
+interface TodoItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  activeForm?: string
+}
+
+// parseTodos validates a TodoWrite tool input ({todos: [...]}), returning null
+// for anything malformed so the call falls back to a normal tool card.
+function parseTodos(input: unknown): TodoItem[] | null {
+  if (!input || typeof input !== 'object') return null
+  const todos = (input as { todos?: unknown }).todos
+  if (!Array.isArray(todos)) return null
+  const out: TodoItem[] = []
+  for (const t of todos) {
+    if (!t || typeof t !== 'object') continue
+    const o = t as Record<string, unknown>
+    if (typeof o.content !== 'string' || !o.content) continue
+    const status = o.status === 'in_progress' || o.status === 'completed' ? o.status : 'pending'
+    out.push({ content: o.content, status, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined })
+  }
+  return out.length ? out : null
+}
+
+// PlanPanel floats the agent's current to-do list (its latest TodoWrite) in the
+// chat's top-right corner (item 17): a compact card that expands to the checklist
+// and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
+// too narrow to sit a card alongside the transcript.
+function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
+  const [open, setOpen] = useState(!narrow)
+  // Follow the narrow/wide flip (collapse when it gets tight, re-open when it
+  // widens) while still letting the user toggle in between - a render-phase sync
+  // like the settings fields use.
+  const [prevNarrow, setPrevNarrow] = useState(narrow)
+  if (prevNarrow !== narrow) {
+    setPrevNarrow(narrow)
+    setOpen(!narrow)
+  }
+  const total = todos.length
+  const done = todos.filter((t) => t.status === 'completed').length
+  const allDone = total > 0 && done === total
+
+  return (
+    <div className="absolute top-3 right-3 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <ListChecks className={`w-3.5 h-3.5 shrink-0 ${allDone ? 'text-emerald-500' : 'text-[#c96442]'}`} />
+        <span className="text-xs font-semibold shrink-0">Plan</span>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-stone-400 dark:text-stone-500">
+          {done}/{total}
+        </span>
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
+      </button>
+      <Expandable open={open}>
+        <ul className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+          {todos.map((t, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              {t.status === 'completed' ? (
+                <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
+              ) : t.status === 'in_progress' ? (
+                <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
+              ) : (
+                <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
+              )}
+              <span
+                className={
+                  t.status === 'completed'
+                    ? 'line-through text-stone-400 dark:text-stone-500'
+                    : t.status === 'in_progress'
+                      ? 'font-medium text-stone-700 dark:text-stone-200'
+                      : 'text-stone-500 dark:text-stone-400'
+                }
+              >
+                {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Expandable>
+    </div>
+  )
 }
 
 // --- Claude-app-ish shared styles -------------------------------------------
@@ -550,7 +656,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
 
   // The settled label keeps the same disclosure affordance but names the elapsed
   // time when we timed it live (item 11), e.g. "Thought for 5s".
-  const settledLabel = durationMs != null ? `Thought for ${Math.max(1, Math.round(durationMs / 1000))}s` : 'Thought'
+  const settledLabel = durationMs != null ? `Thought for ${formatDuration(durationMs)}` : 'Thought'
 
   const trimmed = text.trim()
   const snippet = trimmed.split('\n')[0] ?? ''
@@ -848,6 +954,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // deltas), rendered live below the settled items and superseded by the
   // complete assistant event that follows it.
   const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
+  // The agent's current plan (its latest TodoWrite), shown in the floating
+  // PlanPanel (item 17). Empty until the agent writes a to-do list.
+  const [todos, setTodos] = useState<TodoItem[]>([])
+  // Chat pane width, tracked so the plan panel collapses when there's no room
+  // to sit it alongside the transcript.
+  const [paneWidth, setPaneWidth] = useState(0)
   const [replayDone, setReplayDone] = useState(false)
   // Item ids >= this animate in (they arrived live); replayed history commits
   // in one batch without the entrance animation. null while replaying.
@@ -916,6 +1028,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => {
     setItems([])
     setStream(null)
+    setTodos([])
     setReplayDone(false)
     setLiveFromId(null)
     // Anything still pending was written to the CLI's stdin; its echo will be
@@ -1150,10 +1263,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
-              // control_request (patchQuestionRequest).
+              // control_request (patchQuestionRequest). TodoWrite feeds the
+              // floating plan panel instead of a card (item 17).
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
+              const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
                 push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+              } else if (todos) {
+                setTodos(todos)
               } else {
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
@@ -1263,6 +1380,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const el = scrollRef.current
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
   }, [items, stream, replayDone, pendingSends])
+
+  // Track the pane width so the plan panel (item 17) can collapse when there's
+  // no room to float it alongside the centered transcript.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setPaneWidth(el.clientWidth))
+    ro.observe(el)
+    setPaneWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
 
   // Restore the remembered per-agent scroll offset once the replayed history
   // has rendered (item 20). A saved offset only exists when the user had
@@ -1723,7 +1851,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
         return (
           <div className="text-center text-[10px] text-stone-400/80 dark:text-stone-500/80 select-none">
-            {item.durationMs != null ? `${(item.durationMs / 1000).toFixed(1)}s` : ''}
+            {item.durationMs != null ? formatDuration(item.durationMs) : ''}
             {/* total_cost_usd is a notional API-rate figure; only heads authed
                 with a real API key are billed it, so only they show it
                 (item 15 - subscription usage isn't money). */}
@@ -1827,6 +1955,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <ArrowDown className="w-4 h-4" />
           </button>
         )}
+        {/* Current plan (item 17): the agent's latest TodoWrite, floated in the
+            top-right; collapses to a chip when the pane is narrow. */}
+        {todos.length > 0 && replayDone && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
       </div>
 
       {/* Composer (item 12): one rounded card - textarea on top, controls in a
