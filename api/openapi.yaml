@@ -2612,6 +2612,15 @@ components:
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
+        git_isolation:
+          type: string
+          description: >-
+            How much of the repo's shared .git this head may write (see
+            GIT_ISOLATION.md). "off" (default) writable; "refs" locks refs/ so
+            commits go through the mcp__hydra__git_commit tool and can't leave the
+            branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the
+            head its own repo (falls back to readonly until built). Omitted inherits
+            the agent-type policy default.
         cols:
           type: integer
           description: >-

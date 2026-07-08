@@ -36,6 +36,10 @@ export type SpawnAgentRequest = {
      */
     ephemeral?: boolean;
     /**
+     * How much of the repo's shared .git this head may write (see GIT_ISOLATION.md). "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the head its own repo (falls back to readonly until built). Omitted inherits the agent-type policy default.
+     */
+    git_isolation?: string;
+    /**
      * Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
      */
     cols?: number;

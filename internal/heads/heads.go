@@ -49,6 +49,9 @@ type Head struct {
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
 	// renders a chat view instead of a terminal (Claude only).
 	ChatMode bool
+	// GitIsolation is the head's per-head git-isolation override (off/refs/readonly/
+	// clone; "" = agent-type policy default). See GIT_ISOLATION.md.
+	GitIsolation string
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp; 0 if not started
@@ -128,6 +131,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			PrePrompt:        a.PrePrompt,
 			Prompt:           a.Prompt,
 			BaseBranch:       a.BaseBranch,
+			GitIsolation:     a.GitIsolation,
 			Ephemeral:        a.Ephemeral,
 			ChatMode:         a.ChatMode,
 			CreatedAt:        a.CreatedAt.Unix(),
@@ -296,21 +300,22 @@ func archivedHead(a *db.Agent) Head {
 		branch = &b
 	}
 	return Head{
-		ID:          a.ID,
-		Title:       a.Title,
-		Branch:      branch,
-		Worktree:    nil,
-		ProjectPath: a.ProjectPath,
-		AgentType:   sandbox.AgentType(a.AgentType),
-		PrePrompt:   a.PrePrompt,
-		Prompt:      a.Prompt,
-		BaseBranch:  a.BaseBranch,
-		Ephemeral:   a.Ephemeral,
-		ChatMode:    a.ChatMode,
-		CreatedAt:   a.CreatedAt.Unix(),
-		AgentStatus: archivedAgentStatus(a),
-		Archived:    true,
-		EndState:    a.EndState,
+		ID:           a.ID,
+		Title:        a.Title,
+		Branch:       branch,
+		Worktree:     nil,
+		ProjectPath:  a.ProjectPath,
+		AgentType:    sandbox.AgentType(a.AgentType),
+		PrePrompt:    a.PrePrompt,
+		Prompt:       a.Prompt,
+		BaseBranch:   a.BaseBranch,
+		GitIsolation: a.GitIsolation,
+		Ephemeral:    a.Ephemeral,
+		ChatMode:     a.ChatMode,
+		CreatedAt:    a.CreatedAt.Unix(),
+		AgentStatus:  archivedAgentStatus(a),
+		Archived:     true,
+		EndState:     a.EndState,
 	}
 }
 
@@ -453,6 +458,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			ProjectPath:   projectRoot,
 			BranchName:    branchName,
 			BaseBranch:    baseBranch,
+			GitIsolation:  opts.GitIsolation,
 			AgentType:     string(opts.AgentType),
 			PrePrompt:     opts.PrePrompt,
 			Prompt:        opts.Prompt,
@@ -635,6 +641,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		PrePrompt:     opts.PrePrompt,
 		Prompt:        opts.Prompt,
 		BaseBranch:    baseBranch,
+		GitIsolation:  opts.GitIsolation,
 		Ephemeral:     opts.Ephemeral,
 		ChatMode:      opts.ChatMode,
 		AgentStatus:   initialStatus,
@@ -888,7 +895,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
 		// The bash shell shares the head's worktree, so it inherits the head's
 		// git-isolation mode: a shell must not be able to write refs the agent can't.
-		shellGitIso := resolveGitIsolation(cfg, string(head.AgentType), "")
+		shellGitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{}, shellGitIso)
 		if err != nil {
 			return "", errtrace.Wrap(err)
@@ -1020,9 +1027,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			_ = os.Remove(p)
 		}
 	}
-	// Per-spawn override persistence lands with the db column (next stage); until
-	// then resume honours the agent-type policy default.
-	gitIso := resolveGitIsolation(cfg, string(head.AgentType), "")
+	// Re-apply the head's persisted git-isolation override (empty = policy default),
+	// so a resume after a daemon restart keeps the same .git lockdown.
+	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso)
 	if err != nil {
 		return errtrace.Wrap(err)

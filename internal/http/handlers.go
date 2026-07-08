@@ -1347,6 +1347,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		}, nil
 	}
 
+	var gitIsolation string
+	if request.Body.GitIsolation != nil {
+		gitIsolation = string(*request.Body.GitIsolation)
+	}
+
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
 	// 80x24 - those narrow-wrapped bytes can't be re-flowed once a wider client
@@ -1371,6 +1376,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
 		ChatMode:      chatMode,
+		GitIsolation:  gitIsolation,
 		Replace:       force,
 		Rows:          rows,
 		Cols:          cols,
