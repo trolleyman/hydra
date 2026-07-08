@@ -16,7 +16,7 @@ import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { AgentSidebarItem } from '../components/AgentComponents'
@@ -128,7 +128,7 @@ function RootLayout() {
     onCancel: () => void
   } | null>(null)
 
-  const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
+  const { projects, selectedProjectId, setProjects, setSelectedProjectId, reviewConfigs, setReviewConfig } = useProjectStore()
   const { agents, addAgent, markRead, patchAgentTests } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
@@ -145,6 +145,20 @@ function RootLayout() {
   useEffect(() => {
     if (currentProjectId) touchProject(currentProjectId)
   }, [currentProjectId])
+  // Resolved [review] config for the current project, cached in the project
+  // store (the agent page loads it too - whichever runs first wins). The
+  // sidebar uses its browse_url for the forge web link next to Repository
+  // (NON_LOCAL_INTEGRATION.md 3.8).
+  const reviewConfig = currentProjectId ? reviewConfigs[currentProjectId] : undefined
+  useEffect(() => {
+    if (!currentProjectId || reviewConfig) return
+    let cancelled = false
+    api.default.getReviewConfig(currentProjectId).then(
+      (cfg) => { if (!cancelled) setReviewConfig(currentProjectId, cfg) },
+      () => { /* no forge link; harmless - the agent page retries on open */ },
+    )
+    return () => { cancelled = true }
+  }, [currentProjectId, reviewConfig, setReviewConfig])
   // Whether the user actually has this page in front of them (foreground tab +
   // focused window). Gates the unread auto-clear so a backgrounded page doesn't
   // silently dismiss agents the user hasn't actually looked at.
@@ -622,9 +636,9 @@ function RootLayout() {
           </Tooltip>
         </div>
 
-          <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
-
-          {/* Repository view + Sync - sit between the spawn box and the agents list */}
+          {/* Repository view + Sync - above the spawn box, adjacent to the project
+              selector it describes: context (repo/branch/sync) -> action (spawn)
+              -> results (agents list). NON_LOCAL_INTEGRATION.md 3.8. */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
               (() => {
@@ -676,6 +690,25 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </Link>
+                    {/* Forge web link, derived from the remote URL (read-only, no
+                        auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                        no remote or no https browse URL could be derived. */}
+                    {reviewConfig?.browse_url && (
+                      <Tooltip
+                        content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                        className="shrink-0"
+                      >
+                        <a
+                          href={reviewConfig.browse_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Open repository on the forge"
+                          className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        >
+                          <ExternalLink className="w-4 h-4 shrink-0" />
+                        </a>
+                      </Tooltip>
+                    )}
                     {/* Uncommitted-changes warning: the project checkout is dirty
                         (e.g. a Settings save rewrote .hydra/config.toml). Click to
                         review the paths and commit them all. */}
@@ -734,6 +767,8 @@ function RootLayout() {
               </div>
             )}
           </div>
+
+          <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
           <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1.5">
             <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">

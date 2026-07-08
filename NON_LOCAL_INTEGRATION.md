@@ -15,8 +15,10 @@ implemented yet:)
   Killing or locally merging a head with a linked MR does nothing about the
   MR/remote branch; there is no Close/Detach flow in `KillAgent` /
   `performClaimedMerge` / `AgentDetail.tsx`.
-- [ ] **Protected-branches warning** (3.2). `protected_branches` is parsed
-  and echoed through the config API but the local-merge path never checks it.
+- [x] **Protected-branches warning** (3.2). ~~`protected_branches` is parsed
+  and echoed through the config API but the local-merge path never checks
+  it.~~ Done: the merge confirm dialog cautions when the target branch is in
+  `protected_branches` (`AgentDetail.tsx` `showMergeConfirm`).
 - [ ] **Fetch-fresh spawn base + remote-aware behind-count** (3.6).
   `SpawnHead` still defaults to `git.GetCurrentBranch(projectRoot)`; no
   fetch-before-spawn, no `<remote>/<target>` base resolution.
@@ -24,9 +26,10 @@ implemented yet:)
   is not retargeted at trunk (`handleRemoteMerge` only fetch/ff/tears down).
 - [ ] **Token/REST auth fallback** (3.4). `auth = "token"` returns
   NotConfiguredError; forge access is CLI-only (`gh`/`glab`) today.
-- [ ] **Sidebar reorder + forge web-link icon** (3.8). Repository row still
+- [x] **Sidebar reorder + forge web-link icon** (3.8). ~~Repository row still
   sits below the spawn box; `browse_url` is returned by the API but no
-  component renders a forge link.
+  component renders a forge link.~~ Done: Repository row sits above the spawn
+  box and carries an external-link icon to the forge (`__root.tsx`).
 - [ ] **Phase 4: spawn-from-ticket / JIRA fetch.** Only the `{ticket}`
   branch-template rung is wired (`ExtractTicket`, `ticket_pattern`); there is
   no JIRA REST client, no ticket-summary-into-prompt, no "my open tickets"

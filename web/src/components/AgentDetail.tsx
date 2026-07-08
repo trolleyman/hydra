@@ -722,12 +722,20 @@ export function AgentDetail({
     const parentWarning = parent && parent.session_status === 'running'
       ? `Parent agent "${parent.id}" is running - merging will change its working files.`
       : undefined
+    // Warn before a direct local merge into a branch listed in the [review]
+    // protected_branches config (NON_LOCAL_INTEGRATION.md 3.2): the branch is
+    // protected on the forge, so the local merge would land commits the server
+    // will refuse on push - the MR path is the intended route.
+    const reviewCfg = useProjectStore.getState().reviewConfigs[projectId ?? '']
+    const protectedWarning = reviewCfg?.protected_branches?.includes(toBranch)
+      ? `${toBranch} is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
+      : undefined
     const lead = parent
       ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
       : `Merges this agent’s work into ${toBranch}${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
     // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
     // uncommitted-changes note the background check would otherwise add.
-    const caution = opts.caution ?? parentWarning
+    const caution = opts.caution ?? protectedWarning ?? parentWarning
 
     // Show the dialog immediately so it never lags behind a slow git query.
     // The diff stats + uncommitted-changes check run in the background and fold
