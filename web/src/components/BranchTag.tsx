@@ -31,7 +31,7 @@ export function BranchTag({ branch }: { branch: string }) {
         type="button"
         title="Copy branch name"
         aria-label="Copy branch name"
-        className="text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
+        className="cursor-pointer text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
         onClick={() => {
           copyBranchName(branch)
           setCopied(true)
