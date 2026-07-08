@@ -2,6 +2,7 @@ package gate
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -55,20 +56,32 @@ func TestDecide(t *testing.T) {
 		{"bash cat settings stderr-redirect allowed", "Bash", map[string]any{"command": "cat ~/.claude/settings.json 2>/dev/null"}, Allow},
 		{"bash grep settings allowed", "Bash", map[string]any{"command": "grep model ~/.claude/settings.json"}, Allow},
 		{"bash jq settings allowed", "Bash", map[string]any{"command": "jq .hooks /etc/claude-code/managed-settings.json | head"}, Allow},
-		// A bare mention of the tamper keys (no write) is allowed - e.g. a commit
-		// message describing the gate, or echoing the key name.
-		{"bash commit msg mentioning key allowed", "Bash", map[string]any{"command": `git commit -m "gate: deny disableAllHooks writes to .claude/settings.json"`}, Allow},
+		// A bare mention of the tamper keys (no write) is allowed - e.g. echoing the
+		// key name. (A commit message mentioning it is now denied as a commit, below.)
 		{"bash echo key no write allowed", "Bash", map[string]any{"command": "echo checking for disableAllHooks"}, Allow},
 		{"bash write tamper key denied", "Bash", map[string]any{"command": `printf disableAllHooks >> /tmp/x`}, Deny},
 		{"write managed settings denied", "Write", map[string]any{"file_path": "/etc/claude-code/managed-settings.json"}, Deny},
 		{"bash git push denied", "Bash", map[string]any{"command": "git push origin main"}, Deny},
 		{"bash git push dry-run allowed", "Bash", map[string]any{"command": "git push --dry-run"}, Allow},
 		{"bash chained git push denied", "Bash", map[string]any{"command": "echo done && git push origin main"}, Deny},
-		// The bare substring "git push" inside an argument / grep pattern / commit
-		// message must NOT trip the wire - matching those would hard-deny a
-		// legitimate command (the anchor to a command boundary is what saves them).
+		// The bare substring "git push" inside an argument / grep pattern must NOT
+		// trip the wire - matching those would hard-deny a legitimate command (the
+		// anchor to a command boundary is what saves them).
 		{"bash grep for git push allowed", "Bash", map[string]any{"command": "grep -rn 'git push' internal/"}, Allow},
-		{"bash commit msg mentioning git push allowed", "Bash", map[string]any{"command": "git commit -m 'document the git push flow'"}, Allow},
+		// Raw `git commit` is denied - it is routed through the mcp__hydra__git_commit
+		// tool so a commit can't land on the main repo or a sibling head's branch.
+		{"bash git commit denied", "Bash", map[string]any{"command": "git commit -m 'wip'"}, Deny},
+		{"bash git commit -am denied", "Bash", map[string]any{"command": "git commit -am 'wip'"}, Deny},
+		{"bash git commit amend denied", "Bash", map[string]any{"command": "git commit --amend --no-edit"}, Deny},
+		{"bash git -c commit denied", "Bash", map[string]any{"command": "git -c user.name=x commit -m y"}, Deny},
+		{"bash chained git commit denied", "Bash", map[string]any{"command": "go build ./... && git commit -m done"}, Deny},
+		// ...but read-only git and staging stay allowed (they don't create history or
+		// move refs), and the bare substring "git commit" in an argument doesn't trip.
+		{"bash git status allowed", "Bash", map[string]any{"command": "git status"}, Allow},
+		{"bash git diff allowed", "Bash", map[string]any{"command": "git diff --stat HEAD"}, Allow},
+		{"bash git log allowed", "Bash", map[string]any{"command": "git log --oneline -5"}, Allow},
+		{"bash git add allowed", "Bash", map[string]any{"command": "git add -A"}, Allow},
+		{"bash grep for git commit allowed", "Bash", map[string]any{"command": "grep -rn 'git commit' internal/"}, Allow},
 		{"bash pkill denied", "Bash", map[string]any{"command": "pkill -f simulation"}, Deny},
 		{"bash killall denied", "Bash", map[string]any{"command": "killall node"}, Deny},
 		{"bash chained pkill denied", "Bash", map[string]any{"command": "rm -f x && pkill -f 'go run'"}, Deny},
@@ -79,14 +92,12 @@ func TestDecide(t *testing.T) {
 		{"bash grep for pkill allowed", "Bash", map[string]any{"command": "grep -rn pkill internal/"}, Allow},
 		{"bash kill by pid allowed", "Bash", map[string]any{"command": "kill \"$SRV\""}, Allow},
 		{"bash normal allowed", "Bash", map[string]any{"command": "go test ./..."}, Allow},
-		// Commit-message TEXT must not trip the tripwires - a -m message or a
-		// `git commit -F -` heredoc body is documentation, not executed shell. These
-		// mention tamper keys / installs / a stray ">" that used to false-positive.
-		{"bash commit -m mentioning tamper key allowed", "Bash", map[string]any{"command": `git commit -m "gate: a head cannot disableAllHooks > settings from the shell"`}, Allow},
-		{"bash commit -m mentioning apt install allowed", "Bash", map[string]any{"command": `git commit -m "document the apt-get install flow"`}, Allow},
-		{"bash commit heredoc mentioning tamper key allowed", "Bash", map[string]any{"command": "git commit -F - <<'EOF'\nnote: disableAllHooks and a > char in the body\nEOF"}, Allow},
-		// ...but real writes are still caught, incl. a NON-commit heredoc into a
-		// settings file and a tamper redirect chained after a commit (no bypass).
+		// `git commit` is now denied outright (routed to the tool), but scrubbing of
+		// commit-message TEXT still runs first so the deny carries the commit-routing
+		// reason rather than a tripwire misfire - and a NON-commit heredoc into a
+		// settings file is still caught as a real write (no bypass).
+		{"bash commit -m mentioning apt install denied", "Bash", map[string]any{"command": `git commit -m "document the apt-get install flow"`}, Deny},
+		{"bash commit heredoc denied", "Bash", map[string]any{"command": "git commit -F - <<'EOF'\nnote: disableAllHooks and a > char in the body\nEOF"}, Deny},
 		{"bash non-commit heredoc into settings denied", "Bash", map[string]any{"command": "cat > ~/.claude/settings.json <<'EOF'\n{\"disableAllHooks\":true}\nEOF"}, Deny},
 		{"bash tamper write chained after commit denied", "Bash", map[string]any{"command": `git commit -m ok && printf disableAllHooks >> ~/.claude/settings.json`}, Deny},
 		{"unrecognized tool parked", "SomeNewTool", map[string]any{"x": "y"}, Ask},
@@ -180,6 +191,22 @@ func TestDecideAskCarriesTarget(t *testing.T) {
 	}
 	if r := Decide(p, "WebFetch", map[string]any{"url": "https://evil.test/x"}); r.Kind != "webfetch" || r.Target != "evil.test" {
 		t.Errorf("webfetch ask target: kind=%q target=%q", r.Kind, r.Target)
+	}
+}
+
+// A denied `git commit` points the agent at the git_commit tool - and commit-msg
+// scrubbing runs first, so a message that merely mentions a tripwire (an install,
+// a tamper key) is still denied with the commit-routing reason, not a misfire.
+func TestDecideGitCommitRoutesToTool(t *testing.T) {
+	p := basePolicy()
+	for _, cmd := range []string{
+		"git commit -m 'wip'",
+		`git commit -m "run apt-get install foo and pkill bar"`,
+	} {
+		r := Decide(p, "Bash", map[string]any{"command": cmd})
+		if r.Decision != Deny || !strings.Contains(r.Reason, "git_commit") {
+			t.Errorf("Decide(Bash %q) = %s (%q), want Deny mentioning git_commit", cmd, r.Decision, r.Reason)
+		}
 	}
 }
 

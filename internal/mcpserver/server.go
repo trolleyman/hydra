@@ -43,6 +43,28 @@ type Deps struct {
 	// review file the MR watcher writes; nil disables the review tools. See
 	// NON_LOCAL_INTEGRATION.md 3.5a.
 	GetReview func() *ReviewFile
+	// Commit stages and commits the head's changes onto its OWN branch, inside its
+	// worktree - never another branch or a path outside the worktree. It is the
+	// sanctioned commit path: raw `git commit` in the shell is gate-denied, so a
+	// commit can't accidentally land on the main repo or a sibling head's branch
+	// (the whole shared .git is writable in the sandbox). Nil disables git_commit.
+	Commit func(CommitRequest) CommitResult
+}
+
+// CommitRequest is the input to the git_commit tool: a commit message plus
+// optional staging controls. Paths, when set, stage only those repo-relative
+// files; otherwise all changes (tracked + untracked) are staged.
+type CommitRequest struct {
+	Message string   `json:"message"`
+	Paths   []string `json:"paths,omitempty"`
+	Amend   bool     `json:"amend,omitempty"`
+}
+
+// CommitResult is the outcome of a git_commit call: OK plus an agent-readable
+// summary (the new commit's hash/subject) or an error explanation.
+type CommitResult struct {
+	OK      bool
+	Message string
 }
 
 // ReviewFile is the per-head MR snapshot the daemon's MR watcher writes and the
@@ -171,6 +193,21 @@ func toolDefs(deps Deps) []map[string]any {
 			},
 		},
 	}
+	if deps.Commit != nil {
+		defs = append(defs, map[string]any{
+			"name":        "git_commit",
+			"description": "Commit your work onto YOUR branch, inside your worktree. This is the sanctioned way to commit: raw `git commit` in the shell is blocked, so a commit can never accidentally land on the main repo or another branch. By default it stages ALL your changes (tracked and untracked, like `git add -A`) then commits; pass `paths` to stage only specific files, or `amend` to amend your last commit. Read-only git (status/diff/log) and `git add` still work normally in the shell.",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"message"},
+				"properties": map[string]any{
+					"message": map[string]any{"type": "string", "description": "The commit message."},
+					"paths":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional: repo-relative paths to stage before committing. Omit to stage all changes."},
+					"amend":   map[string]any{"type": "boolean", "description": "Amend your previous commit instead of creating a new one."},
+				},
+			},
+		})
+	}
 	if deps.GetReview != nil {
 		defs = append(defs,
 			map[string]any{
@@ -211,6 +248,17 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		approved, msg := deps.RequestAccess(args.Name)
 		return textResult(msg, !approved)
+	case "git_commit":
+		if deps.Commit == nil {
+			return textResult("git_commit is not available in this session.", true)
+		}
+		var args CommitRequest
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.Message) == "" {
+			return textResult("git_commit requires a non-empty \"message\".", true)
+		}
+		r := deps.Commit(args)
+		return textResult(r.Message, !r.OK)
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)
 	case "get_review_comments":

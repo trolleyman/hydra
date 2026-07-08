@@ -152,6 +152,54 @@ func TestReviewToolsAdvertisedAndCalled(t *testing.T) {
 	}
 }
 
+func TestGitCommitToolAdvertisedAndCalled(t *testing.T) {
+	var got CommitRequest
+	deps := Deps{
+		ListAvailable: func() []Candidate { return nil },
+		RequestAccess: func(string) (bool, string) { return false, "" },
+		Commit: func(r CommitRequest) CommitResult {
+			got = r
+			return CommitResult{OK: true, Message: "Committed abc123 on hydra/x: wip"}
+		},
+	}
+	resps := runLines(t, deps,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git_commit","arguments":{"message":"wip","paths":["a.go"]}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git_commit","arguments":{"message":"  "}}}`,
+	)
+	// Advertised alongside the two base tools.
+	names := map[string]bool{}
+	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
+		names[tl.(map[string]any)["name"].(string)] = true
+	}
+	if !names["git_commit"] {
+		t.Fatalf("git_commit not advertised: %v", names)
+	}
+	// A real call forwards message + paths and reports success.
+	if got.Message != "wip" || len(got.Paths) != 1 || got.Paths[0] != "a.go" {
+		t.Errorf("Commit received %+v, want message=wip paths=[a.go]", got)
+	}
+	if resps[1]["result"].(map[string]any)["isError"] != false {
+		t.Errorf("successful commit should not be isError: %v", resps[1])
+	}
+	// A blank message is rejected before Commit runs.
+	got = CommitRequest{}
+	if resps[2]["result"].(map[string]any)["isError"] != true {
+		t.Errorf("blank message should be isError: %v", resps[2])
+	}
+	if got.Message != "" {
+		t.Errorf("blank message should not reach Commit, got %+v", got)
+	}
+}
+
+func TestGitCommitHiddenWhenUnwired(t *testing.T) {
+	deps := Deps{ListAvailable: func() []Candidate { return nil }, RequestAccess: func(string) (bool, string) { return false, "" }}
+	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_commit","arguments":{"message":"x"}}}`)
+	if resps[0]["result"].(map[string]any)["isError"] != true {
+		t.Errorf("git_commit with nil Commit dep should error: %v", resps[0])
+	}
+}
+
 func TestReviewToolsHiddenWhenUnwired(t *testing.T) {
 	deps := Deps{ListAvailable: func() []Candidate { return nil }, RequestAccess: func(string) (bool, string) { return false, "" }}
 	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)

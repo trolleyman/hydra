@@ -86,9 +86,12 @@ var gitPushRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*pu
 // tripping. Kill-by-PID (`kill "$PID"`) and job specs are unaffected.
 var procKillRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*(?:sudo\s+)?(?:pkill|killall)\b`)
 
-// gitCommitRe matches a `git commit` invocation at a command boundary (same shape
-// as gitPushRe). Used to scope commit-message scrubbing to real commits.
-var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*commit\b`)
+// gitCommitRe matches a `git commit` invocation at a command boundary. Like
+// gitPushRe it skips leading flags, but it also skips a `-c KEY=VAL` config pair
+// (a separate-arg value, e.g. `git -c user.name=x commit`) so that common inline
+// form can't slip a commit past the deny. Used both to scope commit-message
+// scrubbing and to route raw commits to the git_commit tool.
+var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*commit\b`)
 
 // heredocStartRe matches the start of a heredoc and captures its delimiter word
 // (tolerating <<- and a quoted delimiter). RE2 has no backreferences, so the
@@ -311,6 +314,21 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			return Result{
 				Decision: Deny,
 				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
+			}
+		}
+		if gitCommitRe.MatchString(cmd) {
+			// Route commits through the mcp__hydra__git_commit tool, which commits onto
+			// the head's OWN branch inside its worktree. The whole shared .git is bound
+			// writable in the sandbox (a linked worktree needs it), so a raw `git commit`
+			// - especially one run from the wrong directory or after `git checkout main`
+			// - can land on the main repo or a sibling head's branch. The tool refuses
+			// unless HEAD is the head's own branch. Read-only git and `git add` are
+			// untouched; this fires after the tamper/push checks so a message mentioning
+			// a tripwire (already scrubbed above) or a chained tamper write is still
+			// caught with its own reason first.
+			return Result{
+				Decision: Deny,
+				Reason:   "raw `git commit` is not allowed - commit with the mcp__hydra__git_commit tool instead. It stages and commits your changes onto your own branch inside your worktree, so a commit can't land on the main repo or another branch. Read-only git (status/diff/log) and `git add` still work.",
 			}
 		}
 		return Result{Decision: Allow}

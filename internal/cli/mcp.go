@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -19,11 +21,12 @@ func init() {
 }
 
 // mcpCmd is an internal command seeded into the agent's own MCP config as the
-// always-available "hydra" server. It exposes two tools - list_available_mcp_servers
-// and request_mcp_server - so the agent can discover host-configured MCP servers
-// and request access to one at runtime, gated by the same approval round-trip the
-// security gate uses. It speaks MCP over stdio; stdout is the JSON-RPC channel, so
-// all diagnostics go to stderr.
+// always-available "hydra" server. It exposes list_available_mcp_servers and
+// request_mcp_server (discover/request host-configured MCP servers, gated by the
+// same approval round-trip the security gate uses), git_commit (the sanctioned
+// commit path onto the head's own branch, since raw `git commit` is gate-denied),
+// and, when the head is published, the review tools. It speaks MCP over stdio;
+// stdout is the JSON-RPC channel, so all diagnostics go to stderr.
 var mcpCmd = &cobra.Command{
 	Use:    "mcp <agentType>",
 	Short:  "Internal: Hydra control MCP server (discover/request MCP servers)",
@@ -42,6 +45,7 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	deps := mcpserver.Deps{
 		ListAvailable: availableMCPServers,
 		RequestAccess: func(name string) (bool, string) { return requestMCPAccess(agentType, name) },
+		Commit:        commitHeadChanges,
 	}
 	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
 	// is seeded for every head; the file reports linked=false until published).
@@ -49,6 +53,74 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		deps.GetReview = loadReviewFile
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
+}
+
+// commitHeadChanges backs the git_commit MCP tool. It commits the head's changes
+// onto its own branch inside its worktree, using the head-context env
+// (HYDRA_WORKTREE / HYDRA_BRANCH) the agent process was launched with.
+func commitHeadChanges(req mcpserver.CommitRequest) mcpserver.CommitResult {
+	return gitCommit(os.Getenv("HYDRA_WORKTREE"), os.Getenv("HYDRA_BRANCH"), req)
+}
+
+// gitCommit stages and commits changes in worktree onto branch. It refuses if the
+// worktree is not checked out on branch (or, when branch is unknown, on a hydra/*
+// branch) so a commit can never land on main or a sibling head's branch. Every git
+// invocation runs with -C worktree; nothing outside the worktree is touched.
+func gitCommit(worktree, branch string, req mcpserver.CommitRequest) mcpserver.CommitResult {
+	if worktree == "" {
+		return mcpserver.CommitResult{Message: "Cannot determine your worktree (HYDRA_WORKTREE is unset), so I won't commit."}
+	}
+	// The commit must land on this head's OWN branch, not main or a sibling head.
+	cur, err := gitOutput(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || cur == "" {
+		return mcpserver.CommitResult{Message: "Your worktree is not on a branch (detached HEAD). Do not switch branches; check out your head's branch before committing."}
+	}
+	switch {
+	case branch != "" && cur != branch:
+		return mcpserver.CommitResult{Message: fmt.Sprintf("Refusing to commit: your worktree is on %q but your head's branch is %q. Do not switch branches - check out %q (or ask the user) before committing.", cur, branch, branch)}
+	case branch == "" && !strings.HasPrefix(cur, "hydra/"):
+		return mcpserver.CommitResult{Message: fmt.Sprintf("Refusing to commit: %q is not a Hydra head branch (expected hydra/*). Do not commit onto shared branches.", cur)}
+	}
+	// Stage.
+	if len(req.Paths) > 0 {
+		if out, err := gitCombined(worktree, append([]string{"add", "--"}, req.Paths...)...); err != nil {
+			return mcpserver.CommitResult{Message: "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
+		}
+	} else if out, err := gitCombined(worktree, "add", "-A"); err != nil {
+		return mcpserver.CommitResult{Message: "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
+	}
+	// Commit onto the current (own) branch.
+	commitArgs := []string{"commit", "-m", req.Message}
+	if req.Amend {
+		commitArgs = []string{"commit", "--amend", "-m", req.Message}
+	}
+	if out, err := gitCombined(worktree, commitArgs...); err != nil {
+		return mcpserver.CommitResult{Message: "Commit failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
+	}
+	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
+	subject, _ := gitOutput(worktree, "log", "-1", "--pretty=%s")
+	return mcpserver.CommitResult{OK: true, Message: fmt.Sprintf("Committed %s on %s: %s", hash, cur, subject)}
+}
+
+// gitOutput runs `git -C dir <args>` and returns trimmed stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	return strings.TrimSpace(string(out)), errtrace.Wrap(err)
+}
+
+// gitCombined runs `git -C dir <args>` and returns combined stdout+stderr (so a
+// failure's diagnostic can be surfaced to the agent).
+func gitCombined(dir string, args ...string) (string, error) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	return string(out), errtrace.Wrap(err)
+}
+
+// firstNonEmpty returns a if non-empty, else b.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // loadReviewFile reads the per-head review snapshot the MR watcher writes. A

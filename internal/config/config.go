@@ -58,8 +58,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"Two sections are the exception - `[tests.<name>]` and `[artifacts.<name>]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
-	"- As you work, use git commit to save your progress at logical points.\n" +
-	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
+	"- As you work, commit your progress at logical points. If you have the `mcp__hydra__git_commit` tool, commit with it (raw `git commit` in the shell is blocked for you): it stages and commits your changes onto your own branch inside your worktree, so a commit can never land on the main repo or another branch. Read-only git (`status`/`diff`/`log`) and `git add` still work.\n" +
+	"- Once you have finished the task, make a final commit capturing all remaining changes (via `mcp__hydra__git_commit` if you have it).\n" +
 	"- Do *not* use git push or git pull.\n" +
 	"- Try not to bother the user with requests unless necessary.\n" +
 	"- If there are any design decisions made without user input, document them in each commit."
