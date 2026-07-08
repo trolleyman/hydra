@@ -140,6 +140,19 @@ body {
   .toast-progress-bar { animation: none; }
 }
 
+/* Network-egress caution banner: fades + slides down a hair when a non-default
+   posture (advisory / unrestricted / off) is selected, so the warning reads as
+   appearing in response to the choice rather than just popping in. Gated behind
+   motion-safe: at the call site, so no reduced-motion guard is needed here. */
+@keyframes egress-warn-in {
+  from { opacity: 0; transform: translateY(-0.25rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-egress-warn-in {
+  animation: egress-warn-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Indeterminate test-progress bar: a running test runner that hasn't declared a
    ::hydra:test:total:: denominator has no meaningful fill percentage, so instead
    of a static half-bar we fill the whole track with diagonal "barber pole"
