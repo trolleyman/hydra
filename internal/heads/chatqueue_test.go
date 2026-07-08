@@ -15,11 +15,8 @@ func msg(id, text string) QueuedMessage {
 
 func newTestQueue(t *testing.T) (*ChatQueue, string) {
 	t.Helper()
+	// persist() creates the queue dir itself, so a bare temp root is enough.
 	root := t.TempDir()
-	// The status dir must exist for persist() to write into.
-	if err := os.MkdirAll(paths.GetStatusDirFromProjectRoot(root), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	return LoadChatQueue(root, "agent-x"), root
 }
 
@@ -98,7 +95,7 @@ func TestChatQueuePersistence(t *testing.T) {
 
 func TestChatQueueLoadMissingAndCorrupt(t *testing.T) {
 	root := t.TempDir()
-	_ = os.MkdirAll(paths.GetStatusDirFromProjectRoot(root), 0o755)
+	_ = os.MkdirAll(paths.GetChatQueueDirFromProjectRoot(root), 0o755)
 	if got := len(LoadChatQueue(root, "nope").List()); got != 0 {
 		t.Fatalf("missing queue should be empty, got %d", got)
 	}

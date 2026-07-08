@@ -61,4 +61,12 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 			log.Printf("warn: heads: remove build log %s failed for %s: %v", buildLog, id, err)
 		}
 	}
+
+	// A chat head's queued (not-yet-sent) messages, if any survived unsent.
+	chatQueue := paths.GetChatQueueJsonFromProjectRoot(projectRoot, id)
+	if _, err := os.Stat(chatQueue); err == nil {
+		if err := os.Remove(chatQueue); err != nil {
+			log.Printf("warn: heads: remove chat queue %s failed for %s: %v", chatQueue, id, err)
+		}
+	}
 }

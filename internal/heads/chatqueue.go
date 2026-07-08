@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -72,6 +73,11 @@ func (q *ChatQueue) persist() {
 	}
 	data, err := json.Marshal(queueFile{Messages: q.msgs})
 	if err != nil {
+		return
+	}
+	// The queue dir is its own generated dir (.hydra/local/queue), covered by
+	// the .hydra/local top-level gitignore, so a bare MkdirAll suffices.
+	if err := os.MkdirAll(filepath.Dir(q.path), 0o755); err != nil {
 		return
 	}
 	_ = paths.WriteFileIfChanged(q.path, string(data), 0o644)

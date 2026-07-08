@@ -175,12 +175,20 @@ func GetStatusLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_log.jsonl")
 }
 
+// GetChatQueueDirFromProjectRoot returns the directory holding per-head chat
+// message queues. A dedicated dir keyed by the bare id (rather than a
+// status/<id>_queue.json suffix) keeps the id the whole filename, so no head id
+// ending in "_queue" can collide with another head's file.
+func GetChatQueueDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "queue")
+}
+
 // GetChatQueueJsonFromProjectRoot returns the per-head file holding a chat-mode
 // head's queued (not-yet-sent) user messages, so the daemon can hold them while
 // a turn runs and replay them to a (re)attaching client, surviving a daemon
-// restart. Sits beside status.json under .hydra/local/status/<id>_queue.json.
+// restart. Lives at .hydra/local/queue/<id>.json.
 func GetChatQueueJsonFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_queue.json")
+	return filepath.Join(GetChatQueueDirFromProjectRoot(projectRoot), id+".json")
 }
 
 func GetBuildLogFromProjectRoot(projectRoot, id string) string {
