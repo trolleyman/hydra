@@ -2164,6 +2164,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setLightboxIndex(null)
   }
 
+  // discardQueued drops a still-queued message (the X on its bubble, item 52):
+  // tell the daemon to remove it from the server queue and clear the local
+  // bubble. A message already handed to the CLI is gone from the queue, so the
+  // daemon simply reports not-found and the bubble was already off pendingSends.
+  function discardQueued(p: PendingSend) {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'dequeue', id: p.clientId }))
+    }
+    setPendingSends((prev) => prev.filter((x) => x.id !== p.id))
+  }
+
   // answerQuestion replies to a native AskUserQuestion via the control channel
   // (control_response with the answers merged into updatedInput).
   function answerQuestion(item: Extract<ChatItem, { kind: 'question' }>, answers: Record<string, string>): boolean {
@@ -2520,29 +2532,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               gap-3 between distinct turns (item 51). */}
           {pendingSends.length > 0 && (
             <div className="flex flex-col items-end gap-1">
-              {pendingSends.map((p, i) => (
-                <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
+              {pendingSends.map((p) => (
+                <div key={`pending-${p.id}`} className="group flex items-center gap-1.5 animate-chat-item-in">
                   <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
                     <Markdown text={p.text} />
                   </div>
-                  {/* Label only the last pending bubble - a stack of queued messages
-                      is self-evident from position, so repeating it on each is noise
-                      (item 34). */}
-                  {i === pendingSends.length - 1 && (
-                    <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                      {p.queued ? (
-                        <>
-                          <ListEnd className="w-3 h-3" />
-                          Queued - sends when the current turn finishes
-                        </>
-                      ) : (
-                        <>
-                          <LoaderCircle className="w-3 h-3 animate-spin" />
-                          Sending...
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {/* Discard button (item 52): drops the queued message from the
+                      server queue. Sits to the right of the bubble, revealed on
+                      hover so the resting stack stays clean. */}
+                  <Tooltip content="Discard queued message" side="top">
+                    <button
+                      onClick={() => discardQueued(p)}
+                      aria-label="Discard queued message"
+                      className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
                 </div>
               ))}
             </div>
