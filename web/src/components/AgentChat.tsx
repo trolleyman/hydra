@@ -2515,32 +2515,38 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           )}
           {/* Queued messages: held for later, so pinned at the very bottom under
               the in-flight reply. (A "sending" message is an optimistic item in
-              the flow above; only queued holds land here now.) */}
-          {pendingSends.map((p, i) => (
-            <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
-              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
-                <Markdown text={p.text} />
-              </div>
-              {/* Label only the last pending bubble - a stack of queued messages
-                  is self-evident from position, so repeating it on each is noise
-                  (item 34). */}
-              {i === pendingSends.length - 1 && (
-                <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                  {p.queued ? (
-                    <>
-                      <ListEnd className="w-3 h-3" />
-                      Queued - sends when the current turn finishes
-                    </>
-                  ) : (
-                    <>
-                      <LoaderCircle className="w-3 h-3 animate-spin" />
-                      Sending...
-                    </>
+              the flow above; only queued holds land here now.) A stack of queued
+              bubbles reads as one group, so they sit tighter (gap-1) than the
+              gap-3 between distinct turns (item 51). */}
+          {pendingSends.length > 0 && (
+            <div className="flex flex-col items-end gap-1">
+              {pendingSends.map((p, i) => (
+                <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
+                  <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
+                    <Markdown text={p.text} />
+                  </div>
+                  {/* Label only the last pending bubble - a stack of queued messages
+                      is self-evident from position, so repeating it on each is noise
+                      (item 34). */}
+                  {i === pendingSends.length - 1 && (
+                    <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                      {p.queued ? (
+                        <>
+                          <ListEnd className="w-3 h-3" />
+                          Queued - sends when the current turn finishes
+                        </>
+                      ) : (
+                        <>
+                          <LoaderCircle className="w-3 h-3 animate-spin" />
+                          Sending...
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
+          )}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user
