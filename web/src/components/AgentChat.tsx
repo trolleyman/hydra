@@ -1965,7 +1965,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool':
@@ -2070,7 +2070,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               caret; streamed thinking uses the same collapsed card as settled
               thoughts, its preview auto-updating as tokens arrive. */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
               <Markdown text={closeOpenFence(stream.text)} />
               <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
             </div>
