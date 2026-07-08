@@ -228,11 +228,17 @@ type RingFilter struct {
 	// session lock, so the callback must be cheap (the session dispatches the real
 	// work - writing the head's error status - off the read goroutine).
 	OnAPIError func(msg string)
+	// OnResult, if set, is called once per `result` line - the end of a user
+	// turn. The chat message queue uses it to drain the next queued message. Like
+	// OnAPIError it runs under the session lock, so it must be cheap (the session
+	// dispatches the real work off the read goroutine).
+	OnResult func()
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
 // persist (complete non-stream_event lines, newline-terminated). A line the CLI
-// flagged as an API error fires OnAPIError as a side effect.
+// flagged as an API error fires OnAPIError as a side effect; a `result` line
+// (turn end) fires OnResult.
 func (f *RingFilter) Filter(chunk []byte) []byte {
 	var out []byte
 	for _, line := range f.lb.Feed(chunk) {
@@ -242,6 +248,9 @@ func (f *RingFilter) Filter(chunk []byte) []byte {
 		}
 		if ok && ev.IsAPIError && f.OnAPIError != nil {
 			f.OnAPIError(APIErrorText(line))
+		}
+		if ok && ev.Type == "result" && f.OnResult != nil {
+			f.OnResult()
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

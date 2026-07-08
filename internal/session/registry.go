@@ -37,6 +37,7 @@ type Registry struct {
 	sessions       map[string]*Session
 	onExit         func(Info)
 	onChatAPIError func(id, msg string)
+	onChatResult   func(id string)
 }
 
 // NewRegistry returns an empty registry.
@@ -59,6 +60,16 @@ func (r *Registry) SetOnExit(fn func(Info)) {
 func (r *Registry) SetOnChatAPIError(fn func(id, msg string)) {
 	r.mu.Lock()
 	r.onChatAPIError = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatResult registers a callback invoked (off the read goroutine) each
+// time a chat-mode session's stdout carries a `result` line - the end of a user
+// turn. The daemon wires it to drain the head's next queued message. id is the
+// session/head id.
+func (r *Registry) SetOnChatResult(fn func(id string)) {
+	r.mu.Lock()
+	r.onChatResult = fn
 	r.mu.Unlock()
 }
 
@@ -133,6 +144,17 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, msg)
+			}
+		}
+		// A `result` line ends a user turn; dispatch the queue-drain off the read
+		// goroutine (it writes to the session's stdin, which must not deadlock
+		// against the read side under the session lock).
+		ringFilter.OnResult = func() {
+			r.mu.RLock()
+			fn := r.onChatResult
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id)
 			}
 		}
 	}

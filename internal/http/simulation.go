@@ -2819,8 +2819,28 @@ func handleSimChatWS(conn *safeConn) {
 		sendSimChatEvent(conn, line)
 	}
 	sendTerminalEvent(conn, "replay_done")
+	// Replay any queued messages held from a prior connection (survives a
+	// reconnect, like the daemon's persisted queue).
+	sendSimQueueFrame(conn, "sim-chat")
 
 	turn := 0
+	// processTurn echoes one user turn and streams its reply (ending in a
+	// result). A slash command answers with local output instead.
+	processTurn := func(content json.RawMessage) {
+		turn++
+		userEv, _ := json.Marshal(map[string]any{
+			"type":    "user",
+			"message": map[string]any{"role": "user", "content": content},
+		})
+		sendSimChatEvent(conn, string(userEv))
+		if text := firstTextBlock(content); strings.HasPrefix(text, "/") {
+			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			return
+		}
+		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
+		streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
+	}
+
 	for {
 		msg, ok := readSimChatClientMsg(conn)
 		if !ok {
@@ -2833,23 +2853,20 @@ func handleSimChatWS(conn *safeConn) {
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
 		case "interrupt":
 			sendSimUserText(conn, "sim-chat", "[Request interrupted by user]")
+		case "dequeue":
+			simQueueRemove("sim-chat", msg.ID)
 		case "user_message":
-			turn++
-			// Echo the user turn (as --replay-user-messages would).
-			userEv, _ := json.Marshal(map[string]any{
-				"type":    "user",
-				"message": map[string]any{"role": "user", "content": msg.Content},
-			})
-			sendSimChatEvent(conn, string(userEv))
-			// A slash command executes CLI-side and answers with local output.
-			if text := firstTextBlock(msg.Content); strings.HasPrefix(text, "/") {
-				sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			// A message the client marked queued (a turn was running) is HELD, to
+			// be drained when the current turn ends - here, right after the next
+			// processed turn, one per turn (each queued message is its own turn).
+			if msg.Queued {
+				simQueueAppend("sim-chat", simQueuedMsg{ID: msg.ID, Content: msg.Content})
 				continue
 			}
-			// Stream the reply token by token (as --include-partial-messages
-			// does live) before the complete assistant event and the result.
-			const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
-			streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
+			processTurn(msg.Content)
+			for _, qm := range simQueuePopAll("sim-chat") {
+				processTurn(qm.Content)
+			}
 		}
 	}
 }
@@ -2858,9 +2875,64 @@ func handleSimChatWS(conn *safeConn) {
 // simulated chat sockets understand (see chat_ws.go chatClientMsg).
 type simChatClientMsg struct {
 	Type     string          `json:"type"`
+	ID       string          `json:"id"`
+	Queued   bool            `json:"queued"`
 	Content  json.RawMessage `json:"content"`
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
+}
+
+// simQueuedMsg is one held message in the sim's stand-in chat queue.
+type simQueuedMsg struct {
+	ID      string          `json:"id"`
+	Content json.RawMessage `json:"content"`
+}
+
+// The sim's cross-connection chat message queue: a process-lifetime stand-in for
+// the daemon's disk-persisted ChatQueue, so the queued-message flows (surviving a
+// reconnect, dequeue/recall) can be exercised in --simulation. Keyed by session.
+var (
+	simChatQueueMu sync.Mutex
+	simChatQueues  = map[string][]simQueuedMsg{}
+)
+
+func simQueueList(id string) []simQueuedMsg {
+	simChatQueueMu.Lock()
+	defer simChatQueueMu.Unlock()
+	return append([]simQueuedMsg(nil), simChatQueues[id]...)
+}
+
+func simQueueAppend(id string, m simQueuedMsg) {
+	simChatQueueMu.Lock()
+	defer simChatQueueMu.Unlock()
+	simChatQueues[id] = append(simChatQueues[id], m)
+}
+
+func simQueueRemove(id, msgID string) {
+	simChatQueueMu.Lock()
+	defer simChatQueueMu.Unlock()
+	q := simChatQueues[id]
+	for i, m := range q {
+		if m.ID == msgID {
+			simChatQueues[id] = append(q[:i:i], q[i+1:]...)
+			return
+		}
+	}
+}
+
+func simQueuePopAll(id string) []simQueuedMsg {
+	simChatQueueMu.Lock()
+	defer simChatQueueMu.Unlock()
+	q := simChatQueues[id]
+	delete(simChatQueues, id)
+	return q
+}
+
+// sendSimQueueFrame relays the session's current queue snapshot (the frame the
+// daemon sends after replay_done and on reconnect).
+func sendSimQueueFrame(conn *safeConn, id string) {
+	frame, _ := json.Marshal(map[string]any{"type": "queue", "messages": simQueueList(id)})
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
 // readSimChatClientMsg blocks for the next parseable text frame; ok=false on

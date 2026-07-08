@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/claudestream"
+	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/session"
 )
@@ -28,6 +29,13 @@ import (
 // chatClientMsg is one client -> server text frame on a chat-mode socket.
 type chatClientMsg struct {
 	Type string `json:"type"`
+	// ID is the client-generated id of a user_message / dequeue target, so a
+	// queued message can be reconciled and recalled (see ChatQueueManager).
+	ID string `json:"id,omitempty"`
+	// Queued is set on a user_message the client is sending while a turn runs:
+	// the daemon HOLDS it (queues) rather than delivering it now, and drains it
+	// when the turn ends. False (or absent) delivers it immediately.
+	Queued bool `json:"queued,omitempty"`
 	// Content is the content-block array of a user_message, forwarded to the
 	// CLI verbatim (the client owns the block shapes; the daemon only wraps
 	// them in the stdin envelope).
@@ -37,6 +45,14 @@ type chatClientMsg struct {
 	// Response is a control_response payload (e.g. AskUserQuestion answers),
 	// forwarded verbatim like Content.
 	Response json.RawMessage `json:"response,omitempty"`
+}
+
+// chatQueueFrame is the server -> client snapshot of a head's queued messages,
+// sent right after replay_done so a (re)attaching client renders the pending
+// bubbles (the queue survives disconnects/restarts daemon-side).
+type chatQueueFrame struct {
+	terminalEvent
+	Messages []heads.QueuedMessage `json:"messages"`
 }
 
 // chatEventFrame is the server -> client wrapper around one stream-json line.
@@ -50,7 +66,8 @@ type chatEventFrame struct {
 var chatInterruptSeq atomic.Uint64
 
 // handleChatClientMessage services one text frame from a chat client.
-func (s *Server) handleChatClientMessage(sessionID string, data []byte) {
+// projectRoot locates the head's on-disk message queue.
+func (s *Server) handleChatClientMessage(projectRoot, sessionID string, data []byte) {
 	var msg chatClientMsg
 	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Printf("chat ws: bad client frame for %q: %v", sessionID, err)
@@ -58,6 +75,18 @@ func (s *Server) handleChatClientMessage(sessionID string, data []byte) {
 	}
 	switch msg.Type {
 	case "user_message":
+		if !json.Valid(msg.Content) {
+			log.Printf("chat ws: bad user_message content for %q", sessionID)
+			return
+		}
+		// Route through the queue manager: a message sent while a turn runs
+		// (Queued) is held daemon-side and drained when the turn ends; otherwise
+		// it goes straight to the CLI. Falls back to a direct write if queueing
+		// is disabled.
+		if s.ChatQueues != nil {
+			s.ChatQueues.Submit(projectRoot, sessionID, heads.QueuedMessage{ID: msg.ID, Content: msg.Content}, msg.Queued)
+			return
+		}
 		line, err := claudestream.UserMessageLine(msg.Content)
 		if err != nil {
 			log.Printf("chat ws: bad user_message content for %q: %v", sessionID, err)
@@ -65,6 +94,11 @@ func (s *Server) handleChatClientMessage(sessionID string, data []byte) {
 		}
 		if err := s.Sessions.Write(sessionID, line); err != nil {
 			log.Printf("chat ws: write user message to %q: %v", sessionID, err)
+		}
+	case "dequeue":
+		// Recall a still-queued message (Up-arrow edit): drop it from the queue.
+		if s.ChatQueues != nil && msg.ID != "" {
+			s.ChatQueues.Dequeue(projectRoot, sessionID, msg.ID)
 		}
 	case "interrupt":
 		id := fmt.Sprintf("hydra-interrupt-%d", chatInterruptSeq.Add(1))
@@ -178,8 +212,9 @@ func backfillChatHistory(conn *safeConn, agentID, worktree string) map[string]st
 // pumpChatOutput relays a chat session's output to the socket until the
 // session exits or the socket dies: transcript backfill first (durable
 // history), then the scrollback-ring replay (recent events the transcript may
-// not carry, deduped by uuid), then replay_done, then live events.
-func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID, worktree string) {
+// not carry, deduped by uuid), then replay_done, then the queued-message
+// snapshot, then live events.
+func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
 	skip := backfillChatHistory(conn, agentID, worktree)
 
 	lb := &claudestream.LineBuffer{}
@@ -195,6 +230,19 @@ func pumpChatOutput(conn *safeConn, att *session.Attachment, agentID, worktree s
 	default:
 	}
 	sendTerminalEvent(conn, "replay_done")
+
+	// Replay the head's queued (not-yet-sent) messages so this client renders
+	// the pending bubbles, then - if the head is sitting idle - kick the queue
+	// so a restored-from-disk queue drains even without a live turn to end it.
+	if s.ChatQueues != nil {
+		if frame, err := json.Marshal(chatQueueFrame{
+			terminalEvent: terminalEvent{Type: "queue"},
+			Messages:      s.ChatQueues.List(projectRoot, agentID),
+		}); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+		s.ChatQueues.OnAttach(projectRoot, agentID)
+	}
 
 	for {
 		select {

@@ -83,8 +83,11 @@ type ChatItem =
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
 // message sent mid-turn stays here - visibly queued - until the turn ends).
+// clientId is the id sent to the daemon so a queued message can be reconciled
+// against the server's authoritative `queue` frame and targeted by a dequeue.
 interface PendingSend {
   id: number
+  clientId: string
   text: string
   queued: boolean
 }
@@ -145,6 +148,19 @@ function formatDuration(ms: number): string {
   if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`
   const d = Math.floor(h / 24)
   return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
+}
+
+// contentText flattens a user_message content-block array (or plain string) to
+// its display text, for rendering a queued message replayed by the daemon.
+function contentText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : ''))
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
 }
 
 // closeOpenFence appends a virtual closing fence when a streaming text ends
@@ -1159,6 +1175,26 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       })
     }
 
+    // reconcileQueue merges the daemon's authoritative queued-message snapshot
+    // into the optimistic pending bubbles: keep in-flight "sending" bubbles and
+    // any queued bubble the server still lists, and add server-queued messages
+    // we don't have (on reconnect, local pending was reset, so this restores the
+    // whole queue - item 21's survive-navigation guarantee).
+    const reconcileQueue = (messages: { id?: string; content?: unknown }[]) => {
+      const server = messages
+        .filter((m): m is { id: string; content?: unknown } => typeof m.id === 'string')
+        .map((m) => ({ clientId: m.id, text: contentText(m.content) }))
+      const serverIds = new Set(server.map((s) => s.clientId))
+      setPendingSends((prev) => {
+        const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
+        const keptIds = new Set(kept.map((p) => p.clientId))
+        const added = server
+          .filter((s) => !keptIds.has(s.clientId))
+          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true }))
+        return [...kept, ...added]
+      })
+    }
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
@@ -1336,7 +1372,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.onopen = () => setConnected(true)
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data !== 'string') return
-      let msg: { type?: string; status?: string; head_moved?: boolean; event?: ClaudeEvent }
+      let msg: {
+        type?: string
+        status?: string
+        head_moved?: boolean
+        event?: ClaudeEvent
+        messages?: { id?: string; content?: unknown }[]
+      }
       try {
         msg = JSON.parse(e.data)
       } catch {
@@ -1357,6 +1399,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           flush()
           setLiveFromId(nextId)
           setReplayDone(true)
+          return
+        case 'queue':
+          // The daemon's authoritative snapshot of still-queued messages (sent
+          // after replay_done and on reconnect). Reconcile the optimistic
+          // bubbles: keep in-flight "sending" ones and any queued bubble the
+          // server still has, and add server-queued messages we're missing (the
+          // reload-after-navigate case, where local state was reset).
+          reconcileQueue(msg.messages ?? [])
           return
       }
     }
@@ -1460,34 +1510,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
     }, 250)
   }
-
-  // Live mirror of pendingSends + the previous turn-running flag, so the
-  // flush-on-turn-end effect (item 21) can read the queue and edge-detect
-  // without re-subscribing.
-  const pendingSendsRef = useRef<PendingSend[]>([])
-  useEffect(() => {
-    pendingSendsRef.current = pendingSends
-  }, [pendingSends])
-  const prevTurnRunningRef = useRef(isTurnRunning)
-
-  // A message typed while a turn is running is held client-side (queued) rather
-  // than handed to the CLI immediately - so it stays editable/recallable (Up
-  // arrow). When the turn ends, flush the held queue to the socket in order.
-  useEffect(() => {
-    const was = prevTurnRunningRef.current
-    prevTurnRunningRef.current = isTurnRunning
-    if (!was || isTurnRunning) return
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    const held = pendingSendsRef.current.filter((p) => p.queued)
-    if (held.length === 0) return
-    for (const p of held) {
-      ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text: p.text }] }))
-    }
-    setPendingSends((prev) => prev.map((p) => (p.queued ? { ...p, queued: false } : p)))
-    useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
-    onStatusUpdateRef.current?.(AgentStatus.RUNNING)
-  }, [isTurnRunning, agentId])
 
   // --- Composer: attachments ------------------------------------------------
 
@@ -1614,31 +1636,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Sending ----------------------------------------------------------------
 
-  // sendUserText hands one user turn to the socket and tracks it as an
-  // optimistic pending bubble until the CLI's echo supersedes it. While a turn
-  // is running (and the agent isn't waiting on our answer) the message is
-  // instead HELD client-side as a queued bubble - not handed to the CLI yet -
-  // so it stays editable/recallable (Up arrow, item 21); the flush effect sends
-  // it when the turn ends. Returns false when the socket isn't usable.
+  // sendUserText hands one user turn to the socket, tagged with a client id and
+  // whether a turn is currently running (queued). The daemon HOLDS a queued
+  // message (draining it when the turn ends) or delivers it immediately, and
+  // replays the held queue on reconnect (item 21) - so the queue survives
+  // closing the window / navigating away, and stays editable (Up arrow). The
+  // bubble is added optimistically; the CLI's echo (or a `queue` frame on
+  // reattach) is the source of truth. Returns false when the socket isn't usable.
   function sendUserText(text: string): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
     setPinned(true)
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
-    // not RUNNING/STARTING), so a running turn means hold-and-queue.
-    const hold = isTurnRunning
-    if (hold) {
-      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: true }])
-      return true
-    }
-    ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text }] }))
-    // Optimistic: the bubble appears immediately (sending) and is replaced by
-    // the CLI's echo of the processed turn (routeUserText).
-    setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: false }])
-    // Status is nudged optimistically exactly like the terminal's Enter
-    // handling - but not while the agent is asking a question (needs_input).
-    if (status !== AgentStatus.NEEDS_INPUT) {
+    // not RUNNING/STARTING), so a running turn means the daemon should queue it.
+    const queued = isTurnRunning
+    const clientId = crypto.randomUUID()
+    ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
+    setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued }])
+    // A message that goes straight through starts a turn; nudge the status
+    // optimistically (like the terminal's Enter handling). A queued one doesn't.
+    if (!queued && status !== AgentStatus.NEEDS_INPUT) {
       useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
       onStatusUpdateRef.current?.(AgentStatus.RUNNING)
     }
@@ -1740,11 +1758,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     // Up arrow on an empty composer dequeues the most recent still-queued
     // (unsent) message back into the box to edit (item 21). Only queued holds
-    // qualify - a message already handed to the CLI can't be recalled.
+    // qualify - a message already handed to the CLI can't be recalled. Tell the
+    // daemon to drop it from the server queue too.
     if (e.key === 'ArrowUp' && input === '' && slashMatches.length === 0) {
       const last = [...pendingSends].reverse().find((p) => p.queued)
       if (last) {
         e.preventDefault()
+        const ws = wsRef.current
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
+        }
         setPendingSends((prev) => prev.filter((p) => p.id !== last.id))
         setInput(last.text)
         return
