@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -1272,6 +1272,50 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
   }
   return items
 }
+
+// The settled message list, memoized so the live token stream (which updates
+// once per delta, many times a second) doesn't re-render every prior message.
+// While a turn streams, only `stream` changes in ChatPane - none of these props
+// do - so this whole list bails out; without it, each token delta re-rendered
+// every settled message's markdown (O(messages x tokens), the source of the
+// scroll jank on long conversations). It re-renders only when the settled items
+// change (a message commits) or when something that alters how a row renders
+// changes (serif/worktree/connected/subagents). `renderItem` is a stable wrapper
+// (see ChatPane) so it never trips the memo; the fields it reads are listed in
+// the comparator so a change to any of them still refreshes the list.
+interface SettledMessagesProps {
+  items: ChatItem[]
+  liveFromId: number | null
+  renderItem: (item: ChatItem) => ReactNode
+  serif: boolean
+  connected: boolean
+  worktreePath: string | null
+  subByToolUse: Record<string, SubagentView>
+  subagents: Record<string, SubagentView>
+}
+
+const SettledMessages = memo(
+  function SettledMessages({ items, liveFromId, renderItem }: SettledMessagesProps) {
+    return (
+      <>
+        {items.map((item) => (
+          <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
+            {renderItem(item)}
+          </div>
+        ))}
+      </>
+    )
+  },
+  (a, b) =>
+    a.items === b.items &&
+    a.liveFromId === b.liveFromId &&
+    a.renderItem === b.renderItem &&
+    a.serif === b.serif &&
+    a.connected === b.connected &&
+    a.worktreePath === b.worktreePath &&
+    a.subByToolUse === b.subByToolUse &&
+    a.subagents === b.subagents,
+)
 
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
@@ -2577,6 +2621,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return m
   }, [subagents])
 
+  // A stable wrapper around renderChatItem (a per-render closure) so it never
+  // trips SettledMessages' memo. It always calls the latest closure via a ref, so
+  // it never renders stale data; the inputs that actually change a row's output
+  // are passed to SettledMessages explicitly (and listed in its comparator).
+  const renderItemRef = useRef(renderChatItem)
+  renderItemRef.current = renderChatItem
+  const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
+
   return (
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
@@ -2618,11 +2670,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               Beginning of conversation
             </div>
           )}
-          {visibleItems.map((item) => (
-            <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
-              {renderChatItem(item)}
-            </div>
-          ))}
+          <SettledMessages
+            items={visibleItems}
+            liveFromId={liveFromId}
+            renderItem={renderItem}
+            serif={serif}
+            connected={connected}
+            worktreePath={worktreePath}
+            subByToolUse={subByToolUse}
+            subagents={subagents}
+          />
           {/* The in-flight streamed block: markdown-rendered live (with a
               virtual closing fence while inside a code block) plus a pulsing
               caret; streamed thinking uses the same collapsed card as settled
