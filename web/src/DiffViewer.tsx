@@ -1268,7 +1268,10 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 
 // ── Left commit selector ──────────────────────────────────────────────────────
 
-function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
+// memo (both selectors): they sit in the always-visible Changes toolbar, whose
+// owner re-renders on every diff/panel state change; their props only change
+// when the commit list or the selection itself does.
+const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
   commits: CommitInfo[]
   selected: LeftSel
   onChange: (v: LeftSel) => void
@@ -1369,11 +1372,11 @@ function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
       )}
     </div>
   )
-}
+})
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
+const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
@@ -1468,7 +1471,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
       )}
     </div>
   )
-}
+})
 
 // ── Uncommitted changes button ────────────────────────────────────────────────
 
@@ -1825,7 +1828,9 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
 
 // ── Settings popup ────────────────────────────────────────────────────────────
 
-function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
+// memo: pinned in the always-visible Changes toolbar; every prop is a
+// primitive or a stable setter, so diff refreshes skip it.
+const SettingsPopup = memo(function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
   imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange,
   testGroupResult, onTestGroupResultChange, testUseScope, onTestUseScopeChange, testScopeAvailable }: {
@@ -1947,11 +1952,27 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
       )}
     </div>
   )
-}
+})
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
+// DiffViewer only reads a handful of the agent's fields (listed in the memo
+// comparator below). The parent AgentDetail re-renders on EVERY live tick of
+// the agent - activity-line changes, streamed test counts - and each of those
+// hands us a structurally-new `agent` object, so a plain memo() would never
+// hold. Comparing just the consumed fields keeps the whole diff subtree
+// (toolbar, tests/preview/artifact panels, file list) out of those ticks.
+export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
+  prev.projectId === next.projectId &&
+  prev.externalRefreshTrigger === next.externalRefreshTrigger &&
+  prev.externalArtifactRefresh === next.externalArtifactRefresh &&
+  prev.agent.id === next.agent.id &&
+  prev.agent.branch_name === next.agent.branch_name &&
+  prev.agent.base_branch === next.agent.base_branch &&
+  prev.agent.worktree_path === next.agent.worktree_path &&
+  prev.agent.agent_status?.status === next.agent.agent_status?.status)
+
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })

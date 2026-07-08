@@ -318,7 +318,16 @@ export function renderMarkdownSource(text: string): ReactNode {
         </span>
       )
     }
-    const emphasis = s.kind === 'bold' ? 'font-semibold' : 'italic'
+    // Emphasis in the overlay must not change glyph metrics: a real
+    // font-weight/font-style swap renders different advance widths, so the
+    // visible backdrop text drifts from the invisible textarea text - the
+    // caret floats mid-word and spellcheck squiggles land offset under the
+    // wrong glyphs ("double text"). Bold is faked with a text stroke
+    // (.md-src-bold, metric-neutral); italic has no metric-safe fake (an
+    // italic face has different advances), so its content stays upright and
+    // only the dimmed markers signal it. The read-only renderer above keeps
+    // real bold/italic - it has no textarea to align with.
+    const emphasis = s.kind === 'bold' ? 'md-src-bold' : ''
     return (
       <span key={i} className={emphasis}>
         <span className="opacity-40">{s.marker}</span>

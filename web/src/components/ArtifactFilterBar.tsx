@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, FunnelX, Search, X } from 'lucide-react'
 import {
@@ -240,7 +240,12 @@ function ChangeThresholdControl({ value, onChange }: { value: number; onChange: 
 // before the set finishes) and computes the per-value counts itself, so a caller
 // only has to own the `filter`/`search` state and apply computeVisibleFiles. Returns
 // null when there's nothing to filter (no tags, no media, no change filter).
-export function ArtifactFilterBar({
+// memo: the artifacts panel re-renders on every streamed progress/log frame;
+// the panel keeps `files`/`pendingTags` identity-stable through those, so the
+// bar (and its dropdown menus) skip them.
+export const ArtifactFilterBar = memo(ArtifactFilterBarImpl)
+
+function ArtifactFilterBarImpl({
   files,
   pendingTags,
   filter,

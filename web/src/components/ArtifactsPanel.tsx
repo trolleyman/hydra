@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
@@ -722,7 +722,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
 // right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
 // columns than a tall phone shot); side-by-side doubles the span so the before/after
 // pair has room. Drag a tile's edge to override its span.
-function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeThreshold = 0 }: {
+// memo: the parent card re-renders on every streamed progress/log frame while
+// its script regenerates; the files array identity only changes when the
+// results actually change, so the masonry skips those frames entirely.
+const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeThreshold = 0 }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
   // Global tile-size multiplier from the diff settings size slider (see MasonryGrid).
@@ -813,7 +816,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       <MasonryGrid items={items} spanScale={spanScale} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={scope} />
     </div>
   )
-}
+})
 
 // formatElapsed renders a running duration compactly: "12s", or "1m 05s" once it
 // passes a minute.
@@ -836,7 +839,10 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
 }
 
-function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
+// memo: while a script is generating, every streamed progress/log frame
+// replaces just that script's set object - memo confines the re-render to the
+// one affected card instead of every card in the panel.
+const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
   // grid shows only matches - ranked by search score when searching; the header
@@ -867,9 +873,22 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // them as unchanged instead (see presentedFiles), so the default change filter
   // hides them and the card stays calm - the failure is already surfaced by the
   // red-bordered build-log terminal and the header chip, not a flood of fake diffs.
-  const cardFiles = useMemo(() => presentedFiles(set), [set])
+  // Depend on the exact inputs (not the whole set): a streamed progress/log
+  // frame replaces the set object but not its files, and keeping these arrays
+  // identity-stable through those frames is what lets the memo'd FileGrid
+  // below skip re-laying-out the masonry on every frame. Mirrors
+  // presentedFiles (which needs the whole set).
+  const cardFiles = useMemo(
+    () => (failedSide
+      ? set.files.map((f) => ({ ...f, change_type: ArtifactFileNS.change_type.UNCHANGED }))
+      : set.files),
+    [set.files, failedSide],
+  )
 
-  const visibleFiles = computeVisibleFiles(cardFiles, filter, search)
+  const visibleFiles = useMemo(
+    () => computeVisibleFiles(cardFiles, filter, search),
+    [cardFiles, filter, search],
+  )
   // "changed" counts honour the change-type threshold, so a sub-threshold tweak
   // doesn't inflate the "x/y changed" header (see effectiveChangeType).
   const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
@@ -1134,6 +1153,19 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
           )}
     </CollapsibleCard>
   )
+})
+
+// useStableArray keeps an array's identity stable while its ELEMENTS are
+// reference-equal to the previous render's. Derived flatMap/filter arrays get a
+// fresh identity every render even when nothing in them changed, which would
+// defeat the memo() on components taking them as props (the filter bar).
+// Uses the render-phase derived-state idiom (not a ref, which must not be
+// read/written during render).
+function useStableArray<T>(arr: T[]): T[] {
+  const [prev, setPrev] = useState(arr)
+  const same = prev === arr || (prev.length === arr.length && arr.every((v, i) => v === prev[i]))
+  if (!same) setPrev(arr)
+  return same ? prev : arr
 }
 
 type ArtifactSide = 'left' | 'right'
@@ -1159,7 +1191,12 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/artifacts${qs}`
 }
 
-export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactScale, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
+// memo: hosted by DiffViewer (see TestsPanel) - every prop is a primitive, a
+// stable setter, or an identity-stable object (artifactSpans), so the panel
+// only re-renders for its own WS/stream state or a deliberate prop change.
+export const ArtifactsPanel = memo(ArtifactsPanelImpl)
+
+function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactScale, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -1409,17 +1446,20 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // through presentedFiles so a partial-failure set's surviving files count as
   // unchanged here too, matching how each card presents them (no "538 added" in the
   // changes dropdown while the card body calls the same files unchanged).
-  const allFiles = useMemo(() => (displaySets ?? []).flatMap(presentedFiles), [displaySets])
+  // useStableArray: a progress/log frame replaces set objects but not their
+  // files, so the flatMap would otherwise mint a new (identical) array every
+  // frame and re-render the memo'd filter bar for nothing.
+  const allFiles = useStableArray(useMemo(() => (displaySets ?? []).flatMap(presentedFiles), [displaySets]))
   // Tags to offer before files are present: a side's pending_tags once live, plus
   // - while anything is still generating (incl. the skeleton) - the cached chrome
   // tags, so the filter set only grows then settles to the live file tags once
   // everything is ready (a stale cached tag can't linger past settle).
   const anyGenerating = (displaySets ?? []).some((s) => (s.status as string) === 'generating')
-  const pendingTags = useMemo(() => {
+  const pendingTags = useStableArray(useMemo(() => {
     const live = (sets ?? []).flatMap((s) => s.pending_tags ?? [])
     const cached = anyGenerating ? (chrome?.tags ?? []) : []
     return Array.from(new Set([...live, ...cached]))
-  }, [sets, chrome, anyGenerating])
+  }, [sets, chrome, anyGenerating]))
 
   // Surface a server error only when there is nothing else to show; if cached
   // sets are on screen, keep them rather than replacing them with the error.

@@ -10,7 +10,9 @@ export const Route = createFileRoute('/project/$projectId')({
 
 function ProjectLayout() {
   const { projectId } = useParams({ from: '/project/$projectId' })
-  const { setSelectedProjectId } = useProjectStore()
+  // Selector, not a whole-store subscribe: this layout wraps every project
+  // page, so re-rendering it re-renders the whole route subtree.
+  const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
 
   // Sync URL projectId to store so other components can read it.
   useEffect(() => {

@@ -404,6 +404,17 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    and drift the caret, so force weight/style off for these tokens only. */
 .md-src-code, .md-src-code * { font-weight: 400 !important; font-style: normal !important; }
 
+/* Inline **bold** emphasis in that same backdrop. A real font-weight swap
+   renders wider glyphs, so the visible (backdrop) text drifts sideways from the
+   invisible textarea text it must mirror - the caret floats mid-word and the
+   browser's spellcheck squiggles (drawn at the TEXTAREA's glyph positions)
+   land offset under the visible words, reading as doubled text. A text stroke
+   thickens the strokes without touching the advance widths, so it looks bold
+   while staying glyph-for-glyph aligned. (Italic gets no fake: an italic face
+   has different advances, and a skew transform needs inline-block which breaks
+   wrapping - so italic source shows only its dimmed markers.) */
+.md-src-bold { -webkit-text-stroke: 0.035em currentColor; }
+
 /* GFM task-list items (react-markdown + remark-gfm): the <ul> is styled
    list-none/pl-0 by the Markdown component, so give the disabled checkbox a
    little breathing room from its label. */

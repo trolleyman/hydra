@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
 import { useToastStore } from './toastStore'
+import { deepEqual, reconcileList } from '../lib/deepEqual'
 
 // Default lifetime of an optimistic status override. Comfortably longer than
 // the agent-list poll interval (5s) plus the hook → status-poller latency, so
@@ -194,7 +195,12 @@ export const useAgentStore = create<AgentState>((set) => ({
       (a) => ({ ...a, has_unread_changes: true }),
     )
     return {
-      agents: ur.agents,
+      // Reuse the previous agent objects (and, when nothing changed at all, the
+      // previous array itself) for structurally-identical entries, so selector
+      // subscribers and memo()'d rows don't re-render on a no-op refresh - the
+      // events stream re-fetches this list every time anything project-wide
+      // changes, which is near-constant while an agent is working.
+      agents: reconcileList(state.agents, ur.agents, (a) => a.id),
       agentsProjectId: projectId === undefined ? state.agentsProjectId : projectId,
       optimistic: opt.overrides,
       readUntil: rd.overrides,
@@ -214,12 +220,18 @@ export const useAgentStore = create<AgentState>((set) => ({
     readUntil: Object.fromEntries(Object.entries(state.readUntil).filter(([k]) => k !== id)),
     unreadUntil: Object.fromEntries(Object.entries(state.unreadUntil).filter(([k]) => k !== id)),
   })),
-  updateAgent: (agent) => set((state) => ({
-    agents: state.agents.map((a) => a.id === agent.id ? agent : a)
-  })),
-  patchAgentTests: (id, tests) => set((state) => ({
-    agents: state.agents.map((a) => a.id === id ? { ...a, tests } : a)
-  })),
+  updateAgent: (agent) => set((state) => {
+    const prev = state.agents.find((a) => a.id === agent.id)
+    // Identical content: keep the existing object/array so nothing re-renders.
+    if (prev && deepEqual(prev, agent)) return {}
+    return { agents: state.agents.map((a) => a.id === agent.id ? agent : a) }
+  }),
+  patchAgentTests: (id, tests) => set((state) => {
+    const prev = state.agents.find((a) => a.id === id)
+    // Streamed runs re-send the summary on every marker; skip no-op patches.
+    if (!prev || deepEqual(prev.tests, tests)) return {}
+    return { agents: state.agents.map((a) => a.id === id ? { ...a, tests } : a) }
+  }),
   resetArchived: () => set({ archived: [], archivedHasMore: true, archivedLoading: false }),
   setArchivedLoading: (loading) => set({ archivedLoading: loading }),
   setArchivedFirstPage: (page) => set({
@@ -237,7 +249,9 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   }),
   upsertArchived: (agent) => set((state) => {
-    if (state.archived.some((a) => a.id === agent.id)) {
+    const existing = state.archived.find((a) => a.id === agent.id)
+    if (existing) {
+      if (deepEqual(existing, agent)) return {}
       return { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
     }
     // Insert in created-at order (newest first), tie-breaking by id to match the

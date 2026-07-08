@@ -40,7 +40,10 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     useServerData<RepositoryPushStatus | null>(
       currentProjectId,
       (id) => api.default.getRepositoryPushStatus(id),
-      { intervalMs: EVENT_FALLBACK_MS, initial: null, resetOnError: true },
+      // trackLoading false: nobody reads `loading` and this hook lives in
+      // RootLayout - the flag toggling would re-render the whole chrome twice
+      // per background refetch.
+      { intervalMs: EVENT_FALLBACK_MS, initial: null, resetOnError: true, trackLoading: false },
     )
 
   // Read through a ref so a sync that finishes after the user switches projects

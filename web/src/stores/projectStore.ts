@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ProjectInfo, ReviewConfigResponse, StatusResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
+import { deepEqual, reconcileList, reuseIfEqual } from '../lib/deepEqual'
 
 interface ProjectState {
   projects: ProjectInfo[]
@@ -21,11 +22,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   selectedProjectId: readLocal(StorageKeys.projectId),
   systemStatus: null,
   reviewConfigs: {},
-  setProjects: (projects) => set({ projects }),
+  // The setters below reuse the previous objects when a refetch returns
+  // structurally-identical data, so the polls/event-driven refreshes that
+  // re-deliver the same state don't re-render every subscriber.
+  setProjects: (projects) => set((s) => ({ projects: reconcileList(s.projects, projects, (p) => p.id) })),
   setSelectedProjectId: (id) => {
     writeLocal(StorageKeys.projectId, id)
     set({ selectedProjectId: id })
   },
-  setSystemStatus: (systemStatus) => set({ systemStatus }),
-  setReviewConfig: (projectId, cfg) => set((s) => ({ reviewConfigs: { ...s.reviewConfigs, [projectId]: cfg } })),
+  setSystemStatus: (systemStatus) => set((s) => ({ systemStatus: reuseIfEqual(s.systemStatus, systemStatus) })),
+  setReviewConfig: (projectId, cfg) => set((s) => {
+    if (deepEqual(s.reviewConfigs[projectId], cfg)) return {}
+    return { reviewConfigs: { ...s.reviewConfigs, [projectId]: cfg } }
+  }),
 }))

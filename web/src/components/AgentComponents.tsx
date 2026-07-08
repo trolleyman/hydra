@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Clock } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
@@ -11,7 +12,12 @@ import {
   agentStatusBadge, agentStatusDetail, archivedEndStateBadge,
 } from '../lib/agentDisplay'
 
-export function AgentSidebarItem({
+// memo: the sidebar renders one of these per agent and the list re-renders on
+// every agent-store refresh (about once a second while an agent is working).
+// The store preserves object identity for unchanged agents, so memo makes a
+// no-op refresh skip every untouched row. The created-at label stays live via
+// its self-ticking <RelativeTime> leaf.
+export const AgentSidebarItem = memo(function AgentSidebarItem({
   agent,
   selected,
   projectId,
@@ -133,4 +139,4 @@ export function AgentSidebarItem({
       )}
     </Link>
   )
-}
+})

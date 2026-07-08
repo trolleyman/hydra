@@ -57,7 +57,8 @@ export function useSystemStatus(): SystemStatus {
   const { refetch: refetchStatus } = useServerData<StatusResponse>(
     'system-status',
     () => api.default.getStatus(),
-    { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus },
+    // trackLoading false: `loading` is unused and this hook lives in RootLayout.
+    { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus, trackLoading: false },
   )
 
   return { refetchStatus, development, spawnedAt }

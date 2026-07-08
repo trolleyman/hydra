@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { startVisibilityPolling } from './visibilityPolling'
+import { reuseIfEqual } from './deepEqual'
 
 // useServerData collapses the fetch + visibility-poll + refetch-handle idiom that
 // was copy-pasted across ~7 call sites (PLAN #57). Each of those owned, by hand:
@@ -41,6 +42,12 @@ export interface UseServerDataOptions<T> {
   // good value. Matches the sites that blank their state on error (e.g. push
   // status); the default is to swallow and keep what's shown.
   resetOnError?: boolean
+  // Skip the `loading` state entirely (it stays false). The loading flag toggles
+  // true->false around EVERY fetch - including the event-driven background
+  // refetches - which re-renders the owning component twice per fetch. Callers
+  // that never read `loading` (the store-feeding hooks living in RootLayout)
+  // pass false so a background refresh can be a zero-render no-op.
+  trackLoading?: boolean
 }
 
 export interface ServerData<T, A> {
@@ -59,7 +66,7 @@ export function useServerData<T = unknown, A = void>(
   fetcher: (key: string, arg?: A) => Promise<T>,
   options: UseServerDataOptions<T> = {},
 ): ServerData<T, A> {
-  const { intervalMs = 0, deps = [], resetOnError = false } = options
+  const { intervalMs = 0, deps = [], resetOnError = false, trackLoading = true } = options
   const initial = (options.initial ?? null) as T
 
   const [data, setData] = useState<T>(initial)
@@ -100,16 +107,19 @@ export function useServerData<T = unknown, A = void>(
 
     let cancelled = false
     const run = async (arg?: A) => {
-      setLoading(true)
+      if (trackLoading) setLoading(true)
       try {
         const result = await fetcherRef.current(key, arg)
         if (cancelled) return
-        setData(result)
+        // Keep the previous data object when the fetch returned structurally
+        // identical content, so a no-op background refresh doesn't re-render
+        // the owner (React bails out on a same-reference state update).
+        setData((prev) => reuseIfEqual(prev, result))
         onDataRef.current?.(result)
       } catch {
         if (!cancelled && resetOnError) setData(initialRef.current)
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled && trackLoading) setLoading(false)
       }
     }
 
@@ -125,7 +135,7 @@ export function useServerData<T = unknown, A = void>(
       stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, intervalMs, resetOnError, ...deps])
+  }, [key, intervalMs, resetOnError, trackLoading, ...deps])
 
   return { data, setData, refetch, loading }
 }

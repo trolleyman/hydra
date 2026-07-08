@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
@@ -61,7 +61,13 @@ function testsWsUrl(projectId: string, agentId: string, headRef?: string, includ
 // commit, or the uncommitted working tree), defaulting to the branch tip. Streams
 // updates over a WebSocket so progress / the live log / the settled verdict land
 // instantly, falling back to polling if the socket can't connect or drops.
-export function TestsPanel({ projectId, agentId, repoRef, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
+// memo: hosted by DiffViewer, which re-renders on every diff/panel state change
+// (a manual refresh alone updates it several times); all props here are
+// primitives or stable setters, so the panel only re-renders for its own
+// streaming state or a deliberate refreshKey bump.
+export const TestsPanel = memo(TestsPanelImpl)
+
+function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
   projectId: string
   agentId: string
   // The ref (the agent's branch) to browse when a case/file/dir row's

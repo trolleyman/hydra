@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { LoaderCircle } from 'lucide-react'
 import { useAgentStore } from '../../stores/agentStore'
@@ -13,7 +13,13 @@ export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { agents, loading, removeAgent, setAgents } = useAgentStore()
+  // Per-field selectors (not a whole-store subscription): the store refreshes
+  // near-constantly while an agent works, and a whole-store subscribe would
+  // re-render this page - and the whole AgentDetail subtree - on every one.
+  const agents = useAgentStore((s) => s.agents)
+  const loading = useAgentStore((s) => s.loading)
+  const removeAgent = useAgentStore((s) => s.removeAgent)
+  const setAgents = useAgentStore((s) => s.setAgents)
   const archived = useAgentStore((s) => s.archived)
   const upsertArchived = useAgentStore((s) => s.upsertArchived)
   const projects = useProjectStore((s) => s.projects)
@@ -103,29 +109,32 @@ function AgentPage() {
     navigate({ to: '/project/$projectId', params: { projectId } })
   }, [agent, agentsLoaded, archivedFetch, projectId, agentId, navigate])
 
-  function handleKilled(id: string) {
+  // Stable handlers: AgentDetail re-renders on every live tick of its agent, so
+  // the callbacks it forwards to memo()'d children (e.g. AgentTerminal's
+  // onRefresh) must keep their identity across those renders.
+  const handleKilled = useCallback((id: string) => {
     removeAgent(id)
     if (isMounted.current && id === agentIdRef.current) {
       navigate({ to: '/project/$projectId', params: { projectId } })
     }
-  }
+  }, [removeAgent, navigate, projectId])
 
   // Deselect the current agent without removing it (e.g. "Mark as unread"), so it
   // stays in the sidebar with its unread dot lit.
-  function handleUnselect() {
+  const handleUnselect = useCallback(() => {
     if (isMounted.current) {
       navigate({ to: '/project/$projectId', params: { projectId } })
     }
-  }
+  }, [navigate, projectId])
 
-  async function handleRefresh() {
+  const handleRefresh = useCallback(async () => {
     try {
       const result = await api.default.listAgents(projectId)
       setAgents(result)
     } catch (e) {
       console.error('Failed to refresh agents:', e)
     }
-  }
+  }, [projectId, setAgents])
 
   if (!agent) {
     // The agent store holds a single global list scoped to the *selected*

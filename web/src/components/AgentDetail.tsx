@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { memo, useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -69,7 +69,9 @@ function parsePrompt(prompt: string, projectId: string | null): { text: string; 
   return { text, attachments }
 }
 
-function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string | null }) {
+// memo: AgentDetail re-renders on every live tick of its agent, but the prompt
+// never changes after spawn - no need to re-parse/re-render its markdown.
+const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string | null }) {
   // A box that scrolls when the prompt is tall; short prompts show no scrollbar
   // since the content fits under the max-height. The negative top margin tucks
   // it a little closer to the metadata above, and the bottom gradient softens
@@ -104,7 +106,7 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
       )}
     </div>
   )
-}
+})
 
 // ArchivedAgentDetail is the read-only view for a finished (killed/merged) agent
 // retained in the history. There is no live session, so there is no terminal
@@ -351,6 +353,12 @@ export function AgentDetail({
   // viewer re-snapshots the per-commit artifacts (screenshots) on commit - not
   // on every uncommitted working-tree edit, which would rebuild them needlessly.
   const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
+  // Stable identity so the memo'd AgentTerminal doesn't re-render on every
+  // live tick of the agent (this component re-renders on each one).
+  const handleDiffRefresh = useCallback((headMoved: boolean) => {
+    setDiffRefreshTrigger((t) => t + 1)
+    if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
+  }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // The relative "created Xs ago" labels update via the two `live` SeparatedRows
@@ -1313,10 +1321,7 @@ export function AgentDetail({
           isEphemeral={agent.ephemeral}
           chatMode={agent.chat_mode === true}
           onRefresh={onRefresh}
-          onDiffRefresh={(headMoved) => {
-            setDiffRefreshTrigger((t) => t + 1)
-            if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
-          }}
+          onDiffRefresh={handleDiffRefresh}
         />
 
         {/* Diff viewer */}

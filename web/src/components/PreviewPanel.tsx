@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ExternalLink, LoaderCircle, MonitorPlay, Play, RotateCcw, Square } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
@@ -41,7 +41,11 @@ function StateChip({ state }: { state: PreviewStatus['state'] }) {
 // server Hydra spins up on demand behind a dedicated proxy port: Open starts it
 // (the tab shows a live loading page while it builds) and idle instances tear
 // themselves down; the row also exposes stop/restart and the captured build log.
-export function PreviewPanel({ projectId, agentId, headRef, includeUncommitted, refreshKey }: {
+// memo: hosted by DiffViewer (see TestsPanel) - all props are primitives, so
+// only a real ref/refresh change re-renders the panel.
+export const PreviewPanel = memo(PreviewPanelImpl)
+
+function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, refreshKey }: {
   projectId: string
   agentId: string
   // The version to preview, mirrored from the diff viewer's right-hand selector.

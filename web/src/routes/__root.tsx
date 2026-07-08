@@ -128,12 +128,23 @@ function RootLayout() {
     onCancel: () => void
   } | null>(null)
 
-  const { projects, selectedProjectId, setProjects, setSelectedProjectId, reviewConfigs, setReviewConfig } = useProjectStore()
-  const { agents, addAgent, markRead, patchAgentTests } = useAgentStore()
+  // Subscribe with per-field selectors (never the whole store): RootLayout owns
+  // the entire app chrome, so a whole-store subscription would re-render the
+  // sidebar, spawn box and every tooltip each time ANY store field changes -
+  // which, while an agent is streaming output, is about once a second.
+  const projects = useProjectStore((s) => s.projects)
+  const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
+  const setProjects = useProjectStore((s) => s.setProjects)
+  const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
+  const setReviewConfig = useProjectStore((s) => s.setReviewConfig)
+  const agents = useAgentStore((s) => s.agents)
+  const addAgent = useAgentStore((s) => s.addAgent)
+  const markRead = useAgentStore((s) => s.markRead)
+  const patchAgentTests = useAgentStore((s) => s.patchAgentTests)
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
   const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
-  const dialog = useDialogStore()
+  const showDialog = useDialogStore((s) => s.show)
   const navigate = useNavigate()
   const location = useLocation()
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
@@ -149,7 +160,7 @@ function RootLayout() {
   // store (the agent page loads it too - whichever runs first wins). The
   // sidebar uses its browse_url for the forge web link next to Repository
   // (NON_LOCAL_INTEGRATION.md 3.8).
-  const reviewConfig = currentProjectId ? reviewConfigs[currentProjectId] : undefined
+  const reviewConfig = useProjectStore((s) => (currentProjectId ? s.reviewConfigs[currentProjectId] : undefined))
   useEffect(() => {
     if (!currentProjectId || reviewConfig) return
     let cancelled = false
@@ -483,36 +494,11 @@ function RootLayout() {
     window.location.reload()
   }
 
-  // Adding a project reads its .hydra/config.toml from the repo and, once
-  // registered, starts its [[services]] - both of which can run code. So the
-  // user reviews and trusts the config *before* we register it. Trust is decided
-  // here, once, at add time; there is no persisted trust state, so opening an
-  // already-added project never re-prompts. Declining leaves nothing registered.
-  async function handleAddProject(path: string) {
-    const name = path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
-    const trusted = await new Promise<boolean>((resolve) => {
-      setTrustPrompt({
-        name,
-        path,
-        onTrusted: () => {
-          setTrustPrompt(null)
-          resolve(true)
-        },
-        onCancel: () => {
-          setTrustPrompt(null)
-          resolve(false)
-        },
-      })
-    })
-    if (!trusted) return
-    await registerProject(path)
-  }
-
   // registerProject performs the actual add once the user has trusted the
   // project. On a missing / non-git directory it offers to create+init it, then
   // retries with those flags (no second trust prompt - the config was already
   // reviewed).
-  async function registerProject(
+  const registerProject = useCallback(async function register(
     path: string,
     opts?: { create_if_missing?: boolean; init_git?: boolean },
   ): Promise<void> {
@@ -533,7 +519,7 @@ function RootLayout() {
 
         if (isNotFound || isNotGit) {
           return new Promise<void>((resolve, reject) => {
-            dialog.show({
+            showDialog({
               title: isNotFound ? 'Directory Not Found' : 'Not a Git Repository',
               message: isNotFound
                 ? `The directory "${path}" does not exist. Do you want to create it and initialize a git repository?`
@@ -541,7 +527,7 @@ function RootLayout() {
               type: 'confirm',
               showCancel: true,
               onConfirm: () => {
-                registerProject(path, { create_if_missing: isNotFound, init_git: true }).then(resolve, reject)
+                register(path, { create_if_missing: isNotFound, init_git: true }).then(resolve, reject)
               },
               onCancel: () => {
                 reject(err)
@@ -552,9 +538,34 @@ function RootLayout() {
       }
       throw err
     }
-  }
+  }, [projects, setProjects, setSelectedProjectId, navigate, showDialog])
 
-  function handleSpawned(agent: AgentResponse) {
+  // Adding a project reads its .hydra/config.toml from the repo and, once
+  // registered, starts its [[services]] - both of which can run code. So the
+  // user reviews and trusts the config *before* we register it. Trust is decided
+  // here, once, at add time; there is no persisted trust state, so opening an
+  // already-added project never re-prompts. Declining leaves nothing registered.
+  const handleAddProject = useCallback(async (path: string) => {
+    const name = path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
+    const trusted = await new Promise<boolean>((resolve) => {
+      setTrustPrompt({
+        name,
+        path,
+        onTrusted: () => {
+          setTrustPrompt(null)
+          resolve(true)
+        },
+        onCancel: () => {
+          setTrustPrompt(null)
+          resolve(false)
+        },
+      })
+    })
+    if (!trusted) return
+    await registerProject(path)
+  }, [registerProject])
+
+  const handleSpawned = useCallback((agent: AgentResponse) => {
     addAgent(agent)
     // Spawn in the background: only jump to the new agent if the user isn't
     // already focused on one. When an agent is open, leave it in front so a
@@ -564,7 +575,20 @@ function RootLayout() {
     if (currentProjectId && !selectedAgentId) {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
     }
-  }
+  }, [addAgent, currentProjectId, selectedAgentId, navigate])
+
+  // One shared deselect handler for every sidebar row (clicking the already-open
+  // agent toggles back to the project home). Stable so the memo()'d rows don't
+  // re-render just because RootLayout did.
+  const handleAgentDeselect = useCallback(() => {
+    if (currentProjectId) navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+  }, [currentProjectId, navigate])
+
+  // Deselect the project entirely (dropdown "deselect" action).
+  const handleProjectDeselect = useCallback(() => {
+    setSelectedProjectId(null)
+    navigate({ to: '/' })
+  }, [setSelectedProjectId, navigate])
 
   const filteredAgents = agents.filter((a) => !a.ephemeral)
 
@@ -617,10 +641,7 @@ function RootLayout() {
               // Restore the view (agent / repository / project) last open in the
               // project we're switching to (see selectProject / restoreProjectView).
               onSelect={selectProject}
-              onDeselect={() => {
-                setSelectedProjectId(null)
-                navigate({ to: '/' })
-              }}
+              onDeselect={handleProjectDeselect}
               onAddProject={handleAddProject}
             />
           </div>
@@ -792,7 +813,7 @@ function RootLayout() {
                   agent={agent}
                   selected={agent.id === selectedAgentId}
                   projectId={currentProjectId}
-                  onDeselect={() => navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })}
+                  onDeselect={handleAgentDeselect}
                 />
               ))
             )}
@@ -825,7 +846,7 @@ function RootLayout() {
                       agent={agent}
                       selected={agent.id === selectedAgentId}
                       projectId={currentProjectId}
-                      onDeselect={() => navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })}
+                      onDeselect={handleAgentDeselect}
                     />
                   ))}
               </>

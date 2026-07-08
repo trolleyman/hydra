@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -668,7 +668,12 @@ interface Props {
   onDiffRefresh?: (headMoved: boolean) => void
 }
 
-export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+// memo: AgentDetail re-renders on every live tick of its agent (activity line,
+// streamed test counts); the terminal only cares about identity-stable props,
+// so those ticks skip the whole tab strip + xterm/chat subtree.
+export const AgentTerminal = memo(AgentTerminalImpl)
+
+function AgentTerminalImpl({ agentId, projectId, chatMode, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
