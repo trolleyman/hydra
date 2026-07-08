@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -31,6 +31,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
+import { useChatFontStore } from '../lib/chatPrefs'
 
 // ChatPane renders a chat-mode head (CHAT_MODE.md): it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -60,10 +61,15 @@ type ChatItem =
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
   | { kind: 'cmdout'; id: number; text: string }
+  // A harness-injected system notice (e.g. a <task-notification> when a
+  // background task finishes), rendered as a compact muted line, not raw XML.
+  | { kind: 'notice'; id: number; text: string }
   | { kind: 'interrupted'; id: number }
   | { kind: 'assistant'; id: number; text: string }
-  | { kind: 'thinking'; id: number; text: string }
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; isError?: boolean }
+  // durationMs is set for a thought whose streaming we timed live (item 11);
+  // replayed history has no timing, so it renders as a plain "Thought".
+  | { kind: 'thinking'; id: number; text: string; durationMs?: number }
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -140,19 +146,15 @@ function stripToolUseError(text: string): string {
   return m ? m[1].trim() : text
 }
 
-// toolResultText flattens a tool_result block's content (string, or an array
-// of text blocks) into displayable text.
-function toolResultText(content: unknown): string {
-  if (typeof content === 'string') return stripToolUseError(content)
-  if (Array.isArray(content)) {
-    return stripToolUseError(
-      content
-        .map((c) => (typeof c === 'string' ? c : typeof (c as ClaudeContentBlock).text === 'string' ? (c as ClaudeContentBlock).text : ''))
-        .filter(Boolean)
-        .join('\n'),
-    )
-  }
-  return ''
+// decodeEntities turns the handful of XML entities that appear in injected
+// harness text (a <task-notification> summary) back into their characters.
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
 }
 
 // trimWorktreePaths rewrites absolute paths under the head's worktree to
@@ -179,6 +181,77 @@ function summarizeToolInput(input: unknown): string {
   } catch {
     return ''
   }
+}
+
+// collapseHome rewrites an absolute home path (/home/<user>/..., /Users/<user>/
+// ... on macOS) to ~/... for display (item 5) - the machine's home prefix is
+// noise in a tool summary. Applied everywhere it appears in the string.
+function collapseHome(text: string): string {
+  return text.replace(/\/(?:home|Users)\/[^/\s"]+\//g, '~/')
+}
+
+// memoryName recognises a Claude auto-memory file
+// (~/.claude/projects/<slug>/memory/<name>.md) and returns just <name>, so a
+// Read of one renders as "memory <name>" instead of the long absolute path
+// (item 5). Null for anything that isn't a memory file.
+function memoryName(path: string): string | null {
+  const m = /(?:^|\/)memory\/([^/]+?)\.md$/i.exec(path)
+  return m ? m[1] : null
+}
+
+// readLineInfo turns a Read tool's offset/limit into a short "lines N-M" note
+// shown after the filename in the card header (item 1), so the range is visible
+// without expanding the (otherwise hidden) input.
+function readLineInfo(input: Record<string, unknown> | null): string {
+  if (!input) return ''
+  const offset = typeof input.offset === 'number' ? input.offset : undefined
+  const limit = typeof input.limit === 'number' ? input.limit : undefined
+  if (offset != null && limit != null) return `lines ${offset}-${offset + limit - 1}`
+  if (offset != null) return `from line ${offset}`
+  if (limit != null) return `first ${limit} lines`
+  return ''
+}
+
+// LANG_BY_EXT maps a file extension to a highlight.js language, so a Read tool's
+// output can be syntax highlighted by the file it read (item 3).
+const LANG_BY_EXT: Record<string, string> = {
+  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+  mjs: 'javascript', cjs: 'javascript', json: 'json', go: 'go', py: 'python',
+  rb: 'ruby', rs: 'rust', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
+  hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin',
+  sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', yml: 'yaml', yaml: 'yaml',
+  toml: 'ini', ini: 'ini', md: 'markdown', markdown: 'markdown', html: 'xml',
+  xml: 'xml', svg: 'xml', css: 'css', scss: 'scss', sql: 'sql', lua: 'lua',
+  dockerfile: 'dockerfile', diff: 'diff', patch: 'diff',
+}
+function langFromPath(path: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase()
+  return ext ? (LANG_BY_EXT[ext] ?? '') : ''
+}
+
+// parseToolResult flattens a tool_result block's content into displayable text
+// plus any inline images (an image-read returns image blocks, not text - item
+// 4). Base64 sources become data URLs; url sources are used verbatim.
+function parseToolResult(content: unknown): { text: string; images: string[] } {
+  const images: string[] = []
+  const collect = (c: unknown): string => {
+    if (typeof c === 'string') return c
+    if (Array.isArray(c)) return c.map(collect).filter(Boolean).join('\n')
+    if (c && typeof c === 'object') {
+      const b = c as ClaudeContentBlock & {
+        source?: { type?: string; media_type?: string; data?: string; url?: string }
+      }
+      if (b.type === 'image' && b.source) {
+        const s = b.source
+        if (s.type === 'base64' && s.data) images.push(`data:${s.media_type ?? 'image/png'};base64,${s.data}`)
+        else if (s.type === 'url' && s.url) images.push(s.url)
+        return ''
+      }
+      if (typeof b.text === 'string') return b.text
+    }
+    return ''
+  }
+  return { text: stripToolUseError(collect(content)), images }
 }
 
 // --- Claude-app-ish shared styles -------------------------------------------
@@ -308,6 +381,18 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
   return <pre className={cls}>{code}</pre>
 }
 
+// OutputPanel renders a tool's textual output on the shared quiet panel,
+// syntax highlighted when a language is known (item 3, e.g. a Read of a .ts
+// file) and tinted red on error. Tall output scrolls within a capped height.
+function OutputPanel({ text, lang, isError }: { text: string; lang: string; isError?: boolean }) {
+  const html = useMemo(() => (lang ? highlightHtml(text, lang) : null), [text, lang])
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 ${
+    isError ? 'text-red-600 dark:text-red-300' : 'text-stone-600 dark:text-stone-300'
+  }`
+  if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
+  return <pre className={cls}>{text || '(no output)'}</pre>
+}
+
 // Per-tool icons for the card header; anything unlisted gets the wrench.
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
@@ -323,7 +408,9 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   Agent: Bot,
 }
 
-function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
+// memo'd so composer keystrokes (a sibling state change) don't re-render every
+// tool card in the transcript (item 16). Props are stable per settled item.
+const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const pending = item.result === undefined
@@ -333,11 +420,30 @@ function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
   const isBash = item.name === 'Bash' && command !== ''
   const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
+
+  // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
+  // for auto-memory files, the line range for the header, whether the input is
+  // "simple" (fully described by the header, so the Input panel is hidden), and
+  // the language to highlight its output by.
+  const isRead = item.name === 'Read'
+  const readPath = isRead && typeof input?.file_path === 'string' ? (input.file_path as string) : ''
+  const mem = isRead ? memoryName(readPath) : null
+  const lineInfo = isRead ? readLineInfo(input) : ''
+  const simpleRead =
+    isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
+  const outputLang = isRead ? langFromPath(readPath) : ''
+
   // A Bash header shows the human description when the agent provided one (the
-  // script itself lives in the expanded card); other tools show their primary
-  // argument, worktree-relative.
-  const summary = trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree)
-  const summaryMono = !(isBash && description)
+  // script itself lives in the expanded card); a memory Read shows "memory
+  // <name>"; other tools show their primary argument, worktree-relative and
+  // home-collapsed.
+  const summary = mem
+    ? `memory ${mem}`
+    : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
+  const summaryMono = !mem && !(isBash && description)
+  // The Input panel is redundant for a plain Read (item 1) - everything it holds
+  // is already in the header. Bash shows its Command panel unlabelled (item 13).
+  const hideInput = simpleRead
   const Icon = TOOL_ICONS[item.name] ?? Wrench
 
   const rawJson = useMemo(() => {
@@ -357,23 +463,27 @@ function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }
     >
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         <ChevronRight
-          className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
         />
-        <Icon className={`w-3 h-3 shrink-0 ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
+        <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
         <span className="font-medium shrink-0">{item.name}</span>
         <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+        {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         {pending && (
-          <span className="ml-auto shrink-0 text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+          <span className="ml-auto shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
       </button>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
+          {/* Only the Raw view is labelled (right-aligned toggle aside). The
+              input panel itself is self-evident, so "Input"/"Command" headers
+              add nothing and are dropped (items 1, 13, 14). */}
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500 select-none">
-              {showRaw ? 'Raw' : isBash ? 'Command' : 'Input'}
+            <span className="text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+              {showRaw ? 'Raw' : ''}
             </span>
             <button
               onClick={() => setShowRaw((r) => !r)}
@@ -393,21 +503,29 @@ function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }
             <>
               {isBash ? (
                 <CodePanel code={trimWorktreePaths(splitBashChains(command), worktree)} lang="bash" />
-              ) : (
+              ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
-              {item.result !== undefined && (
+              {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500 select-none">
+                  <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                     Output
                   </div>
-                  <pre
-                    className={`${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 ${
-                      item.isError ? 'text-red-600 dark:text-red-300' : 'text-stone-600 dark:text-stone-300'
-                    }`}
-                  >
-                    {item.result || '(no output)'}
-                  </pre>
+                  {item.resultImages && item.resultImages.length > 0 && (
+                    <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
+                      {item.resultImages.map((src, i) => (
+                        <img
+                          key={i}
+                          src={src}
+                          alt="Tool output image"
+                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08]"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
+                    <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+                  )}
                 </div>
               )}
             </>
@@ -416,18 +534,23 @@ function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }
       </Expandable>
     </div>
   )
-}
+})
 
 // ThinkingCard is the Claude-app-style thought disclosure: a shimmering
 // "Thinking..." label with a live tail while tokens stream, a quiet one-line
 // snippet once settled. Clicking expands inline on desktop (clamped, with a
 // Show more escape hatch) and opens a bottom sheet on small screens.
-function ThinkingCard({ text, streaming }: { text: string; streaming?: boolean }) {
+// memo'd for the same reason as ToolCard (item 16).
+const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }: { text: string; streaming?: boolean; durationMs?: number }) {
   const [open, setOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [sheet, setSheet] = useState(false)
   const [clipped, setClipped] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
+
+  // The settled label keeps the same disclosure affordance but names the elapsed
+  // time when we timed it live (item 11), e.g. "Thought for 5s".
+  const settledLabel = durationMs != null ? `Thought for ${Math.max(1, Math.round(durationMs / 1000))}s` : 'Thought'
 
   const trimmed = text.trim()
   const snippet = trimmed.split('\n')[0] ?? ''
@@ -460,7 +583,7 @@ function ThinkingCard({ text, streaming }: { text: string; streaming?: boolean }
           <span className="chat-text-shimmer font-medium shrink-0 text-stone-500">Thinking...</span>
         ) : (
           <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
-            Thinking
+            {settledLabel}
           </span>
         )}
         {!streaming && !open && snippet && (
@@ -509,7 +632,7 @@ function ThinkingCard({ text, streaming }: { text: string; streaming?: boolean }
           <div className="absolute inset-x-0 bottom-0 max-h-[75vh] flex flex-col rounded-t-2xl border-t border-stone-200 dark:border-white/10 bg-[#faf9f5] dark:bg-[#2b2b28] shadow-2xl animate-chat-sheet-up">
             <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
               <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
-                {streaming ? 'Thinking...' : 'Thinking'}
+                {streaming ? 'Thinking...' : settledLabel}
               </span>
               <button
                 onClick={() => setSheet(false)}
@@ -527,7 +650,7 @@ function ThinkingCard({ text, streaming }: { text: string; streaming?: boolean }
       )}
     </div>
   )
-}
+})
 
 // --- Question cards (AskUserQuestion) ----------------------------------------
 //
@@ -775,6 +898,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   const status = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
+  // Whether agent prose renders serif (item 9, the default) - a Browser setting.
+  const serif = useChatFontStore((s) => s.serif)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
@@ -831,6 +956,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // in-flight block, which stays small.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let streamTimer: ReturnType<typeof setTimeout> | null = null
+    // When a thinking block starts streaming we stamp the start time; the settled
+    // thinking item picks it up (and clears it) to show "Thought for Xs" (item
+    // 11). Replayed history never streams, so it stays null -> a plain "Thought".
+    let thinkingStart: number | null = null
+    const takeThinkingDuration = (): number | undefined => {
+      if (thinkingStart == null) return undefined
+      const ms = Date.now() - thinkingStart
+      thinkingStart = null
+      return ms
+    }
     const scheduleStreamFlush = () => {
       if (streamTimer != null) return
       streamTimer = setTimeout(() => {
@@ -846,7 +981,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       setStream(null)
     }
-    const patchTool = (toolUseId: string, result: string, isError: boolean) => {
+    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[]) => {
+      const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
       // rendered.
       const inPending = pending.find(
@@ -855,6 +991,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (inPending && inPending.kind === 'tool') {
         inPending.result = result
         inPending.isError = isError
+        inPending.resultImages = resultImages
         return
       }
       if (inPending && inPending.kind === 'question') {
@@ -863,7 +1000,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       setItems((prev) =>
         prev.map((it) => {
-          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError }
+          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages }
           if (it.kind === 'question' && it.toolUseId === toolUseId) return { ...it, result }
           return it
         }),
@@ -926,6 +1063,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         push({ kind: 'interrupted' })
         return
       }
+      // A harness-injected background-task notification (<task-notification>):
+      // render a compact one-line notice instead of the raw XML (item 15).
+      if (text.includes('<task-notification>')) {
+        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+        push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+        return
+      }
       settlePendingSend(text)
       push({ kind: 'user', text })
     }
@@ -966,7 +1110,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (block.type === 'text' && block.text?.trim()) {
               routeUserText(block.text)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
-              patchTool(block.tool_use_id, toolResultText(block.content), block.is_error === true)
+              const parsed = parseToolResult(block.content)
+              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
             }
           }
           return
@@ -1001,7 +1146,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (block.type === 'text' && block.text?.trim()) {
               push({ kind: 'assistant', text: block.text })
             } else if (block.type === 'thinking' && block.thinking?.trim()) {
-              push({ kind: 'thinking', text: block.thinking })
+              push({ kind: 'thinking', text: block.thinking, durationMs: takeThinkingDuration() })
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
@@ -1028,6 +1173,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
+            if (bt === 'thinking') thinkingStart = Date.now()
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta
@@ -1533,6 +1679,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             {item.text}
           </pre>
         )
+      case 'notice':
+        return (
+          <div className="flex justify-center">
+            <div className="max-w-[90%] truncate rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
+              {item.text}
+            </div>
+          </div>
+        )
       case 'interrupted':
         return (
           <div className="flex justify-end">
@@ -1542,9 +1696,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         )
       case 'assistant':
-        return <div className="max-w-[95%] leading-relaxed">{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
-        return <ThinkingCard text={item.text} />
+        return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool':
         return <ToolCard item={item} worktree={worktreePath} />
       case 'question':
@@ -1581,6 +1735,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   const modelLabel = modelDisplayLabel(model)
 
+  // A turn's result footer (duration/cost) should show once. On a resume the
+  // transcript backfill and the live stream can each end with their own result
+  // event, landing two footers back to back with nothing between (the "2
+  // durations" report); drop a result that is immediately followed by another,
+  // keeping only the last of any consecutive run.
+  const visibleItems = useMemo(
+    () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
+    [items],
+  )
+
   return (
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
@@ -1604,30 +1768,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     >
       <div className="relative flex-1 min-h-0">
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-4 py-3 flex flex-col gap-3">
+          <div className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {!replayDone && items.length === 0 && (
             <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
               {connected ? 'Loading conversation...' : 'Connecting...'}
             </div>
           )}
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
               {renderChatItem(item)}
             </div>
           ))}
-          {/* The in-flight streamed block: markdown-rendered live (with a
-              virtual closing fence while inside a code block) plus a pulsing
-              caret; streamed thinking uses the same collapsed card as settled
-              thoughts, its preview auto-updating as tokens arrive. */}
-          {stream && stream.kind === 'assistant' && (
-            <div className="max-w-[95%] leading-relaxed">
-              <Markdown text={closeOpenFence(stream.text)} />
-              <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
-            </div>
-          )}
-          {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
-          {/* Optimistic sends: pinned under the transcript until the CLI echoes
-              the processed turn back, visibly queued while a turn is running. */}
+          {/* Optimistic sends: pinned under the transcript (above the agent's
+              in-flight reply / thinking - item 12) until the CLI echoes the
+              processed turn back, visibly queued while a turn is running. */}
           {pendingSends.map((p) => (
             <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
               <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
@@ -1648,6 +1802,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               </div>
             </div>
           ))}
+          {/* The in-flight streamed block: markdown-rendered live (with a
+              virtual closing fence while inside a code block) plus a pulsing
+              caret; streamed thinking uses the same collapsed card as settled
+              thoughts, its preview auto-updating as tokens arrive. */}
+          {stream && stream.kind === 'assistant' && (
+            <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <Markdown text={closeOpenFence(stream.text)} />
+              <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
+            </div>
+          )}
+          {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user
@@ -1678,7 +1843,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         >
           <div className="h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-stone-300 dark:group-hover:bg-stone-600" />
         </div>
-        <div className="relative mx-auto max-w-3xl">
+        <div className="relative mx-auto max-w-5xl">
           {slashMatches.length > 0 && (
             <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
               {slashMatches.map((c, i) => (
@@ -1751,7 +1916,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                   <button
                     onClick={() => setModelMenuOpen((o) => !o)}
                     disabled={!connected}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200 transition-colors cursor-pointer disabled:opacity-40"
+                    className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
+                      modelMenuOpen
+                        ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
+                        : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
+                    }`}
                     title="Model"
                   >
                     {modelLabel}

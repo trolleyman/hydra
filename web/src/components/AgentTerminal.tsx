@@ -846,12 +846,16 @@ export function AgentTerminal({ agentId, projectId, chatMode, onRefresh, onStatu
     >
       {/* Size indicator shown while dragging the resize handle; fades out when
           the drag stops. Snapping keeps rows whole, so this reads cleanly. Inset
-          a bit from the top-right corner so it sits clearly inside the terminal. */}
-      <div
-        className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
-      >
-        {dims.cols}×{dims.rows}
-      </div>
+          a bit from the top-right corner so it sits clearly inside the terminal.
+          The chat pane has no character grid, so there's nothing meaningful to
+          show (it would read "0x0") - suppress it there. */}
+      {!chatActive && (
+        <div
+          className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
+        >
+          {dims.cols}×{dims.rows}
+        </div>
+      )}
       {/* Title bar with inline tabs */}
       <div
         className={`flex items-center gap-1 px-3 py-2 border-b shrink-0 ${
