@@ -589,6 +589,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header. Bash shows its Command panel unlabelled (item 13).
   const hideInput = simpleRead
+  // Whether an input/command panel renders above the output. When it doesn't
+  // (a plain Read), the "Output" header is redundant and dropped (item 32).
+  const hasInput = isBash || !hideInput
   const Icon = TOOL_ICONS[item.name] ?? Wrench
 
   const rawJson = useMemo(() => {
@@ -606,42 +609,41 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-        <span className="font-medium shrink-0">{item.name}</span>
-        <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
-        {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+      {/* Header row: the whole left side toggles open; a Raw button sits at the
+          right, only while expanded (item 32). Two sibling buttons (not nested)
+          so the Raw toggle doesn't also collapse the card. */}
+      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
+          <span className="font-medium shrink-0">{item.name}</span>
+          <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+        </button>
         {pending && (
-          <span className="ml-auto shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
-      </button>
+        {open && (
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              showRaw
+                ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
+                : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
+            }`}
+            title="Toggle the raw tool-call JSON"
+          >
+            Raw
+          </button>
+        )}
+      </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
-          {/* Only the Raw view is labelled (right-aligned toggle aside). The
-              input panel itself is self-evident, so "Input"/"Command" headers
-              add nothing and are dropped (items 1, 13, 14). */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-              {showRaw ? 'Raw' : ''}
-            </span>
-            <button
-              onClick={() => setShowRaw((r) => !r)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
-                showRaw
-                  ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
-                  : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
-              }`}
-              title="Toggle the raw tool-call JSON"
-            >
-              Raw
-            </button>
-          </div>
           {showRaw ? (
             <CodePanel code={rawJson} lang="json" />
           ) : (
@@ -653,9 +655,13 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
               )}
               {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-                    Output
-                  </div>
+                  {/* "Output" only when there's an input panel above it to
+                      separate from; a plain Read's body is output-only (item 32). */}
+                  {hasInput && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Output
+                    </div>
+                  )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
                       {item.resultImages.map((src, i) => (
