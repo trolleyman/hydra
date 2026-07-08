@@ -13,6 +13,7 @@ import { useDialogStore } from '../stores/dialogStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { saveLastGeometry } from '../lib/terminalGeometry'
+import { loadChatDefaultHeight, DEFAULT_CHAT_HEIGHT } from '../lib/chatPrefs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { ChatPane } from './AgentChat'
@@ -691,8 +692,13 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, onRefresh, onStatusUp
   // agent's page restores its own layout.
   const rootRef = useRef<HTMLDivElement>(null)
   const paneWrapRef = useRef<HTMLDivElement>(null)
+  // The panel opens at this agent's saved (dragged) height if it has one; failing
+  // that, chat agents fall back to the chat default height and terminal agents to
+  // the terminal default, so the two kinds of window can start at different sizes.
   const [height, setHeight] = useState(
-    () => loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT,
+    () =>
+      loadAgentViewPrefs(projectId, agentId).terminalHeight ??
+      (chatMode ? loadChatDefaultHeight() ?? DEFAULT_CHAT_HEIGHT : DEFAULT_TERMINAL_HEIGHT),
   )
   const lastHeightRef = useRef(height)
 

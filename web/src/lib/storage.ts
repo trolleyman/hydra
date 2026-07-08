@@ -70,6 +70,12 @@ export const StorageKeys = {
   // user settings page. Used as the spawn height only when no last-height geometry
   // exists yet (see lib/terminalGeometry).
   terminalDefaultRows: 'hydra-terminal-default-rows',
+  // User-chosen default height (pixels) a chat window opens at, set on the user
+  // settings page. Chat panes have no character grid, so their height is a raw
+  // pixel value rather than rows - and is kept separate from the terminal default
+  // so chat windows and terminal windows can open at different sizes (see
+  // lib/chatPrefs + AgentTerminal).
+  chatDefaultHeight: 'hydra-chat-default-height',
 
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
