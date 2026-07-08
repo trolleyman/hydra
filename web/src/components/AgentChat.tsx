@@ -14,6 +14,7 @@ import {
   Globe,
   ListChecks,
   ListEnd,
+  ListPlus,
   LoaderCircle,
   Plus,
   Search,
@@ -317,7 +318,13 @@ function summarizeToolInput(input: unknown): string {
   if (input == null) return ''
   if (typeof input !== 'object') return String(input)
   const obj = input as Record<string, unknown>
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt']) {
+  // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
+  if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
+    const status = typeof obj.status === 'string' ? obj.status : ''
+    const subj = typeof obj.subject === 'string' ? obj.subject : ''
+    return `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`
+  }
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt']) {
     if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
   }
   try {
@@ -423,6 +430,40 @@ function parseTodos(input: unknown): TodoItem[] | null {
     out.push({ content: o.content, status, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined })
   }
   return out.length ? out : null
+}
+
+// The Task* tool family (TaskCreate/TaskUpdate) is the incremental cousin of
+// TodoWrite: instead of one call carrying the whole list, each call mutates a
+// single task. parseTaskCreate reads a TaskCreate input ({subject, ...}); a new
+// task always starts `pending` (the harness assigns its id in creation order).
+function parseTaskCreate(input: unknown): { content: string; activeForm?: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  if (typeof o.subject !== 'string' || !o.subject) return null
+  return { content: o.subject, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined }
+}
+
+// parseTaskUpdate reads a TaskUpdate input ({taskId, status?, subject?, ...}),
+// returning the referenced id plus only the fields it changes (status "deleted"
+// removes the task). Returns null when it names no task, so the call falls back
+// to a normal tool card.
+function parseTaskUpdate(
+  input: unknown,
+): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  const taskId = typeof o.taskId === 'string' ? o.taskId : typeof o.taskId === 'number' ? String(o.taskId) : ''
+  if (!taskId) return null
+  const status =
+    o.status === 'pending' || o.status === 'in_progress' || o.status === 'completed' || o.status === 'deleted'
+      ? o.status
+      : undefined
+  return {
+    taskId,
+    status,
+    content: typeof o.subject === 'string' && o.subject ? o.subject : undefined,
+    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
+  }
 }
 
 // PlanPanel floats the agent's current to-do list (its latest TodoWrite) in the
@@ -646,6 +687,8 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Task: Bot,
   Agent: Bot,
+  TaskCreate: ListPlus,
+  TaskUpdate: ListChecks,
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
@@ -1386,6 +1429,9 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
           if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
           else if (todos) { /* older plan state - the panel already shows the latest */ }
+          // Task* ops fall through to a normal tool card (like any other tool);
+          // only the panel state is latest-wins, and that is driven by the live
+          // reducer's replay, not this older page.
           else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
         }
       }
@@ -1620,6 +1666,53 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // message id; if a CLI version ever re-emits blocks cumulatively, this
     // per-message seen-set keeps the reducer idempotent.
     const seenBlocks = new Map<string, Set<string>>()
+
+    // --- Task* plan reconstruction (item 17, cont.) ------------------------
+    // TodoWrite carries the whole to-do list in one call, so it can just replace
+    // `todos`. The Task* family (TaskCreate/TaskUpdate) is incremental, so we
+    // rebuild the list here and republish it to the same PlanPanel: TaskCreate
+    // appends a task (the harness numbers them in creation order - #1, #2, ... -
+    // which we mirror with taskSeq, since the assigned id lives in the tool
+    // *result*, not its input); TaskUpdate mutates one by id, or drops it on
+    // status "deleted". A session uses one planning tool or the other; if both
+    // ever appear, the most recent write wins.
+    const taskItems = new Map<string, { content: string; status: TodoItem['status']; activeForm?: string; order: number }>()
+    let taskSeq = 0
+    const publishTasks = () => {
+      const list = [...taskItems.values()]
+        .sort((a, b) => a.order - b.order)
+        .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
+      setTodos(list)
+    }
+    // applyTaskTool folds one Task* tool_use into the plan panel (TaskCreate
+    // appends a pending task; TaskUpdate mutates one by id, or drops it on status
+    // "deleted"). Non-Task tools and malformed inputs are ignored. The block is
+    // still rendered as a normal tool card by the caller, so the task-list
+    // mutation stays visible in the conversation flow too.
+    const applyTaskTool = (name: string | undefined, input: unknown) => {
+      if (name === 'TaskCreate') {
+        const t = parseTaskCreate(input)
+        if (!t) return
+        taskSeq += 1
+        taskItems.set(String(taskSeq), { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
+        publishTasks()
+      } else if (name === 'TaskUpdate') {
+        const u = parseTaskUpdate(input)
+        if (!u) return
+        // A TaskUpdate for a task we never saw created (e.g. its create predates
+        // the replay window) has nothing to reflect yet.
+        const cur = taskItems.get(u.taskId)
+        if (!cur) return
+        if (u.status === 'deleted') taskItems.delete(u.taskId)
+        else {
+          if (u.status) cur.status = u.status
+          if (u.content) cur.content = u.content
+          if (u.activeForm !== undefined) cur.activeForm = u.activeForm
+        }
+        publishTasks()
+      }
+    }
+
     const pending: ChatItem[] = []
     let flushScheduled = false
     const flush = () => {
@@ -2072,7 +2165,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
               // control_request (patchQuestionRequest). TodoWrite feeds the
-              // floating plan panel instead of a card (item 17).
+              // floating plan panel instead of a card (item 17); the Task* family
+              // feeds the panel too but still shows its card, so each individual
+              // task-list mutation is visible in the flow.
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
               const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
@@ -2080,6 +2175,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               } else if (todos) {
                 setTodos(todos)
               } else {
+                applyTaskTool(block.name, block.input)
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
             }
