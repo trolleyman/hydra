@@ -87,7 +87,7 @@ type ChatItem =
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
   | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
-  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; outputTokens?: number; errorText?: string }
+  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
   // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
   // no Task card to fold into and renders as a standalone card in the flow. The
   // common case - a sub-agent linked to its Task card - needs no item: the Task
@@ -151,7 +151,10 @@ interface ClaudeEvent {
   // The durable conversation-record id (transcript + stdout share it). Tracked
   // as the anchor for load-older history paging (item 25).
   uuid?: string
-  message?: { id?: string; content?: ClaudeContentBlock[] | string }
+  // stop_reason on a complete assistant message: "end_turn"/"tool_use" are
+  // normal, "max_tokens" means the reply was truncated, "refusal" a safety stop
+  // - only the abnormal ones are surfaced (item: turn footer).
+  message?: { id?: string; content?: ClaudeContentBlock[] | string; stop_reason?: string; usage?: TokenUsage }
   duration_ms?: number
   total_cost_usd?: number
   result?: string
@@ -198,6 +201,35 @@ function formatTokens(n: number): string {
   if (n < 1000) return String(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+// formatCost renders a per-turn dollar figure - more precision for tiny amounts
+// so a fraction-of-a-cent turn doesn't collapse to "$0.00".
+function formatCost(usd: number): string {
+  if (usd >= 0.1) return `$${usd.toFixed(2)}`
+  if (usd >= 0.001) return `$${usd.toFixed(3)}`
+  return `$${usd.toFixed(4)}`
+}
+
+// usageBreakdown builds the hover title spelling out a turn's full token usage -
+// input (uncached), cache read/write and output - kept off the visible line
+// (item 47: only output shows there) since cache figures are noise at a glance.
+function usageBreakdown(u: TokenUsage): string {
+  const parts: string[] = []
+  if (u.input_tokens) parts.push(`Input ${formatTokens(u.input_tokens)}`)
+  if (u.cache_read_input_tokens) parts.push(`Cache read ${formatTokens(u.cache_read_input_tokens)}`)
+  if (u.cache_creation_input_tokens) parts.push(`Cache write ${formatTokens(u.cache_creation_input_tokens)}`)
+  if (u.output_tokens) parts.push(`Output ${formatTokens(u.output_tokens)}`)
+  return parts.join(' · ')
+}
+
+// STOP_REASON_LABEL maps an abnormal assistant stop_reason to a short footer
+// note. Normal ends (end_turn / tool_use) are absent - only truncation or a
+// refusal is worth surfacing (the rest is noise).
+const STOP_REASON_LABEL: Record<string, string> = {
+  max_tokens: 'response cut off at max tokens',
+  refusal: 'stopped (refusal)',
+  model_context_window_exceeded: 'response cut off (context full)',
 }
 
 // Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
@@ -1304,6 +1336,13 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
     push({ kind: 'user', text })
   }
   const seenBlocks = new Map<string, Set<string>>()
+  // The transcript has no `result` events (they aren't part of Claude's durable
+  // record), so a historical turn's footer is synthesized from the assistant
+  // messages' own usage: accumulate output tokens across the turn's messages and
+  // flush a footer when a message ends the turn (stop_reason other than the
+  // mid-turn "tool_use"). No duration/cost is recoverable, so the footer shows
+  // just the token count (+ any truncation flag).
+  let histTurnOut = 0
   for (const ev of events) {
     if (ev.type === 'user') {
       const content = ev.message?.content
@@ -1350,13 +1389,31 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
           else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
         }
       }
+      // Turn-footer synthesis (item: historical usage). Roll this message's
+      // output into the turn total; flush a footer when the turn ends.
+      const u = ev.message?.usage
+      if (u?.output_tokens) histTurnOut += u.output_tokens
+      const sr = ev.message?.stop_reason
+      if (sr && sr !== 'tool_use') {
+        const total = histTurnOut || u?.output_tokens
+        if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+          push({
+            kind: 'result',
+            isError: false,
+            usage: total ? { ...u, output_tokens: total } : u,
+            stopReason: sr,
+          })
+        }
+        histTurnOut = 0
+      }
     } else if (ev.type === 'result') {
+      const out = ev.usage?.output_tokens
       push({
         kind: 'result',
         isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
         durationMs: ev.duration_ms,
         costUsd: ev.total_cost_usd,
-        outputTokens: ev.usage?.output_tokens || undefined,
+        usage: ev.usage ?? (out ? { output_tokens: out } : undefined),
         errorText: ev.is_error ? ev.result : undefined,
       })
     }
@@ -1424,9 +1481,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
   const turnCountRef = useRef(0)
+  // The latest assistant message's stop_reason this turn, so the footer can flag
+  // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
+  const turnStopReasonRef = useRef<string | null>(null)
   const [turnVerb, setTurnVerb] = useState(WORKING_VERBS[0])
   const [elapsed, setElapsed] = useState(0)
   const [turnTokens, setTurnTokens] = useState(0)
+  // Whether the CLI is authed with a real API key (system:init apiKeySource).
+  // Subscription/OAuth auth reports "none", where total_cost_usd is a notional
+  // API-rate figure not money billed - so the footer shows cost only for a key.
+  const [apiKeyReal, setApiKeyReal] = useState(false)
   // Sub-agents (Task tool runs) keyed by agentId, each assembled from its
   // sidechain events. A linked sub folds into its Task card; an unlinked one
   // renders via a 'subagent' item. Reset per connection like `items`.
@@ -1578,6 +1642,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // in-flight block, which stays small.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let streamTimer: ReturnType<typeof setTimeout> | null = null
+    // Output tokens accumulated across the current turn's assistant messages, so
+    // a footer can be synthesized from message usage (the transcript backfill has
+    // no `result` event to carry it). Flushed at each turn end. A live turn also
+    // synthesizes one, but the real `result` footer that immediately follows it
+    // supersedes it (visibleItems drops a result followed by another result).
+    let histTurnOut = 0
     // When a thinking block starts streaming we stamp the start time; the settled
     // thinking item picks it up (and clears it) to show "Thought for Xs" (item
     // 11). Replayed history never streams, so it stays null -> a plain "Thought".
@@ -1929,6 +1999,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (Array.isArray(ev.slash_commands)) {
               setSlashCommands(ev.slash_commands.filter((c): c is string => typeof c === 'string'))
             }
+            if (typeof ev.apiKeySource === 'string') setApiKeyReal(ev.apiKeySource !== 'none')
           }
           return
         }
@@ -1980,6 +2051,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           }
           if (!Array.isArray(content)) return
           clearSending()
+          // Remember this turn's latest stop_reason so the result footer can flag
+          // a truncated / refused reply (the last message before the result wins).
+          if (typeof ev.message?.stop_reason === 'string') turnStopReasonRef.current = ev.message.stop_reason
           const msgId = ev.message?.id ?? ''
           let seen = seenBlocks.get(msgId)
           if (!seen) {
@@ -2009,6 +2083,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
             }
+          }
+          // Synthesize a turn footer from this message's usage + stop_reason, so
+          // backfilled history (no `result` event) still gets one. A live turn's
+          // real `result` follows immediately and supersedes it (see histTurnOut).
+          const u = ev.message?.usage
+          if (u?.output_tokens) histTurnOut += u.output_tokens
+          const sr = ev.message?.stop_reason
+          if (sr && sr !== 'tool_use') {
+            const total = histTurnOut || u?.output_tokens
+            if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+              push({ kind: 'result', isError: false, usage: total ? { ...u, output_tokens: total } : u, stopReason: sr })
+            }
+            histTurnOut = 0
           }
           // The complete event supersedes any in-flight streamed block (finals
           // always follow their own deltas). Cleared in the same batch as the
@@ -2055,16 +2142,24 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return
         }
         case 'result': {
-          // Prefer the result's own usage; fall back to what we tallied live.
-          const outputTokens = (ev.usage?.output_tokens ?? (turnTokensRef.current + curMsgTokensRef.current)) || undefined
+          // Prefer the result's own usage; fall back to the output count we
+          // tallied live from the stream deltas (item 47/48).
+          const liveOut = (turnTokensRef.current + curMsgTokensRef.current) || undefined
+          const usage: TokenUsage | undefined = ev.usage ?? (liveOut ? { output_tokens: liveOut } : undefined)
           push({
             kind: 'result',
             isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
             durationMs: ev.duration_ms,
             costUsd: ev.total_cost_usd,
-            outputTokens,
+            usage,
+            stopReason: turnStopReasonRef.current ?? undefined,
             errorText: ev.is_error ? ev.result : undefined,
           })
+          // Consumed - clear it so it can't leak onto a later turn's result (the
+          // live turn-start reset only fires between live turns, not between the
+          // several results a backfill can carry).
+          turnStopReasonRef.current = null
+          histTurnOut = 0
           // A turn ends only once all its sub-agents have; settle any still
           // marked running (a sub whose own result line we never saw).
           let changed = false
@@ -2197,6 +2292,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       turnStartRef.current = Date.now()
       turnTokensRef.current = 0
       curMsgTokensRef.current = 0
+      turnStopReasonRef.current = null
       setTurnTokens(0)
       setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
     }
@@ -2782,15 +2878,38 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           )
         }
         // A quiet end-of-turn summary (item 47): "* Crunched for <duration>",
-        // Claude-Code style. Nothing when the turn carried no timing.
-        if (item.durationMs == null) return null
-        return (
-          <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
-            <span className="text-[#c96442]">✳</span>
-            Crunched for {formatDuration(item.durationMs)}
-            {item.outputTokens ? ` · ↓ ${formatTokens(item.outputTokens)} tokens` : ''}
-          </div>
-        )
+        // Claude-Code style, optionally with cost (API-key auth only) and the
+        // output-token count (hover for the full input/cache/output breakdown).
+        // A truncation/refusal stop_reason is flagged in amber. Historical turns
+        // carry no timing, so they show just the metrics. Nothing when empty.
+        {
+          const out = item.usage?.output_tokens
+          const cost = apiKeyReal && item.costUsd ? formatCost(item.costUsd) : null
+          const stopNote = item.stopReason ? STOP_REASON_LABEL[item.stopReason] : undefined
+          if (item.durationMs == null && !out && !cost && !stopNote) return null
+          const segs: ReactNode[] = []
+          if (item.durationMs != null) segs.push(`Crunched for ${formatDuration(item.durationMs)}`)
+          if (cost) segs.push(cost)
+          if (out) segs.push(
+            <span key="tok" title={item.usage ? usageBreakdown(item.usage) : undefined}>
+              ↓ {formatTokens(out)} tokens
+            </span>,
+          )
+          if (stopNote) segs.push(
+            <span key="stop" className="text-amber-600 dark:text-amber-500">{stopNote}</span>,
+          )
+          return (
+            <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+              <span className="text-[#c96442]">✳</span>
+              {segs.map((s, i) => (
+                <span key={i} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
+                  {s}
+                </span>
+              ))}
+            </div>
+          )
+        }
     }
   }
 

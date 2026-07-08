@@ -2805,7 +2805,10 @@ var simChatEvents = []string{
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_4","content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\nfor attempt := 0; attempt < maxAttempts; attempt++ {\n    if err = u.put(ctx, key, r); err == nil {\n        return nil\n    }\n    sleepBackoff(attempt)\n}\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	// A turn-ending assistant message carrying usage + stop_reason: the chat
+	// synthesizes a per-turn footer from it (the transcript has no `result`
+	// event), showing "↓ N tokens" with the full input/cache breakdown on hover.
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
@@ -2814,7 +2817,7 @@ var simChatEvents = []string{
 	// A tool_use with NO tool_result before the turn ends: it must NOT stay stuck
 	// showing "running" once the turn's result arrives / history replays (item 42).
 	`{"type":"assistant","message":{"id":"msg_sim_6","content":[{"type":"tool_use","id":"toolu_sim_stuck","name":"Read","input":{"file_path":"web/src/components/settings/NotificationsSection.tsx"}}]}}`,
-	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"session_id":"sim-chat"}`,
+	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"usage":{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800},"session_id":"sim-chat"}`,
 }
 
 // simChatImageB64 is a tiny gradient PNG (base64) used by the simulated chat's
@@ -3093,15 +3096,17 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	reply, _ := json.Marshal(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"id":      msgID,
-			"content": []map[string]any{{"type": "text", "text": replyText}},
+			"id":          msgID,
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 1200, "output_tokens": tokens, "cache_read_input_tokens": 9800, "cache_creation_input_tokens": 640},
+			"content":     []map[string]any{{"type": "text", "text": replyText}},
 		},
 		"session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(reply))
 	result, _ := json.Marshal(map[string]any{
 		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042,
-		"usage": map[string]any{"input_tokens": 1200, "output_tokens": tokens}, "session_id": sessionID,
+		"usage": map[string]any{"input_tokens": 1200, "output_tokens": tokens, "cache_read_input_tokens": 9800, "cache_creation_input_tokens": 640}, "session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(result))
 }
