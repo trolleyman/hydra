@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
 )
 
@@ -2782,6 +2783,19 @@ var simChatEvents = []string{
 	// header).
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
+	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
+	// call, its reply), then the Task tool_result. The chat folds the sidechain
+	// steps into a SubagentCard on the Task card instead of leaking them into the
+	// main conversation as user/assistant messages (the whole point of this
+	// feature). handleSimChatWS emits the paired subagent_meta frame.
+	`{"type":"assistant","message":{"id":"msg_sim_task","content":[{"type":"tool_use","id":"toolu_sim_task","name":"Task","input":{"description":"Audit upload retry tests","subagent_type":"Explore","prompt":"Search the internal/artifacts package for existing retry/backoff tests and report what is covered and where the gaps are - especially whether the giving-up path (all attempts exhausted) is asserted anywhere."}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"text","text":"Search the internal/artifacts package for existing retry/backoff tests and report what is covered and where the gaps are - especially whether the giving-up path (all attempts exhausted) is asserted anywhere."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_1","content":[{"type":"thinking","thinking":"I'll grep the package for retry test functions, then read the upload test file to see which paths are covered."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2","content":[{"type":"tool_use","id":"toolu_sub_grep","name":"Grep","input":{"pattern":"func Test.*Retry","path":"internal/artifacts"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
@@ -2826,6 +2840,14 @@ func handleSimChatWS(conn *safeConn) {
 	for _, line := range simChatEvents {
 		sendSimChatEvent(conn, line)
 	}
+	// The Task sub-agent's linkage (see the sidechain lines in simChatEvents).
+	// The client tolerates this arriving after the sidechain events, so a single
+	// frame here mirrors what the daemon's resolver emits.
+	sendSubagentMeta(conn, "sim_sub_1", &claudestream.SubagentMeta{
+		AgentType:   "Explore",
+		Description: "Audit upload retry tests",
+		ToolUseID:   "toolu_sim_task",
+	})
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).

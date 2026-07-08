@@ -17,12 +17,14 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
+import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
+import { RelativeTime } from './LiveTime'
+import { deepEqual } from '../lib/deepEqual'
 import { Markdown } from '../lib/MarkdownRenderer'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
@@ -162,8 +164,11 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         <div className="w-full">
         {/* Header */}
         <div className="mb-6">
-          {/* Metadata row */}
-          <SeparatedRow live className="flex items-center gap-3 flex-wrap">
+          {/* Metadata row. Not `live`: this archived view's agent is static, so
+              the only thing that ticks is "created X ago", which self-updates via
+              its own <RelativeTime> leaf - no need to re-render + re-measure the
+              whole row every second. */}
+          <SeparatedRow className="flex items-center gap-3 flex-wrap">
             <Badge
               variant="pill"
               className={agentTypeClass}
@@ -175,7 +180,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
             {agent.branch_name && <BranchTag branch={agent.branch_name} />}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                created {formatStartedAgo(agent.created_at)}
+                created <RelativeTime createdAt={agent.created_at} />
               </span>
             )}
           </SeparatedRow>
@@ -313,6 +318,174 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   )
 }
 
+// The fields of `agent` the metadata row (AgentMetaRow) actually renders. The
+// row is memoized on a deep comparison of just these, so the near-constant agent
+// refreshes while a head works (activity text, timestamps, token counts - none
+// shown here) don't re-render the header and its BranchSelector/badges/chips on
+// every tick, and don't fire SeparatedRow's layout re-measure. A fresh listAgents
+// poll rebuilds every nested object, so identity (===) can't be trusted - hence
+// deepEqual over this projected subset. KEEP THIS IN SYNC with the JSX below: a
+// new agent field shown in the row must be added here or it won't update live.
+function metaRowSignature(a: AgentResponse) {
+  return {
+    agent_type: a.agent_type,
+    archived: a.archived,
+    status: a.agent_status?.status,
+    tests: a.tests,
+    network_enforcement: a.network_enforcement,
+    branch_name: a.branch_name,
+    base_branch: a.base_branch,
+    chat_mode: a.chat_mode,
+    created_at: a.created_at,
+    // Read by the DownstreamBranchEditor + MRStateChip children.
+    downstream_branch: a.downstream_branch,
+    review: a.review,
+  }
+}
+
+// The agent-page metadata row: the type/status/test badges, network + branch
+// tags, base-branch selector, terminal/chat toggle, downstream editor and MR
+// chip, plus a self-ticking "created X ago". Memoized (see metaRowSignature) so a
+// running head's constant refreshes don't churn it; the handlers are stabilized
+// by the caller so only real display changes get through.
+const AgentMetaRow = memo(function AgentMetaRow({
+  agent,
+  agentTypeClass,
+  branches,
+  savingBase,
+  savingChatMode,
+  savingDownstream,
+  onSaveBase,
+  onRefreshBranches,
+  onSaveChatMode,
+  onSaveDownstream,
+}: {
+  agent: AgentResponse
+  agentTypeClass: string
+  branches: RepositoryBranch[] | null
+  savingBase: boolean
+  savingChatMode: boolean
+  savingDownstream: boolean
+  onSaveBase: (name: string) => void
+  onRefreshBranches: () => void
+  onSaveChatMode: (next: boolean) => void
+  onSaveDownstream: (n: string) => void
+}) {
+  return (
+    // Not `live`: "created X ago" self-updates via its own <RelativeTime> leaf, so
+    // the row no longer subscribes to the 1s clock (which re-rendered + re-measured
+    // it every second even when idle).
+    <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+      <Badge
+        variant="pill"
+        className={agentTypeClass}
+        icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+      >
+        {agent.agent_type}
+      </Badge>
+      {agent.agent_status && (
+        <Badge className={agentStatusBadge(agent.agent_status.status).className}>
+          {agentStatusBadge(agent.agent_status.status).label}
+        </Badge>
+      )}
+      {/* Test verdict chip (PLAN #68): an at-a-glance verdict. The full
+          tests panel lives in the diff viewer, below the Changes header. */}
+      {agent.tests && agent.tests.status !== 'none' && (
+        <TestVerdictChip tests={agent.tests} variant="sm" />
+      )}
+      {/* The armed "merges when tests pass" state is shown by the merge button
+          itself now (the green pill), so no separate metadata-row badge. */}
+      {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
+      {agent.branch_name && <BranchTag branch={agent.branch_name} />}
+      {/* Base branch. Editing it is metadata-only: it changes what
+          update-from-base merges in and what the diff compares against,
+          but does not rebase existing commits. */}
+      <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+        <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
+        {branches !== null && !savingBase ? (
+          <BranchSelector
+            // An agent can't be its own base, so drop its own branch from
+            // the options (the backend lists every branch agent-agnostically).
+            branches={branches.filter((b) => b.name !== agent.branch_name)}
+            activeRef={agent.base_branch || ''}
+            isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
+            onSelect={(name) => onSaveBase(name)}
+            onOpen={() => onRefreshBranches()}
+            title="Change base branch (metadata only - does not rebase commits)"
+          />
+        ) : (
+          <span className="flex items-center gap-1.5 px-2.5 py-1.5">
+            {savingBase && <LoaderCircle className="w-3 h-3 animate-spin" />}
+            {agent.base_branch || '-'}
+          </span>
+        )}
+      </span>
+      {/* Terminal/chat mode toggle (Claude only). Switching
+          restarts the Claude process in the new mode; the conversation is
+          preserved via --continue. */}
+      {agent.agent_type === 'claude' && !agent.archived && (
+        <span
+          className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
+          title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
+        >
+          {savingChatMode ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              switching
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={() => onSaveChatMode(false)}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                  agent.chat_mode
+                    ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                    : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                }`}
+              >
+                <TerminalSquare className="w-3 h-3" />
+                terminal
+              </button>
+              <button
+                onClick={() => onSaveChatMode(true)}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
+                  agent.chat_mode
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                chat
+              </button>
+            </>
+          )}
+        </span>
+      )}
+      {/* Downstream branch (the name this head is pushed AS) - editable
+          until first publish, then soft-locked. Only shown once set. */}
+      <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
+      {/* Linked-MR state chip (state/CI/approvals/discussions). */}
+      <MRStateChip agent={agent} />
+      {agent.created_at !== 0 && agent.created_at !== undefined && (
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          created <RelativeTime createdAt={agent.created_at} />
+        </span>
+      )}
+    </SeparatedRow>
+  )
+}, (prev, next) =>
+  prev.agentTypeClass === next.agentTypeClass &&
+  prev.branches === next.branches &&
+  prev.savingBase === next.savingBase &&
+  prev.savingChatMode === next.savingChatMode &&
+  prev.savingDownstream === next.savingDownstream &&
+  prev.onSaveBase === next.onSaveBase &&
+  prev.onRefreshBranches === next.onRefreshBranches &&
+  prev.onSaveChatMode === next.onSaveChatMode &&
+  prev.onSaveDownstream === next.onSaveDownstream &&
+  deepEqual(metaRowSignature(prev.agent), metaRowSignature(next.agent)),
+)
+
 export function AgentDetail({
   agent,
   projectId,
@@ -360,10 +533,11 @@ export function AgentDetail({
   }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // The relative "created Xs ago" labels update via the two `live` SeparatedRows
-  // in the header (see SeparatedRow / useNowTick) - each re-renders only itself
-  // once a second, instead of a page-wide setInterval re-rendering the whole
-  // agent view (diff viewer, terminal, panels) every second.
+  // The relative "created Xs ago" labels update via their own <RelativeTime>
+  // leaves (see LiveTime / useNowTick) - each re-renders only itself once a
+  // second, instead of a page-wide setInterval re-rendering the whole agent view
+  // (diff viewer, terminal, panels) every second. The metadata rows themselves
+  // are no longer `live`, so they don't re-render/re-measure on the clock.
 
   // Load the repo's branch list for the base-branch selector. Cheap (`git
   // branch`); failures just leave the selector showing the current base as
@@ -437,6 +611,19 @@ export function AgentDetail({
   }, [agent.id, projectId])
 
   const agentTypeClass = agentTypePill(agent.agent_type)
+
+  // Stable wrappers for the metadata-row handlers so memoizing AgentMetaRow isn't
+  // defeated by these functions being re-created each render. Each forwards to the
+  // latest closure via a ref, so no stale `agent`/state is captured.
+  const saveBaseRef = useRef(saveBase)
+  saveBaseRef.current = saveBase
+  const saveChatModeRef = useRef(saveChatMode)
+  saveChatModeRef.current = saveChatMode
+  const saveDownstreamRef = useRef(saveDownstream)
+  saveDownstreamRef.current = saveDownstream
+  const onSaveBase = useCallback((name: string) => { void saveBaseRef.current(name) }, [])
+  const onSaveChatMode = useCallback((next: boolean) => { void saveChatModeRef.current(next) }, [])
+  const onSaveDownstream = useCallback((n: string) => { void saveDownstreamRef.current(n) }, [])
 
   async function handleKill() {
     useDialogStore.getState().show({
@@ -1195,104 +1382,20 @@ export function AgentDetail({
         <div className="w-full">
         {/* Header */}
         <div className="mb-6">
-          {/* Metadata row */}
-          <SeparatedRow live className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-            <Badge
-              variant="pill"
-              className={agentTypeClass}
-              icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
-            >
-              {agent.agent_type}
-            </Badge>
-            {agent.agent_status && (
-              <Badge className={agentStatusBadge(agent.agent_status.status).className}>
-                {agentStatusBadge(agent.agent_status.status).label}
-              </Badge>
-            )}
-            {/* Test verdict chip (PLAN #68): an at-a-glance verdict. The full
-                tests panel lives in the diff viewer, below the Changes header. */}
-            {agent.tests && agent.tests.status !== 'none' && (
-              <TestVerdictChip tests={agent.tests} variant="sm" />
-            )}
-            {/* The armed "merges when tests pass" state is shown by the merge button
-                itself now (the green pill), so no separate metadata-row badge. */}
-            {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-            {agent.branch_name && <BranchTag branch={agent.branch_name} />}
-            {/* Base branch. Editing it is metadata-only: it changes what
-                update-from-base merges in and what the diff compares against,
-                but does not rebase existing commits. */}
-            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-              <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
-              {branches !== null && !savingBase ? (
-                <BranchSelector
-                  // An agent can't be its own base, so drop its own branch from
-                  // the options (the backend lists every branch agent-agnostically).
-                  branches={branches.filter((b) => b.name !== agent.branch_name)}
-                  activeRef={agent.base_branch || ''}
-                  isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
-                  onSelect={(name) => void saveBase(name)}
-                  onOpen={() => void refreshBranches()}
-                  title="Change base branch (metadata only - does not rebase commits)"
-                />
-              ) : (
-                <span className="flex items-center gap-1.5 px-2.5 py-1.5">
-                  {savingBase && <LoaderCircle className="w-3 h-3 animate-spin" />}
-                  {agent.base_branch || '-'}
-                </span>
-              )}
-            </span>
-            {/* Terminal/chat mode toggle (Claude only). Switching
-                restarts the Claude process in the new mode; the conversation is
-                preserved via --continue. */}
-            {agent.agent_type === 'claude' && !agent.archived && (
-              <span
-                className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
-                title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
-              >
-                {savingChatMode ? (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
-                    <LoaderCircle className="w-3 h-3 animate-spin" />
-                    switching
-                  </span>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => void saveChatMode(false)}
-                      className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-                        agent.chat_mode
-                          ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                          : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                      }`}
-                    >
-                      <TerminalSquare className="w-3 h-3" />
-                      terminal
-                    </button>
-                    <button
-                      onClick={() => void saveChatMode(true)}
-                      className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
-                        agent.chat_mode
-                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                      }`}
-                    >
-                      <MessageSquare className="w-3 h-3" />
-                      chat
-                    </button>
-                  </>
-                )}
-              </span>
-            )}
-            {/* Downstream branch (the name this head is pushed AS) - editable
-                until first publish, then soft-locked. Only shown once set. */}
-            <DownstreamBranchEditor agent={agent} onSave={(n) => void saveDownstream(n)} saving={savingDownstream} />
-            {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-            <MRStateChip agent={agent} />
-            {agent.created_at !== 0 && agent.created_at !== undefined && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                created {formatStartedAgo(agent.created_at)}
-              </span>
-            )}
-          </SeparatedRow>
+          {/* Metadata row - memoized so a running head's constant refreshes
+              (activity/tokens, none shown here) don't re-render it every tick. */}
+          <AgentMetaRow
+            agent={agent}
+            agentTypeClass={agentTypeClass}
+            branches={branches}
+            savingBase={savingBase}
+            savingChatMode={savingChatMode}
+            savingDownstream={savingDownstream}
+            onSaveBase={onSaveBase}
+            onRefreshBranches={refreshBranches}
+            onSaveChatMode={onSaveChatMode}
+            onSaveDownstream={onSaveDownstream}
+          />
 
         </div>
 

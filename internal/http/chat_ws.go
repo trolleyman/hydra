@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
@@ -63,6 +64,69 @@ type chatQueueFrame struct {
 type chatEventFrame struct {
 	terminalEvent
 	Event json.RawMessage `json:"event"`
+}
+
+// chatSubagentMetaFrame links a sub-agent (Task tool) to the Task tool_use that
+// spawned it, so the chat client can fold the sub-agent's sidechain activity
+// into that Task card and label it. Sent once per sub-agent, ahead of (or during
+// backfill, alongside) its sidechain events. Fields come from the sub-agent's
+// meta.json sidecar; the client tolerates it arriving after the events too.
+type chatSubagentMetaFrame struct {
+	terminalEvent
+	AgentID     string `json:"agentId"`
+	ToolUseID   string `json:"toolUseId,omitempty"`
+	AgentType   string `json:"agentType,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// subagentResolver emits one subagent_meta frame per distinct sidechain
+// agent_id seen on a connection. The meta sidecar may not exist the instant the
+// first sidechain line arrives (Claude writes it around sub-agent spawn), so an
+// unresolved id is left un-seen and retried on its next line. claudeProjectDir
+// is ~/.claude/projects/<worktree-slug>; sessionID scopes the subagents/ dir.
+type subagentResolver struct {
+	claudeProjectDir string
+	seen             map[string]struct{}
+}
+
+func newSubagentResolver(claudeProjectDir string) *subagentResolver {
+	return &subagentResolver{claudeProjectDir: claudeProjectDir, seen: map[string]struct{}{}}
+}
+
+// resolve sends the subagent_meta frame for agentID (once) if its meta sidecar
+// can be read. Returns false only on a socket write failure.
+func (r *subagentResolver) resolve(conn *safeConn, agentID, sessionID string) bool {
+	if r == nil || agentID == "" || r.claudeProjectDir == "" || sessionID == "" {
+		return true
+	}
+	if _, done := r.seen[agentID]; done {
+		return true
+	}
+	meta, ok := claudestream.ReadSubagentMeta(r.claudeProjectDir, sessionID, agentID)
+	if !ok {
+		return true // not flushed yet; retry on this sub-agent's next line
+	}
+	r.seen[agentID] = struct{}{}
+	return sendSubagentMeta(conn, agentID, meta)
+}
+
+// sendSubagentMeta relays one subagent_meta frame. meta may be nil (backfill of
+// a sub-agent whose sidecar is missing) - the frame still links the id so the
+// client folds the standalone card, just without a type/description label.
+func sendSubagentMeta(conn *safeConn, agentID string, meta *claudestream.SubagentMeta) bool {
+	f := chatSubagentMetaFrame{terminalEvent: terminalEvent{Type: "subagent_meta"}, AgentID: agentID}
+	if meta != nil {
+		f.ToolUseID, f.AgentType, f.Description = meta.ToolUseID, meta.AgentType, meta.Description
+	}
+	frame, err := json.Marshal(f)
+	if err != nil {
+		log.Printf("chat ws: marshal subagent_meta for %q: %v", agentID, err)
+		return true
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		return false
+	}
+	return true
 }
 
 // chatInterruptSeq numbers control_request interrupts so each request_id is
@@ -166,7 +230,7 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 // fragment at the start of a replay) are skipped, as are lines whose uuid was
 // already delivered by the transcript backfill. Returns false once the socket
 // write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}) bool {
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
@@ -178,6 +242,13 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 		if ev.UUID != "" {
 			if _, dup := skip[ev.UUID]; dup {
 				continue
+			}
+		}
+		// A sub-agent line: emit its Task-tool linkage (once) ahead of the event
+		// so the client can fold it into the right card as it renders.
+		if ev.IsSidechain && ev.AgentID != "" {
+			if !subs.resolve(conn, ev.AgentID, ev.SessionID) {
+				return false
 			}
 		}
 		if !sendChatEventLine(conn, line, agentID) {
@@ -196,12 +267,18 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 // of every transcript entry seen, which the ring replay uses to skip lines
 // the backfill already delivered (stdout events and transcript lines share
 // uuids). Best-effort: a missing dir/file (fresh head) backfills nothing.
-func backfillChatHistory(conn *safeConn, agentID, worktree string) map[string]struct{} {
+// It also backfills each sub-agent (Task tool) transcript recorded for the
+// session (the subagents/*.jsonl siblings, not the main transcript, carry
+// sub-agent activity), each preceded by its subagent_meta frame.
+func backfillChatHistory(conn *safeConn, agentID, worktree string, subs *subagentResolver) map[string]struct{} {
 	home, err := os.UserHomeDir()
 	if err != nil || worktree == "" {
 		return nil
 	}
 	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	if subs != nil {
+		subs.claudeProjectDir = dir
+	}
 	transcript := claudestream.LatestTranscript(dir)
 	if transcript == "" {
 		return nil
@@ -214,6 +291,26 @@ func backfillChatHistory(conn *safeConn, agentID, worktree string) map[string]st
 	for _, line := range lines {
 		if !sendChatEventLine(conn, line, agentID) {
 			return uuids
+		}
+	}
+	// Sub-agent history lives in per-session subagents/*.jsonl siblings; relay
+	// each with its meta so the client rebuilds the sub-agent cards on reconnect.
+	sessionID := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
+	subTranscripts, subUUIDs := claudestream.TailSubagentTranscripts(dir, sessionID, claudestream.DefaultBackfillBytes)
+	for u := range subUUIDs {
+		uuids[u] = struct{}{}
+	}
+	for _, sub := range subTranscripts {
+		if subs != nil {
+			subs.seen[sub.AgentID] = struct{}{}
+		}
+		if !sendSubagentMeta(conn, sub.AgentID, sub.Meta) {
+			return uuids
+		}
+		for _, line := range sub.Lines {
+			if !sendChatEventLine(conn, line, agentID) {
+				return uuids
+			}
 		}
 	}
 	return uuids
@@ -269,7 +366,8 @@ func sendChatHistoryBefore(conn *safeConn, worktree, agentID, beforeUUID string)
 // not carry, deduped by uuid), then replay_done, then the queued-message
 // snapshot, then live events.
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
-	skip := backfillChatHistory(conn, agentID, worktree)
+	subs := newSubagentResolver("")
+	skip := backfillChatHistory(conn, agentID, worktree, subs)
 
 	lb := &claudestream.LineBuffer{}
 	// Attach queues the ring snapshot synchronously before returning, so a
@@ -278,7 +376,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	// stream starts.
 	select {
 	case data, ok := <-att.Output:
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip) {
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs) {
 			return
 		}
 	default:
@@ -306,7 +404,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			if !ok {
 				return
 			}
-			if !relayChatChunk(conn, lb, data, agentID, skip) {
+			if !relayChatChunk(conn, lb, data, agentID, skip, subs) {
 				return
 			}
 		}

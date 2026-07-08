@@ -32,6 +32,13 @@ type Event struct {
 	// IsSidechain marks transcript entries from a sub-agent (Task tool) run;
 	// those are not part of the main conversation and are skipped by backfill.
 	IsSidechain bool `json:"isSidechain,omitempty"`
+	// AgentID identifies which sub-agent a sidechain entry belongs to (the Claude
+	// Task tool assigns each spawned sub-agent a hex id, carried on every one of
+	// its stdout/transcript lines). Empty on main-conversation lines. The chat
+	// client groups sidechain events by this id into a per-sub-agent card, and
+	// the daemon uses it to resolve the sub-agent's meta.json (its parent Task
+	// tool_use id, agent type and description) - see the subagent_meta relay.
+	AgentID string `json:"agentId,omitempty"`
 	// IsAPIError marks a synthesized assistant message the CLI emits when a turn
 	// fails mid-response (e.g. "API Error: Server error mid-response. The response
 	// above may be incomplete."). It carries the same shape on stdout as in the
