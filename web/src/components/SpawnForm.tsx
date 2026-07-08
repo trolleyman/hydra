@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
-import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare, SlidersHorizontal, Shield, Bot } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -180,6 +179,186 @@ const AgentModelPicker = memo(function AgentModelPicker({
   )
 })
 
+// The git-isolation choices offered in the spawn Options menu. '' means "use the
+// project's configured policy default" (the request omits git_isolation). The
+// rest are explicit per-head overrides. See GIT_ISOLATION.md.
+const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
+  { id: '', label: 'Default', desc: "Project's policy default." },
+  { id: 'off', label: 'Off', desc: 'Full .git access.' },
+  { id: 'refs', label: 'Refs read-only', desc: "No branch switch; commit via tool." },
+  { id: 'readonly', label: 'Read-only .git', desc: 'No .git writes; commit host-side.' },
+  { id: 'clone', label: 'Isolated clone', desc: 'Own repo (readonly until built).' },
+]
+
+// SpawnOptionsMenu is the "..." kebab on the spawn box that groups the per-spawn
+// options that don't warrant their own always-visible control: chat view (Claude
+// only), git isolation, and the base branch. Mirrors AgentModelPicker's
+// fixed-position dropdown (which escapes the card's overflow-hidden) and flips
+// above the trigger when there isn't room below (the sidebar footer sits low).
+const SpawnOptionsMenu = memo(function SpawnOptionsMenu({
+  agentType, chatMode, setChatMode, gitIsolation, setGitIsolation,
+  branches, baseBranch, setBaseBranch, onBranchOpen, loading, disabled, size = 'md',
+}: {
+  agentType: AgentTypeOption
+  chatMode: boolean
+  setChatMode: (v: boolean) => void
+  gitIsolation: string
+  setGitIsolation: (v: string) => void
+  branches: RepositoryBranch[] | null
+  baseBranch: string
+  setBaseBranch: (v: string) => void
+  onBranchOpen: () => void
+  loading: boolean
+  disabled?: boolean
+  size?: 'sm' | 'md'
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const PANEL = 380
+    const spaceBelow = window.innerHeight - r.bottom
+    if (spaceBelow < PANEL && r.top > spaceBelow) {
+      setCoords({ left: r.left, bottom: window.innerHeight - r.top + 4 })
+    } else {
+      setCoords({ left: r.left, top: r.bottom + 4 })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    onBranchOpen() // refresh the branch list on open, like BranchSelector
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open, place, onBranchOpen])
+
+  // The kebab lights up when any option deviates from its default, so a
+  // non-obvious choice (a locked .git, a stacked base branch) is visible at rest.
+  const active = chatMode || gitIsolation !== '' || (baseBranch !== '' && !branches?.some((b) => b.name === baseBranch && b.is_current))
+  const btn = size === 'sm' ? 'w-6 h-6' : 'w-7 h-7'
+  const icon = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
+
+  const current = branches?.find((b) => b.is_current)
+  const agentBranches = branches?.filter((b) => b.is_agent && !b.is_current) ?? []
+  const otherBranches = branches?.filter((b) => !b.is_agent && !b.is_current) ?? []
+
+  // A plain render helper (not a nested component) so it can close over the
+  // setters without tripping react/no-unstable-nested-components.
+  const branchRow = (b: RepositoryBranch) => (
+    <button
+      key={b.name}
+      type="button"
+      onClick={() => { setBaseBranch(b.name); setOpen(false) }}
+      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+    >
+      {b.is_agent ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+      <span className="truncate font-mono">{b.name}</span>
+      {b.is_current && <span className="ml-1 text-[9px] px-1 py-px rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 shrink-0">HEAD</span>}
+      {b.name === baseBranch && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+    </button>
+  )
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <Tooltip content="Spawn options (chat, git isolation, base branch)" side="top">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label="Spawn options"
+          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          disabled={loading || disabled}
+          className={`flex items-center justify-center rounded-lg border transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${btn} ${
+            open || active
+              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+              : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <SlidersHorizontal className={icon} />
+        </button>
+      </Tooltip>
+      {open && coords && (
+        <div
+          style={{ position: 'fixed', left: coords.left, top: coords.top, bottom: coords.bottom }}
+          className="w-64 max-h-[380px] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+        >
+          {/* Git isolation */}
+          <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+            <Shield className="w-3.5 h-3.5 shrink-0" />
+            <span>Git isolation</span>
+          </div>
+          {GIT_ISOLATION_OPTS.map((o) => (
+            <button
+              key={o.id || 'default'}
+              type="button"
+              onClick={() => setGitIsolation(o.id)}
+              className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+            >
+              <span className="w-3.5 shrink-0 pt-0.5">{gitIsolation === o.id && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
+                <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{o.desc}</span>
+              </span>
+            </button>
+          ))}
+
+          {/* Chat view (Claude only) */}
+          {agentType === 'claude' && (
+            <>
+              <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+              <button
+                type="button"
+                onClick={() => setChatMode(!chatMode)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                <span className="text-xs text-gray-700 dark:text-gray-200">Chat view</span>
+                <span className={`ml-auto text-[10px] px-1.5 py-px rounded ${chatMode ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}>{chatMode ? 'On' : 'Off'}</span>
+              </button>
+            </>
+          )}
+
+          {/* Base branch */}
+          {branches && branches.length > 0 && (
+            <>
+              <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+              <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                <span>Base branch</span>
+              </div>
+              {current && branchRow(current)}
+              {agentBranches.length > 0 && (
+                <>
+                  <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Agent branches · {agentBranches.length}</p>
+                  {agentBranches.map((b) => branchRow(b))}
+                </>
+              )}
+              {otherBranches.length > 0 && (
+                <>
+                  <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Other branches · {otherBranches.length}</p>
+                  {otherBranches.map((b) => branchRow(b))}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+})
+
 // memo: the compact variant lives in the RootLayout sidebar, which re-renders
 // whenever project/agent state refreshes; all four props are stable across
 // those, so the whole composer (textarea, chips, pickers) skips them.
@@ -208,6 +387,10 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode (Claude only): drive the head via stream-json and
   // show a chat view instead of a terminal. Remembered like the agent/model.
   const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
+  // Per-head git-isolation override ('' = use the project's policy default, so the
+  // request omits git_isolation). See GIT_ISOLATION.md. Not persisted: a locked
+  // .git is a deliberate per-spawn choice, defaulted to the project policy.
+  const [gitIsolation, setGitIsolation] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the project's
@@ -646,6 +829,8 @@ export const SpawnForm = memo(function SpawnForm({
         // and a remembered value must not leak into their spawns.
         ...(agentType === 'claude' && chatMode ? { chat_mode: true } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
+        // Omit git_isolation when '' so the server applies the project policy default.
+        ...(gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -682,66 +867,6 @@ export const SpawnForm = memo(function SpawnForm({
         onRemove={removeAttachment}
         onOpenImage={openImageLightbox}
       />
-    )
-  }
-
-  // The chat-mode toggle pill, next to the agent/model picker. Claude-only
-  // (other CLIs have no stream-json interface); lights up when on. The spawned
-  // head then opens as a chat view instead of a terminal.
-  function renderChatToggle(compactSel: boolean) {
-    if (agentType !== 'claude') return null
-    return (
-      <Tooltip content={chatMode ? 'Spawns with a chat view. Click for a terminal.' : 'Spawns with a terminal. Click for a chat view.'} side="top">
-        <button
-          type="button"
-          aria-pressed={chatMode}
-          onClick={() => setChatMode((c) => !c)}
-          disabled={loading || disabled}
-          className={`flex items-center gap-1 rounded-lg border transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
-            compactSel ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'
-          } ${
-            chatMode
-              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
-              : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-        >
-          <MessageSquare className={compactSel ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
-          Chat
-        </button>
-      </Tooltip>
-    )
-  }
-
-  // The base-branch picker, shown immediately left of the Spawn button. Hidden
-  // until branches load (or if the project has none). In the narrow compact
-  // footer it shrinks and truncates; on the full-page form it sizes to content.
-  function renderBranchSelector(compactSel: boolean) {
-    if (!branches || branches.length === 0) return null
-    // The compact sidebar footer is tight, so there the branch selector collapses
-    // to a single branch icon (name shown in its tooltip + the open dropdown); the
-    // full-page form keeps the labelled trigger.
-    const selector = (
-      <BranchSelector
-        branches={branches}
-        activeRef={baseBranch}
-        isKnownBranch={branches.some((b) => b.name === baseBranch)}
-        onSelect={setBaseBranch}
-        onOpen={handleBranchOpen}
-        title={compactSel
-          ? `Base branch: ${baseBranch || 'current'} - pick an agent branch to stack on it`
-          : 'Base branch to create the agent from (pick an agent branch to stack on it)'}
-        triggerIcon={compactSel ? GitBranch : undefined}
-        flexible={compactSel}
-      />
-    )
-    if (compactSel) {
-      return <div className="flex shrink-0">{selector}</div>
-    }
-    return (
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">from</span>
-        {selector}
-      </div>
     )
   }
 
@@ -845,9 +970,13 @@ export const SpawnForm = memo(function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
-                {renderChatToggle(true)}
+                <SpawnOptionsMenu
+                  agentType={agentType} chatMode={chatMode} setChatMode={setChatMode}
+                  gitIsolation={gitIsolation} setGitIsolation={setGitIsolation}
+                  branches={branches} baseBranch={baseBranch} setBaseBranch={setBaseBranch}
+                  onBranchOpen={handleBranchOpen} loading={loading} disabled={disabled} size="sm"
+                />
               </div>
-              {renderBranchSelector(true)}
               <button
                 type="submit"
                 disabled={!canSubmit || loading || disabled}
@@ -925,10 +1054,14 @@ export const SpawnForm = memo(function SpawnForm({
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
                   <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
-                  {renderChatToggle(false)}
+                  <SpawnOptionsMenu
+                    agentType={agentType} chatMode={chatMode} setChatMode={setChatMode}
+                    gitIsolation={gitIsolation} setGitIsolation={setGitIsolation}
+                    branches={branches} baseBranch={baseBranch} setBaseBranch={setBaseBranch}
+                    onBranchOpen={handleBranchOpen} loading={loading} disabled={disabled}
+                  />
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
-                  {renderBranchSelector(false)}
                   <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
                   <button
                     type="submit"
