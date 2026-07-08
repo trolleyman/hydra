@@ -1205,6 +1205,7 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
         isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
         durationMs: ev.duration_ms,
         costUsd: ev.total_cost_usd,
+        outputTokens: ev.usage?.output_tokens || undefined,
         errorText: ev.is_error ? ev.result : undefined,
       })
     }
