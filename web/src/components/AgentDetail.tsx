@@ -28,7 +28,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
-import { useProjectStore } from '../stores/projectStore'
+import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
 
@@ -337,7 +337,6 @@ export function AgentDetail({
   // Review config is project-scoped, cached in the project store so it is
   // fetched once per project (not per agent) and shared with the Settings editor.
   const reviewConfig = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] ?? null : null))
-  const setReviewConfigInStore = useProjectStore((s) => s.setReviewConfig)
   const remotes = reviewConfig?.remote ? [reviewConfig.remote] : ['origin']
   const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -970,29 +969,20 @@ export function AgentDetail({
 
   // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
 
-  // refreshReviewConfig loads the resolved review config into the project store.
-  const refreshReviewConfig = useCallback(async () => {
-    if (!projectId) return
-    try {
-      setReviewConfigInStore(projectId, await api.default.getReviewConfig(projectId))
-    } catch {
-      // Leave any previously-loaded config in place on a transient failure.
-    }
-  }, [projectId, setReviewConfigInStore])
-
   // Fetch the review config once per project (if not already cached) as soon as
   // the head is on screen, so clicking "Create MR" opens the dialog instantly
-  // with prefilled values - the fetch no longer gates the popup.
+  // with prefilled values - the fetch no longer gates the popup. Deduped in the
+  // store, so this and the root layout's fetch produce a single request.
   useEffect(() => {
-    if (projectId && !reviewConfig) void refreshReviewConfig()
-  }, [projectId, reviewConfig, refreshReviewConfig])
+    if (projectId && !reviewConfig) void ensureReviewConfig(projectId)
+  }, [projectId, reviewConfig])
 
   // openCreateMR opens the Create MR dialog immediately, refreshing the config
   // in the background rather than blocking the popup on a network round-trip.
   function openCreateMR() {
     setPublishError(null)
     setShowCreateMR(true)
-    void refreshReviewConfig()
+    if (projectId) void refreshReviewConfig(projectId)
   }
 
   // doPublish runs the publish POST with the dialog's values. A failure is shown
