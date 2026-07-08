@@ -128,7 +128,7 @@ func TestGitCommitStagesOnlyGivenPaths(t *testing.T) {
 
 func TestGitCommitNoWorktree(t *testing.T) {
 	r := gitCommit("", "hydra/test", mcpserver.CommitRequest{Message: "x"})
-	if r.OK || !strings.Contains(r.Message, "HYDRA_WORKTREE") {
+	if r.OK || !strings.Contains(r.Message, "worktree") {
 		t.Errorf("empty worktree should error, got OK=%v msg=%q", r.OK, r.Message)
 	}
 }

@@ -69,7 +69,7 @@ type seedResult struct {
 // seeded here as context files (~/.gemini/GEMINI.md,
 // ~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), merged on top of any
 // the host user already has.
-func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy) (*seedResult, error) {
+func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy, gitIso sandbox.GitIsolationMode) (*seedResult, error) {
 	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
 	if err := paths.EnsureHydraLocalIgnored(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -122,6 +122,20 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	}
 	res.WritablePaths = append(res.WritablePaths, subagentsDirHost)
 	res.Env = append(res.Env, "HYDRA_SUBAGENTS_DIR="+subagentsDirHost)
+
+	// Host-mediated commit channel: when git_isolation locks .git refs, an
+	// in-sandbox commit can't update a ref, so the git_commit tool hands the commit
+	// to the daemon's commit watcher via this writable per-head dir (see
+	// GIT_ISOLATION.md). HYDRA_COMMIT_DIR both points the tool at the channel AND
+	// signals that host-mediated mode is active; absent => commit in-sandbox.
+	if gitIso.HostMediatedCommit() {
+		commitDirHost := paths.GetCommitDirFromProjectRoot(projectRoot, id)
+		if err := os.MkdirAll(commitDirHost, 0755); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", commitDirHost, err))
+		}
+		res.WritablePaths = append(res.WritablePaths, commitDirHost)
+		res.Env = append(res.Env, "HYDRA_COMMIT_DIR="+commitDirHost)
+	}
 
 	// The hydra binary's real path, so hooks can invoke it. Visible read-only
 	// inside the sandbox via the root bind.

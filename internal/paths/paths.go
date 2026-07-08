@@ -222,6 +222,22 @@ func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
 }
 
+// GetCommitsDirFromProjectRoot returns the parent dir holding every head's
+// host-mediated commit channel (.hydra/local/commits). The daemon's commit
+// watcher scans it to find heads with pending commit requests.
+func GetCommitsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "commits")
+}
+
+// GetCommitDirFromProjectRoot returns the per-head directory used for the
+// host-mediated commit round-trip (git_isolation refs/readonly): the in-sandbox
+// git_commit tool writes a commit request here (the dir is made writable at its
+// real host path, like the approvals dir) and the daemon's commit watcher writes
+// back the result. Lives under .hydra/local/commits/<id>.
+func GetCommitDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetCommitsDirFromProjectRoot(projectRoot), id)
+}
+
 // WriteFileIfChanged writes content to path only when it differs from the existing file.
 // Reports whether the file was (over)written.
 func WriteFileIfChanged(path, content string, perm os.FileMode) error {

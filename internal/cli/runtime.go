@@ -282,6 +282,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Poll MR-linked heads: refresh cached MR state, detect remote merges (fetch +
 	// ff local target + teardown), and auto-publish armed publish-when-green heads.
 	go server.RunReviewWatcher(ctx)
+	// Perform commits for heads whose git_isolation locks .git refs (the in-sandbox
+	// git_commit tool can't update a ref, so it hands the commit to the daemon).
+	go server.RunCommitWatcher(ctx, roots)
 
 	// Register each project's [[services]]. Done after the pollers so a slow
 	// service launch never delays request serving; StopAll on shutdown. Whether a

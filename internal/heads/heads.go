@@ -539,7 +539,8 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// persist across resumes but never touch the real source.
 	cowMounts := buildCowMounts(projectRoot, worktreePath, home, opts.ID, cowPaths, true)
 
-	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)))
+	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
@@ -567,7 +568,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		AgentType:      opts.AgentType,
 		WorktreePath:   worktreePath,
 		GitCommonDir:   gitCommonDir(projectRoot),
-		GitIsolation:   resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation),
+		GitIsolation:   gitIso,
 		Home:           home,
 		TmpDir:         ensureHeadTmpDir(projectRoot, opts.ID),
 		WritablePaths:  append(writable, seed.WritablePaths...),
@@ -885,7 +886,10 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
-		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{})
+		// The bash shell shares the head's worktree, so it inherits the head's
+		// git-isolation mode: a shell must not be able to write refs the agent can't.
+		shellGitIso := resolveGitIsolation(cfg, string(head.AgentType), "")
+		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{}, shellGitIso)
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
@@ -908,6 +912,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
 			GitCommonDir:  gitCommonDir(projectRoot),
+			GitIsolation:  shellGitIso,
 			Home:          home,
 			TmpDir:        ensureHeadTmpDir(projectRoot, head.ID),
 			WritablePaths: append(writable, seed.WritablePaths...),
@@ -1015,7 +1020,10 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			_ = os.Remove(p)
 		}
 	}
-	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
+	// Per-spawn override persistence lands with the db column (next stage); until
+	// then resume honours the agent-type policy default.
+	gitIso := resolveGitIsolation(cfg, string(head.AgentType), "")
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1054,6 +1062,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		AgentType:      head.AgentType,
 		WorktreePath:   worktreePath,
 		GitCommonDir:   gitCommonDir(projectRoot),
+		GitIsolation:   gitIso,
 		Home:           home,
 		TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
 		WritablePaths:  append(writable, seed.WritablePaths...),

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
-	"strings"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/commitq"
 	"github.com/trolleyman/hydra/internal/gate"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/mcpserver"
 )
 
@@ -55,72 +55,52 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
 
+// commitPollInterval / commitTimeout bound the in-sandbox wait for a
+// host-mediated commit result (the watcher runs on a ~1s cadence).
+const (
+	commitPollInterval = 200 * time.Millisecond
+	commitTimeout      = 30 * time.Second
+)
+
 // commitHeadChanges backs the git_commit MCP tool. It commits the head's changes
 // onto its own branch inside its worktree, using the head-context env
-// (HYDRA_WORKTREE / HYDRA_BRANCH) the agent process was launched with.
+// (HYDRA_WORKTREE / HYDRA_BRANCH). When HYDRA_COMMIT_DIR is set (git_isolation
+// refs/readonly, where .git is read-only in the sandbox), it hands the commit to
+// the host daemon over the commitq file channel instead of running git itself.
 func commitHeadChanges(req mcpserver.CommitRequest) mcpserver.CommitResult {
+	if dir := os.Getenv("HYDRA_COMMIT_DIR"); dir != "" {
+		return commitViaDaemon(dir, req)
+	}
 	return gitCommit(os.Getenv("HYDRA_WORKTREE"), os.Getenv("HYDRA_BRANCH"), req)
 }
 
-// gitCommit stages and commits changes in worktree onto branch. It refuses if the
-// worktree is not checked out on branch (or, when branch is unknown, on a hydra/*
-// branch) so a commit can never land on main or a sibling head's branch. Every git
-// invocation runs with -C worktree; nothing outside the worktree is touched.
+// gitCommit commits in-sandbox via the shared guardrail (git_isolation off).
 func gitCommit(worktree, branch string, req mcpserver.CommitRequest) mcpserver.CommitResult {
-	if worktree == "" {
-		return mcpserver.CommitResult{Message: "Cannot determine your worktree (HYDRA_WORKTREE is unset), so I won't commit."}
+	ok, msg := git.GuardedCommit(worktree, branch, req.Message, req.Paths, req.Amend)
+	return mcpserver.CommitResult{OK: ok, Message: msg}
+}
+
+// commitViaDaemon submits the commit to the daemon's commit watcher and blocks
+// for the result (the sandbox can't write refs, and can't reach the daemon
+// socket, so it uses the writable commitq dir + polling - like gate approvals).
+func commitViaDaemon(dir string, req mcpserver.CommitRequest) mcpserver.CommitResult {
+	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := commitq.WriteRequest(dir, commitq.Request{
+		ReqID: reqid, Message: req.Message, Paths: req.Paths, Amend: req.Amend,
+		TS: time.Now().Format(time.RFC3339Nano),
+	}); err != nil {
+		return mcpserver.CommitResult{Message: "Failed to submit the commit to Hydra: " + err.Error()}
 	}
-	// The commit must land on this head's OWN branch, not main or a sibling head.
-	cur, err := gitOutput(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || cur == "" {
-		return mcpserver.CommitResult{Message: "Your worktree is not on a branch (detached HEAD). Do not switch branches; check out your head's branch before committing."}
-	}
-	switch {
-	case branch != "" && cur != branch:
-		return mcpserver.CommitResult{Message: fmt.Sprintf("Refusing to commit: your worktree is on %q but your head's branch is %q. Do not switch branches - check out %q (or ask the user) before committing.", cur, branch, branch)}
-	case branch == "" && !strings.HasPrefix(cur, "hydra/"):
-		return mcpserver.CommitResult{Message: fmt.Sprintf("Refusing to commit: %q is not a Hydra head branch (expected hydra/*). Do not commit onto shared branches.", cur)}
-	}
-	// Stage.
-	if len(req.Paths) > 0 {
-		if out, err := gitCombined(worktree, append([]string{"add", "--"}, req.Paths...)...); err != nil {
-			return mcpserver.CommitResult{Message: "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
+	deadline := time.Now().Add(commitTimeout)
+	for {
+		if res, ok, err := commitq.ReadResult(dir, reqid); err == nil && ok {
+			return mcpserver.CommitResult{OK: res.OK, Message: res.Message}
 		}
-	} else if out, err := gitCombined(worktree, "add", "-A"); err != nil {
-		return mcpserver.CommitResult{Message: "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
+		if time.Now().After(deadline) {
+			return mcpserver.CommitResult{Message: "Timed out waiting for Hydra to perform the commit. Ask the user to check the daemon."}
+		}
+		time.Sleep(commitPollInterval)
 	}
-	// Commit onto the current (own) branch.
-	commitArgs := []string{"commit", "-m", req.Message}
-	if req.Amend {
-		commitArgs = []string{"commit", "--amend", "-m", req.Message}
-	}
-	if out, err := gitCombined(worktree, commitArgs...); err != nil {
-		return mcpserver.CommitResult{Message: "Commit failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())}
-	}
-	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
-	subject, _ := gitOutput(worktree, "log", "-1", "--pretty=%s")
-	return mcpserver.CommitResult{OK: true, Message: fmt.Sprintf("Committed %s on %s: %s", hash, cur, subject)}
-}
-
-// gitOutput runs `git -C dir <args>` and returns trimmed stdout.
-func gitOutput(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	return strings.TrimSpace(string(out)), errtrace.Wrap(err)
-}
-
-// gitCombined runs `git -C dir <args>` and returns combined stdout+stderr (so a
-// failure's diagnostic can be surfaced to the agent).
-func gitCombined(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	return string(out), errtrace.Wrap(err)
-}
-
-// firstNonEmpty returns a if non-empty, else b.
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // loadReviewFile reads the per-head review snapshot the MR watcher writes. A
