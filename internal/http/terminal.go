@@ -361,6 +361,13 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 
+	// The head's worktree, needed by the chat framing both to locate the
+	// transcript (backfill / load-older) and to key the message queue.
+	worktree := ""
+	if head.Worktree != nil {
+		worktree = *head.Worktree
+	}
+
 	// WebSocket → session stdin (and resize control messages)
 	go func() {
 		defer close(done)
@@ -384,7 +391,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 			case websocket.TextMessage:
 				if chatMode {
-					s.handleChatClientMessage(projectRoot, sessionID, data)
+					s.handleChatClientMessage(conn, projectRoot, worktree, sessionID, data)
 					continue
 				}
 				var msg termResizeMsg
@@ -416,10 +423,6 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		if chatMode {
-			worktree := ""
-			if head.Worktree != nil {
-				worktree = *head.Worktree
-			}
 			s.pumpChatOutput(conn, att, projectRoot, agentID, worktree)
 			return
 		}

@@ -80,6 +80,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	// Per-head status JSON + log, kept at their real host paths and made
 	// writable so the agent writes them directly (the poller reads the same
 	// files). HYDRA_STATUS_PATH/LOG tell trigger-hook where to write.
+	// Each of these per-head state files now lives in its own type-keyed dir
+	// (status/, status-log/, review/, subagents/ - PLAN #26 / paths.go), so
+	// ensure each dir exists before writing into it.
 	statusJSONHost := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
 	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(statusJSONHost)); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -88,6 +91,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusJSONHost, err))
 	}
 	statusLogHost := paths.GetStatusLogFromProjectRoot(projectRoot, id)
+	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(statusLogHost)); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if err := os.WriteFile(statusLogHost, []byte(""), 0644); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusLogHost, err))
 	}
@@ -103,6 +109,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	// real host path (like status.json) so it exists in the sandbox; the agent only
 	// reads it. Per-head by construction - bound only into THIS head's sandbox.
 	reviewJSONHost := paths.GetReviewJsonFromProjectRoot(projectRoot, id)
+	if err := paths.EnsureHydraLocalIgnored(filepath.Dir(reviewJSONHost)); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if _, err := os.Stat(reviewJSONHost); os.IsNotExist(err) {
 		if err := os.WriteFile(reviewJSONHost, []byte(`{"linked":false}`), 0644); err != nil {
 			return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", reviewJSONHost, err))

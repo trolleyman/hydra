@@ -167,6 +167,28 @@ func TestRingFilterOnAPIError(t *testing.T) {
 	}
 }
 
+func TestRingFilterOnResult(t *testing.T) {
+	var results int
+	f := &RingFilter{OnResult: func() { results++ }}
+
+	// A `result` line (turn end) fires OnResult exactly once and is persisted;
+	// other line types don't fire it.
+	f.Filter([]byte(`{"type":"stream_event"}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"))
+	kept := f.Filter([]byte(`{"type":"result","subtype":"success","duration_ms":1200}` + "\n"))
+	if results != 1 {
+		t.Fatalf("OnResult fired %d times, want 1", results)
+	}
+	if len(kept) == 0 {
+		t.Error("result line should still be persisted to the ring")
+	}
+	// A second result fires again (one drain per turn end).
+	f.Filter([]byte(`{"type":"result","subtype":"success"}` + "\n"))
+	if results != 2 {
+		t.Fatalf("OnResult fired %d times after a second result, want 2", results)
+	}
+}
+
 func TestLineBufferReassembly(t *testing.T) {
 	lb := &LineBuffer{}
 	var got []string

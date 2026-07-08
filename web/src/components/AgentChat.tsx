@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -34,6 +34,7 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
+import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
 
@@ -112,6 +113,9 @@ interface ClaudeContentBlock {
 interface ClaudeEvent {
   type: string
   subtype?: string
+  // The durable conversation-record id (transcript + stdout share it). Tracked
+  // as the anchor for load-older history paging (item 25).
+  uuid?: string
   message?: { id?: string; content?: ClaudeContentBlock[] | string }
   duration_ms?: number
   total_cost_usd?: number
@@ -181,6 +185,14 @@ function closeOpenFence(text: string): string {
 function stripToolUseError(text: string): string {
   const m = /^\s*<tool_use_error>([\s\S]*?)<\/tool_use_error>\s*$/.exec(text)
   return m ? m[1].trim() : text
+}
+
+// stripLocalCommandCaveat removes the <local-command-caveat>...</local-command-
+// caveat> block the CLI injects around local-command output (e.g. after a
+// /model change) - it's a note to the model, not user-facing content, and would
+// otherwise render as a raw-XML bubble (item 31).
+function stripLocalCommandCaveat(text: string): string {
+  return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
 }
 
 // decodeEntities turns the handful of XML entities that appear in injected
@@ -577,6 +589,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header. Bash shows its Command panel unlabelled (item 13).
   const hideInput = simpleRead
+  // Whether an input/command panel renders above the output. When it doesn't
+  // (a plain Read), the "Output" header is redundant and dropped (item 32).
+  const hasInput = isBash || !hideInput
   const Icon = TOOL_ICONS[item.name] ?? Wrench
 
   const rawJson = useMemo(() => {
@@ -594,42 +609,41 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-        <span className="font-medium shrink-0">{item.name}</span>
-        <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
-        {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+      {/* Header row: the whole left side toggles open; a Raw button sits at the
+          right, only while expanded (item 32). Two sibling buttons (not nested)
+          so the Raw toggle doesn't also collapse the card. */}
+      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
+          <span className="font-medium shrink-0">{item.name}</span>
+          <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+        </button>
         {pending && (
-          <span className="ml-auto shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
-      </button>
+        {open && (
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              showRaw
+                ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
+                : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
+            }`}
+            title="Toggle the raw tool-call JSON"
+          >
+            Raw
+          </button>
+        )}
+      </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
-          {/* Only the Raw view is labelled (right-aligned toggle aside). The
-              input panel itself is self-evident, so "Input"/"Command" headers
-              add nothing and are dropped (items 1, 13, 14). */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-              {showRaw ? 'Raw' : ''}
-            </span>
-            <button
-              onClick={() => setShowRaw((r) => !r)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
-                showRaw
-                  ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
-                  : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
-              }`}
-              title="Toggle the raw tool-call JSON"
-            >
-              Raw
-            </button>
-          </div>
           {showRaw ? (
             <CodePanel code={rawJson} lang="json" />
           ) : (
@@ -641,9 +655,13 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
               )}
               {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-                    Output
-                  </div>
+                  {/* "Output" only when there's an input panel above it to
+                      separate from; a plain Read's body is output-only (item 32). */}
+                  {hasInput && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Output
+                    </div>
+                  )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
                       {item.resultImages.map((src, i) => (
@@ -991,6 +1009,119 @@ function QuestionCard({
   )
 }
 
+// reduceHistoryEvents reduces a batch of older (settled) conversation events -
+// the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
+// the live reducer's settled-event handling (no streaming, model or
+// control_request state): user turns (classified like routeUserText),
+// assistant text/thinking/tool_use/question blocks with tool_result patching,
+// and result footers. A TodoWrite is dropped (the plan panel already holds the
+// latest state, not this older one). allocId hands out ids for the batch.
+function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): ChatItem[] {
+  const items: ChatItem[] = []
+  const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
+    items.push({ ...item, id: allocId() } as ChatItem)
+  }
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+        it.result = text
+        it.isError = isError
+        it.resultImages = images.length ? images : undefined
+        return
+      }
+      if (it.kind === 'question' && it.toolUseId === toolUseId) {
+        it.result = text
+        return
+      }
+    }
+  }
+  const routeUser = (rawText: string) => {
+    const text = stripLocalCommandCaveat(rawText)
+    if (!text) return
+    const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
+    if (cmd) {
+      const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+      push({ kind: 'command', name: cmd[1].trim(), args })
+      return
+    }
+    const stdout = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)
+    if (stdout) {
+      const body = stdout[1].trim()
+      if (body) push({ kind: 'cmdout', text: body })
+      return
+    }
+    if (text.startsWith('[Request interrupted by user')) {
+      push({ kind: 'interrupted' })
+      return
+    }
+    if (text.includes('<task-notification>')) {
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      return
+    }
+    push({ kind: 'user', text })
+  }
+  const seenBlocks = new Map<string, Set<string>>()
+  for (const ev of events) {
+    if (ev.type === 'user') {
+      const content = ev.message?.content
+      if (typeof content === 'string') {
+        if (content.trim()) routeUser(content)
+        continue
+      }
+      for (const block of content ?? []) {
+        if (block.type === 'text' && block.text?.trim()) routeUser(block.text)
+        else if (block.type === 'tool_result' && block.tool_use_id) {
+          const p = parseToolResult(block.content)
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
+        }
+      }
+    } else if (ev.type === 'assistant') {
+      const content = ev.message?.content
+      if (ev.isApiErrorMessage) {
+        const text = Array.isArray(content)
+          ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+          : typeof content === 'string'
+            ? content
+            : ''
+        push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
+        continue
+      }
+      if (!Array.isArray(content)) continue
+      const msgId = ev.message?.id ?? ''
+      let seen = seenBlocks.get(msgId)
+      if (!seen) {
+        seen = new Set()
+        seenBlocks.set(msgId, seen)
+      }
+      for (const block of content) {
+        const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
+        if (msgId && seen.has(key)) continue
+        if (msgId) seen.add(key)
+        if (block.type === 'text' && block.text?.trim()) push({ kind: 'assistant', text: block.text })
+        else if (block.type === 'thinking' && block.thinking?.trim()) push({ kind: 'thinking', text: block.thinking })
+        else if (block.type === 'tool_use' && block.id) {
+          const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
+          const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
+          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+          else if (todos) { /* older plan state - the panel already shows the latest */ }
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+        }
+      }
+    } else if (ev.type === 'result') {
+      push({
+        kind: 'result',
+        isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
+        durationMs: ev.duration_ms,
+        costUsd: ev.total_cost_usd,
+        errorText: ev.is_error ? ev.result : undefined,
+      })
+    }
+  }
+  return items
+}
+
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // The in-flight streamed content block (token streaming via stream_event
@@ -1008,7 +1139,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
   const [connected, setConnected] = useState(false)
-  const [input, setInput] = useState('')
+  // The composer draft (text + attachments) is restored per agent so it survives
+  // switching agents/reloads (item 30): text from agentViewPrefs, attachments
+  // from the in-memory chatDrafts cache.
+  const [input, setInput] = useState(() => loadAgentViewPrefs(projectId, agentId).chatDraft ?? '')
+  const inputRef = useRef(input)
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
   // Messages handed to the socket, awaiting their --replay-user-messages echo
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
@@ -1019,8 +1157,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
   const optimisticTextsRef = useRef<string[]>([])
-  // Composer attachments (same upload flow as the spawn box).
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
+  // real echo can supersede it. null when none is pending.
+  const optimisticModelIdRef = useRef<number | null>(null)
+  // Load-older infinite scroll (item 25): the uuid of the current oldest history
+  // line (the paging anchor), a decreasing id space for prepended history (kept
+  // well below the optimistic range so it never collides), an in-flight guard,
+  // whether the transcript start has been reached, and the scrollHeight snapshot
+  // used to keep the viewport anchored across a prepend.
+  const oldestUuidRef = useRef<string | null>(null)
+  const historyIdRef = useRef(-1_000_000)
+  const loadingOlderRef = useRef(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
+  const pendingPrependRef = useRef<number | null>(null)
+  // Composer attachments (same upload flow as the spawn box), restored from the
+  // per-agent in-memory cache (item 30).
+  const [attachments, setAttachments] = useState<Attachment[]>(() => loadChatAttachments(chatDraftKey(projectId, agentId)))
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1082,6 +1235,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setPendingSends([])
     optimisticTextsRef.current = []
     optimisticIdRef.current = -1
+    optimisticModelIdRef.current = null
+    // Reset load-older paging for the fresh backfill.
+    oldestUuidRef.current = null
+    historyIdRef.current = -1_000_000
+    loadingOlderRef.current = false
+    setLoadingOlder(false)
+    setAllHistoryLoaded(false)
+    pendingPrependRef.current = null
     pinnedRef.current = true
 
     let nextId = 1
@@ -1219,10 +1380,34 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       })
     }
 
+    // handleHistoryBefore prepends an older-history batch (item 25): reduce the
+    // events, snapshot the scroll height so the viewport can be re-anchored
+    // after the prepend (a layout effect does the adjust), advance the oldest
+    // anchor, and mark the end reached.
+    const handleHistoryBefore = (events: ClaudeEvent[], done: boolean) => {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+      if (events.length > 0) {
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--)
+        // Advance the anchor to the oldest event of this batch.
+        const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
+        if (anchor) oldestUuidRef.current = anchor
+        if (older.length > 0) {
+          pendingPrependRef.current = scrollRef.current?.scrollHeight ?? 0
+          setItems((prev) => [...older, ...prev])
+        }
+      }
+      if (done) setAllHistoryLoaded(true)
+    }
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (text: string) => {
+    const routeUserText = (rawText: string) => {
+      // Drop the CLI's local-command caveat wrapper; a message that is nothing
+      // but the caveat is skipped entirely (item 31).
+      const text = stripLocalCommandCaveat(rawText)
+      if (!text) return
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -1233,9 +1418,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (stdout) {
         const body = stdout[1].trim()
         // "Set model to sonnet (claude-sonnet-5)" - the CLI's confirmation is
-        // the source of truth for the dropdown.
+        // the source of truth for the dropdown, and supersedes our optimistic
+        // one (item 31).
         const m = /^Set model to\s+(\S+)/.exec(body)
-        if (m) setModel(m[1])
+        if (m) {
+          setModel(m[1])
+          const oid = optimisticModelIdRef.current
+          if (oid != null) {
+            optimisticModelIdRef.current = null
+            setItems((prev) => prev.filter((it) => it.id !== oid))
+          }
+        }
         if (body) push({ kind: 'cmdout', text: body })
         return
       }
@@ -1278,6 +1471,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // The first event carrying a uuid is the oldest loaded so far - the anchor
+      // for load-older paging (item 25). Only set once (backfill is oldest-first;
+      // a prepend updates it to something older).
+      if (ev.uuid && oldestUuidRef.current === null) oldestUuidRef.current = ev.uuid
       switch (ev.type) {
         case 'system': {
           if (ev.subtype === 'init') {
@@ -1424,6 +1621,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         head_moved?: boolean
         event?: ClaudeEvent
         messages?: { id?: string; content?: unknown }[]
+        events?: ClaudeEvent[]
+        done?: boolean
       }
       try {
         msg = JSON.parse(e.data)
@@ -1454,6 +1653,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // reload-after-navigate case, where local state was reset).
           reconcileQueue(msg.messages ?? [])
           return
+        case 'history_before':
+          // A load-older page (item 25): older conversation events to prepend.
+          handleHistoryBefore(msg.events ?? [], msg.done === true)
+          return
       }
     }
     ws.onclose = () => {
@@ -1477,6 +1680,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  // Keep the viewport anchored across a load-older prepend (item 25): before
+  // paint, grow scrollTop by however much taller the content got, so the lines
+  // the user was reading stay put instead of jumping down. Runs before the
+  // auto-scroll effect below, which no-ops here (a user loading older history is
+  // scrolled up, not pinned).
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && pendingPrependRef.current != null) {
+      el.scrollTop += el.scrollHeight - pendingPrependRef.current
+      pendingPrependRef.current = null
+    }
+  }, [items])
 
   // Auto-scroll to the bottom on new content while pinned.
   useEffect(() => {
@@ -1540,9 +1756,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     [projectId, agentId],
   )
 
+  // requestOlderHistory asks the daemon for the batch older than the current
+  // oldest line, when the user scrolls near the top (item 25).
+  function requestOlderHistory() {
+    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !oldestUuidRef.current) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
+  }
+
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
+    if (el.scrollTop < 300) requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     pinnedRef.current = nearBottom
     setPinned(nearBottom)
@@ -1557,18 +1785,32 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }, 250)
   }
 
+  // --- Composer draft persistence (item 30) ---------------------------------
+
+  // Save the composer text (debounced) so a half-written message survives an
+  // agent switch or reload. Sending clears input, which persists as "no draft".
+  useEffect(() => {
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
+    return () => clearTimeout(t)
+  }, [input, projectId, agentId])
+
   // --- Composer: attachments ------------------------------------------------
 
   const attachmentsRef = useRef<Attachment[]>([])
   useEffect(() => {
     attachmentsRef.current = attachments
-  }, [attachments])
-  // Free preview object URLs when the pane goes away.
+    // Mirror to the per-agent cache so a switch away restores them.
+    saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
+  }, [attachments, projectId, agentId])
+  // On unmount (agent switch), keep the draft's attachments alive in the cache -
+  // do NOT revoke their object URLs, so returning to the agent restores working
+  // thumbnails. They're freed on send/remove, or when the page fully reloads.
   useEffect(
     () => () => {
-      for (const a of attachmentsRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
+      patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
     },
-    [],
+    [projectId, agentId],
   )
 
   function patchAttachment(id: number, patch: Partial<Attachment>) {
@@ -1729,7 +1971,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (!finalText || !sendUserText(finalText)) return
     setInput('')
     setSlashDismissed(false)
-    for (const a of attachments) if (a.previewUrl && !readyAttachments.includes(a)) URL.revokeObjectURL(a.previewUrl)
+    // All attachments are consumed by the send; free their preview URLs (the
+    // unmount handler no longer revokes - it preserves them for the draft cache).
+    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
     setAttachments([])
     setLightboxIndex(null)
   }
@@ -1773,6 +2017,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.send(JSON.stringify({ type: 'set_model', model: id }))
     // Optimistic; the CLI's "Set model to ..." confirmation re-syncs it.
     setModel(id)
+    // Also show the confirmation in-flow right away (item 31): the CLI echoes a
+    // /model change to the transcript but not always to the live stream, so it
+    // would otherwise not appear until a reload. The CLI's real echo, when it
+    // arrives, supersedes this (routeUserText).
+    const optId = optimisticIdRef.current--
+    optimisticModelIdRef.current = optId
+    setItems((prev) => [...prev, { kind: 'cmdout', id: optId, text: `Set model to ${id}` }])
+    pinnedRef.current = true
+    setPinned(true)
   }
 
   // --- Keyboard ----------------------------------------------------------------
@@ -1965,7 +2218,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool':
@@ -2037,45 +2290,64 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               {connected ? 'Loading conversation...' : 'Connecting...'}
             </div>
           )}
+          {/* Load-older affordance at the very top (item 25). */}
+          {replayDone && loadingOlder && (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              Loading older messages...
+            </div>
+          )}
+          {replayDone && allHistoryLoaded && items.length > 0 && (
+            <div className="text-center py-1 text-[11px] text-stone-300 dark:text-stone-600 select-none">
+              Beginning of conversation
+            </div>
+          )}
           {visibleItems.map((item) => (
             <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
               {renderChatItem(item)}
             </div>
           ))}
-          {/* Optimistic sends: pinned under the transcript (above the agent's
-              in-flight reply / thinking - item 12) until the CLI echoes the
-              processed turn back, visibly queued while a turn is running. */}
-          {pendingSends.map((p) => (
-            <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
-              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
-                <Markdown text={p.text} />
-              </div>
-              <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                {p.queued ? (
-                  <>
-                    <ListEnd className="w-3 h-3" />
-                    Queued - sends when the current turn finishes
-                  </>
-                ) : (
-                  <>
-                    <LoaderCircle className="w-3 h-3 animate-spin" />
-                    Sending...
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
           {/* The in-flight streamed block: markdown-rendered live (with a
               virtual closing fence while inside a code block) plus a pulsing
               caret; streamed thinking uses the same collapsed card as settled
-              thoughts, its preview auto-updating as tokens arrive. */}
+              thoughts, its preview auto-updating as tokens arrive. It's the
+              current turn's response, so it sits ABOVE any queued (held-for-
+              later) messages (item 33). */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
               <Markdown text={closeOpenFence(stream.text)} />
               <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
+          {/* Queued messages: held for later, so pinned at the very bottom under
+              the in-flight reply. (A "sending" message is an optimistic item in
+              the flow above; only queued holds land here now.) */}
+          {pendingSends.map((p, i) => (
+            <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
+              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
+                <Markdown text={p.text} />
+              </div>
+              {/* Label only the last pending bubble - a stack of queued messages
+                  is self-evident from position, so repeating it on each is noise
+                  (item 34). */}
+              {i === pendingSends.length - 1 && (
+                <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                  {p.queued ? (
+                    <>
+                      <ListEnd className="w-3 h-3" />
+                      Queued - sends when the current turn finishes
+                    </>
+                  ) : (
+                    <>
+                      <LoaderCircle className="w-3 h-3 animate-spin" />
+                      Sending...
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user
