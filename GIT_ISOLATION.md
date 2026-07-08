@@ -96,31 +96,51 @@ Casualties to accept (things that legitimately write `.git`): in-sandbox
 `rebase -i`, `--fixup`), and setup-time writers - **husky hook installs, `git-lfs`,
 submodule checkout**. For repos that need those, use `clone`.
 
-### `clone` (anti-rogue + full git) - FOLLOW-UP, not yet implemented
+### `clone` (anti-rogue + full git)
 
 Each head is its own repo that **borrows the main repo's objects read-only via git
 alternates** (`git clone --shared`, i.e. `objects/info/alternates` ->
 `<main>/.git/objects`). The agent gets 100% native git on its branch; a rogue agent
 can only trash its *own* private store (discarded on kill - `main` and siblings are
-physically unreachable). Verified properties:
+physically unreachable). Properties:
 
 - The head borrows `main`'s history read-only and writes only *new* objects into its
   private store; a `rm -rf` / `git gc` in the head cannot touch the borrowed objects.
-- The daemon **publishes** the agent's own commit by fetching from the head:
-  `git -C <main> fetch <head> refs/heads/hydra/<id>:refs/heads/hydra/<id>`, then
-  merges/ff. There is *no* host-side commit - the agent commits natively; the host
-  pulls a commit that already exists.
 - Concurrency is safe because git objects are **immutable and append-only**: the
   host adding commits to `main` (another head merging) never invalidates a
   borrower's reads (head stays `fsck`-clean). The one hazard is the host *deleting*
   base objects a head still borrows - i.e. `git gc --prune` on `main` while heads
-  are live - which is gated/deferred while heads exist.
+  are live - which Hydra does not do automatically (note it if you add manual gc).
 
-Why `clone` is a separate, larger project: the head stops being a linked worktree,
-so spawn / kill / merge / resume all change (create-as-shared-clone, mirror-back on
-merge, discard-private-store on kill), plus gc coordination on `main`. It is
-strictly nicer for the *agent* (native git just works, no `EROFS` surprises) - which
-is why `refs`/`readonly` are transitional and `clone` is the destination.
+There is *no* host-side commit - the agent commits natively. Instead the daemon
+**mirrors** the head's branch back into the main repo so the rest of Hydra keeps
+working (see below).
+
+Implementation:
+- **Sandbox** (`internal/heads` `commonDirForSandbox`): clone mode binds no shared
+  common dir (`GitCommonDir=""`); the head's own `.git` is inside the writable
+  worktree, and `<main>/.git/objects` is reachable read-only via the sandbox's root
+  bind for the clone's alternate (`.git` is not masked).
+- **Create** (`git.CreateCloneWorktree`): `git clone --shared --no-checkout <main>
+  <worktree>` + `checkout -b hydra/<id> <baseSHA>`, then an initial mirror so the
+  branch exists in `main` immediately (existence/diff checks).
+- **Mirror-back** (`git.MirrorCloneBranch`): force-updates `refs/heads/hydra/<id>` in
+  `main` from the head's repo (fetching its new objects), a no-op for linked
+  worktrees and already-current tips. Driven by `RunCloneMirrorWatcher` (~1s, keeps
+  diffs/tests/artifacts within a tick) and called synchronously before a merge
+  (`heads.MirrorCloneHead`, since merge can't tolerate the poll lag). Because `main`
+  always mirrors the branch, diff/merge/tests/conflict/artifact reads that run
+  against the main repo work unchanged.
+- **Teardown** (`git.RemoveWorktreeTree`): a standalone clone is `os.RemoveAll`'d
+  (`git worktree remove` would reject it); layout is detected by whether
+  `<worktree>/.git` is a dir (clone) or a file (linked worktree), so no mode needs
+  threading. The mirror ref in `main` is deleted like any head branch.
+- **Update-from-base**: a clone head's local base is a clone-time snapshot, so the
+  handler `git fetch origin` + merges `origin/<base>` instead of the stale local ref.
+
+Residual: committed diffs/tests/artifacts can lag the head by up to one mirror tick
+(~1s) - the uncommitted overlay is always live from the worktree, and merge mirrors
+synchronously, so nothing incorrect merges.
 
 > Note: an overlayfs copy-on-write of `.git` was considered and rejected. The kernel
 > documents modifying an overlay's lower dir while it is mounted as *undefined
@@ -166,7 +186,7 @@ The guardrails (own-branch-only, inside-worktree) that today live in the in-sand
 - **Sandbox:** `sandbox.Options.GitIsolation` selects the bind: `off` = writable
   common dir (today); `refs` = writable common dir with `refs/` + `packed-refs`
   re-bound read-only on top; `readonly` = `--ro-bind` the whole common dir; `clone`
-  = the private-repo lifecycle (follow-up).
+  binds no common dir (the head is a standalone clone - see the `clone` section).
 - **Web:** a git-isolation dropdown on the spawn box, grouped with the chat-mode and
   base-branch controls under a kebab/overflow menu; a matching selector in project
   Settings for the config default.
@@ -176,7 +196,6 @@ The guardrails (own-branch-only, inside-worktree) that today live in the in-sand
 1. `off` stays the default.
 2. `refs` + `readonly` ship together (one bind knob + the host-commit watcher).
    Dogfood per head.
-3. `clone` is the eventual end state for repos that need full native git
-   (hunk staging, history cleanup, husky/LFS/submodules); it is the larger
-   lifecycle project described above and is wired through config/API/UI but gated
-   off in the sandbox layer until built.
+3. `clone` is the end state for repos that need full native git (hunk staging,
+   history cleanup, husky/LFS/submodules): a standalone `git clone --shared` per
+   head with a mirror-back into the main repo (see the `clone` section).

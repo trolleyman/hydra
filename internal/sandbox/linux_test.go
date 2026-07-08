@@ -201,10 +201,12 @@ func TestBuildSpecLinuxGitIsolation(t *testing.T) {
 		t.Error("refs: refs/ ro-bind must follow the writable common-dir bind")
 	}
 
-	// clone falls back to read-only in the sandbox layer (lifecycle not built).
+	// clone heads pass GitCommonDir="" (their .git lives in the writable worktree),
+	// so nothing is bound; if a common dir IS supplied it is ro-bound as a safe
+	// fallback (the agent must never write the main repo's .git).
 	cl := build(GitIsolationClone)
 	if !hasPair(cl, "--ro-bind", gitdir, gitdir) {
-		t.Error("clone: common dir not bound read-only (expected readonly fallback)")
+		t.Error("clone: a supplied common dir should be bound read-only (safe fallback)")
 	}
 }
 

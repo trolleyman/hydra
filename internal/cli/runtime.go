@@ -285,6 +285,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Perform commits for heads whose git_isolation locks .git refs (the in-sandbox
 	// git_commit tool can't update a ref, so it hands the commit to the daemon).
 	go server.RunCommitWatcher(ctx, roots)
+	// Mirror git_isolation=clone heads' branches from their standalone repos back
+	// into the main repo, so their commits appear in diffs/tests/merge.
+	go server.RunCloneMirrorWatcher(ctx, roots)
 
 	// Register each project's [[services]]. Done after the pollers so a slow
 	// service launch never delays request serving; StopAll on shutdown. Whether a

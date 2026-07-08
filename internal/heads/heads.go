@@ -493,7 +493,15 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 
-	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+	// Resolve the git-isolation mode up front: clone mode changes how the worktree
+	// is created (a standalone `git clone --shared` instead of a linked worktree).
+	cfg, _ := config.Load(projectRoot)
+	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
+	createWorktree := git.CreateWorktree
+	if gitIso == sandbox.GitIsolationClone {
+		createWorktree = git.CreateCloneWorktree
+	}
+	if err := createWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 		if store != nil {
 			// Hard-delete: an aborted spawn never really existed, and a
 			// soft-deleted tombstone would reserve the ID forever.
@@ -535,7 +543,6 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	setStatus(api.Starting)
 
 	// Build the sandbox launch options.
-	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 	// Pre-spawn is per-launch sandbox setup, not a once-per-head constructor: it
 	// runs on every agent launch - spawn and resume alike (see ResumeHead) - so a
@@ -545,7 +552,6 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// persist across resumes but never touch the real source.
 	cowMounts := buildCowMounts(projectRoot, worktreePath, home, opts.ID, cowPaths, true)
 
-	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
@@ -573,7 +579,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
 		AgentType:      opts.AgentType,
 		WorktreePath:   worktreePath,
-		GitCommonDir:   gitCommonDir(projectRoot),
+		GitCommonDir:   commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:   gitIso,
 		Home:           home,
 		TmpDir:         ensureHeadTmpDir(projectRoot, opts.ID),
@@ -651,7 +657,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 // spawnCleanup tears down a partially-created head after an early failure.
 func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
-	_ = git.RemoveWorktree(projectRoot, worktreePath)
+	_ = git.RemoveWorktreeTree(projectRoot, worktreePath)
 	_ = git.DeleteBranch(projectRoot, branchName)
 	if store != nil {
 		// Hard-delete: an aborted spawn never really existed, and a soft-deleted
@@ -686,25 +692,42 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
+// commonDirForSandbox returns the shared git dir to bind into a head's sandbox,
+// or "" for clone mode - a clone head has its OWN .git inside the (writable)
+// worktree, and the main repo's objects are reachable read-only via the sandbox's
+// root bind for the clone's alternate, so no shared common dir is bound.
+func commonDirForSandbox(projectRoot string, mode sandbox.GitIsolationMode) string {
+	if mode == sandbox.GitIsolationClone {
+		return ""
+	}
+	return gitCommonDir(projectRoot)
+}
+
+// MirrorCloneHead force-refreshes the main repo's mirror of a clone head's branch
+// from its private standalone repo, so committed diffs, conflict checks, tests and
+// merge see the agent's latest commits. A no-op for a linked worktree (shared .git)
+// or a head without a live worktree/branch. Call it synchronously before an
+// operation that reads the branch from the main repo and can't tolerate the
+// mirror watcher's poll lag (notably merge).
+func MirrorCloneHead(head Head) {
+	if head.Worktree == nil || head.Branch == nil {
+		return
+	}
+	if err := git.MirrorCloneBranch(head.ProjectPath, *head.Worktree, *head.Branch); err != nil {
+		log.Printf("warn: mirror clone head %s: %v", head.ID, err)
+	}
+}
+
 // resolveGitIsolation picks the effective git-isolation mode for a head: the
 // per-head override (from the spawn request, persisted on the agent) when set,
-// else the agent-type policy default from config. clone is downgraded to readonly
-// for now - its lifecycle (private repo + mirror-back) is not built yet, so
-// readonly is the strongest mode that actually works (see GIT_ISOLATION.md).
+// else the agent-type policy default from config. See GIT_ISOLATION.md.
 func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.GitIsolationMode {
-	mode := sandbox.GitIsolationOff
 	if override != "" {
 		if m := sandbox.NormalizeGitIsolation(override); sandbox.ValidGitIsolation(string(m)) && m != "" {
-			mode = m
+			return m
 		}
-	} else {
-		mode = cfg.ResolvePolicy(agentType).ResolveGitIsolation()
 	}
-	if mode == sandbox.GitIsolationClone {
-		log.Printf("warn: git_isolation %q not yet implemented; using %q for %s", sandbox.GitIsolationClone, sandbox.GitIsolationReadonly, agentType)
-		mode = sandbox.GitIsolationReadonly
-	}
-	return mode
+	return cfg.ResolvePolicy(agentType).ResolveGitIsolation()
 }
 
 // ShellSessionID derives the registry session ID for a head's web bash shell
@@ -918,7 +941,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		sb = sandbox.Options{
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
+			GitCommonDir:  commonDirForSandbox(projectRoot, shellGitIso),
 			GitIsolation:  shellGitIso,
 			Home:          home,
 			TmpDir:        ensureHeadTmpDir(projectRoot, head.ID),
@@ -1068,7 +1091,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:      head.AgentType,
 		WorktreePath:   worktreePath,
-		GitCommonDir:   gitCommonDir(projectRoot),
+		GitCommonDir:   commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:   gitIso,
 		Home:           home,
 		TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
@@ -1296,7 +1319,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {
 			log.Printf("heads: removing worktree %s for agent %s", *head.Worktree, head.ID)
-			if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
+			if err := git.RemoveWorktreeTree(head.ProjectPath, *head.Worktree); err != nil {
 				log.Printf("warn: heads: remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
 			}
 		}
@@ -1394,7 +1417,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	spec, err := sandbox.BuildSpec(sandbox.Options{
 		AgentType:     sandbox.AgentTypeBash,
 		WorktreePath:  worktree,
-		GitCommonDir:  gitCommonDir(head.ProjectPath),
+		GitCommonDir:  commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
 		Home:          home,
 		TmpDir:        ensureHeadTmpDir(head.ProjectPath, head.ID),
 		WritablePaths: writable,
@@ -1451,7 +1474,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 	}
 
 	if head.Worktree != nil && head.ProjectPath != "" {
-		if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
+		if err := git.RemoveWorktreeTree(head.ProjectPath, *head.Worktree); err != nil {
 			log.Printf("warn: heads: purge remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
 		}
 	}
