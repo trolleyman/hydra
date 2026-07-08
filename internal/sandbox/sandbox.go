@@ -72,6 +72,56 @@ func ValidNetworkMode(s string) bool {
 	return false
 }
 
+// GitIsolationMode is how much of the repo's shared .git a head may write, chosen
+// per head in config (see GIT_ISOLATION.md). It bounds the blast radius of the
+// agent's git activity, from "accidentally commits to the wrong branch" up to "a
+// rogue agent physically cannot damage the real repo".
+type GitIsolationMode string
+
+const (
+	// GitIsolationOff is today's behaviour: the whole shared common dir is bound
+	// writable, guarded only by the decision gate (heuristic, not a boundary).
+	GitIsolationOff GitIsolationMode = "off"
+	// GitIsolationRefs binds refs/ + packed-refs read-only (objects + the
+	// per-worktree gitdir stay writable): no ref can be updated in-sandbox, so a
+	// commit can't land on main or a sibling and the head can't leave its branch.
+	// An anti-accident guard only - the writable objects/ still lets a rogue agent
+	// destroy the shared object store. Commits are host-mediated.
+	GitIsolationRefs GitIsolationMode = "refs"
+	// GitIsolationReadonly binds the whole common dir read-only: the agent cannot
+	// write .git at all (no commit, add, stash, or object destruction). Staging and
+	// commit are host-mediated. Anti-rogue; costs in-sandbox git add / history edit.
+	GitIsolationReadonly GitIsolationMode = "readonly"
+	// GitIsolationClone gives the head its own repo borrowing main's objects
+	// read-only via git alternates: full native git, a rogue agent can only trash
+	// its own private store, and the daemon mirrors the branch back. FOLLOW-UP: the
+	// lifecycle rework is not yet implemented (see GIT_ISOLATION.md).
+	GitIsolationClone GitIsolationMode = "clone"
+)
+
+// NormalizeGitIsolation canonicalises a git-isolation string. Every canonical
+// value maps to itself; unknown strings are returned unchanged so callers can
+// reject them via ValidGitIsolation.
+func NormalizeGitIsolation(s string) GitIsolationMode {
+	return GitIsolationMode(s)
+}
+
+// ValidGitIsolation reports whether s names a known mode (empty allowed: "use the
+// default", which is off).
+func ValidGitIsolation(s string) bool {
+	switch NormalizeGitIsolation(s) {
+	case "", GitIsolationOff, GitIsolationRefs, GitIsolationReadonly, GitIsolationClone:
+		return true
+	}
+	return false
+}
+
+// HostMediatedCommit reports whether commits for this mode must run on the host
+// (refs are read-only in the sandbox, so an in-sandbox commit can't update a ref).
+func (m GitIsolationMode) HostMediatedCommit() bool {
+	return m == GitIsolationRefs || m == GitIsolationReadonly
+}
+
 // NetworkPolicy controls the sandbox's network access.
 type NetworkPolicy struct {
 	// Enabled allows outbound network access when true. When false the agent
@@ -236,6 +286,12 @@ type Options struct {
 	// bound writable so the agent can commit from its linked worktree. Empty to
 	// skip. See git.GetCommonDir.
 	GitCommonDir string
+	// GitIsolation controls how much of GitCommonDir is writable in the sandbox
+	// (see GIT_ISOLATION.md): off (default) = whole dir writable; refs = refs/ +
+	// packed-refs re-bound read-only on top; readonly = the whole common dir bound
+	// read-only. clone is handled at the head-lifecycle layer, not here. Empty ==
+	// off.
+	GitIsolation GitIsolationMode
 	// Home is the HOME directory the agent should see.
 	Home string
 

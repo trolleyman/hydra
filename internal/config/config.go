@@ -119,6 +119,12 @@ type NetworkConfig struct {
 type PolicyConfig struct {
 	// GateEnabled toggles the decision-capable gate hook. nil = default (enabled).
 	GateEnabled *bool `toml:"gate_enabled"`
+	// GitIsolation bounds how much of the repo's shared .git the head may write:
+	// "off" (default) writable; "refs" locks refs/ so commits are host-mediated and
+	// can't leave the branch; "readonly" locks the whole common dir (anti-rogue);
+	// "clone" gives the head its own repo (follow-up). See GIT_ISOLATION.md. nil =
+	// default (off). A last-writer-wins scalar, not a union list.
+	GitIsolation *string `toml:"git_isolation"`
 	// MCPAllowed lists the MCP server names the agent may use. Any server not
 	// listed (and not referenced by MCPToolsAllowed) is stripped from the seeded
 	// ~/.claude.json pre-launch (so it never spawns) and denied at runtime if
@@ -160,6 +166,20 @@ func (p PolicyConfig) IsGateEnabled() bool {
 	return p.GateEnabled == nil || *p.GateEnabled
 }
 
+// ResolveGitIsolation returns the normalized git-isolation mode, defaulting to
+// "off" when unset or unrecognized (fail-open to today's behaviour so a typo
+// never silently locks a head out of committing).
+func (p PolicyConfig) ResolveGitIsolation() sandbox.GitIsolationMode {
+	if p.GitIsolation == nil {
+		return sandbox.GitIsolationOff
+	}
+	m := sandbox.NormalizeGitIsolation(*p.GitIsolation)
+	if !sandbox.ValidGitIsolation(string(m)) || m == "" {
+		return sandbox.GitIsolationOff
+	}
+	return m
+}
+
 // Merge merges another PolicyConfig into this one. The MCP allow/block lists
 // and known_tools UNION across config layers (internal defaults -> user ->
 // project -> local -> per-agent) like the sandbox path and network host lists:
@@ -169,6 +189,9 @@ func (p PolicyConfig) IsGateEnabled() bool {
 func (p *PolicyConfig) Merge(other PolicyConfig) {
 	if other.GateEnabled != nil {
 		p.GateEnabled = other.GateEnabled
+	}
+	if other.GitIsolation != nil {
+		p.GitIsolation = other.GitIsolation
 	}
 	if other.MCPAllowed != nil {
 		p.MCPAllowed = unionStrings(p.MCPAllowed, other.MCPAllowed)
@@ -1912,6 +1935,17 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "policy", key: "git_isolation",
+			doc: `how much of the repo's shared .git the head may write: "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the head its own repo (see GIT_ISOLATION.md).`,
+			def: func() string { return `"off"` },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Policy != nil && a.Policy.GitIsolation != nil {
+					return strconv.Quote(*a.Policy.GitIsolation), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "policy", key: "mcp_allowed",
 			doc: "MCP server names the agent may use (whole-server grant covers all its tools); any other server is stripped before launch and denied at runtime (default none).",
 			def: func() string { return "[]" },
@@ -3387,6 +3421,9 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	if p.GateEnabled != nil {
 		emitSetField(out, name+".policy", "gate_enabled", fmt.Sprintf("%t", *p.GateEnabled), true, keyComments)
 	}
+	if p.GitIsolation != nil {
+		emitSetField(out, name+".policy", "git_isolation", strconv.Quote(*p.GitIsolation), true, keyComments)
+	}
 	emitSetField(out, name+".policy", "mcp_allowed", tomlStringArray(p.MCPAllowed), len(p.MCPAllowed) > 0, keyComments)
 	emitSetField(out, name+".policy", "mcp_tools_allowed", tomlStringArray(p.MCPToolsAllowed), len(p.MCPToolsAllowed) > 0, keyComments)
 	emitSetField(out, name+".policy", "mcp_blocked", tomlStringArray(p.MCPBlocked), len(p.MCPBlocked) > 0, keyComments)
@@ -3418,7 +3455,7 @@ func policyHasContent(p *PolicyConfig) bool {
 	if p == nil {
 		return false
 	}
-	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
+	return p.GateEnabled != nil || p.GitIsolation != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
 		len(p.MCPBlocked) > 0 || len(p.MCPToolsBlocked) > 0 ||
 		p.MCPAutoAllowRead != nil || len(p.KnownTools) > 0
 }

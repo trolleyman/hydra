@@ -27,6 +27,25 @@ func TestNetworkModeSynonyms(t *testing.T) {
 	}
 }
 
+func TestGitIsolationMode(t *testing.T) {
+	for _, ok := range []string{"", "off", "refs", "readonly", "clone"} {
+		if !ValidGitIsolation(ok) {
+			t.Errorf("ValidGitIsolation(%q) = false, want true", ok)
+		}
+	}
+	if ValidGitIsolation("bogus") {
+		t.Error(`ValidGitIsolation("bogus") = true, want false`)
+	}
+	// Only the refs-locked modes require host-mediated commits.
+	for m, want := range map[GitIsolationMode]bool{
+		GitIsolationOff: false, GitIsolationRefs: true, GitIsolationReadonly: true, GitIsolationClone: false,
+	} {
+		if got := m.HostMediatedCommit(); got != want {
+			t.Errorf("%q.HostMediatedCommit() = %v, want %v", m, got, want)
+		}
+	}
+}
+
 func TestExpandPath(t *testing.T) {
 	home := "/home/u"
 	cases := map[string]string{

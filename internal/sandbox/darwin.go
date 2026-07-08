@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -46,10 +47,21 @@ func BuildSpec(opts Options) (*Spec, error) {
 	b.WriteString(sandboxProfileTemplate)
 	b.WriteString("\n;; --- Hydra config-driven rules (appended; last match wins) ---\n")
 
-	// The worktree's git metadata lives in the main repo's common dir; allow
-	// writes there so the agent can commit (the worktree itself is WORK_DIR).
+	// The worktree's git metadata lives in the main repo's common dir. How much is
+	// writable depends on the git-isolation mode (see GIT_ISOLATION.md); reads are
+	// allowed by the base template, so read-only modes simply omit the write grant.
+	// Seatbelt is last-match-wins, so a deny after the allow carves out subpaths.
 	if opts.GitCommonDir != "" {
-		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))
+		switch opts.GitIsolation {
+		case GitIsolationReadonly, GitIsolationClone:
+			// No write grant -> the whole common dir is read-only.
+		case GitIsolationRefs:
+			fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))
+			fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(filepath.Join(opts.GitCommonDir, "refs")))
+			fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(filepath.Join(opts.GitCommonDir, "packed-refs")))
+		default:
+			fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))
+		}
 	}
 	// Writable paths (the worktree is covered by WORK_DIR in the template).
 	for _, p := range expandAll(opts.WritablePaths, home) {

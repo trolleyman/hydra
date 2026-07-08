@@ -49,6 +49,35 @@ func TestResolvePolicyMergesDefaultsAndAgent(t *testing.T) {
 	}
 }
 
+func TestResolveGitIsolation(t *testing.T) {
+	// Unset -> off (fail-open to today's behaviour).
+	if got := (PolicyConfig{}).ResolveGitIsolation(); got != "off" {
+		t.Errorf("unset git_isolation = %q, want off", got)
+	}
+	// Valid values pass through; an unrecognized one falls back to off.
+	for in, want := range map[string]string{
+		"refs": "refs", "readonly": "readonly", "clone": "clone", "off": "off",
+		"bogus": "off", "": "off",
+	} {
+		s := in
+		if got := string((PolicyConfig{GitIsolation: &s}).ResolveGitIsolation()); got != want {
+			t.Errorf("ResolveGitIsolation(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Agent override wins over the defaults layer, per-agent-type.
+	def, agent := "off", "readonly"
+	cfg := Config{
+		Defaults: AgentConfig{Policy: &PolicyConfig{GitIsolation: &def}},
+		Agents:   map[string]AgentConfig{"claude": {Policy: &PolicyConfig{GitIsolation: &agent}}},
+	}
+	if got := cfg.ResolvePolicy("claude").ResolveGitIsolation(); got != "readonly" {
+		t.Errorf("claude git_isolation = %q, want readonly (agent override)", got)
+	}
+	if got := cfg.ResolvePolicy("gemini").ResolveGitIsolation(); got != "off" {
+		t.Errorf("gemini git_isolation = %q, want off (defaults)", got)
+	}
+}
+
 func TestPolicyRenderRoundTrip(t *testing.T) {
 	// The empty template documents the policy defaults (commented-out).
 	tmpl := renderConfig(nil, Config{})

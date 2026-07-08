@@ -220,9 +220,37 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 	addRWDir(opts.WorktreePath)
-	// The worktree's git metadata lives in the main repo's common dir; bind it
-	// writable so the agent can commit (index.lock, refs, objects, logs).
-	addRWDir(opts.GitCommonDir)
+	// The worktree's git metadata lives in the main repo's common dir. How much of
+	// it is writable depends on the head's git-isolation mode (see GIT_ISOLATION.md).
+	addROPath := func(p string) {
+		if p == "" {
+			return
+		}
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+	switch opts.GitIsolation {
+	case GitIsolationReadonly, GitIsolationClone:
+		// Whole common dir read-only: the agent cannot write .git at all (no commit,
+		// add, stash, or object destruction). Staging + commit are host-mediated.
+		// (clone should be intercepted earlier; ro-bind is the safe fallback if not.)
+		addROPath(opts.GitCommonDir)
+	case GitIsolationRefs:
+		// Common dir writable (objects + the per-worktree gitdir stay writable so
+		// git add / status work), then refs/ + packed-refs re-bound read-only ON TOP
+		// so no ref can be updated in-sandbox: a commit can't land on main or a
+		// sibling, and the head can't leave its branch. Commits are host-mediated.
+		addRWDir(opts.GitCommonDir)
+		if opts.GitCommonDir != "" {
+			addROPath(filepath.Join(opts.GitCommonDir, "refs"))
+			addROPath(filepath.Join(opts.GitCommonDir, "packed-refs"))
+		}
+	default:
+		// off (and empty): bind it writable so the agent can commit in-sandbox
+		// (index.lock, refs, objects, logs) - today's behaviour.
+		addRWDir(opts.GitCommonDir)
+	}
 	// A copy-on-write overlay (below) and a plain writable --bind cannot coexist on
 	// the same target, and the overlay is what the user asked for. So skip any
 	// writable path that a CowMount already covers - e.g. a home-anchored

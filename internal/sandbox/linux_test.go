@@ -140,6 +140,74 @@ func TestBuildSpecNetworkEnabled(t *testing.T) {
 // TestBuildSpecLinuxCowMount checks a CowMount is translated into either an
 // overlayfs mount (when this bwrap supports overlay) or a read-only bind
 // fallback, and that the read-only variant (empty Upper/Work) always binds.
+func TestBuildSpecLinuxGitIsolation(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	gitdir := filepath.Join(home, "repo", ".git")
+	refs := filepath.Join(gitdir, "refs")
+	packed := filepath.Join(gitdir, "packed-refs")
+	for _, d := range []string{work, refs} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(packed, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	build := func(mode GitIsolationMode) []string {
+		spec, err := BuildSpec(Options{
+			AgentType: AgentTypeClaude, WorktreePath: work, Home: home,
+			GitCommonDir: gitdir, GitIsolation: mode, Argv: []string{"claude"},
+		})
+		if err != nil {
+			t.Fatalf("BuildSpec(%q): %v", mode, err)
+		}
+		t.Cleanup(func() { spec.Cleanup() })
+		return spec.Args
+	}
+
+	// off: whole common dir writable, never read-only.
+	off := build(GitIsolationOff)
+	if !hasPair(off, "--bind", gitdir, gitdir) {
+		t.Error("off: common dir not bound writable")
+	}
+	if hasPair(off, "--ro-bind", gitdir, gitdir) {
+		t.Error("off: common dir should not be read-only")
+	}
+
+	// readonly: whole common dir read-only, never writable.
+	ro := build(GitIsolationReadonly)
+	if !hasPair(ro, "--ro-bind", gitdir, gitdir) {
+		t.Error("readonly: common dir not bound read-only")
+	}
+	if hasPair(ro, "--bind", gitdir, gitdir) {
+		t.Error("readonly: common dir should not be writable")
+	}
+
+	// refs: common dir writable, but refs/ + packed-refs re-bound read-only on top.
+	rf := build(GitIsolationRefs)
+	if !hasPair(rf, "--bind", gitdir, gitdir) {
+		t.Error("refs: common dir not bound writable")
+	}
+	if !hasPair(rf, "--ro-bind", refs, refs) {
+		t.Error("refs: refs/ not re-bound read-only")
+	}
+	if !hasPair(rf, "--ro-bind", packed, packed) {
+		t.Error("refs: packed-refs not re-bound read-only")
+	}
+	// The read-only refs bind must come AFTER the writable parent bind to win.
+	if argIndex(rf, refs) < argIndex(rf, gitdir) {
+		t.Error("refs: refs/ ro-bind must follow the writable common-dir bind")
+	}
+
+	// clone falls back to read-only in the sandbox layer (lifecycle not built).
+	cl := build(GitIsolationClone)
+	if !hasPair(cl, "--ro-bind", gitdir, gitdir) {
+		t.Error("clone: common dir not bound read-only (expected readonly fallback)")
+	}
+}
+
 func TestBuildSpecLinuxCowMount(t *testing.T) {
 	home := t.TempDir()
 	work := filepath.Join(home, "work")

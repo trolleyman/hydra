@@ -343,7 +343,11 @@ type SpawnHeadOptions struct {
 	// renders a chat view instead of a terminal (Claude only).
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
-	Resume   bool // if true, resume the agent's prior conversation
+	// GitIsolation overrides the agent-type policy's git_isolation default for this
+	// head (off/refs/readonly/clone; empty = use the policy default). See
+	// GIT_ISOLATION.md. Persisted on the agent so resume applies the same mode.
+	GitIsolation string
+	Resume       bool // if true, resume the agent's prior conversation
 	// Replace allows an explicit ID to take over an ARCHIVED head with the same
 	// ID in the SAME project, overwriting its archived record (the restart and
 	// `hydra spawn --force` paths). Without it any existing record - active or
@@ -563,6 +567,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		AgentType:      opts.AgentType,
 		WorktreePath:   worktreePath,
 		GitCommonDir:   gitCommonDir(projectRoot),
+		GitIsolation:   resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation),
 		Home:           home,
 		TmpDir:         ensureHeadTmpDir(projectRoot, opts.ID),
 		WritablePaths:  append(writable, seed.WritablePaths...),
@@ -671,6 +676,27 @@ func gitCommonDir(projectRoot string) string {
 		return ""
 	}
 	return dir
+}
+
+// resolveGitIsolation picks the effective git-isolation mode for a head: the
+// per-head override (from the spawn request, persisted on the agent) when set,
+// else the agent-type policy default from config. clone is downgraded to readonly
+// for now - its lifecycle (private repo + mirror-back) is not built yet, so
+// readonly is the strongest mode that actually works (see GIT_ISOLATION.md).
+func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.GitIsolationMode {
+	mode := sandbox.GitIsolationOff
+	if override != "" {
+		if m := sandbox.NormalizeGitIsolation(override); sandbox.ValidGitIsolation(string(m)) && m != "" {
+			mode = m
+		}
+	} else {
+		mode = cfg.ResolvePolicy(agentType).ResolveGitIsolation()
+	}
+	if mode == sandbox.GitIsolationClone {
+		log.Printf("warn: git_isolation %q not yet implemented; using %q for %s", sandbox.GitIsolationClone, sandbox.GitIsolationReadonly, agentType)
+		mode = sandbox.GitIsolationReadonly
+	}
+	return mode
 }
 
 // ShellSessionID derives the registry session ID for a head's web bash shell
