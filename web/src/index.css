@@ -310,6 +310,71 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   }
 }
 
+/* --- ANSI terminal output (ansiToHtml) ------------------------------------ */
+
+/* SGR colours rendered from bash tool output. Two palettes - a darker set for
+   the light output panel, brighter for the dark one - so both stay legible.
+   Styles (bold/dim/italic/underline) are theme-neutral. 8-bit/24-bit colours
+   arrive as inline styles, not these classes. */
+.ansi-bold { font-weight: 600; }
+.ansi-dim { opacity: 0.6; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+.ansi-link { color: #2563eb; text-decoration: underline; }
+.dark .ansi-link { color: #60a5fa; }
+
+.ansi-black { color: #3b3b3b; }
+.ansi-red { color: #c0341d; }
+.ansi-green { color: #2f7d31; }
+.ansi-yellow { color: #a8791a; }
+.ansi-blue { color: #1f5fbf; }
+.ansi-magenta { color: #a3379a; }
+.ansi-cyan { color: #157e7e; }
+.ansi-white { color: #6b6b6b; }
+.ansi-bright-black { color: #6b6b6b; }
+.ansi-bright-red { color: #d63a26; }
+.ansi-bright-green { color: #3a9a3c; }
+.ansi-bright-yellow { color: #b8860b; }
+.ansi-bright-blue { color: #2f6fd0; }
+.ansi-bright-magenta { color: #bd4bb3; }
+.ansi-bright-cyan { color: #1a8f8f; }
+.ansi-bright-white { color: #2b2b2b; }
+
+.dark .ansi-black { color: #6b6b6b; }
+.dark .ansi-red { color: #f0836b; }
+.dark .ansi-green { color: #8fd18f; }
+.dark .ansi-yellow { color: #e2c675; }
+.dark .ansi-blue { color: #85b4f5; }
+.dark .ansi-magenta { color: #e2a1db; }
+.dark .ansi-cyan { color: #86d9d9; }
+.dark .ansi-white { color: #d6d3ce; }
+.dark .ansi-bright-black { color: #8a8a8a; }
+.dark .ansi-bright-red { color: #ff9a82; }
+.dark .ansi-bright-green { color: #a6e0a6; }
+.dark .ansi-bright-yellow { color: #f0d68a; }
+.dark .ansi-bright-blue { color: #9dc4ff; }
+.dark .ansi-bright-magenta { color: #eeb4e8; }
+.dark .ansi-bright-cyan { color: #9fe6e6; }
+.dark .ansi-bright-white { color: #f5f3ee; }
+
+/* Background colours: the eight base slots plus brights, both palettes. */
+.ansi-bg-black { background-color: #d9d6ce; } .dark .ansi-bg-black { background-color: #333330; }
+.ansi-bg-red { background-color: #f3c8c0; } .dark .ansi-bg-red { background-color: #5c2a22; }
+.ansi-bg-green { background-color: #cfe6cf; } .dark .ansi-bg-green { background-color: #274a27; }
+.ansi-bg-yellow { background-color: #efe0b8; } .dark .ansi-bg-yellow { background-color: #524623; }
+.ansi-bg-blue { background-color: #ccddf5; } .dark .ansi-bg-blue { background-color: #26375c; }
+.ansi-bg-magenta { background-color: #ebcce8; } .dark .ansi-bg-magenta { background-color: #4d2649; }
+.ansi-bg-cyan { background-color: #c8e6e6; } .dark .ansi-bg-cyan { background-color: #244a4a; }
+.ansi-bg-white { background-color: #efece5; } .dark .ansi-bg-white { background-color: #55534e; }
+.ansi-bg-bright-black { background-color: #cfccc4; } .dark .ansi-bg-bright-black { background-color: #444440; }
+.ansi-bg-bright-red { background-color: #f7d2ca; } .dark .ansi-bg-bright-red { background-color: #6b3227; }
+.ansi-bg-bright-green { background-color: #d6ecd6; } .dark .ansi-bg-bright-green { background-color: #2f572f; }
+.ansi-bg-bright-yellow { background-color: #f3e6c2; } .dark .ansi-bg-bright-yellow { background-color: #5f512a; }
+.ansi-bg-bright-blue { background-color: #d2e2f7; } .dark .ansi-bg-bright-blue { background-color: #2d4269; }
+.ansi-bg-bright-magenta { background-color: #f0d4ed; } .dark .ansi-bg-bright-magenta { background-color: #5a2d55; }
+.ansi-bg-bright-cyan { background-color: #d2ecec; } .dark .ansi-bg-bright-cyan { background-color: #2b5757; }
+.ansi-bg-bright-white { background-color: #f7f5ef; } .dark .ansi-bg-bright-white { background-color: #66635d; }
+
 /* The prompt editor's highlight backdrop syntax-colours code blocks too, but it
    uses the proportional UI font and must stay glyph-aligned with the (invisible)
    textarea caret underneath. Token COLOUR is free — it doesn't affect layout —

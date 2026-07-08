@@ -24,6 +24,7 @@ import {
 import { AgentStatus } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
+import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -491,12 +492,18 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
 // syntax highlighted when a language is known (item 3, e.g. a Read of a .ts
 // file) and tinted red on error. Tall output scrolls within a capped height.
 function OutputPanel({ text, lang, isError }: { text: string; lang: string; isError?: boolean }) {
-  const html = useMemo(() => (lang ? highlightHtml(text, lang) : null), [text, lang])
+  // Code output (a Read of a known extension) is stripped of any stray ANSI and
+  // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
+  // to spans. Neither path ever shows raw escape garbage.
+  const html = useMemo(
+    () => (lang ? highlightHtml(stripAnsi(text), lang) : hasAnsi(text) ? ansiToHtml(text) : null),
+    [text, lang],
+  )
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 ${
     isError ? 'text-red-600 dark:text-red-300' : 'text-stone-600 dark:text-stone-300'
   }`
   if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
-  return <pre className={cls}>{text || '(no output)'}</pre>
+  return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
 
 // Per-tool icons for the card header; anything unlisted gets the wrench.
@@ -1454,6 +1461,34 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }, 250)
   }
 
+  // Live mirror of pendingSends + the previous turn-running flag, so the
+  // flush-on-turn-end effect (item 21) can read the queue and edge-detect
+  // without re-subscribing.
+  const pendingSendsRef = useRef<PendingSend[]>([])
+  useEffect(() => {
+    pendingSendsRef.current = pendingSends
+  }, [pendingSends])
+  const prevTurnRunningRef = useRef(isTurnRunning)
+
+  // A message typed while a turn is running is held client-side (queued) rather
+  // than handed to the CLI immediately - so it stays editable/recallable (Up
+  // arrow). When the turn ends, flush the held queue to the socket in order.
+  useEffect(() => {
+    const was = prevTurnRunningRef.current
+    prevTurnRunningRef.current = isTurnRunning
+    if (!was || isTurnRunning) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    const held = pendingSendsRef.current.filter((p) => p.queued)
+    if (held.length === 0) return
+    for (const p of held) {
+      ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text: p.text }] }))
+    }
+    setPendingSends((prev) => prev.map((p) => (p.queued ? { ...p, queued: false } : p)))
+    useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+    onStatusUpdateRef.current?.(AgentStatus.RUNNING)
+  }, [isTurnRunning, agentId])
+
   // --- Composer: attachments ------------------------------------------------
 
   const attachmentsRef = useRef<Attachment[]>([])
@@ -1580,18 +1615,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // --- Sending ----------------------------------------------------------------
 
   // sendUserText hands one user turn to the socket and tracks it as an
-  // optimistic pending bubble until the CLI's echo supersedes it. Returns
-  // false when the socket isn't usable.
+  // optimistic pending bubble until the CLI's echo supersedes it. While a turn
+  // is running (and the agent isn't waiting on our answer) the message is
+  // instead HELD client-side as a queued bubble - not handed to the CLI yet -
+  // so it stays editable/recallable (Up arrow, item 21); the flush effect sends
+  // it when the turn ends. Returns false when the socket isn't usable.
   function sendUserText(text: string): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
-    ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text }] }))
-    // Optimistic: the bubble appears immediately, marked queued when a turn is
-    // in flight (the CLI holds it until the turn ends). The pending copy is
-    // replaced by the CLI's echo of the processed turn (routeUserText).
-    setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: isTurnRunning }])
     pinnedRef.current = true
     setPinned(true)
+    // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
+    // not RUNNING/STARTING), so a running turn means hold-and-queue.
+    const hold = isTurnRunning
+    if (hold) {
+      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: true }])
+      return true
+    }
+    ws.send(JSON.stringify({ type: 'user_message', content: [{ type: 'text', text }] }))
+    // Optimistic: the bubble appears immediately (sending) and is replaced by
+    // the CLI's echo of the processed turn (routeUserText).
+    setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, text, queued: false }])
     // Status is nudged optimistically exactly like the terminal's Enter
     // handling - but not while the agent is asking a question (needs_input).
     if (status !== AgentStatus.NEEDS_INPUT) {
@@ -1691,6 +1735,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (e.key === 'Tab' || (e.key === 'Enter' && !exact && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
         e.preventDefault()
         acceptSlash(slashMatches[Math.min(slashSel, slashMatches.length - 1)])
+        return
+      }
+    }
+    // Up arrow on an empty composer dequeues the most recent still-queued
+    // (unsent) message back into the box to edit (item 21). Only queued holds
+    // qualify - a message already handed to the CLI can't be recalled.
+    if (e.key === 'ArrowUp' && input === '' && slashMatches.length === 0) {
+      const last = [...pendingSends].reverse().find((p) => p.queued)
+      if (last) {
+        e.preventDefault()
+        setPendingSends((prev) => prev.filter((p) => p.id !== last.id))
+        setInput(last.text)
         return
       }
     }

@@ -2788,7 +2788,9 @@ var simChatEvents = []string{
 	// A chained command with a description: the collapsed card shows the
 	// description, the expanded card the ;/&&-split highlighted script.
 	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"FAIL: TestPutRetry (0.02s)\n    upload_test.go:41: expected 5 attempts, got 1","is_error":true}]}}`,
+	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
+	// rather than raw escape garbage (item 20).
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_4","content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\nfor attempt := 0; attempt < maxAttempts; attempt++ {\n    if err = u.put(ctx, key, r); err == nil {\n        return nil\n    }\n    sleepBackoff(attempt)\n}\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"session_id":"sim-chat"}`,
 }
