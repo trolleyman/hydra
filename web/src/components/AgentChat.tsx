@@ -87,7 +87,7 @@ type ChatItem =
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
   | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
-  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; errorText?: string }
+  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; outputTokens?: number; errorText?: string }
 
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
@@ -114,6 +114,15 @@ interface ClaudeContentBlock {
   content?: unknown
   is_error?: boolean
 }
+// Anthropic token-usage shape (subset), carried on message_start / message_delta
+// stream events and the final result event.
+interface TokenUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}
+
 interface ClaudeEvent {
   type: string
   subtype?: string
@@ -125,6 +134,8 @@ interface ClaudeEvent {
   total_cost_usd?: number
   result?: string
   is_error?: boolean
+  // Token usage on the final result event (Anthropic usage shape).
+  usage?: TokenUsage
   // system:init fields the pane cares about.
   model?: string
   slash_commands?: string[]
@@ -135,11 +146,15 @@ interface ClaudeEvent {
   // Set by the CLI on the synthesized assistant message it emits when a turn
   // fails mid-response ("API Error: ... The response above may be incomplete.").
   isApiErrorMessage?: boolean
-  // Raw API event carried by stream_event lines (--include-partial-messages).
+  // Raw API event carried by stream_event lines (--include-partial-messages):
+  // message_start carries the message's initial usage, message_delta the running
+  // output-token count - fed to the live "working" indicator (item 48).
   event?: {
     type?: string
     content_block?: { type?: string }
     delta?: { type?: string; text?: string; thinking?: string }
+    usage?: TokenUsage
+    message?: { usage?: TokenUsage }
   }
   // control_request fields (--permission-prompt-tool stdio): the CLI asks the
   // client to approve a tool call - in practice only AskUserQuestion, since
@@ -148,6 +163,21 @@ interface ClaudeEvent {
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
 }
+
+// formatTokens abbreviates a token count (3900 -> "3.9k", 1_200_000 -> "1.2M").
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+// Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
+// one is picked per turn so it stays stable while the turn runs.
+const WORKING_VERBS = [
+  'Flambéing', 'Percolating', 'Simmering', 'Noodling', 'Conjuring', 'Marinating',
+  'Whisking', 'Churning', 'Brewing', 'Pondering', 'Tinkering', 'Finagling',
+  'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
+]
 
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
@@ -1191,6 +1221,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
   const [todos, setTodos] = useState<TodoItem[]>([])
+  // Live "working" indicator (item 48): the turn's start time (for the ticking
+  // elapsed), the elapsed seconds, the running output-token count (completed
+  // messages + the in-flight one), and the per-turn verb. Reset each turn.
+  const turnStartRef = useRef<number | null>(null)
+  const turnTokensRef = useRef(0)
+  const curMsgTokensRef = useRef(0)
+  const turnCountRef = useRef(0)
+  const [turnVerb, setTurnVerb] = useState(WORKING_VERBS[0])
+  const [elapsed, setElapsed] = useState(0)
+  const [turnTokens, setTurnTokens] = useState(0)
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -1676,17 +1716,32 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               streamBuf.text += d.thinking
               scheduleStreamFlush()
             }
+          } else if (e.type === 'message_start') {
+            // A new API message in this turn: seed the in-flight token count (item 48).
+            curMsgTokensRef.current = e.message?.usage?.output_tokens ?? 0
+            setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
+          } else if (e.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
+            // Running (cumulative-for-this-message) output token count.
+            curMsgTokensRef.current = e.usage.output_tokens
+            setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
           } else if (e.type === 'message_stop') {
+            // Roll the finished message's tokens into the turn total.
+            turnTokensRef.current += curMsgTokensRef.current
+            curMsgTokensRef.current = 0
+            setTurnTokens(turnTokensRef.current)
             clearStream()
           }
           return
         }
         case 'result': {
+          // Prefer the result's own usage; fall back to what we tallied live.
+          const outputTokens = (ev.usage?.output_tokens ?? (turnTokensRef.current + curMsgTokensRef.current)) || undefined
           push({
             kind: 'result',
             isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
             durationMs: ev.duration_ms,
             costUsd: ev.total_cost_usd,
+            outputTokens,
             errorText: ev.is_error ? ev.result : undefined,
           })
           clearStream()
@@ -1786,6 +1841,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       pendingPrependRef.current = null
     }
   }, [items])
+
+  // Live turn timer for the "working" indicator (item 48): start the clock (and
+  // reset the per-turn token count + pick a fresh verb) when a turn begins, tick
+  // the elapsed seconds while it runs, and stop when it ends.
+  useEffect(() => {
+    if (!isTurnRunning) {
+      turnStartRef.current = null
+      setElapsed(0)
+      return
+    }
+    if (turnStartRef.current == null) {
+      turnStartRef.current = Date.now()
+      turnTokensRef.current = 0
+      curMsgTokensRef.current = 0
+      setTurnTokens(0)
+      setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
+    }
+    const tick = () => setElapsed(Math.floor((Date.now() - (turnStartRef.current ?? Date.now())) / 1000))
+    tick()
+    const iv = setInterval(tick, 1000)
+    return () => clearInterval(iv)
+  }, [isTurnRunning])
 
   // Auto-scroll to the bottom on new content while pinned.
   useEffect(() => {
@@ -2332,8 +2409,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           />
         )
       case 'result':
-        // A failed turn still surfaces its error; a successful one renders
-        // nothing - the per-turn duration/cost footer was noise (item 27).
         if (item.isError) {
           return (
             <div className="rounded-lg border border-red-300/70 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">
@@ -2341,7 +2416,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )
         }
-        return null
+        // A quiet end-of-turn summary (item 47): "* Crunched for <duration>",
+        // Claude-Code style. Nothing when the turn carried no timing.
+        if (item.durationMs == null) return null
+        return (
+          <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+            <span className="text-[#c96442]">✳</span>
+            Crunched for {formatDuration(item.durationMs)}
+            {item.outputTokens ? ` · ↓ ${formatTokens(item.outputTokens)} tokens` : ''}
+          </div>
+        )
     }
   }
 
@@ -2416,6 +2500,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
+          {/* Live "working" indicator (item 48): a playful verb + elapsed time,
+              and the running output-token count when the CLI reports it. */}
+          {isTurnRunning && replayDone && (
+            <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
+              <span className="text-[#c96442]">✳</span>
+              <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
+              <span className="text-stone-400 dark:text-stone-500">
+                ({formatDuration(elapsed * 1000)}
+                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''})
+              </span>
+            </div>
+          )}
           {/* Queued messages: held for later, so pinned at the very bottom under
               the in-flight reply. (A "sending" message is an optimistic item in
               the flow above; only queued holds land here now.) */}

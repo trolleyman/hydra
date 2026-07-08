@@ -3054,12 +3054,19 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": sessionID})
 		sendSimChatEvent(conn, string(line))
 	}
+	// message_start carries the initial usage; message_delta the running output
+	// token count - both feed the live "working" indicator (item 48).
+	streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1200, "output_tokens": 1}}})
 	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+	tokens := 1
 	for chunk := range strings.SplitSeq(replyText, " ") {
 		streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+		tokens += 2
+		streamEv(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": tokens}})
 		time.Sleep(90 * time.Millisecond)
 	}
 	streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+	streamEv(map[string]any{"type": "message_stop"})
 
 	reply, _ := json.Marshal(map[string]any{
 		"type": "assistant",
@@ -3071,7 +3078,8 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	})
 	sendSimChatEvent(conn, string(reply))
 	result, _ := json.Marshal(map[string]any{
-		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042, "session_id": sessionID,
+		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042,
+		"usage": map[string]any{"input_tokens": 1200, "output_tokens": tokens}, "session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(result))
 }
