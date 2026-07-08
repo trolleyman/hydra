@@ -34,6 +34,7 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
+import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
 
@@ -184,6 +185,14 @@ function closeOpenFence(text: string): string {
 function stripToolUseError(text: string): string {
   const m = /^\s*<tool_use_error>([\s\S]*?)<\/tool_use_error>\s*$/.exec(text)
   return m ? m[1].trim() : text
+}
+
+// stripLocalCommandCaveat removes the <local-command-caveat>...</local-command-
+// caveat> block the CLI injects around local-command output (e.g. after a
+// /model change) - it's a note to the model, not user-facing content, and would
+// otherwise render as a raw-XML bubble (item 31).
+function stripLocalCommandCaveat(text: string): string {
+  return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
 }
 
 // decodeEntities turns the handful of XML entities that appear in injected
@@ -1021,7 +1030,9 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
       }
     }
   }
-  const routeUser = (text: string) => {
+  const routeUser = (rawText: string) => {
+    const text = stripLocalCommandCaveat(rawText)
+    if (!text) return
     const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
     if (cmd) {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -1122,7 +1133,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
   const [connected, setConnected] = useState(false)
-  const [input, setInput] = useState('')
+  // The composer draft (text + attachments) is restored per agent so it survives
+  // switching agents/reloads (item 30): text from agentViewPrefs, attachments
+  // from the in-memory chatDrafts cache.
+  const [input, setInput] = useState(() => loadAgentViewPrefs(projectId, agentId).chatDraft ?? '')
+  const inputRef = useRef(input)
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
   // Messages handed to the socket, awaiting their --replay-user-messages echo
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
@@ -1133,6 +1151,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
   const optimisticTextsRef = useRef<string[]>([])
+  // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
+  // real echo can supersede it. null when none is pending.
+  const optimisticModelIdRef = useRef<number | null>(null)
   // Load-older infinite scroll (item 25): the uuid of the current oldest history
   // line (the paging anchor), a decreasing id space for prepended history (kept
   // well below the optimistic range so it never collides), an in-flight guard,
@@ -1144,8 +1165,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
-  // Composer attachments (same upload flow as the spawn box).
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Composer attachments (same upload flow as the spawn box), restored from the
+  // per-agent in-memory cache (item 30).
+  const [attachments, setAttachments] = useState<Attachment[]>(() => loadChatAttachments(chatDraftKey(projectId, agentId)))
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1207,6 +1229,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setPendingSends([])
     optimisticTextsRef.current = []
     optimisticIdRef.current = -1
+    optimisticModelIdRef.current = null
     // Reset load-older paging for the fresh backfill.
     oldestUuidRef.current = null
     historyIdRef.current = -1_000_000
@@ -1374,7 +1397,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (text: string) => {
+    const routeUserText = (rawText: string) => {
+      // Drop the CLI's local-command caveat wrapper; a message that is nothing
+      // but the caveat is skipped entirely (item 31).
+      const text = stripLocalCommandCaveat(rawText)
+      if (!text) return
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -1385,9 +1412,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (stdout) {
         const body = stdout[1].trim()
         // "Set model to sonnet (claude-sonnet-5)" - the CLI's confirmation is
-        // the source of truth for the dropdown.
+        // the source of truth for the dropdown, and supersedes our optimistic
+        // one (item 31).
         const m = /^Set model to\s+(\S+)/.exec(body)
-        if (m) setModel(m[1])
+        if (m) {
+          setModel(m[1])
+          const oid = optimisticModelIdRef.current
+          if (oid != null) {
+            optimisticModelIdRef.current = null
+            setItems((prev) => prev.filter((it) => it.id !== oid))
+          }
+        }
         if (body) push({ kind: 'cmdout', text: body })
         return
       }
@@ -1744,18 +1779,32 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }, 250)
   }
 
+  // --- Composer draft persistence (item 30) ---------------------------------
+
+  // Save the composer text (debounced) so a half-written message survives an
+  // agent switch or reload. Sending clears input, which persists as "no draft".
+  useEffect(() => {
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
+    return () => clearTimeout(t)
+  }, [input, projectId, agentId])
+
   // --- Composer: attachments ------------------------------------------------
 
   const attachmentsRef = useRef<Attachment[]>([])
   useEffect(() => {
     attachmentsRef.current = attachments
-  }, [attachments])
-  // Free preview object URLs when the pane goes away.
+    // Mirror to the per-agent cache so a switch away restores them.
+    saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
+  }, [attachments, projectId, agentId])
+  // On unmount (agent switch), keep the draft's attachments alive in the cache -
+  // do NOT revoke their object URLs, so returning to the agent restores working
+  // thumbnails. They're freed on send/remove, or when the page fully reloads.
   useEffect(
     () => () => {
-      for (const a of attachmentsRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
+      patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
     },
-    [],
+    [projectId, agentId],
   )
 
   function patchAttachment(id: number, patch: Partial<Attachment>) {
@@ -1916,7 +1965,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (!finalText || !sendUserText(finalText)) return
     setInput('')
     setSlashDismissed(false)
-    for (const a of attachments) if (a.previewUrl && !readyAttachments.includes(a)) URL.revokeObjectURL(a.previewUrl)
+    // All attachments are consumed by the send; free their preview URLs (the
+    // unmount handler no longer revokes - it preserves them for the draft cache).
+    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
     setAttachments([])
     setLightboxIndex(null)
   }
@@ -1960,6 +2011,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.send(JSON.stringify({ type: 'set_model', model: id }))
     // Optimistic; the CLI's "Set model to ..." confirmation re-syncs it.
     setModel(id)
+    // Also show the confirmation in-flow right away (item 31): the CLI echoes a
+    // /model change to the transcript but not always to the live stream, so it
+    // would otherwise not appear until a reload. The CLI's real echo, when it
+    // arrives, supersedes this (routeUserText).
+    const optId = optimisticIdRef.current--
+    optimisticModelIdRef.current = optId
+    setItems((prev) => [...prev, { kind: 'cmdout', id: optId, text: `Set model to ${id}` }])
+    pinnedRef.current = true
+    setPinned(true)
   }
 
   // --- Keyboard ----------------------------------------------------------------
