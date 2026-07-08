@@ -35,6 +35,8 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
+import { chatImageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
 
@@ -78,7 +80,9 @@ type ChatItem =
   // durationMs is set for a thought whose streaming we timed live (item 11);
   // replayed history has no timing, so it renders as a plain "Thought".
   | { kind: 'thinking'; id: number; text: string; durationMs?: number }
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean }
+  // ended: the turn finished (or history was replayed) without a result for this
+  // tool, so stop showing it as "running" (item 42).
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -558,7 +562,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
 const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
-  const pending = item.result === undefined
+  const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
@@ -1014,6 +1018,57 @@ function QuestionCard({
   )
 }
 
+// ChatUserMessage renders a user turn: the prose bubble plus any uploads it
+// referenced, shown as attachment chips / image thumbnails (clickable into a
+// lightbox) rather than raw paths, with the CLI's image placeholder stripped
+// (items 41, 43). memo'd so composer keystrokes don't re-parse every message.
+const ChatUserMessage = memo(function ChatUserMessage({
+  text,
+  sending,
+  projectId,
+}: {
+  text: string
+  sending?: boolean
+  projectId: string | null
+}) {
+  const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
+  // render an empty bubble.
+  if (!body && attachments.length === 0 && !sending) return null
+  const imageAttachments = attachments.filter((a) => a.previewUrl)
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className={`${USER_BUBBLE_CLASS}${sending ? ' opacity-75' : ''}`}>
+        {body && <Markdown text={body} />}
+        {attachments.length > 0 && (
+          <AttachmentChips
+            attachments={attachments}
+            size="sm"
+            className={body ? 'mt-2' : ''}
+            onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+          />
+        )}
+      </div>
+      {sending && (
+        <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
+          <LoaderCircle className="w-3 h-3 animate-spin" />
+          Sending...
+        </div>
+      )}
+      {lightboxIndex !== null && lightboxImages.length > 0 && (
+        <ImageLightbox
+          images={lightboxImages}
+          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </div>
+  )
+})
+
 // reduceHistoryEvents reduces a batch of older (settled) conversation events -
 // the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
 // the live reducer's settled-event handling (no streaming, model or
@@ -1333,6 +1388,31 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       )
     }
 
+    // clearSending drops the "Sending..." indicator from optimistic user
+    // messages the moment the agent starts responding (item 44) - the response
+    // proves the message was received, so waiting for the CLI's echo (which can
+    // lag behind the reply) would leave it stuck reading "Sending...".
+    const clearSending = () => {
+      setItems((prev) =>
+        prev.some((it) => it.kind === 'user' && it.sending)
+          ? prev.map((it) => (it.kind === 'user' && it.sending ? { ...it, sending: false } : it))
+          : prev,
+      )
+    }
+
+    // endPendingTools stops the "running" indicator on tool cards that never got
+    // a result - a turn that ended (or history replayed) without one means the
+    // tool isn't actually still running (item 42). Also clears the un-flushed
+    // batch so replayed history doesn't briefly strobe "running".
+    const endPendingTools = () => {
+      for (const it of pending) if (it.kind === 'tool' && it.result === undefined) it.ended = true
+      setItems((prev) =>
+        prev.some((it) => it.kind === 'tool' && it.result === undefined && !it.ended)
+          ? prev.map((it) => (it.kind === 'tool' && it.result === undefined && !it.ended ? { ...it, ended: true } : it))
+          : prev,
+      )
+    }
+
     // The can_use_tool control_request paired with an AskUserQuestion tool_use
     // carries the request_id the answer must quote; attach it to the question
     // card (which normally arrived just before, via the assistant event).
@@ -1439,6 +1519,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       if (text.startsWith('[Request interrupted by user')) {
         push({ kind: 'interrupted' })
+        endPendingTools()
         return
       }
       // A harness-injected background-task notification (<task-notification>):
@@ -1537,6 +1618,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             return
           }
           if (!Array.isArray(content)) return
+          clearSending()
           const msgId = ev.message?.id ?? ''
           let seen = seenBlocks.get(msgId)
           if (!seen) {
@@ -1578,6 +1660,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           if (!e) return
           if (e.type === 'content_block_start') {
             const bt = e.content_block?.type
+            // The agent is producing output - the pending send has landed (item 44).
+            clearSending()
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
@@ -1606,6 +1690,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             errorText: ev.is_error ? ev.result : undefined,
           })
           clearStream()
+          endPendingTools()
           return
         }
         default:
@@ -1646,6 +1731,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return
         case 'replay_done':
           replaying = false
+          // Any tool from the replayed history with no result isn't running
+          // anymore (its turn is over) - don't leave it stuck "running" (item 42).
+          endPendingTools()
           flush()
           setLiveFromId(nextId)
           setReplayDone(true)
@@ -1822,8 +1910,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
   }
 
-  function addFiles(files: File[]) {
-    for (const file of files) {
+  // numberGenericImage renames pasted / unnamed images to image1.png,
+  // image2.png, ... (per project+agent, persisted) so each gets a stable, unique
+  // on-disk name - like the spawn box (item 46). Named files keep their name.
+  function numberGenericImage(file: File): File {
+    if (!isImageFile(file)) return file
+    const stem = file.name.replace(/\.[^.]*$/, '')
+    if (stem !== '' && stem.toLowerCase() !== 'image') return file
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
+    const key = chatImageCounterKey(projectId, agentId)
+    const n = (Number(readLocal(key)) || 0) + 1
+    writeLocal(key, String(n))
+    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
+  }
+
+  function addFiles(rawFiles: File[]) {
+    for (const raw of rawFiles) {
+      const file = numberGenericImage(raw)
       const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
       setAttachments((prev) => [
@@ -2174,19 +2277,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   function renderChatItem(item: ChatItem): ReactNode {
     switch (item.kind) {
       case 'user':
-        return (
-          <div className="flex flex-col items-end gap-1">
-            <div className={`${USER_BUBBLE_CLASS}${item.sending ? ' opacity-75' : ''}`}>
-              <Markdown text={item.text} />
-            </div>
-            {item.sending && (
-              <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-                Sending...
-              </div>
-            )}
-          </div>
-        )
+        return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
