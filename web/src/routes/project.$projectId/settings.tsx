@@ -2,7 +2,7 @@ import { createFileRoute, useBlocker, useParams, useCanGoBack, useRouter } from 
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../../stores/apiClient'
 import { formatError } from '../../api/format_error'
-import { useProjectStore } from '../../stores/projectStore'
+import { refreshReviewConfig, useProjectStore } from '../../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../../api'
 import { Save, Loader2 } from 'lucide-react'
 import { useDialogStore } from '../../stores/dialogStore'
@@ -111,6 +111,10 @@ function ProjectSettingsPage() {
     try {
       await api.default.saveConfig(projectId, config, scope)
       setBaseConfig(JSON.stringify(config))
+      // A save can change the effective [review] table; re-resolve the cached
+      // config so the Review section's "effective" hints track what was saved
+      // (mounts read the cache now instead of refetching).
+      void refreshReviewConfig(projectId)
       useToastStore.getState().show({ message: `Configuration saved to ${scope} successfully!`, type: 'success' })
     } catch (err) {
       useDialogStore.getState().show({ title: 'Save Failed', message: `Failed to save configuration: ${formatError(err)}`, type: 'error' })
