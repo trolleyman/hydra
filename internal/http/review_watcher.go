@@ -125,6 +125,9 @@ func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussion
 	if err != nil {
 		return
 	}
+	// The review file lives in its own dir now (PLAN #26); ensure it exists in
+	// case the watcher writes before the head's sandbox was seeded.
+	_ = os.MkdirAll(paths.GetReviewDirFromProjectRoot(projectRoot), 0o755)
 	_ = os.WriteFile(paths.GetReviewJsonFromProjectRoot(projectRoot, a.ID), data, 0644)
 }
 

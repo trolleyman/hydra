@@ -46,6 +46,9 @@ export type AgentViewPrefs = {
   chatScrollTop?: number
   // Chat composer minimum height, in whole rows (the drag bar's setting).
   chatComposerRows?: number
+  // Unsent chat composer text, so a draft survives switching agents and reloads
+  // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
+  chatDraft?: string
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -71,6 +74,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     testTreeCollapsed: stored.testTreeCollapsed,
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
+    chatDraft: stored.chatDraft,
   }
 }
 

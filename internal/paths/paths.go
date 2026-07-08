@@ -171,8 +171,22 @@ func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+".json")
 }
 
+// The per-head companion state (status log, build log, review, sub-agents,
+// queue) each live in their OWN directory keyed by the bare id, rather than as
+// status/<id>_<suffix> siblings of status.json. Keying the whole filename by the
+// id makes them collision-proof: a head id may contain "_" (headIDRe), so a
+// suffix like status/<id>_review.json could otherwise alias the status file of a
+// head literally named "<id>_review" (see PLAN #26). status.json stays the base
+// name in status/ (nothing else shares that dir now, so it can't collide).
+func GetStatusLogDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status-log")
+}
 func GetStatusLogFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_log.jsonl")
+	return filepath.Join(GetStatusLogDirFromProjectRoot(projectRoot), id+".jsonl")
+}
+
+func GetBuildLogDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "build-log")
 }
 
 // GetChatQueueDirFromProjectRoot returns the directory holding per-head chat
@@ -192,26 +206,32 @@ func GetChatQueueJsonFromProjectRoot(projectRoot, id string) string {
 }
 
 func GetBuildLogFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_build.log")
+	return filepath.Join(GetBuildLogDirFromProjectRoot(projectRoot), id+".log")
 }
 
 // GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle
 // watcher writes (status + unresolved discussions) and the in-sandbox `hydra mcp`
 // server reads for get_review_status / get_review_comments (NON_LOCAL_INTEGRATION.md
 // 3.5a). Per-head by construction: it is bound only into that head's sandbox, so
-// the agent's identity comes from the channel, never a self-reported id. Sits
-// beside status.json under .hydra/local/status/<id>_review.json.
+// the agent's identity comes from the channel, never a self-reported id. Lives
+// at .hydra/local/review/<id>.json.
+func GetReviewDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review")
+}
 func GetReviewJsonFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_review.json")
+	return filepath.Join(GetReviewDirFromProjectRoot(projectRoot), id+".json")
 }
 
 // GetSubagentsDirFromProjectRoot returns the per-head directory tracking the
 // head's currently-live Claude sub-agents (Task tool). trigger-hook drops a
 // marker file per running sub-agent so the main agent's Stop hook can tell a
-// genuine finish from "the turn ended but sub-agents are still working". It sits
-// beside status.json under .hydra/local/status/<id>_subagents.
+// genuine finish from "the turn ended but sub-agents are still working". Lives
+// at .hydra/local/subagents/<id>/.
+func GetSubagentsBaseDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "subagents")
+}
 func GetSubagentsDirFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_subagents")
+	return filepath.Join(GetSubagentsBaseDirFromProjectRoot(projectRoot), id)
 }
 
 // GetApprovalsDirFromProjectRoot returns the per-head directory used for the

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -14,6 +14,7 @@ import {
   Globe,
   ListChecks,
   ListEnd,
+  ListPlus,
   LoaderCircle,
   Plus,
   Search,
@@ -34,6 +35,9 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
+import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
+import { chatImageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
 
@@ -77,12 +81,36 @@ type ChatItem =
   // durationMs is set for a thought whose streaming we timed live (item 11);
   // replayed history has no timing, so it renders as a plain "Thought".
   | { kind: 'thinking'; id: number; text: string; durationMs?: number }
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean }
+  // ended: the turn finished (or history was replayed) without a result for this
+  // tool, so stop showing it as "running" (item 42).
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
   | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
-  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; errorText?: string }
+  | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
+  // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
+  // no Task card to fold into and renders as a standalone card in the flow. The
+  // common case - a sub-agent linked to its Task card - needs no item: the Task
+  // ToolCard upgrades into a SubagentCard in place (see renderChatItem).
+  | { kind: 'subagent'; id: number; agentId: string }
+
+// A sub-agent (Claude Task tool) run, assembled from its sidechain events.
+// Keyed by agentId in the `subagents` map. `toolUseId` (from the meta frame)
+// links it to the parent Task tool card, which upgrades into a SubagentCard;
+// `items` is the sub-agent's own inner timeline (its thinking, tool calls and
+// replies) and `prompt` its opening instruction.
+interface SubagentView {
+  agentId: string
+  toolUseId?: string
+  agentType?: string
+  description?: string
+  prompt?: string
+  // 'running' until a sidechain result (or the turn's result) settles it; for a
+  // Task-linked sub the parent tool_result is the more precise done signal.
+  status: 'running' | 'done'
+  items: ChatItem[]
+}
 
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
@@ -109,14 +137,31 @@ interface ClaudeContentBlock {
   content?: unknown
   is_error?: boolean
 }
+// Anthropic token-usage shape (subset), carried on message_start / message_delta
+// stream events and the final result event.
+interface TokenUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}
+
 interface ClaudeEvent {
   type: string
   subtype?: string
-  message?: { id?: string; content?: ClaudeContentBlock[] | string }
+  // The durable conversation-record id (transcript + stdout share it). Tracked
+  // as the anchor for load-older history paging (item 25).
+  uuid?: string
+  // stop_reason on a complete assistant message: "end_turn"/"tool_use" are
+  // normal, "max_tokens" means the reply was truncated, "refusal" a safety stop
+  // - only the abnormal ones are surfaced (item: turn footer).
+  message?: { id?: string; content?: ClaudeContentBlock[] | string; stop_reason?: string; usage?: TokenUsage }
   duration_ms?: number
   total_cost_usd?: number
   result?: string
   is_error?: boolean
+  // Token usage on the final result event (Anthropic usage shape).
+  usage?: TokenUsage
   // system:init fields the pane cares about.
   model?: string
   slash_commands?: string[]
@@ -127,11 +172,22 @@ interface ClaudeEvent {
   // Set by the CLI on the synthesized assistant message it emits when a turn
   // fails mid-response ("API Error: ... The response above may be incomplete.").
   isApiErrorMessage?: boolean
-  // Raw API event carried by stream_event lines (--include-partial-messages).
+  // Sub-agent (Task tool) markers: a sidechain event is one of a sub-agent's
+  // own inner steps, not part of the main conversation; agentId names which
+  // sub-agent. The reducer routes these into that sub-agent's card instead of
+  // the main flow (so a sub-agent's prompt no longer masquerades as a user
+  // message). Both fields ride verbatim on the stream-json lines.
+  isSidechain?: boolean
+  agentId?: string
+  // Raw API event carried by stream_event lines (--include-partial-messages):
+  // message_start carries the message's initial usage, message_delta the running
+  // output-token count - fed to the live "working" indicator (item 48).
   event?: {
     type?: string
     content_block?: { type?: string }
     delta?: { type?: string; text?: string; thinking?: string }
+    usage?: TokenUsage
+    message?: { usage?: TokenUsage }
   }
   // control_request fields (--permission-prompt-tool stdio): the CLI asks the
   // client to approve a tool call - in practice only AskUserQuestion, since
@@ -140,6 +196,50 @@ interface ClaudeEvent {
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
 }
+
+// formatTokens abbreviates a token count (3900 -> "3.9k", 1_200_000 -> "1.2M").
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+// formatCost renders a per-turn dollar figure - more precision for tiny amounts
+// so a fraction-of-a-cent turn doesn't collapse to "$0.00".
+function formatCost(usd: number): string {
+  if (usd >= 0.1) return `$${usd.toFixed(2)}`
+  if (usd >= 0.001) return `$${usd.toFixed(3)}`
+  return `$${usd.toFixed(4)}`
+}
+
+// usageBreakdown builds the hover title spelling out a turn's full token usage -
+// input (uncached), cache read/write and output - kept off the visible line
+// (item 47: only output shows there) since cache figures are noise at a glance.
+function usageBreakdown(u: TokenUsage): string {
+  const parts: string[] = []
+  if (u.input_tokens) parts.push(`Input ${formatTokens(u.input_tokens)}`)
+  if (u.cache_read_input_tokens) parts.push(`Cache read ${formatTokens(u.cache_read_input_tokens)}`)
+  if (u.cache_creation_input_tokens) parts.push(`Cache write ${formatTokens(u.cache_creation_input_tokens)}`)
+  if (u.output_tokens) parts.push(`Output ${formatTokens(u.output_tokens)}`)
+  return parts.join(' · ')
+}
+
+// STOP_REASON_LABEL maps an abnormal assistant stop_reason to a short footer
+// note. Normal ends (end_turn / tool_use) are absent - only truncation or a
+// refusal is worth surfacing (the rest is noise).
+const STOP_REASON_LABEL: Record<string, string> = {
+  max_tokens: 'response cut off at max tokens',
+  refusal: 'stopped (refusal)',
+  model_context_window_exceeded: 'response cut off (context full)',
+}
+
+// Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
+// one is picked per turn so it stays stable while the turn runs.
+const WORKING_VERBS = [
+  'Flambéing', 'Percolating', 'Simmering', 'Noodling', 'Conjuring', 'Marinating',
+  'Whisking', 'Churning', 'Brewing', 'Pondering', 'Tinkering', 'Finagling',
+  'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
+]
 
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
@@ -183,6 +283,14 @@ function stripToolUseError(text: string): string {
   return m ? m[1].trim() : text
 }
 
+// stripLocalCommandCaveat removes the <local-command-caveat>...</local-command-
+// caveat> block the CLI injects around local-command output (e.g. after a
+// /model change) - it's a note to the model, not user-facing content, and would
+// otherwise render as a raw-XML bubble (item 31).
+function stripLocalCommandCaveat(text: string): string {
+  return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
+}
+
 // decodeEntities turns the handful of XML entities that appear in injected
 // harness text (a <task-notification> summary) back into their characters.
 function decodeEntities(text: string): string {
@@ -210,7 +318,13 @@ function summarizeToolInput(input: unknown): string {
   if (input == null) return ''
   if (typeof input !== 'object') return String(input)
   const obj = input as Record<string, unknown>
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt']) {
+  // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
+  if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
+    const status = typeof obj.status === 'string' ? obj.status : ''
+    const subj = typeof obj.subject === 'string' ? obj.subject : ''
+    return `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`
+  }
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt']) {
     if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
   }
   try {
@@ -316,6 +430,40 @@ function parseTodos(input: unknown): TodoItem[] | null {
     out.push({ content: o.content, status, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined })
   }
   return out.length ? out : null
+}
+
+// The Task* tool family (TaskCreate/TaskUpdate) is the incremental cousin of
+// TodoWrite: instead of one call carrying the whole list, each call mutates a
+// single task. parseTaskCreate reads a TaskCreate input ({subject, ...}); a new
+// task always starts `pending` (the harness assigns its id in creation order).
+function parseTaskCreate(input: unknown): { content: string; activeForm?: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  if (typeof o.subject !== 'string' || !o.subject) return null
+  return { content: o.subject, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined }
+}
+
+// parseTaskUpdate reads a TaskUpdate input ({taskId, status?, subject?, ...}),
+// returning the referenced id plus only the fields it changes (status "deleted"
+// removes the task). Returns null when it names no task, so the call falls back
+// to a normal tool card.
+function parseTaskUpdate(
+  input: unknown,
+): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  const taskId = typeof o.taskId === 'string' ? o.taskId : typeof o.taskId === 'number' ? String(o.taskId) : ''
+  if (!taskId) return null
+  const status =
+    o.status === 'pending' || o.status === 'in_progress' || o.status === 'completed' || o.status === 'deleted'
+      ? o.status
+      : undefined
+  return {
+    taskId,
+    status,
+    content: typeof o.subject === 'string' && o.subject ? o.subject : undefined,
+    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
+  }
 }
 
 // PlanPanel floats the agent's current to-do list (its latest TodoWrite) in the
@@ -539,6 +687,8 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Task: Bot,
   Agent: Bot,
+  TaskCreate: ListPlus,
+  TaskUpdate: ListChecks,
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
@@ -546,7 +696,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
 const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
-  const pending = item.result === undefined
+  const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
@@ -573,10 +723,18 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const summary = mem
     ? `memory ${mem}`
     : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
-  const summaryMono = !mem && !(isBash && description)
+  // File paths render in the UI sans font (item 23/2); code-like summaries (a
+  // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
+  // description are prose (sans) already.
+  const isPathSummary =
+    !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
+  const summaryMono = !mem && !isPathSummary && !(isBash && description)
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header. Bash shows its Command panel unlabelled (item 13).
   const hideInput = simpleRead
+  // Whether an input/command panel renders above the output. When it doesn't
+  // (a plain Read), the "Output" header is redundant and dropped (item 32).
+  const hasInput = isBash || !hideInput
   const Icon = TOOL_ICONS[item.name] ?? Wrench
 
   const rawJson = useMemo(() => {
@@ -594,42 +752,41 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-        <span className="font-medium shrink-0">{item.name}</span>
-        <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
-        {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+      {/* Header row: the whole left side toggles open; a Raw button sits at the
+          right, only while expanded (item 32). Two sibling buttons (not nested)
+          so the Raw toggle doesn't also collapse the card. */}
+      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
+          <span className="font-medium shrink-0">{item.name}</span>
+          <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
+        </button>
         {pending && (
-          <span className="ml-auto shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
-      </button>
+        {open && (
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              showRaw
+                ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
+                : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
+            }`}
+            title="Toggle the raw tool-call JSON"
+          >
+            Raw
+          </button>
+        )}
+      </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
-          {/* Only the Raw view is labelled (right-aligned toggle aside). The
-              input panel itself is self-evident, so "Input"/"Command" headers
-              add nothing and are dropped (items 1, 13, 14). */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-              {showRaw ? 'Raw' : ''}
-            </span>
-            <button
-              onClick={() => setShowRaw((r) => !r)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
-                showRaw
-                  ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
-                  : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
-              }`}
-              title="Toggle the raw tool-call JSON"
-            >
-              Raw
-            </button>
-          </div>
           {showRaw ? (
             <CodePanel code={rawJson} lang="json" />
           ) : (
@@ -641,9 +798,13 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
               )}
               {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
-                  <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-                    Output
-                  </div>
+                  {/* "Output" only when there's an input panel above it to
+                      separate from; a plain Read's body is output-only (item 32). */}
+                  {hasInput && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Output
+                    </div>
+                  )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
                       {item.resultImages.map((src, i) => (
@@ -797,6 +958,128 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           </div>
         </div>
       )}
+    </div>
+  )
+})
+
+// SubagentCard renders one sub-agent (Task tool) run: its inner timeline
+// (thinking / tool calls / replies), folded into a single collapsible card so a
+// sub-agent's steps - and especially its opening prompt - never leak into the
+// main conversation as stray user/assistant messages. When a Task tool card
+// spawned it (`tool` set), the card upgrades that tool card in place and shows
+// the tool_result as the sub-agent's final report; an unlinked sub-agent
+// renders standalone. Auto-expanded while running, then collapses once done
+// (unless the user pinned it open).
+const SubagentCard = memo(function SubagentCard({
+  sub,
+  tool,
+  worktree,
+  serif,
+}: {
+  sub: SubagentView
+  tool?: Extract<ChatItem, { kind: 'tool' }>
+  worktree: string | null
+  serif: boolean
+}) {
+  const running = tool ? tool.result === undefined : sub.status === 'running'
+  const [open, setOpen] = useState(running)
+  const [userToggled, setUserToggled] = useState(false)
+  // Auto-collapse when the run finishes (unless the user pinned it open), via
+  // the render-phase state-adjustment pattern React endorses over an effect.
+  const [prevRunning, setPrevRunning] = useState(running)
+  if (prevRunning !== running) {
+    setPrevRunning(running)
+    if (!running && !userToggled) setOpen(false)
+  }
+
+  const toolInput = (typeof tool?.input === 'object' && tool?.input !== null ? tool.input : null) as
+    | Record<string, unknown>
+    | null
+  const description =
+    sub.description ||
+    (typeof toolInput?.description === 'string' ? (toolInput.description as string) : '') ||
+    (sub.prompt ? sub.prompt.split('\n')[0] : '')
+  const label = sub.agentType || (typeof toolInput?.subagent_type === 'string' ? (toolInput.subagent_type as string) : '') || 'Sub-agent'
+  const report = tool?.result
+  const steps = sub.items.length
+
+  return (
+    <div
+      className={`rounded-lg border text-xs overflow-hidden ${
+        tool?.isError
+          ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+      }`}
+    >
+      <button
+        onClick={() => {
+          setUserToggled(true)
+          setOpen((o) => !o)
+        }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
+        <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+        <span className="font-medium shrink-0">{label}</span>
+        {description && <span className="truncate text-stone-400 dark:text-stone-500">{description}</span>}
+        {running ? (
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
+            <LoaderCircle className="w-3 h-3 animate-spin" />
+            working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
+          </span>
+        ) : (
+          steps > 0 && (
+            <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
+              {steps} step{steps === 1 ? '' : 's'}
+            </span>
+          )
+        )}
+      </button>
+      <Expandable open={open}>
+        <div className="px-2.5 pb-2 space-y-2 border-t border-stone-200/70 dark:border-white/[0.05] pt-2">
+          {sub.prompt && (
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                Prompt
+              </div>
+              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+                {sub.prompt}
+              </div>
+            </div>
+          )}
+          {sub.items.length > 0 && (
+            <div className="space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
+              {sub.items.map((it) =>
+                it.kind === 'thinking' ? (
+                  <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+                ) : it.kind === 'tool' ? (
+                  <ToolCard key={it.id} item={it} worktree={worktree} />
+                ) : it.kind === 'assistant' ? (
+                  <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+                    <Markdown text={it.text} />
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
+          {report !== undefined && report !== '' && (
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                Report
+              </div>
+              {tool?.isError ? (
+                <OutputPanel text={report} lang="" isError />
+              ) : (
+                <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+                  <Markdown text={report} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Expandable>
     </div>
   )
 })
@@ -991,6 +1274,243 @@ function QuestionCard({
   )
 }
 
+// ChatUserMessage renders a user turn: the prose bubble plus any uploads it
+// referenced, shown as attachment chips / image thumbnails (clickable into a
+// lightbox) rather than raw paths, with the CLI's image placeholder stripped
+// (items 41, 43). memo'd so composer keystrokes don't re-parse every message.
+const ChatUserMessage = memo(function ChatUserMessage({
+  text,
+  sending,
+  projectId,
+}: {
+  text: string
+  sending?: boolean
+  projectId: string | null
+}) {
+  const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
+  // render an empty bubble.
+  if (!body && attachments.length === 0 && !sending) return null
+  const imageAttachments = attachments.filter((a) => a.previewUrl)
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className={`${USER_BUBBLE_CLASS}${sending ? ' opacity-75' : ''}`}>
+        {body && <Markdown text={body} />}
+        {attachments.length > 0 && (
+          <AttachmentChips
+            attachments={attachments}
+            size="sm"
+            className={body ? 'mt-2' : ''}
+            onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+          />
+        )}
+      </div>
+      {sending && (
+        <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
+          <LoaderCircle className="w-3 h-3 animate-spin" />
+          Sending...
+        </div>
+      )}
+      {lightboxIndex !== null && lightboxImages.length > 0 && (
+        <ImageLightbox
+          images={lightboxImages}
+          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+    </div>
+  )
+})
+
+// reduceHistoryEvents reduces a batch of older (settled) conversation events -
+// the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
+// the live reducer's settled-event handling (no streaming, model or
+// control_request state): user turns (classified like routeUserText),
+// assistant text/thinking/tool_use/question blocks with tool_result patching,
+// and result footers. A TodoWrite is dropped (the plan panel already holds the
+// latest state, not this older one). allocId hands out ids for the batch.
+function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): ChatItem[] {
+  const items: ChatItem[] = []
+  const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
+    items.push({ ...item, id: allocId() } as ChatItem)
+  }
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+        it.result = text
+        it.isError = isError
+        it.resultImages = images.length ? images : undefined
+        return
+      }
+      if (it.kind === 'question' && it.toolUseId === toolUseId) {
+        it.result = text
+        return
+      }
+    }
+  }
+  const routeUser = (rawText: string) => {
+    const text = stripLocalCommandCaveat(rawText)
+    if (!text) return
+    const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
+    if (cmd) {
+      const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+      push({ kind: 'command', name: cmd[1].trim(), args })
+      return
+    }
+    const stdout = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)
+    if (stdout) {
+      const body = stdout[1].trim()
+      if (body) push({ kind: 'cmdout', text: body })
+      return
+    }
+    if (text.startsWith('[Request interrupted by user')) {
+      push({ kind: 'interrupted' })
+      return
+    }
+    if (text.includes('<task-notification>')) {
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      return
+    }
+    push({ kind: 'user', text })
+  }
+  const seenBlocks = new Map<string, Set<string>>()
+  // The transcript has no `result` events (they aren't part of Claude's durable
+  // record), so a historical turn's footer is synthesized from the assistant
+  // messages' own usage: accumulate output tokens across the turn's messages and
+  // flush a footer when a message ends the turn (stop_reason other than the
+  // mid-turn "tool_use"). No duration/cost is recoverable, so the footer shows
+  // just the token count (+ any truncation flag).
+  let histTurnOut = 0
+  for (const ev of events) {
+    if (ev.type === 'user') {
+      const content = ev.message?.content
+      if (typeof content === 'string') {
+        if (content.trim()) routeUser(content)
+        continue
+      }
+      for (const block of content ?? []) {
+        if (block.type === 'text' && block.text?.trim()) routeUser(block.text)
+        else if (block.type === 'tool_result' && block.tool_use_id) {
+          const p = parseToolResult(block.content)
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
+        }
+      }
+    } else if (ev.type === 'assistant') {
+      const content = ev.message?.content
+      if (ev.isApiErrorMessage) {
+        const text = Array.isArray(content)
+          ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+          : typeof content === 'string'
+            ? content
+            : ''
+        push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
+        continue
+      }
+      if (!Array.isArray(content)) continue
+      const msgId = ev.message?.id ?? ''
+      let seen = seenBlocks.get(msgId)
+      if (!seen) {
+        seen = new Set()
+        seenBlocks.set(msgId, seen)
+      }
+      for (const block of content) {
+        const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
+        if (msgId && seen.has(key)) continue
+        if (msgId) seen.add(key)
+        if (block.type === 'text' && block.text?.trim()) push({ kind: 'assistant', text: block.text })
+        else if (block.type === 'thinking' && block.thinking?.trim()) push({ kind: 'thinking', text: block.thinking })
+        else if (block.type === 'tool_use' && block.id) {
+          const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
+          const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
+          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+          else if (todos) { /* older plan state - the panel already shows the latest */ }
+          // Task* ops fall through to a normal tool card (like any other tool);
+          // only the panel state is latest-wins, and that is driven by the live
+          // reducer's replay, not this older page.
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+        }
+      }
+      // Turn-footer synthesis (item: historical usage). Roll this message's
+      // output into the turn total; flush a footer when the turn ends.
+      const u = ev.message?.usage
+      if (u?.output_tokens) histTurnOut += u.output_tokens
+      const sr = ev.message?.stop_reason
+      if (sr && sr !== 'tool_use') {
+        const total = histTurnOut || u?.output_tokens
+        if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+          push({
+            kind: 'result',
+            isError: false,
+            usage: total ? { ...u, output_tokens: total } : u,
+            stopReason: sr,
+          })
+        }
+        histTurnOut = 0
+      }
+    } else if (ev.type === 'result') {
+      const out = ev.usage?.output_tokens
+      push({
+        kind: 'result',
+        isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
+        durationMs: ev.duration_ms,
+        costUsd: ev.total_cost_usd,
+        usage: ev.usage ?? (out ? { output_tokens: out } : undefined),
+        errorText: ev.is_error ? ev.result : undefined,
+      })
+    }
+  }
+  return items
+}
+
+// The settled message list, memoized so the live token stream (which updates
+// once per delta, many times a second) doesn't re-render every prior message.
+// While a turn streams, only `stream` changes in ChatPane - none of these props
+// do - so this whole list bails out; without it, each token delta re-rendered
+// every settled message's markdown (O(messages x tokens), the source of the
+// scroll jank on long conversations). It re-renders only when the settled items
+// change (a message commits) or when something that alters how a row renders
+// changes (serif/worktree/connected/subagents). `renderItem` is a stable wrapper
+// (see ChatPane) so it never trips the memo; the fields it reads are listed in
+// the comparator so a change to any of them still refreshes the list.
+interface SettledMessagesProps {
+  items: ChatItem[]
+  liveFromId: number | null
+  renderItem: (item: ChatItem) => ReactNode
+  serif: boolean
+  connected: boolean
+  worktreePath: string | null
+  subByToolUse: Record<string, SubagentView>
+  subagents: Record<string, SubagentView>
+}
+
+const SettledMessages = memo(
+  function SettledMessages({ items, liveFromId, renderItem }: SettledMessagesProps) {
+    return (
+      <>
+        {items.map((item) => (
+          <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
+            {renderItem(item)}
+          </div>
+        ))}
+      </>
+    )
+  },
+  (a, b) =>
+    a.items === b.items &&
+    a.liveFromId === b.liveFromId &&
+    a.renderItem === b.renderItem &&
+    a.serif === b.serif &&
+    a.connected === b.connected &&
+    a.worktreePath === b.worktreePath &&
+    a.subByToolUse === b.subByToolUse &&
+    a.subagents === b.subagents,
+)
+
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // The in-flight streamed content block (token streaming via stream_event
@@ -1000,6 +1520,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
   const [todos, setTodos] = useState<TodoItem[]>([])
+  // Live "working" indicator (item 48): the turn's start time (for the ticking
+  // elapsed), the elapsed seconds, the running output-token count (completed
+  // messages + the in-flight one), and the per-turn verb. Reset each turn.
+  const turnStartRef = useRef<number | null>(null)
+  const turnTokensRef = useRef(0)
+  const curMsgTokensRef = useRef(0)
+  const turnCountRef = useRef(0)
+  // The latest assistant message's stop_reason this turn, so the footer can flag
+  // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
+  const turnStopReasonRef = useRef<string | null>(null)
+  const [turnVerb, setTurnVerb] = useState(WORKING_VERBS[0])
+  const [elapsed, setElapsed] = useState(0)
+  const [turnTokens, setTurnTokens] = useState(0)
+  // Whether the CLI is authed with a real API key (system:init apiKeySource).
+  // Subscription/OAuth auth reports "none", where total_cost_usd is a notional
+  // API-rate figure not money billed - so the footer shows cost only for a key.
+  const [apiKeyReal, setApiKeyReal] = useState(false)
+  // Sub-agents (Task tool runs) keyed by agentId, each assembled from its
+  // sidechain events. A linked sub folds into its Task card; an unlinked one
+  // renders via a 'subagent' item. Reset per connection like `items`.
+  const [subagents, setSubagents] = useState<Record<string, SubagentView>>({})
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -1008,7 +1549,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
   const [connected, setConnected] = useState(false)
-  const [input, setInput] = useState('')
+  // The composer draft (text + attachments) is restored per agent so it survives
+  // switching agents/reloads (item 30): text from agentViewPrefs, attachments
+  // from the in-memory chatDrafts cache.
+  const [input, setInput] = useState(() => loadAgentViewPrefs(projectId, agentId).chatDraft ?? '')
+  const inputRef = useRef(input)
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
   // Messages handed to the socket, awaiting their --replay-user-messages echo
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
@@ -1019,8 +1567,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
   const optimisticTextsRef = useRef<string[]>([])
-  // Composer attachments (same upload flow as the spawn box).
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
+  // real echo can supersede it. null when none is pending.
+  const optimisticModelIdRef = useRef<number | null>(null)
+  // Load-older infinite scroll (item 25): the uuid of the current oldest history
+  // line (the paging anchor), a decreasing id space for prepended history (kept
+  // well below the optimistic range so it never collides), an in-flight guard,
+  // whether the transcript start has been reached, and the scrollHeight snapshot
+  // used to keep the viewport anchored across a prepend.
+  const oldestUuidRef = useRef<string | null>(null)
+  const historyIdRef = useRef(-1_000_000)
+  const loadingOlderRef = useRef(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
+  const pendingPrependRef = useRef<number | null>(null)
+  // Composer attachments (same upload flow as the spawn box), restored from the
+  // per-agent in-memory cache (item 30).
+  const [attachments, setAttachments] = useState<Attachment[]>(() => loadChatAttachments(chatDraftKey(projectId, agentId)))
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1074,6 +1637,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setItems([])
     setStream(null)
     setTodos([])
+    setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
     // The transcript replay + the daemon's queue frame are authoritative for
@@ -1082,6 +1646,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setPendingSends([])
     optimisticTextsRef.current = []
     optimisticIdRef.current = -1
+    optimisticModelIdRef.current = null
+    // Reset load-older paging for the fresh backfill.
+    oldestUuidRef.current = null
+    historyIdRef.current = -1_000_000
+    loadingOlderRef.current = false
+    setLoadingOlder(false)
+    setAllHistoryLoaded(false)
+    pendingPrependRef.current = null
     pinnedRef.current = true
 
     let nextId = 1
@@ -1094,6 +1666,53 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // message id; if a CLI version ever re-emits blocks cumulatively, this
     // per-message seen-set keeps the reducer idempotent.
     const seenBlocks = new Map<string, Set<string>>()
+
+    // --- Task* plan reconstruction (item 17, cont.) ------------------------
+    // TodoWrite carries the whole to-do list in one call, so it can just replace
+    // `todos`. The Task* family (TaskCreate/TaskUpdate) is incremental, so we
+    // rebuild the list here and republish it to the same PlanPanel: TaskCreate
+    // appends a task (the harness numbers them in creation order - #1, #2, ... -
+    // which we mirror with taskSeq, since the assigned id lives in the tool
+    // *result*, not its input); TaskUpdate mutates one by id, or drops it on
+    // status "deleted". A session uses one planning tool or the other; if both
+    // ever appear, the most recent write wins.
+    const taskItems = new Map<string, { content: string; status: TodoItem['status']; activeForm?: string; order: number }>()
+    let taskSeq = 0
+    const publishTasks = () => {
+      const list = [...taskItems.values()]
+        .sort((a, b) => a.order - b.order)
+        .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
+      setTodos(list)
+    }
+    // applyTaskTool folds one Task* tool_use into the plan panel (TaskCreate
+    // appends a pending task; TaskUpdate mutates one by id, or drops it on status
+    // "deleted"). Non-Task tools and malformed inputs are ignored. The block is
+    // still rendered as a normal tool card by the caller, so the task-list
+    // mutation stays visible in the conversation flow too.
+    const applyTaskTool = (name: string | undefined, input: unknown) => {
+      if (name === 'TaskCreate') {
+        const t = parseTaskCreate(input)
+        if (!t) return
+        taskSeq += 1
+        taskItems.set(String(taskSeq), { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
+        publishTasks()
+      } else if (name === 'TaskUpdate') {
+        const u = parseTaskUpdate(input)
+        if (!u) return
+        // A TaskUpdate for a task we never saw created (e.g. its create predates
+        // the replay window) has nothing to reflect yet.
+        const cur = taskItems.get(u.taskId)
+        if (!cur) return
+        if (u.status === 'deleted') taskItems.delete(u.taskId)
+        else {
+          if (u.status) cur.status = u.status
+          if (u.content) cur.content = u.content
+          if (u.activeForm !== undefined) cur.activeForm = u.activeForm
+        }
+        publishTasks()
+      }
+    }
+
     const pending: ChatItem[] = []
     let flushScheduled = false
     const flush = () => {
@@ -1116,6 +1735,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // in-flight block, which stays small.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let streamTimer: ReturnType<typeof setTimeout> | null = null
+    // Output tokens accumulated across the current turn's assistant messages, so
+    // a footer can be synthesized from message usage (the transcript backfill has
+    // no `result` event to carry it). Flushed at each turn end. A live turn also
+    // synthesizes one, but the real `result` footer that immediately follows it
+    // supersedes it (visibleItems drops a result followed by another result).
+    let histTurnOut = 0
     // When a thinking block starts streaming we stamp the start time; the settled
     // thinking item picks it up (and clears it) to show "Thought for Xs" (item
     // 11). Replayed history never streams, so it stays null -> a plain "Thought".
@@ -1141,6 +1766,117 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       setStream(null)
     }
+
+    // --- Sub-agent (Task tool) routing -------------------------------------
+    // Sidechain events are a sub-agent's own inner steps; they must not land in
+    // the main flow (that is the bug where a sub-agent's prompt showed as a user
+    // message). We accumulate each sub-agent in `subLocal`, keyed by agentId,
+    // and commit to the `subagents` state on the same replay-vs-live cadence as
+    // the main items (one batch during replay, microtask-coalesced when live).
+    const subLocal: Record<string, SubagentView> = {}
+    // Per-sub id counter (for inner item React keys) + seen-block set (idempotent
+    // block handling, mirroring the main reducer's seenBlocks).
+    const subMeta = new Map<string, { nextId: number; seen: Map<string, Set<string>> }>()
+    let subFlushScheduled = false
+    const flushSubagents = () => {
+      subFlushScheduled = false
+      // Fresh object + fresh item arrays so React re-renders the changed subs.
+      const snap: Record<string, SubagentView> = {}
+      for (const k in subLocal) snap[k] = { ...subLocal[k], items: [...subLocal[k].items] }
+      setSubagents(snap)
+    }
+    const scheduleSubFlush = () => {
+      if (replaying || subFlushScheduled) return
+      subFlushScheduled = true
+      queueMicrotask(flushSubagents)
+    }
+    const ensureSubagent = (agentId: string): SubagentView => {
+      let sub = subLocal[agentId]
+      if (!sub) {
+        sub = { agentId, status: 'running', items: [] }
+        subLocal[agentId] = sub
+        subMeta.set(agentId, { nextId: 1, seen: new Map() })
+      }
+      return sub
+    }
+    // A subagent_meta frame links a sub-agent to its Task tool_use (so the Task
+    // card upgrades into the SubagentCard in place) and labels it. A frame
+    // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
+    // into, so it gets a standalone 'subagent' item instead.
+    const markedStandalone = new Set<string>()
+    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string) => {
+      if (!agentId) return
+      const sub = ensureSubagent(agentId)
+      if (agentType) sub.agentType = agentType
+      if (description) sub.description = description
+      if (toolUseId) sub.toolUseId = toolUseId
+      else if (!markedStandalone.has(agentId)) {
+        markedStandalone.add(agentId)
+        push({ kind: 'subagent', agentId })
+      }
+      scheduleSubFlush()
+    }
+    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[]) => {
+      const resultImages = images.length > 0 ? images : undefined
+      for (const it of sub.items) {
+        if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+          it.result = result
+          it.isError = isError
+          it.resultImages = resultImages
+          return
+        }
+      }
+    }
+    // routeSidechain folds one sub-agent stream event into its card. Mirrors the
+    // main user/assistant handling, minus the specialisations that can't occur
+    // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
+    // the queue) - those render as plain items or are ignored.
+    const routeSidechain = (ev: ClaudeEvent) => {
+      const agentId = ev.agentId || '_sub'
+      const sub = ensureSubagent(agentId)
+      const meta = subMeta.get(agentId)!
+      if (ev.type === 'user') {
+        const content = ev.message?.content
+        const takePrompt = (t: string) => {
+          if (!sub.prompt && t.trim()) sub.prompt = t
+        }
+        if (typeof content === 'string') takePrompt(content)
+        else
+          for (const block of content ?? []) {
+            if (block.type === 'text' && block.text) takePrompt(block.text)
+            else if (block.type === 'tool_result' && block.tool_use_id) {
+              const parsed = parseToolResult(block.content)
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
+            }
+          }
+      } else if (ev.type === 'assistant') {
+        const content = ev.message?.content
+        if (Array.isArray(content)) {
+          const msgId = ev.message?.id ?? ''
+          let seen = meta.seen.get(msgId)
+          if (!seen) {
+            seen = new Set()
+            meta.seen.set(msgId, seen)
+          }
+          for (const block of content) {
+            const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
+            if (msgId && seen.has(key)) continue
+            if (msgId) seen.add(key)
+            if (block.type === 'text' && block.text?.trim()) {
+              sub.items.push({ kind: 'assistant', id: meta.nextId++, text: block.text })
+            } else if (block.type === 'thinking' && block.thinking?.trim()) {
+              sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking })
+            } else if (block.type === 'tool_use' && block.id) {
+              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+            }
+          }
+        }
+      } else if (ev.type === 'result') {
+        sub.status = 'done'
+      }
+      scheduleSubFlush()
+    }
+
     const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[]) => {
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
@@ -1164,6 +1900,31 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           if (it.kind === 'question' && it.toolUseId === toolUseId) return { ...it, result }
           return it
         }),
+      )
+    }
+
+    // clearSending drops the "Sending..." indicator from optimistic user
+    // messages the moment the agent starts responding (item 44) - the response
+    // proves the message was received, so waiting for the CLI's echo (which can
+    // lag behind the reply) would leave it stuck reading "Sending...".
+    const clearSending = () => {
+      setItems((prev) =>
+        prev.some((it) => it.kind === 'user' && it.sending)
+          ? prev.map((it) => (it.kind === 'user' && it.sending ? { ...it, sending: false } : it))
+          : prev,
+      )
+    }
+
+    // endPendingTools stops the "running" indicator on tool cards that never got
+    // a result - a turn that ended (or history replayed) without one means the
+    // tool isn't actually still running (item 42). Also clears the un-flushed
+    // batch so replayed history doesn't briefly strobe "running".
+    const endPendingTools = () => {
+      for (const it of pending) if (it.kind === 'tool' && it.result === undefined) it.ended = true
+      setItems((prev) =>
+        prev.some((it) => it.kind === 'tool' && it.result === undefined && !it.ended)
+          ? prev.map((it) => (it.kind === 'tool' && it.result === undefined && !it.ended ? { ...it, ended: true } : it))
+          : prev,
       )
     }
 
@@ -1219,10 +1980,34 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       })
     }
 
+    // handleHistoryBefore prepends an older-history batch (item 25): reduce the
+    // events, snapshot the scroll height so the viewport can be re-anchored
+    // after the prepend (a layout effect does the adjust), advance the oldest
+    // anchor, and mark the end reached.
+    const handleHistoryBefore = (events: ClaudeEvent[], done: boolean) => {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+      if (events.length > 0) {
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--)
+        // Advance the anchor to the oldest event of this batch.
+        const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
+        if (anchor) oldestUuidRef.current = anchor
+        if (older.length > 0) {
+          pendingPrependRef.current = scrollRef.current?.scrollHeight ?? 0
+          setItems((prev) => [...older, ...prev])
+        }
+      }
+      if (done) setAllHistoryLoaded(true)
+    }
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (text: string) => {
+    const routeUserText = (rawText: string) => {
+      // Drop the CLI's local-command caveat wrapper; a message that is nothing
+      // but the caveat is skipped entirely (item 31).
+      const text = stripLocalCommandCaveat(rawText)
+      if (!text) return
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -1233,14 +2018,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (stdout) {
         const body = stdout[1].trim()
         // "Set model to sonnet (claude-sonnet-5)" - the CLI's confirmation is
-        // the source of truth for the dropdown.
+        // the source of truth for the dropdown, and supersedes our optimistic
+        // one (item 31).
         const m = /^Set model to\s+(\S+)/.exec(body)
-        if (m) setModel(m[1])
+        if (m) {
+          setModel(m[1])
+          const oid = optimisticModelIdRef.current
+          if (oid != null) {
+            optimisticModelIdRef.current = null
+            setItems((prev) => prev.filter((it) => it.id !== oid))
+          }
+        }
         if (body) push({ kind: 'cmdout', text: body })
         return
       }
       if (text.startsWith('[Request interrupted by user')) {
         push({ kind: 'interrupted' })
+        endPendingTools()
         return
       }
       // A harness-injected background-task notification (<task-notification>):
@@ -1278,6 +2072,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // A sub-agent's inner step: route it into that sub-agent's card, never the
+      // main flow. This is the fix for sub-agent prompts showing as user
+      // messages (they arrive as sidechain `user` events). Checked before the
+      // load-older anchor below: sidechain uuids live in sub-agent transcripts,
+      // so anchoring history paging on one would never resolve.
+      if (ev.isSidechain) {
+        routeSidechain(ev)
+        return
+      }
+      // The first event carrying a uuid is the oldest loaded so far - the anchor
+      // for load-older paging (item 25). Only set once (backfill is oldest-first;
+      // a prepend updates it to something older).
+      if (ev.uuid && oldestUuidRef.current === null) oldestUuidRef.current = ev.uuid
       switch (ev.type) {
         case 'system': {
           if (ev.subtype === 'init') {
@@ -1285,6 +2092,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (Array.isArray(ev.slash_commands)) {
               setSlashCommands(ev.slash_commands.filter((c): c is string => typeof c === 'string'))
             }
+            if (typeof ev.apiKeySource === 'string') setApiKeyReal(ev.apiKeySource !== 'none')
           }
           return
         }
@@ -1335,6 +2143,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             return
           }
           if (!Array.isArray(content)) return
+          clearSending()
+          // Remember this turn's latest stop_reason so the result footer can flag
+          // a truncated / refused reply (the last message before the result wins).
+          if (typeof ev.message?.stop_reason === 'string') turnStopReasonRef.current = ev.message.stop_reason
           const msgId = ev.message?.id ?? ''
           let seen = seenBlocks.get(msgId)
           if (!seen) {
@@ -1353,7 +2165,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
               // control_request (patchQuestionRequest). TodoWrite feeds the
-              // floating plan panel instead of a card (item 17).
+              // floating plan panel instead of a card (item 17); the Task* family
+              // feeds the panel too but still shows its card, so each individual
+              // task-list mutation is visible in the flow.
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
               const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
@@ -1361,9 +2175,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               } else if (todos) {
                 setTodos(todos)
               } else {
+                applyTaskTool(block.name, block.input)
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
             }
+          }
+          // Synthesize a turn footer from this message's usage + stop_reason, so
+          // backfilled history (no `result` event) still gets one. A live turn's
+          // real `result` follows immediately and supersedes it (see histTurnOut).
+          const u = ev.message?.usage
+          if (u?.output_tokens) histTurnOut += u.output_tokens
+          const sr = ev.message?.stop_reason
+          if (sr && sr !== 'tool_use') {
+            const total = histTurnOut || u?.output_tokens
+            if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+              push({ kind: 'result', isError: false, usage: total ? { ...u, output_tokens: total } : u, stopReason: sr })
+            }
+            histTurnOut = 0
           }
           // The complete event supersedes any in-flight streamed block (finals
           // always follow their own deltas). Cleared in the same batch as the
@@ -1376,6 +2204,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           if (!e) return
           if (e.type === 'content_block_start') {
             const bt = e.content_block?.type
+            // The agent is producing output - the pending send has landed (item 44).
+            clearSending()
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
@@ -1390,20 +2220,54 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               streamBuf.text += d.thinking
               scheduleStreamFlush()
             }
+          } else if (e.type === 'message_start') {
+            // A new API message in this turn: seed the in-flight token count (item 48).
+            curMsgTokensRef.current = e.message?.usage?.output_tokens ?? 0
+            setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
+          } else if (e.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
+            // Running (cumulative-for-this-message) output token count.
+            curMsgTokensRef.current = e.usage.output_tokens
+            setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
           } else if (e.type === 'message_stop') {
+            // Roll the finished message's tokens into the turn total.
+            turnTokensRef.current += curMsgTokensRef.current
+            curMsgTokensRef.current = 0
+            setTurnTokens(turnTokensRef.current)
             clearStream()
           }
           return
         }
         case 'result': {
+          // Prefer the result's own usage; fall back to the output count we
+          // tallied live from the stream deltas (item 47/48).
+          const liveOut = (turnTokensRef.current + curMsgTokensRef.current) || undefined
+          const usage: TokenUsage | undefined = ev.usage ?? (liveOut ? { output_tokens: liveOut } : undefined)
           push({
             kind: 'result',
             isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
             durationMs: ev.duration_ms,
             costUsd: ev.total_cost_usd,
+            usage,
+            stopReason: turnStopReasonRef.current ?? undefined,
             errorText: ev.is_error ? ev.result : undefined,
           })
+          // Consumed - clear it so it can't leak onto a later turn's result (the
+          // live turn-start reset only fires between live turns, not between the
+          // several results a backfill can carry).
+          turnStopReasonRef.current = null
+          histTurnOut = 0
+          // A turn ends only once all its sub-agents have; settle any still
+          // marked running (a sub whose own result line we never saw).
+          let changed = false
+          for (const k in subLocal) {
+            if (subLocal[k].status === 'running') {
+              subLocal[k].status = 'done'
+              changed = true
+            }
+          }
+          if (changed) scheduleSubFlush()
           clearStream()
+          endPendingTools()
           return
         }
         default:
@@ -1424,6 +2288,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         head_moved?: boolean
         event?: ClaudeEvent
         messages?: { id?: string; content?: unknown }[]
+        agentId?: string
+        toolUseId?: string
+        agentType?: string
+        description?: string
+        events?: ClaudeEvent[]
+        done?: boolean
       }
       try {
         msg = JSON.parse(e.data)
@@ -1440,9 +2310,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         case 'claude_event':
           if (msg.event) handleClaudeEvent(msg.event)
           return
+        case 'subagent_meta':
+          // Links a sub-agent to its Task tool_use (folding it into that card)
+          // and labels it; arrives ahead of the sub's events live, and per-sub
+          // during backfill. Tolerates arriving after events too.
+          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
+          return
         case 'replay_done':
           replaying = false
+          // Any tool from the replayed history with no result isn't running
+          // anymore (its turn is over) - don't leave it stuck "running" (item 42).
+          endPendingTools()
           flush()
+          flushSubagents()
           setLiveFromId(nextId)
           setReplayDone(true)
           return
@@ -1453,6 +2333,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // server still has, and add server-queued messages we're missing (the
           // reload-after-navigate case, where local state was reset).
           reconcileQueue(msg.messages ?? [])
+          return
+        case 'history_before':
+          // A load-older page (item 25): older conversation events to prepend.
+          handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
       }
     }
@@ -1477,6 +2361,42 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  // Keep the viewport anchored across a load-older prepend (item 25): before
+  // paint, grow scrollTop by however much taller the content got, so the lines
+  // the user was reading stay put instead of jumping down. Runs before the
+  // auto-scroll effect below, which no-ops here (a user loading older history is
+  // scrolled up, not pinned).
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && pendingPrependRef.current != null) {
+      el.scrollTop += el.scrollHeight - pendingPrependRef.current
+      pendingPrependRef.current = null
+    }
+  }, [items])
+
+  // Live turn timer for the "working" indicator (item 48): start the clock (and
+  // reset the per-turn token count + pick a fresh verb) when a turn begins, tick
+  // the elapsed seconds while it runs, and stop when it ends.
+  useEffect(() => {
+    if (!isTurnRunning) {
+      turnStartRef.current = null
+      setElapsed(0)
+      return
+    }
+    if (turnStartRef.current == null) {
+      turnStartRef.current = Date.now()
+      turnTokensRef.current = 0
+      curMsgTokensRef.current = 0
+      turnStopReasonRef.current = null
+      setTurnTokens(0)
+      setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
+    }
+    const tick = () => setElapsed(Math.floor((Date.now() - (turnStartRef.current ?? Date.now())) / 1000))
+    tick()
+    const iv = setInterval(tick, 1000)
+    return () => clearInterval(iv)
+  }, [isTurnRunning])
 
   // Auto-scroll to the bottom on new content while pinned.
   useEffect(() => {
@@ -1540,9 +2460,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     [projectId, agentId],
   )
 
+  // requestOlderHistory asks the daemon for the batch older than the current
+  // oldest line, when the user scrolls near the top (item 25).
+  function requestOlderHistory() {
+    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !oldestUuidRef.current) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
+  }
+
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
+    if (el.scrollTop < 300) requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     pinnedRef.current = nearBottom
     setPinned(nearBottom)
@@ -1557,26 +2489,55 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }, 250)
   }
 
+  // --- Composer draft persistence (item 30) ---------------------------------
+
+  // Save the composer text (debounced) so a half-written message survives an
+  // agent switch or reload. Sending clears input, which persists as "no draft".
+  useEffect(() => {
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
+    return () => clearTimeout(t)
+  }, [input, projectId, agentId])
+
   // --- Composer: attachments ------------------------------------------------
 
   const attachmentsRef = useRef<Attachment[]>([])
   useEffect(() => {
     attachmentsRef.current = attachments
-  }, [attachments])
-  // Free preview object URLs when the pane goes away.
+    // Mirror to the per-agent cache so a switch away restores them.
+    saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
+  }, [attachments, projectId, agentId])
+  // On unmount (agent switch), keep the draft's attachments alive in the cache -
+  // do NOT revoke their object URLs, so returning to the agent restores working
+  // thumbnails. They're freed on send/remove, or when the page fully reloads.
   useEffect(
     () => () => {
-      for (const a of attachmentsRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
+      patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
     },
-    [],
+    [projectId, agentId],
   )
 
   function patchAttachment(id: number, patch: Partial<Attachment>) {
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
   }
 
-  function addFiles(files: File[]) {
-    for (const file of files) {
+  // numberGenericImage renames pasted / unnamed images to image1.png,
+  // image2.png, ... (per project+agent, persisted) so each gets a stable, unique
+  // on-disk name - like the spawn box (item 46). Named files keep their name.
+  function numberGenericImage(file: File): File {
+    if (!isImageFile(file)) return file
+    const stem = file.name.replace(/\.[^.]*$/, '')
+    if (stem !== '' && stem.toLowerCase() !== 'image') return file
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
+    const key = chatImageCounterKey(projectId, agentId)
+    const n = (Number(readLocal(key)) || 0) + 1
+    writeLocal(key, String(n))
+    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
+  }
+
+  function addFiles(rawFiles: File[]) {
+    for (const raw of rawFiles) {
+      const file = numberGenericImage(raw)
       const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
       setAttachments((prev) => [
@@ -1729,9 +2690,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (!finalText || !sendUserText(finalText)) return
     setInput('')
     setSlashDismissed(false)
-    for (const a of attachments) if (a.previewUrl && !readyAttachments.includes(a)) URL.revokeObjectURL(a.previewUrl)
+    // All attachments are consumed by the send; free their preview URLs (the
+    // unmount handler no longer revokes - it preserves them for the draft cache).
+    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
     setAttachments([])
     setLightboxIndex(null)
+  }
+
+  // discardQueued drops a still-queued message (the X on its bubble, item 52):
+  // tell the daemon to remove it from the server queue and clear the local
+  // bubble. A message already handed to the CLI is gone from the queue, so the
+  // daemon simply reports not-found and the bubble was already off pendingSends.
+  function discardQueued(p: PendingSend) {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'dequeue', id: p.clientId }))
+    }
+    setPendingSends((prev) => prev.filter((x) => x.id !== p.id))
   }
 
   // answerQuestion replies to a native AskUserQuestion via the control channel
@@ -1773,6 +2748,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.send(JSON.stringify({ type: 'set_model', model: id }))
     // Optimistic; the CLI's "Set model to ..." confirmation re-syncs it.
     setModel(id)
+    // Also show the confirmation in-flow right away (item 31): the CLI echoes a
+    // /model change to the transcript but not always to the live stream, so it
+    // would otherwise not appear until a reload. The CLI's real echo, when it
+    // arrives, supersedes this (routeUserText).
+    const optId = optimisticIdRef.current--
+    optimisticModelIdRef.current = optId
+    setItems((prev) => [...prev, { kind: 'cmdout', id: optId, text: `Set model to ${id}` }])
+    pinnedRef.current = true
+    setPinned(true)
   }
 
   // --- Keyboard ----------------------------------------------------------------
@@ -1916,19 +2900,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   function renderChatItem(item: ChatItem): ReactNode {
     switch (item.kind) {
       case 'user':
-        return (
-          <div className="flex flex-col items-end gap-1">
-            <div className={`${USER_BUBBLE_CLASS}${item.sending ? ' opacity-75' : ''}`}>
-              <Markdown text={item.text} />
-            </div>
-            {item.sending && (
-              <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-                Sending...
-              </div>
-            )}
-          </div>
-        )
+        return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -1965,11 +2937,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
-      case 'tool':
+      case 'tool': {
+        // A Task tool card whose sub-agent we've linked upgrades into the
+        // richer SubagentCard (its inner timeline + report) in place.
+        const sub = subByToolUse[item.toolUseId]
+        if (sub) return <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} />
         return <ToolCard item={item} worktree={worktreePath} />
+      }
+      case 'subagent': {
+        // A sub-agent with no parent Task card (its meta lacked a tool_use id).
+        const sub = subagents[item.agentId]
+        if (!sub) return null
+        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} />
+      }
       case 'question':
         return (
           <QuestionCard
@@ -1983,8 +2966,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           />
         )
       case 'result':
-        // A failed turn still surfaces its error; a successful one renders
-        // nothing - the per-turn duration/cost footer was noise (item 27).
         if (item.isError) {
           return (
             <div className="rounded-lg border border-red-300/70 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">
@@ -1992,7 +2973,39 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )
         }
-        return null
+        // A quiet end-of-turn summary (item 47): "* Crunched for <duration>",
+        // Claude-Code style, optionally with cost (API-key auth only) and the
+        // output-token count (hover for the full input/cache/output breakdown).
+        // A truncation/refusal stop_reason is flagged in amber. Historical turns
+        // carry no timing, so they show just the metrics. Nothing when empty.
+        {
+          const out = item.usage?.output_tokens
+          const cost = apiKeyReal && item.costUsd ? formatCost(item.costUsd) : null
+          const stopNote = item.stopReason ? STOP_REASON_LABEL[item.stopReason] : undefined
+          if (item.durationMs == null && !out && !cost && !stopNote) return null
+          const segs: ReactNode[] = []
+          if (item.durationMs != null) segs.push(`Crunched for ${formatDuration(item.durationMs)}`)
+          if (cost) segs.push(cost)
+          if (out) segs.push(
+            <span key="tok" title={item.usage ? usageBreakdown(item.usage) : undefined}>
+              ↓ {formatTokens(out)} tokens
+            </span>,
+          )
+          if (stopNote) segs.push(
+            <span key="stop" className="text-amber-600 dark:text-amber-500">{stopNote}</span>,
+          )
+          return (
+            <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+              <span className="text-[#c96442]">✳</span>
+              {segs.map((s, i) => (
+                <span key={i} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
+                  {s}
+                </span>
+              ))}
+            </div>
+          )
+        }
     }
   }
 
@@ -2007,6 +3020,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
     [items],
   )
+
+  // toolUseId -> sub-agent, so a Task tool card upgrades into a SubagentCard in
+  // place (correct position, live and on backfill) without any marker item.
+  const subByToolUse = useMemo(() => {
+    const m: Record<string, SubagentView> = {}
+    for (const s of Object.values(subagents)) if (s.toolUseId) m[s.toolUseId] = s
+    return m
+  }, [subagents])
+
+  // A stable wrapper around renderChatItem (a per-render closure) so it never
+  // trips SettledMessages' memo. It always calls the latest closure via a ref, so
+  // it never renders stale data; the inputs that actually change a row's output
+  // are passed to SettledMessages explicitly (and listed in its comparator).
+  const renderItemRef = useRef(renderChatItem)
+  renderItemRef.current = renderChatItem
+  const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
 
   return (
     <div
@@ -2037,45 +3066,81 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               {connected ? 'Loading conversation...' : 'Connecting...'}
             </div>
           )}
-          {visibleItems.map((item) => (
-            <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
-              {renderChatItem(item)}
+          {/* Load-older affordance at the very top (item 25). */}
+          {replayDone && loadingOlder && (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              Loading older messages...
             </div>
-          ))}
-          {/* Optimistic sends: pinned under the transcript (above the agent's
-              in-flight reply / thinking - item 12) until the CLI echoes the
-              processed turn back, visibly queued while a turn is running. */}
-          {pendingSends.map((p) => (
-            <div key={`pending-${p.id}`} className="flex flex-col items-end gap-1 animate-chat-item-in">
-              <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
-                <Markdown text={p.text} />
-              </div>
-              <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                {p.queued ? (
-                  <>
-                    <ListEnd className="w-3 h-3" />
-                    Queued - sends when the current turn finishes
-                  </>
-                ) : (
-                  <>
-                    <LoaderCircle className="w-3 h-3 animate-spin" />
-                    Sending...
-                  </>
-                )}
-              </div>
+          )}
+          {replayDone && allHistoryLoaded && items.length > 0 && (
+            <div className="text-center py-1 text-[11px] text-stone-300 dark:text-stone-600 select-none">
+              Beginning of conversation
             </div>
-          ))}
+          )}
+          <SettledMessages
+            items={visibleItems}
+            liveFromId={liveFromId}
+            renderItem={renderItem}
+            serif={serif}
+            connected={connected}
+            worktreePath={worktreePath}
+            subByToolUse={subByToolUse}
+            subagents={subagents}
+          />
           {/* The in-flight streamed block: markdown-rendered live (with a
               virtual closing fence while inside a code block) plus a pulsing
               caret; streamed thinking uses the same collapsed card as settled
-              thoughts, its preview auto-updating as tokens arrive. */}
+              thoughts, its preview auto-updating as tokens arrive. It's the
+              current turn's response, so it sits ABOVE any queued (held-for-
+              later) messages (item 33). */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
               <Markdown text={closeOpenFence(stream.text)} />
               <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
+          {/* Live "working" indicator (item 48): a playful verb + elapsed time,
+              and the running output-token count when the CLI reports it. */}
+          {isTurnRunning && replayDone && (
+            <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
+              <span className="text-[#c96442]">✳</span>
+              <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
+              <span className="text-stone-400 dark:text-stone-500">
+                ({formatDuration(elapsed * 1000)}
+                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''})
+              </span>
+            </div>
+          )}
+          {/* Queued messages: held for later, so pinned at the very bottom under
+              the in-flight reply. (A "sending" message is an optimistic item in
+              the flow above; only queued holds land here now.) A stack of queued
+              bubbles reads as one group, so they sit tighter (gap-1) than the
+              gap-3 between distinct turns (item 51). */}
+          {pendingSends.length > 0 && (
+            <div className="flex flex-col items-end gap-1">
+              {pendingSends.map((p) => (
+                <div key={`pending-${p.id}`} className="group flex items-center gap-1.5 animate-chat-item-in">
+                  <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
+                    <Markdown text={p.text} />
+                  </div>
+                  {/* Discard button (item 52): drops the queued message from the
+                      server queue. Sits to the right of the bubble, revealed on
+                      hover so the resting stack stays clean. */}
+                  <Tooltip content="Discard queued message" side="top">
+                    <button
+                      onClick={() => discardQueued(p)}
+                      aria-label="Discard queued message"
+                      className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                </div>
+              ))}
+            </div>
+          )}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user

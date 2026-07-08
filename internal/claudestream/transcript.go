@@ -2,6 +2,7 @@ package claudestream
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -101,6 +102,130 @@ func firstLineIsSidechain(path string) bool {
 	return false
 }
 
+// SubagentMeta is the sidecar Claude Code writes next to each sub-agent
+// transcript (agent-<id>.meta.json), linking the sub-agent to the Task tool_use
+// that spawned it. The chat client uses ToolUseID to fold the sub-agent's
+// activity into that Task card and AgentType/Description to label it.
+type SubagentMeta struct {
+	AgentType   string `json:"agentType"`
+	Description string `json:"description"`
+	ToolUseID   string `json:"toolUseId"`
+}
+
+// subagentsSubdir is the per-session directory Claude Code writes sub-agent
+// (Task tool) transcripts and their meta sidecars into, alongside the main
+// session .jsonl (i.e. <claudeProjectDir>/<sessionID>/subagents/).
+func subagentsSubdir(claudeProjectDir, sessionID string) string {
+	return filepath.Join(claudeProjectDir, sessionID, "subagents")
+}
+
+// ReadSubagentMeta reads the meta sidecar for one sub-agent, or (nil, false)
+// when it is absent (a sub-agent whose meta hasn't been flushed yet) or
+// unparseable. sessionID is the main transcript basename (without .jsonl).
+func ReadSubagentMeta(claudeProjectDir, sessionID, agentID string) (*SubagentMeta, bool) {
+	path := filepath.Join(subagentsSubdir(claudeProjectDir, sessionID), "agent-"+agentID+".meta.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var m SubagentMeta
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	return &m, true
+}
+
+// SubagentTranscript pairs a sub-agent's id with the lines of its transcript.
+type SubagentTranscript struct {
+	AgentID string
+	Meta    *SubagentMeta
+	Lines   [][]byte
+}
+
+// TailSubagentTranscripts reads every sub-agent transcript recorded for one
+// session (the newest main transcript's siblings under subagents/), returning
+// each sub-agent's relayable lines plus the union of all their entry uuids (for
+// ring-replay dedup, exactly like TailTranscript). Only user/assistant lines
+// are relayed; the sub-agent's low-level attachment/system entries are dropped.
+// Best-effort: a missing subagents/ dir returns nothing.
+func TailSubagentTranscripts(claudeProjectDir, sessionID string, maxBytes int64) (subs []SubagentTranscript, uuids map[string]struct{}) {
+	uuids = make(map[string]struct{})
+	dir := subagentsSubdir(claudeProjectDir, sessionID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, uuids
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "agent-") || filepath.Ext(name) != ".jsonl" {
+			continue
+		}
+		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		lines, lineUUIDs, err := tailTranscript(filepath.Join(dir, name), maxBytes, true)
+		if err != nil {
+			continue
+		}
+		for u := range lineUUIDs {
+			uuids[u] = struct{}{}
+		}
+		meta, _ := ReadSubagentMeta(claudeProjectDir, sessionID, agentID)
+		subs = append(subs, SubagentTranscript{AgentID: agentID, Meta: meta, Lines: lines})
+	}
+	return subs, uuids
+}
+
+// HistoryBatchBytes is how much older conversation one load-older request pulls.
+const HistoryBatchBytes = 512 * 1024
+
+// HistoryBefore returns the batch of conversation lines (user/assistant, minus
+// sub-agent sidechains) immediately older than the line carrying beforeUUID -
+// the "load older" page for the chat view's infinite scroll. Lines are returned
+// oldest-first (ready to prepend). done is true once the batch reaches the start
+// of the transcript (or nothing older exists), so the client can stop asking.
+// A missing/anchorless transcript yields an empty, done result.
+func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, done bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, errtrace.Wrap(err)
+	}
+	all := bytes.Split(data, []byte{'\n'})
+	// Locate the anchor (the client's current oldest line).
+	anchor := -1
+	for i, line := range all {
+		if ev, ok := ParseEvent(line); ok && ev.UUID != "" && ev.UUID == beforeUUID {
+			anchor = i
+			break
+		}
+	}
+	if anchor <= 0 {
+		return nil, true, nil // not found, or already at the first line
+	}
+	// Walk backward from just before the anchor, collecting conversation lines
+	// (newest-first) until the byte budget, then reverse to oldest-first.
+	var batch [][]byte
+	var used int64
+	i := anchor - 1
+	for ; i >= 0; i-- {
+		ev, ok := ParseEvent(all[i])
+		if !ok || ev.IsSidechain || (ev.Type != "user" && ev.Type != "assistant") {
+			continue
+		}
+		cp := make([]byte, len(all[i]))
+		copy(cp, all[i])
+		batch = append(batch, cp)
+		used += int64(len(cp))
+		if used >= maxBytes {
+			break
+		}
+	}
+	for l, r := 0, len(batch)-1; l < r; l, r = l+1, r-1 {
+		batch[l], batch[r] = batch[r], batch[l]
+	}
+	// done when we reached the start, or found nothing more to give (so the
+	// client doesn't loop forever on an unchanged anchor).
+	return batch, i < 0 || len(batch) == 0, nil
+}
+
 // TailTranscript reads (up to) the last maxBytes of a session transcript and
 // returns the conversation lines to backfill - user/assistant entries, minus
 // sub-agent sidechains - plus the uuid set of EVERY entry seen. The uuid set
@@ -109,6 +234,14 @@ func firstLineIsSidechain(path string) bool {
 // transcript was either just relayed or deliberately filtered, and must not
 // be replayed again either way.
 func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[string]struct{}, err error) {
+	return errtrace.Wrap3(tailTranscript(path, maxBytes, false))
+}
+
+// tailTranscript is the shared core of TailTranscript. keepSidechain relays
+// sub-agent sidechain user/assistant lines instead of dropping them - the
+// main-transcript backfill drops them (main conversation only), but a sub-agent
+// transcript IS entirely sidechain, so its own backfill keeps them.
+func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, errtrace.Wrap(err)
@@ -148,7 +281,7 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 		if ev.UUID != "" {
 			uuids[ev.UUID] = struct{}{}
 		}
-		if ev.IsSidechain || (ev.Type != "user" && ev.Type != "assistant") {
+		if (ev.IsSidechain && !keepSidechain) || (ev.Type != "user" && ev.Type != "assistant") {
 			continue
 		}
 		cp := make([]byte, len(line))

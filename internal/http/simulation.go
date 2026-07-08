@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
 )
 
@@ -2759,7 +2760,7 @@ var simChatEvents = []string{
 	// $ figure on turn footers; model + slash_commands feed the composer's
 	// model dropdown and / autocomplete.
 	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
+	`{"type":"user","uuid":"sim-real-0","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"text","text":"I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the ` + "`PUT`" + ` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."}]}}`,
 	// A TodoWrite: feeds the floating plan panel (item 17) instead of a card.
@@ -2782,6 +2783,19 @@ var simChatEvents = []string{
 	// header).
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
+	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
+	// call, its reply), then the Task tool_result. The chat folds the sidechain
+	// steps into a SubagentCard on the Task card instead of leaking them into the
+	// main conversation as user/assistant messages (the whole point of this
+	// feature). handleSimChatWS emits the paired subagent_meta frame.
+	`{"type":"assistant","message":{"id":"msg_sim_task","content":[{"type":"tool_use","id":"toolu_sim_task","name":"Task","input":{"description":"Audit upload retry tests","subagent_type":"Explore","prompt":"Search the internal/artifacts package for existing retry/backoff tests and report what is covered and where the gaps are - especially whether the giving-up path (all attempts exhausted) is asserted anywhere."}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"text","text":"Search the internal/artifacts package for existing retry/backoff tests and report what is covered and where the gaps are - especially whether the giving-up path (all attempts exhausted) is asserted anywhere."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_1","content":[{"type":"thinking","thinking":"I'll grep the package for retry test functions, then read the upload test file to see which paths are covered."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2","content":[{"type":"tool_use","id":"toolu_sub_grep","name":"Grep","input":{"pattern":"func Test.*Retry","path":"internal/artifacts"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
@@ -2791,8 +2805,19 @@ var simChatEvents = []string{
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_4","content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\nfor attempt := 0; attempt < maxAttempts; attempt++ {\n    if err = u.put(ctx, key, r); err == nil {\n        return nil\n    }\n    sleepBackoff(attempt)\n}\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
-	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"session_id":"sim-chat"}`,
+	// A turn-ending assistant message carrying usage + stop_reason: the chat
+	// synthesizes a per-turn footer from it (the transcript has no `result`
+	// event), showing "↓ N tokens" with the full input/cache breakdown on hover.
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	// A user turn that referenced an uploaded image + the CLI's image
+	// placeholder: renders as an attachment chip, not a raw path/placeholder
+	// (items 41, 43).
+	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
+	// A tool_use with NO tool_result before the turn ends: it must NOT stay stuck
+	// showing "running" once the turn's result arrives / history replays (item 42).
+	`{"type":"assistant","message":{"id":"msg_sim_6","content":[{"type":"tool_use","id":"toolu_sim_stuck","name":"Read","input":{"file_path":"web/src/components/settings/NotificationsSection.tsx"}}]}}`,
+	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"usage":{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800},"session_id":"sim-chat"}`,
 }
 
 // simChatImageB64 is a tiny gradient PNG (base64) used by the simulated chat's
@@ -2818,6 +2843,14 @@ func handleSimChatWS(conn *safeConn) {
 	for _, line := range simChatEvents {
 		sendSimChatEvent(conn, line)
 	}
+	// The Task sub-agent's linkage (see the sidechain lines in simChatEvents).
+	// The client tolerates this arriving after the sidechain events, so a single
+	// frame here mirrors what the daemon's resolver emits.
+	sendSubagentMeta(conn, "sim_sub_1", &claudestream.SubagentMeta{
+		AgentType:   "Explore",
+		Description: "Audit upload retry tests",
+		ToolUseID:   "toolu_sim_task",
+	})
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).
@@ -2849,12 +2882,16 @@ func handleSimChatWS(conn *safeConn) {
 		switch msg.Type {
 		case "set_model":
 			// The real CLI confirms a set_model control_request with a
-			// local-command echo; that echo is what re-syncs the dropdown.
-			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
+			// local-command echo (wrapped in a caveat, which the chat hides) -
+			// that echo is what re-syncs the dropdown.
+			sendSimUserText(conn, "sim-chat", "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>")
+			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Set model to %s (claude-%s-5)</local-command-stdout>", msg.Model, msg.Model))
 		case "interrupt":
 			sendSimUserText(conn, "sim-chat", "[Request interrupted by user]")
 		case "dequeue":
 			simQueueRemove("sim-chat", msg.ID)
+		case "load_before":
+			sendSimHistoryBefore(conn, msg.Before)
 		case "user_message":
 			// A message the client marked queued (a turn was running) is HELD, to
 			// be drained when the current turn ends - here, right after the next
@@ -2877,9 +2914,61 @@ type simChatClientMsg struct {
 	Type     string          `json:"type"`
 	ID       string          `json:"id"`
 	Queued   bool            `json:"queued"`
+	Before   string          `json:"before"`
 	Content  json.RawMessage `json:"content"`
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
+}
+
+// simOlderHistory is a canned run of older conversation (oldest-first, uuids
+// sim-old-0..19), used to exercise the chat view's load-older infinite scroll in
+// --simulation. The first replayed event carries uuid sim-real-0, so the client
+// anchors its first load_before at it.
+var simOlderHistory = buildSimOlderHistory()
+
+func buildSimOlderHistory() []string {
+	var out []string
+	for i := range 20 {
+		if i%2 == 0 {
+			out = append(out, fmt.Sprintf(`{"type":"user","uuid":"sim-old-%d","message":{"role":"user","content":[{"type":"text","text":"Older question #%d - loaded by scrolling up."}]}}`, i, i/2+1))
+		} else {
+			out = append(out, fmt.Sprintf(`{"type":"assistant","uuid":"sim-old-%d","message":{"id":"old-m%d","content":[{"type":"text","text":"Older reply #%d from earlier in the conversation."}]}}`, i, i, i/2+1))
+		}
+	}
+	return out
+}
+
+// simOlderBefore returns the batch of older events before beforeUUID (up to 8),
+// oldest-first, and done when the start is reached - mirroring HistoryBefore.
+func simOlderBefore(beforeUUID string) (events []string, done bool) {
+	const batch = 8
+	idx := -1
+	if beforeUUID == "sim-real-0" {
+		idx = len(simOlderHistory)
+	} else {
+		for i := range simOlderHistory {
+			if fmt.Sprintf("sim-old-%d", i) == beforeUUID {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx <= 0 {
+		return nil, true
+	}
+	start := max(idx-batch, 0)
+	return simOlderHistory[start:idx], start == 0
+}
+
+// sendSimHistoryBefore answers a load_before with the older-history batch.
+func sendSimHistoryBefore(conn *safeConn, before string) {
+	events, done := simOlderBefore(before)
+	raw := make([]json.RawMessage, len(events))
+	for i, e := range events {
+		raw[i] = json.RawMessage(e)
+	}
+	frame, _ := json.Marshal(map[string]any{"type": "history_before", "events": raw, "done": done})
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
 // simQueuedMsg is one held message in the sim's stand-in chat queue.
@@ -2990,24 +3079,34 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": sessionID})
 		sendSimChatEvent(conn, string(line))
 	}
+	// message_start carries the initial usage; message_delta the running output
+	// token count - both feed the live "working" indicator (item 48).
+	streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1200, "output_tokens": 1}}})
 	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+	tokens := 1
 	for chunk := range strings.SplitSeq(replyText, " ") {
 		streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+		tokens += 2
+		streamEv(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": tokens}})
 		time.Sleep(90 * time.Millisecond)
 	}
 	streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+	streamEv(map[string]any{"type": "message_stop"})
 
 	reply, _ := json.Marshal(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"id":      msgID,
-			"content": []map[string]any{{"type": "text", "text": replyText}},
+			"id":          msgID,
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 1200, "output_tokens": tokens, "cache_read_input_tokens": 9800, "cache_creation_input_tokens": 640},
+			"content":     []map[string]any{{"type": "text", "text": replyText}},
 		},
 		"session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(reply))
 	result, _ := json.Marshal(map[string]any{
-		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042, "session_id": sessionID,
+		"type": "result", "subtype": "success", "duration_ms": 1200, "total_cost_usd": 0.0042,
+		"usage": map[string]any{"input_tokens": 1200, "output_tokens": tokens, "cache_read_input_tokens": 9800, "cache_creation_input_tokens": 640}, "session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(result))
 }

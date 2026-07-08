@@ -1143,22 +1143,19 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			log.Printf("warn: update resume agent status for %s: %v", head.ID, err)
 		}
 	}
-	if willNudge {
-		if head.ChatMode {
-			// No TUI to wait out in chat mode: deliver the nudge directly as a
-			// stream-json user turn (the pipe buffers it while the CLI boots).
-			if err := reg.Write(head.ID, claudestream.TextUserMessageLine(nudge)); err != nil {
-				log.Printf("warn: resume nudge (chat): write to %s: %v", head.ID, err)
-			}
-		} else {
-			// The agent restored its prior conversation but won't act on it on its
-			// own, so type the nudge to make it continue. Done async because the TUI
-			// can take a while to finish rendering a large restored conversation, and
-			// ResumeHead must not block its callers (daemon boot, terminal attach).
-			// The agent's own hooks flip its status back to running once the nudge
-			// submits, so the "waiting" written above is only momentary.
-			go nudgeResumedAgent(reg, head.ID, nudge)
-		}
+	// Chat mode is Claude-only, and `claude --continue` re-prompts the agent to
+	// continue on its own (it injects a "Continue from where you left off." turn),
+	// so Hydra's extra nudge is redundant: it just adds a duplicate "Continue"
+	// turn - and the pair reads as noise in the chat transcript (item 40). So the
+	// nudge is only sent to terminal heads, whose TUI won't auto-continue.
+	if willNudge && !head.ChatMode {
+		// The agent restored its prior conversation but won't act on it on its
+		// own, so type the nudge to make it continue. Done async because the TUI
+		// can take a while to finish rendering a large restored conversation, and
+		// ResumeHead must not block its callers (daemon boot, terminal attach).
+		// The agent's own hooks flip its status back to running once the nudge
+		// submits, so the "waiting" written above is only momentary.
+		go nudgeResumedAgent(reg, head.ID, nudge)
 	}
 	return nil
 }

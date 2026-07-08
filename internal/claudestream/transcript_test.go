@@ -74,6 +74,65 @@ func TestTailTranscript(t *testing.T) {
 	}
 }
 
+func TestHistoryBefore(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	line := func(uuid, text string) string {
+		return `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + text + `"}]},"uuid":"` + uuid + `"}`
+	}
+	content := strings.Join([]string{
+		line("u1", "oldest"),
+		line("u2", "second"),
+		`{"type":"user","uuid":"side","isSidechain":true,"message":{"content":[]}}`, // skipped
+		line("u3", "third"),
+		line("u4", "newest"),
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Everything older than u4 (large budget): u1, u2, u3 - oldest-first, no
+	// sidechain - and done (reached the start).
+	lines, done, err := HistoryBefore(path, "u4", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done {
+		t.Error("expected done=true when the batch reaches the start")
+	}
+	var got []string
+	for _, l := range lines {
+		ev, _ := ParseEvent(l)
+		got = append(got, ev.UUID)
+	}
+	if strings.Join(got, ",") != "u1,u2,u3" {
+		t.Fatalf("older-than-u4 = %v, want [u1 u2 u3]", got)
+	}
+
+	// Anchored at the oldest line: nothing older, done.
+	lines, done, err = HistoryBefore(path, "u1", 1<<20)
+	if err != nil || len(lines) != 0 || !done {
+		t.Fatalf("older-than-u1 = (%d lines, done=%v, err=%v), want (0, true, nil)", len(lines), done, err)
+	}
+
+	// A tiny budget returns a partial batch (just u3) and NOT done.
+	lines, done, err = HistoryBefore(path, "u4", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || done {
+		t.Fatalf("tiny budget = (%d lines, done=%v), want (1, false)", len(lines), done)
+	}
+	if ev, _ := ParseEvent(lines[0]); ev.UUID != "u3" {
+		t.Fatalf("tiny budget returned %q, want the nearest-older u3", ev.UUID)
+	}
+
+	// Unknown anchor -> empty, done.
+	if lines, done, _ := HistoryBefore(path, "nope", 1<<20); len(lines) != 0 || !done {
+		t.Fatalf("unknown anchor = (%d, %v), want (0, true)", len(lines), done)
+	}
+}
+
 func TestLatestTranscript(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "old.jsonl")
@@ -93,6 +152,68 @@ func TestLatestTranscript(t *testing.T) {
 	}
 	if got := LatestTranscript(filepath.Join(dir, "absent")); got != "" {
 		t.Errorf("LatestTranscript(absent) = %q, want empty", got)
+	}
+}
+
+func TestTailSubagentTranscripts(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "session-1"
+	// Main transcript alongside the per-session subagents/ dir.
+	if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte(`{"type":"user","uuid":"u1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(dir, sessionID, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One sub-agent: its transcript entries are all sidechain (must be KEPT here,
+	// unlike the main-transcript backfill which drops them) plus a non-relayable
+	// attachment line, and a meta sidecar linking it to its Task tool_use.
+	subLines := strings.Join([]string{
+		`{"type":"user","isSidechain":true,"agentId":"a1f2","uuid":"su1","message":{"role":"user","content":[{"type":"text","text":"go look"}]}}`,
+		`{"type":"attachment","isSidechain":true,"agentId":"a1f2","uuid":"sat1"}`,
+		`{"type":"assistant","isSidechain":true,"agentId":"a1f2","uuid":"sa1","message":{"id":"m","content":[{"type":"text","text":"done"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(subDir, "agent-a1f2.jsonl"), []byte(subLines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-a1f2.meta.json"), []byte(`{"agentType":"Explore","description":"go look","toolUseId":"toolu_x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	subs, uuids := TailSubagentTranscripts(dir, sessionID, 0)
+	if len(subs) != 1 {
+		t.Fatalf("got %d sub-agents, want 1", len(subs))
+	}
+	s := subs[0]
+	if s.AgentID != "a1f2" {
+		t.Errorf("AgentID = %q, want a1f2", s.AgentID)
+	}
+	if s.Meta == nil || s.Meta.ToolUseID != "toolu_x" || s.Meta.AgentType != "Explore" {
+		t.Errorf("meta = %+v, want toolUseId toolu_x / Explore", s.Meta)
+	}
+	// user + assistant kept (sidechain preserved), attachment dropped.
+	if len(s.Lines) != 2 {
+		t.Fatalf("relayed %d lines, want 2 (user + assistant, no attachment): %s", len(s.Lines), s.Lines)
+	}
+	// Every entry's uuid (incl. the dropped attachment) is reported for ring dedup.
+	for _, u := range []string{"su1", "sat1", "sa1"} {
+		if _, ok := uuids[u]; !ok {
+			t.Errorf("uuid set missing %q", u)
+		}
+	}
+
+	// Absent subagents/ dir: nothing, no panic.
+	if subs, _ := TailSubagentTranscripts(dir, "no-such-session", 0); subs != nil {
+		t.Errorf("TailSubagentTranscripts(absent) = %v, want nil", subs)
+	}
+
+	// ReadSubagentMeta reads the sidecar directly; missing id -> not ok.
+	if m, ok := ReadSubagentMeta(dir, sessionID, "a1f2"); !ok || m.ToolUseID != "toolu_x" {
+		t.Errorf("ReadSubagentMeta = %+v, %v", m, ok)
+	}
+	if _, ok := ReadSubagentMeta(dir, sessionID, "missing"); ok {
+		t.Errorf("ReadSubagentMeta(missing) ok = true, want false")
 	}
 }
 
