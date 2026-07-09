@@ -142,6 +142,12 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	chatQueues := heads.NewChatQueueManager(reg, store)
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
 	reg.SetOnChatStep(chatQueues.OnTurnStep)
+	// Auto-approve the ExitPlanMode plan gate for chat heads: with
+	// --permission-prompt-tool stdio it arrives as a can_use_tool control_request
+	// nothing answers, so the head would hang leaving plan mode. Answer it
+	// daemon-side (mirrors the terminal-mode PermissionRequest hook auto-approve),
+	// so it fires even with no browser attached.
+	reg.SetOnChatPlanApproval(chatQueues.OnPlanApproval)
 
 	// Fans change events to web clients over the events WS, replacing per-tab
 	// polling. A supervised service's state transition pushes services_changed.

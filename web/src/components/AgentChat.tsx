@@ -2828,8 +2828,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           ) {
             patchQuestionRequest(req.tool_use_id, ev.request_id, req.input)
           }
-          // Other can_use_tool requests don't occur: --dangerously-skip-permissions
-          // auto-allows everything that doesn't require user interaction.
+          // The only other can_use_tool request is ExitPlanMode's plan gate
+          // (--dangerously-skip-permissions auto-allows everything else): the
+          // daemon auto-approves that one server-side, so the client ignores it
+          // and just renders the proposed plan as a card (see PlanCard).
           return
         }
         case 'user': {

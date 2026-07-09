@@ -237,6 +237,36 @@ func TestChatStepDrainsViaRegistry(t *testing.T) {
 	}
 }
 
+// End to end (daemon side, minus the real CLI): an ExitPlanMode can_use_tool
+// control_request on the chat session's stdout - the plan-approval gate a chat
+// head hits leaving plan mode - fires the registry's OnChatPlanApproval hook,
+// which writes an allow control_response back to stdin so the head proceeds
+// instead of hanging. A can_use_tool request for a different tool (answered by
+// the client) is left alone.
+func TestChatPlanApprovalViaRegistry(t *testing.T) {
+	mgr, pty, _ := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatPlanApproval(mgr.OnPlanApproval)
+
+	// The CLI asks to leave plan mode; the daemon auto-approves.
+	pty.feed([]byte(`{"type":"control_request","request_id":"req_9","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"ship it"}}}` + "\n"))
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "req_9") },
+		"ExitPlanMode gate was not auto-approved to stdin")
+	w := pty.written()
+	if !strings.Contains(w, `"behavior":"allow"`) || !strings.Contains(w, `"control_response"`) {
+		t.Fatalf("plan approval was not an allow control_response: %q", w)
+	}
+
+	// An AskUserQuestion can_use_tool request is the client's to answer, not the
+	// daemon's - it must NOT be auto-approved here.
+	before := len(pty.written())
+	pty.feed([]byte(`{"type":"control_request","request_id":"req_10","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{}}}` + "\n"))
+	time.Sleep(50 * time.Millisecond)
+	if strings.Contains(pty.written()[before:], "req_10") {
+		t.Fatalf("an AskUserQuestion request was auto-approved: %q", pty.written())
+	}
+}
+
 // A user interrupt ends the turn with a `result` line (subtype
 // error_during_execution) but fires NO Stop hook (spike-verified against the
 // real CLI), so the daemon itself must flip the head out of "running". End to
