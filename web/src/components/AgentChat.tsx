@@ -34,6 +34,7 @@ import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
@@ -69,8 +70,11 @@ type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
   // the instant it's sent - above the thinking/response it triggers - and the
   // flag clears when the CLI's echo confirms it (which can arrive after the
-  // response, so we render our own copy rather than wait for it).
-  | { kind: 'user'; id: number; text: string; sending?: boolean }
+  // response, so we render our own copy rather than wait for it). noEntrance
+  // suppresses the fade/slide entrance for a message that takes the place of a
+  // queued bubble already on screen (item 21) - it was visible, so re-animating
+  // it as it settles reads as a flicker.
+  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -123,9 +127,16 @@ type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 
 // isSubRunning reports whether a sub-agent is still working: the parent Task
 // card's tool_result (or its turn ending, `ended`) is the precise done signal
-// for a linked sub; an unlinked one falls back to its own status.
+// for a linked sub. A background/async agent is the exception - its tool_result
+// is only the launch boilerplate, arriving at spawn time, NOT a completion - so
+// that result is ignored and we defer to the sub's own status (settled when its
+// sidechain result finally lands), keeping the "working" marker up meanwhile.
 function isSubRunning(sub: SubagentView, tool?: ToolItem): boolean {
-  return tool ? tool.result === undefined && !tool.ended : sub.status === 'running'
+  if (tool) {
+    if (tool.result !== undefined && !isLaunchBoilerplate(tool.result)) return false
+    if (tool.ended) return false
+  }
+  return sub.status === 'running'
 }
 
 // subLabels derives a sub-agent's display label + description, preferring the
@@ -180,6 +191,12 @@ interface TokenUsage {
 interface ClaudeEvent {
   type: string
   subtype?: string
+  // ISO-8601 wall-clock time the entry was recorded. Only transcript lines
+  // carry it (the backfill/replay on reconnect); live stdout stream-json lines
+  // don't. Used to anchor the "working" indicator's elapsed clock to when the
+  // turn actually started, so a reconnect mid-turn shows the real duration
+  // rather than time-since-page-load (item 48).
+  timestamp?: string
   // The durable conversation-record id (transcript + stdout share it). Tracked
   // as the anchor for load-older history paging (item 25).
   uuid?: string
@@ -230,6 +247,14 @@ interface ClaudeEvent {
   // require user interaction.
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
+}
+
+// parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
+// null when absent/unparseable (live stdout lines have none).
+function parseEventTs(ev: ClaudeEvent): number | null {
+  if (typeof ev.timestamp !== 'string') return null
+  const t = Date.parse(ev.timestamp)
+  return Number.isFinite(t) ? t : null
 }
 
 // formatTokens abbreviates a token count (3900 -> "3.9k", 1_200_000 -> "1.2M").
@@ -1086,11 +1111,23 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
 
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
-function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktree: string | null; serif: boolean }) {
+// skipId drops one inner item (the assistant message shown separately as the
+// Report) so it does not appear twice.
+function SubagentTimeline({
+  sub,
+  worktree,
+  serif,
+  skipId,
+}: {
+  sub: SubagentView
+  worktree: string | null
+  serif: boolean
+  skipId?: number
+}) {
   return (
     <>
       {sub.items.map((it) =>
-        it.kind === 'thinking' ? (
+        it.id === skipId ? null : it.kind === 'thinking' ? (
           <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
         ) : it.kind === 'tool' ? (
           it.name === 'ExitPlanMode' ? (
@@ -1108,35 +1145,145 @@ function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktre
   )
 }
 
-// SubagentReport renders the parent Task tool_result as the sub-agent's final
-// report (an error result as an error panel).
-function SubagentReport({ tool, serif }: { tool: ToolItem; serif: boolean }) {
-  if (tool.result === undefined || tool.result === '') return null
+// The resolved final report of a sub-agent: `text` rendered as the report body,
+// `itemId` set only when it came from an inner assistant message (so the timeline
+// can skip it).
+interface SubReport {
+  text: string
+  isError: boolean
+  itemId?: number
+}
+
+// isLaunchBoilerplate spots the async/background-agent launch acknowledgement
+// ("Async agent launched successfully ... internal metadata ...") - that is NOT
+// the real report, just the handle returned to the parent at spawn time.
+function isLaunchBoilerplate(s: string): boolean {
+  return /Async agent launched successfully|internal metadata/i.test(s)
+}
+
+// subReport resolves what a sub-agent reported back. Normally that is the Task
+// tool_result; but for a background/async agent the tool_result is only the
+// launch boilerplate, so the sub-agent's own final assistant message is the real
+// report (#62). itemId is set only in that latter case, letting the timeline skip
+// the message so it is not shown twice.
+function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
+  const res = tool?.result?.trim()
+  if (tool?.isError && res) return { text: tool!.result!, isError: true }
+  if (res && !isLaunchBoilerplate(res)) return { text: tool!.result!, isError: false }
+  for (let i = sub.items.length - 1; i >= 0; i--) {
+    const it = sub.items[i]
+    if (it.kind === 'assistant' && it.text.trim()) return { text: it.text, isError: false, itemId: it.id }
+  }
+  return null
+}
+
+// SubagentReport renders a sub-agent's final report (an error result as an error
+// panel), under a small "Report" heading.
+function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
   return (
     <div>
       <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
         Report
       </div>
-      {tool.isError ? (
-        <OutputPanel text={tool.result} lang="" isError />
+      {report.isError ? (
+        <OutputPanel text={report.text} lang="" isError />
       ) : (
         <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-          <Markdown text={tool.result} />
+          <Markdown text={report.text} />
         </div>
       )}
     </div>
   )
 }
 
-// SubagentCard renders one sub-agent (Task tool) run: its inner timeline
-// (thinking / tool calls / replies), folded into a single collapsible card so a
-// sub-agent's steps - and especially its opening prompt - never leak into the
-// main conversation as stray user/assistant messages. When a Task tool card
-// spawned it (`tool` set), the card upgrades that tool card in place and shows
-// the tool_result as the sub-agent's final report; an unlinked sub-agent
-// renders standalone. Auto-expanded while running, then collapses once done
-// (unless the user pinned it open). onOpenChat opens the sub-agent's own chat
-// view (the pane's top-left selector switches back).
+// parseTaskOutput pulls the fields out of a TaskOutput tool_result - the XML-ish
+// envelope the harness returns when the parent agent explicitly retrieves a
+// background task's result (`<status>`, `<output>`). A completed output becomes a
+// report card instead of leaking the raw envelope into the chat (#62).
+function parseTaskOutput(result?: string): { taskId?: string; status?: string; output?: string } | null {
+  if (!result) return null
+  const grab = (re: RegExp) => result.match(re)?.[1]?.trim()
+  const output = result.match(/<output>\s*([\s\S]*?)\s*<\/output>/)?.[1]?.trim()
+  if (!output) return null
+  return {
+    taskId: grab(/<task_id>([\s\S]*?)<\/task_id>/),
+    status: grab(/<status>([\s\S]*?)<\/status>/),
+    output,
+  }
+}
+
+// FinishedReportCard surfaces a completed sub-agent's report inline: a compact
+// header (label, description, optional link to the full run) over the report body
+// rendered as markdown (or an error panel). Shared by the live "sub-agent
+// finished" card (dropped at completion time) and the TaskOutput retrieval card
+// (#62), so the user sees what the agent reported back without scrolling up to
+// the launch card.
+function FinishedReportCard({
+  label,
+  desc,
+  report,
+  serif,
+  onOpenChat,
+  openLabel,
+}: {
+  label: string
+  desc?: string
+  report: SubReport | null
+  serif: boolean
+  onOpenChat?: () => void
+  openLabel?: string
+}) {
+  const isError = !!report?.isError
+  return (
+    <div
+      className={`rounded-lg border text-xs overflow-hidden ${
+        isError
+          ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+      }`}
+    >
+      <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-stone-600 dark:text-stone-300">
+        <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+        <span className="font-medium shrink-0">{label}</span>
+        <span className="shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+          <Check className="w-3 h-3" />
+          finished
+        </span>
+        {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
+        {onOpenChat && (
+          <button
+            onClick={onOpenChat}
+            className="ml-auto shrink-0 font-medium text-[#c96442] hover:underline cursor-pointer"
+          >
+            {openLabel || 'View steps'}
+          </button>
+        )}
+      </div>
+      <div className="border-t border-stone-200/70 dark:border-white/[0.05] px-2.5 pb-2.5 pt-2">
+        {report ? (
+          report.isError ? (
+            <OutputPanel text={report.text} lang="" isError />
+          ) : (
+            <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <Markdown text={report.text} />
+            </div>
+          )
+        ) : (
+          <div className="text-[11px] italic text-stone-400 dark:text-stone-500">No report returned.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// SubagentCard renders one sub-agent (Task tool) run: its opening prompt and,
+// once done, its final report, with the inner step timeline (thinking / tool
+// calls / replies) tucked behind a "N steps" toggle so it never dominates the
+// main conversation (#62). While running, steps are shown live; when it finishes
+// they auto-collapse, leaving prompt + report on show. When a Task tool card
+// spawned it (`tool` set), the card upgrades that tool card in place; an unlinked
+// sub-agent renders standalone. onOpenChat opens the sub-agent's own chat view
+// (the pane's top-left selector switches back).
 const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
@@ -1151,49 +1298,58 @@ const SubagentCard = memo(function SubagentCard({
   onOpenChat?: () => void
 }) {
   const running = isSubRunning(sub, tool)
-  const [open, setOpen] = useState(running)
-  const [userToggled, setUserToggled] = useState(false)
-  // Auto-collapse when the run finishes (unless the user pinned it open), via
+  const [open, setOpen] = useState(true)
+  // The step timeline starts open while running (watch it live) and auto-collapses
+  // once done (prompt + report are the resting view), unless the user pinned it -
   // the render-phase state-adjustment pattern React endorses over an effect.
+  const [stepsOpen, setStepsOpen] = useState(running)
+  const [stepsToggled, setStepsToggled] = useState(false)
   const [prevRunning, setPrevRunning] = useState(running)
   if (prevRunning !== running) {
     setPrevRunning(running)
-    if (!running && !userToggled) setOpen(false)
+    if (!running && !stepsToggled) setStepsOpen(false)
   }
 
   const { label, desc } = subLabels(sub, tool)
   const steps = sub.items.length
+  const report = running ? null : subReport(sub, tool)
 
   return (
     <div
       className={`rounded-lg border text-xs overflow-hidden ${
         tool?.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+          : running
+            ? 'border-violet-300/70 bg-violet-50/40 dark:border-violet-500/30 dark:bg-violet-500/[0.05]'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <div className="flex w-full items-baseline gap-1.5 pl-2.5 pr-1 text-stone-600 dark:text-stone-300">
+      <div className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300">
         <button
-          onClick={() => {
-            setUserToggled(true)
-            setOpen((o) => !o)
-          }}
-          className="flex min-w-0 flex-1 items-baseline gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+          onClick={() => setOpen((o) => !o)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
         >
           <ChevronRight
-            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+            className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+          {running ? (
+            <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-violet-400/60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
+            </span>
+          ) : (
+            <Bot className="w-3 h-3 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+          )}
           <span className="font-medium shrink-0">{label}</span>
           {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
           {running ? (
-            <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
           ) : (
             steps > 0 && (
-              <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
+              <span className="ml-auto shrink-0 text-[10px] text-stone-400 dark:text-stone-500">
                 {steps} step{steps === 1 ? '' : 's'}
               </span>
             )
@@ -1204,7 +1360,7 @@ const SubagentCard = memo(function SubagentCard({
             <button
               onClick={onOpenChat}
               aria-label="Open sub-agent chat"
-              className="shrink-0 self-center rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
+              className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
               <MessageSquare className="w-3.5 h-3.5" />
             </button>
@@ -1223,12 +1379,28 @@ const SubagentCard = memo(function SubagentCard({
               </div>
             </div>
           )}
-          {sub.items.length > 0 && (
-            <div className="space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-              <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
+          {report && <SubagentReport report={report} serif={serif} />}
+          {steps > 0 && (
+            <div>
+              <button
+                onClick={() => {
+                  setStepsToggled(true)
+                  setStepsOpen((o) => !o)
+                }}
+                className="flex items-center gap-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
+              >
+                <ChevronRight
+                  className={`w-3 h-3 transition-transform duration-200 ${stepsOpen ? 'rotate-90' : ''}`}
+                />
+                {steps} step{steps === 1 ? '' : 's'}
+              </button>
+              <Expandable open={stepsOpen}>
+                <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
+                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
+                </div>
+              </Expandable>
             </div>
           )}
-          {tool && <SubagentReport tool={tool} serif={serif} />}
         </div>
       </Expandable>
     </div>
@@ -1252,6 +1424,7 @@ function SubagentChatView({
 }) {
   const running = isSubRunning(sub, tool)
   const { label, desc } = subLabels(sub, tool)
+  const report = running ? null : subReport(sub, tool)
   return (
     <>
       <div className="flex items-baseline gap-2 pt-8 text-stone-600 dark:text-stone-300">
@@ -1281,9 +1454,9 @@ function SubagentChatView({
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
       </div>
-      {tool && <SubagentReport tool={tool} serif={serif} />}
+      {report && <SubagentReport report={report} serif={serif} />}
       {running && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
           <span className="text-[#c96442]">✳</span>
@@ -1443,6 +1616,48 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
+// deriveAnswered reconstructs which options (and any free-text "Other") each
+// question resolved to, from the recorded tool_result text. On a resume the
+// card's local selection state is gone - all we have is the durable result,
+// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
+// shape the real CLI's AskUserQuestion result produces, mirrored by the
+// simulation). Matching those labels back to option indices lets a replayed
+// card highlight the chosen options just as it did right after answering.
+function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+  const selected = specs.map(() => new Set<number>())
+  const other = specs.map(() => '')
+  specs.forEach((q, qi) => {
+    const needle = `"${q.question}"="`
+    const start = answeredText.indexOf(needle)
+    if (start === -1) return
+    const from = start + needle.length
+    const end = answeredText.indexOf('"', from)
+    if (end === -1) return
+    // The labels were joined with ", " (see submit()). Consume the value left to
+    // right, matching whole option labels (longest first, so a label that itself
+    // contains ", " isn't mistaken for two) and dropping anything else into the
+    // free-text "Other" field.
+    let rest = answeredText.slice(from, end)
+    const extras: string[] = []
+    while (rest.length > 0) {
+      const match = q.options
+        .map((o) => o.label)
+        .filter((l) => rest === l || rest.startsWith(l + ', '))
+        .sort((a, b) => b.length - a.length)[0]
+      if (match != null) {
+        selected[qi].add(q.options.findIndex((o) => o.label === match))
+        rest = rest.slice(match.length).replace(/^, /, '')
+      } else {
+        const sep = rest.indexOf(', ')
+        extras.push(sep === -1 ? rest : rest.slice(0, sep))
+        rest = sep === -1 ? '' : rest.slice(sep + 2)
+      }
+    }
+    if (extras.length) other[qi] = extras.join(', ')
+  })
+  return { selected, other }
+}
+
 function QuestionCard({
   specs,
   disabled,
@@ -1461,6 +1676,19 @@ function QuestionCard({
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
+
+  // On a resume the card mounts already-answered with no local selection - and
+  // the same holds if it was answered in another tab. Recover the chosen
+  // options from the recorded result so the settled card highlights them just
+  // as it did right after answering. A live answer in this tab keeps its own
+  // local selection, so only fall back when nothing was picked here.
+  const derived = useMemo(
+    () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
+    [specs, answeredText],
+  )
+  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const showSelected = derived && localEmpty ? derived.selected : selected
+  const showOther = derived && localEmpty ? derived.other : other
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -1507,7 +1735,7 @@ function QuestionCard({
           </div>
           <div className="space-y-1">
             {q.options.map((o, oi) => {
-              const isSel = selected[qi].has(oi)
+              const isSel = showSelected[qi].has(oi)
               return (
                 <button
                   key={oi}
@@ -1539,7 +1767,7 @@ function QuestionCard({
             })}
             <input
               type="text"
-              value={other[qi]}
+              value={showOther[qi]}
               onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
               disabled={answered}
               placeholder="Other..."
@@ -1577,22 +1805,27 @@ function QuestionCard({
 const ChatUserMessage = memo(function ChatUserMessage({
   text,
   sending,
+  dimmed,
   projectId,
 }: {
   text: string
   sending?: boolean
+  // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
+  // used for a queued message pinned under the transcript, so it shows the same
+  // image thumbnails / chips as a finalized turn instead of raw upload paths.
+  dimmed?: boolean
   projectId: string | null
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
-  if (!body && attachments.length === 0 && !sending) return null
+  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending ? ' opacity-75' : ''}`}>
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -1814,7 +2047,14 @@ const SettledMessages = memo(
     return (
       <>
         {items.map((item) => (
-          <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
+          <div
+            key={item.id}
+            className={
+              liveFromId != null && item.id >= liveFromId && !(item.kind === 'user' && item.noEntrance)
+                ? 'animate-chat-item-in'
+                : undefined
+            }
+          >
             {renderItem(item)}
           </div>
         ))}
@@ -1845,6 +2085,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // elapsed), the elapsed seconds, the running output-token count (completed
   // messages + the in-flight one), and the per-turn verb. Reset each turn.
   const turnStartRef = useRef<number | null>(null)
+  // The current turn's true wall-clock start (ms), parsed from the triggering
+  // user message's transcript timestamp when the reconnect backfill replays it.
+  // Null until a turn-starting user message with a timestamp is seen (a live
+  // turn we witnessed from the start has none, and correctly falls back to
+  // Date.now()). Consumed by the elapsed effect and corrected at replay_done.
+  const turnStartClockRef = useRef<number | null>(null)
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
   const turnCountRef = useRef(0)
@@ -1902,6 +2148,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
   const sendSeqRef = useRef(1)
+  // A ref mirror of pendingSends so the (effect-scoped) reducer can tell whether
+  // a just-echoed user turn came from a queued bubble - if so, the settled item
+  // replaces it without an entrance animation (it was already on screen).
+  const pendingSendsRef = useRef<PendingSend[]>([])
+  useEffect(() => {
+    pendingSendsRef.current = pendingSends
+  }, [pendingSends])
   // Optimistically-shown user messages (item 26): a decreasing id counter (kept
   // negative so it never collides with the reducer's positive ids) and the
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
@@ -1941,6 +2194,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [minRows, setMinRows] = useState(() => {
     const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+  })
+  // Explicit composer height (px), driven by the per-line auto-grow effect. The
+  // markdown-highlight textarea is absolutely positioned inside its wrapper, so
+  // it can't size the box itself - the wrapper carries the height instead. Seed
+  // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
+  // so the composer opens at the right height before the effect measures.
+  const [composerHeight, setComposerHeight] = useState<number>(() => {
+    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+    return rows * 20 + 14
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -2230,8 +2493,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     // settleSubagentByToolUse marks the sub-agent spawned by a Task tool_use as
     // done - the parent tool_result arriving is the authoritative live end
-    // signal (current CLIs never put the sub's own result line on stdout).
-    const settleSubagentByToolUse = (toolUseId: string) => {
+    // signal (current CLIs never put the sub's own result line on stdout). A
+    // background/async agent's result is only the launch boilerplate, though, so
+    // it settles nothing - that sub stays running until its sidechain result.
+    const settleSubagentByToolUse = (toolUseId: string, result: string) => {
+      if (isLaunchBoilerplate(result)) return
       for (const key in subLocal) {
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
@@ -2435,7 +2701,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string) => {
+    const routeUserText = (rawText: string, ts?: number | null) => {
       // Drop the CLI's local-command caveat wrapper; a message that is nothing
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
@@ -2444,9 +2710,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // synthesized footer (backfill only - live turns' pending footers are
       // discarded by their real result event before the next user turn).
       flushHistFooter()
+      // Record this turn's true start time (item 48): a genuine turn-starting
+      // message (a slash command, a prompt, a background-task continuation)
+      // anchors the "working" indicator's elapsed clock. Skipped for the
+      // non-turn-starting cases below (slash-command output, an interrupt).
+      const markTurnStart = () => {
+        if (ts != null) turnStartClockRef.current = ts
+      }
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+        markTurnStart()
         push({ kind: 'command', name: cmd[1].trim(), args })
         return
       }
@@ -2478,6 +2752,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // render a compact one-line notice instead of the raw XML (item 15).
       if (text.includes('<task-notification>')) {
         const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+        markTurnStart()
         push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
         return
       }
@@ -2487,6 +2762,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // it for placement would put the user message below its own reply.
       const oi = optimisticTextsRef.current.indexOf(text)
       if (oi >= 0) {
+        markTurnStart()
         optimisticTextsRef.current.splice(oi, 1)
         setItems((prev) => {
           let j = -1
@@ -2504,9 +2780,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         })
         return
       }
+      markTurnStart()
+      // A queued bubble being echoed back: the settled item takes its place, so
+      // it enters without the fade/slide (it was already visible as the pending
+      // bubble - item 21).
+      const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text })
+      push({ kind: 'user', text, noEntrance: fromQueue })
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
@@ -2553,17 +2834,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
         case 'user': {
           const content = ev.message?.content
+          const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content)
+            if (content.trim()) routeUserText(content, userTs)
             return
           }
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text)
+              routeUserText(block.text, userTs)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
-              settleSubagentByToolUse(block.tool_use_id)
+              settleSubagentByToolUse(block.tool_use_id, parsed.text)
             }
           }
           return
@@ -2786,6 +3068,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           endPendingTools()
           flush()
           flushSubagents()
+          // Anchor the "working" indicator to the running turn's real start
+          // (item 48): the backfill just replayed the triggering user message,
+          // so turnStartClockRef now holds when the turn actually began. The
+          // elapsed effect set turnStartRef to page-load time before the
+          // backfill arrived; correct it (and elapsed) here, before the
+          // indicator first renders (it's gated on replayDone).
+          {
+            const real = turnStartClockRef.current
+            if (real != null && real <= Date.now()) {
+              turnStartRef.current = real
+              setElapsed(Math.floor((Date.now() - real) / 1000))
+            }
+          }
           setLiveFromId(nextId)
           setReplayDone(true)
           return
@@ -2903,11 +3198,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => {
     if (!isTurnRunning) {
       turnStartRef.current = null
+      turnStartClockRef.current = null
       setElapsed(0)
       return
     }
     if (turnStartRef.current == null) {
-      turnStartRef.current = Date.now()
+      // Prefer the turn's real start (from a replayed user message's timestamp)
+      // over "now" so a reconnect mid-turn shows the true elapsed. A live turn
+      // we saw begin has no such timestamp yet and falls back to now; a later
+      // replay_done still corrects it. clamp: never a future time (clock skew).
+      const real = turnStartClockRef.current
+      turnStartRef.current = real != null && real <= Date.now() ? real : Date.now()
       turnTokensRef.current = 0
       curMsgTokensRef.current = 0
       turnStopReasonRef.current = null
@@ -3132,11 +3433,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const cs = getComputedStyle(ta)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    ta.style.height = 'auto'
+    // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
+    // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
+    // is empty but the content overflows, so scrollHeight reports the true content
+    // height. Restore to '' afterwards to hand sizing back to the wrapper.
+    ta.style.height = '0px'
     const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
+    ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.height = `${rows * lineHeight + pad}px`
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    setComposerHeight(rows * lineHeight + pad)
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -3325,7 +3631,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // (unsent) message back into the box to edit (item 21). Only queued holds
     // qualify - a message already handed to the CLI can't be recalled. Tell the
     // daemon to drop it from the server queue too.
-    if (e.key === 'ArrowUp' && input === '' && slashMatches.length === 0) {
+    // A staged attachment counts as a non-empty composer too, so recalling never
+    // clobbers files the user is mid-way through attaching.
+    if (e.key === 'ArrowUp' && input === '' && attachments.length === 0 && slashMatches.length === 0) {
       const last = [...pendingSends].reverse().find((p) => p.queued)
       if (last) {
         e.preventDefault()
@@ -3334,7 +3642,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
         }
         setPendingSends((prev) => prev.filter((p) => p.id !== last.id))
-        setInput(last.text)
+        // Split the recalled message back into its typed text and the uploads it
+        // referenced, so image attachments return to the composer as chips - not
+        // raw upload paths pasted into the textarea (the send flow re-appends
+        // them). Fresh ids keep them unique against later attachments.
+        const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
+        setInput(body)
+        setAttachments(recalled.map((a) => ({ ...a, id: nextAttachmentId() })))
         return
       }
     }
@@ -3446,20 +3760,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </pre>
         )
       case 'notice': {
-        // A "sub-agent finished" notice links to that sub-agent's chat view.
-        const target = item.subagentKey && subagents[item.subagentKey] ? item.subagentKey : null
+        // A "sub-agent finished" notice: when it links to a sub-agent we have,
+        // surface what it reported back as a card (#62), dropped at completion
+        // time so the user needn't scroll up to the launch card. Other notices
+        // (background-task completions etc.) stay as a compact pill.
+        const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
+        if (sub) {
+          const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
+          const { label, desc } = subLabels(sub, tool)
+          return (
+            <FinishedReportCard
+              label={label}
+              desc={desc}
+              report={subReport(sub, tool)}
+              serif={serif}
+              onOpenChat={() => openSubView(sub.agentId)}
+            />
+          )
+        }
         return (
           <div className="flex justify-center">
             <div className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
               <span className="truncate">{item.text}</span>
-              {target && (
-                <button
-                  onClick={() => openSubView(target)}
-                  className="shrink-0 font-medium text-[#c96442] hover:underline cursor-pointer"
-                >
-                  View
-                </button>
-              )}
             </div>
           </div>
         )
@@ -3486,6 +3808,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
+        // A TaskOutput retrieval whose result has landed: render the reported
+        // output as a finished card (linking to the sub-agent's steps when the
+        // task_id matches one we're tracking) rather than the raw XML envelope.
+        if (item.name === 'TaskOutput') {
+          const parsed = parseTaskOutput(item.result)
+          if (parsed) {
+            const linked = parsed.taskId ? subagents[parsed.taskId] : undefined
+            const linkedTool = linked?.toolUseId ? taskToolByUse[linked.toolUseId] : undefined
+            const label = linked ? subLabels(linked, linkedTool).label : 'Agent'
+            const desc = linked ? subLabels(linked, linkedTool).desc : undefined
+            return (
+              <FinishedReportCard
+                label={label}
+                desc={desc}
+                report={{ text: parsed.output!, isError: parsed.status !== undefined && parsed.status !== 'completed' }}
+                serif={serif}
+                onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
+              />
+            )
+          }
+        }
         return <ToolCard item={item} worktree={worktreePath} />
       }
       case 'subagent': {
@@ -3523,11 +3866,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           const out = item.usage?.output_tokens
           const cost = apiKeyReal && item.costUsd ? formatCost(item.costUsd) : null
           const stopNote = item.stopReason ? STOP_REASON_LABEL[item.stopReason] : undefined
-          if (item.durationMs == null && !out && !cost && !stopNote) return null
+          // The "↓ N tokens" count is only useful for the current (latest) turn -
+          // a wall of per-turn counts up the scrollback is just noise (#60). Show
+          // it on the last turn's footer only; earlier footers keep just their
+          // duration/cost, dropping to nothing for historical (timing-less) turns.
+          const isLast = visibleItems[visibleItems.length - 1]?.id === item.id
+          const showTokens = !!out && isLast
+          if (item.durationMs == null && !showTokens && !cost && !stopNote) return null
           const segs: ReactNode[] = []
           if (item.durationMs != null) segs.push(`Crunched for ${formatDuration(item.durationMs)}`)
           if (cost) segs.push(cost)
-          if (out) segs.push(
+          if (showTokens) segs.push(
             <span key="tok" title={item.usage ? usageBreakdown(item.usage) : undefined}>
               ↓ {formatTokens(out)} tokens
             </span>,
@@ -3547,6 +3896,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )
         }
+      default: {
+        // Exhaustiveness guard: with every kind above handled, `item` narrows to
+        // `never` here, so a newly-added ChatItem kind that isn't given a case
+        // fails to compile. A kind that only shows up at runtime (something off
+        // the wire we don't model) still surfaces a visible notice rather than
+        // silently rendering nothing.
+        const exhaustive: never = item
+        return (
+          <div className="flex justify-center">
+            <div className="rounded-full border border-amber-300/70 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 px-2.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400 select-none">
+              Unknown event kind: {(exhaustive as { kind?: string }).kind ?? 'unknown'}
+            </div>
+          </div>
+        )
+      }
     }
   }
 
@@ -3684,10 +4048,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               {pendingSends.map((p) => (
                 <div key={`pending-${p.id}`} className="group relative flex justify-end animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
-                      is sent (a real user bubble). */}
-                  <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
-                    <Markdown text={p.text} />
-                  </div>
+                      is sent (a real user bubble) - and rendered the same way, so
+                      image thumbnails / attachment chips show here too, not raw
+                      upload paths (dimmed while it waits). */}
+                  <ChatUserMessage text={p.text} dimmed projectId={projectId} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -3792,7 +4156,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               onRemove={removeAttachment}
               onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
             />
-            <textarea
+            <HighlightedTextarea
               ref={textareaRef}
               value={input}
               onChange={(e) => {
@@ -3804,7 +4168,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
-              className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-[13px] leading-5 text-stone-800 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-50"
+              wrapperClassName="w-full"
+              wrapperStyle={{ height: composerHeight }}
+              textColorClassName="text-stone-800 dark:text-stone-100"
+              caretClassName="caret-stone-800 dark:caret-stone-100"
+              textClassName="px-3.5 pt-2.5 pb-1 text-[13px] leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
