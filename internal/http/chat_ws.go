@@ -238,13 +238,24 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 // already delivered by the transcript backfill. Relayed uuids are added to
 // skip so the sub-agent transcript tailer never re-delivers a line an (older)
 // CLI also put on stdout. Returns false once the socket write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver) bool {
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
 			if len(line) > 0 {
 				log.Printf("chat ws: skipping non-protocol line for %q (%d bytes)", agentID, len(line))
 			}
+			continue
+		}
+		// Drop `result` events during the scrollback-ring replay. The durable
+		// transcript carries none, so a past turn's result only exists in the ring
+		// - which replays AFTER the whole transcript backfill, landing a finished
+		// turn's "Crunched for Xs" footer at the very bottom of the conversation,
+		// right above the live "working" indicator (it reads as "this running turn
+		// already finished"). Each backfilled turn already gets an in-place footer
+		// synthesized from its assistant usage, so the ring copy is just misplaced
+		// noise. Live results (dropResults=false) stream in order and are kept.
+		if dropResults && ev.Type == "result" {
 			continue
 		}
 		if ev.UUID != "" {
@@ -477,7 +488,9 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	// stream starts.
 	select {
 	case data, ok := <-att.Output:
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
+		// before Attach returned) - drop its misplaced past-turn result footers.
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true) {
 			return
 		}
 	default:
@@ -558,7 +571,8 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			if !ok {
 				return
 			}
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+			// Live stream (post replay_done): results arrive in order, so keep them.
+			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false) {
 				return
 			}
 		}
