@@ -17,23 +17,28 @@ import (
 
 // Chat-mode message queue (server-authoritative, disk-persisted).
 //
-// A chat head processes one user turn at a time. A message the user sends while
-// a turn is running is HELD here - in the daemon, not written to the CLI's stdin
-// yet - and drained one-per-turn as each turn completes (a `result` event on the
-// session's live stdout). Holding queued messages daemon-side (rather than
-// client-side) means they survive closing the browser, navigating away, and a WS
-// reconnect; persisting them to disk means they also survive a daemon restart. On
+// A message the user sends while a turn is running is HELD here - in the
+// daemon, not written to the CLI's stdin yet - and drained one message per
+// observed step of the running turn (each completed assistant line: a thinking
+// block, a tool_use, a text block) plus at the turn's end (`result`). The CLI
+// injects a mid-turn stdin message into the running turn at its next step
+// boundary, exactly like typing into the interactive terminal (spike-verified),
+// so a queued message reaches the agent quickly instead of waiting out the
+// whole turn. Holding queued messages daemon-side (rather than client-side)
+// means they survive closing the browser, navigating away, and a WS reconnect;
+// persisting them to disk means they also survive a daemon restart. On
 // (re)attach the daemon replays the queue so the client renders the pending
-// bubbles, and the client can recall a still-queued message to edit it (dequeue).
+// bubbles, and the client can recall a still-queued message to edit it
+// (dequeue) for as long as it hasn't drained.
 //
 // The store is just a persisted FIFO: it holds ONLY queued (not-yet-sent)
-// messages, and the daemon pops the front each time it observes a turn end.
+// messages, and the daemon pops the front on each step/turn-end it observes.
 // Whether a fresh message is queued vs sent immediately is decided by the client
 // (which knows, and shows, whether a turn is running) and passed in the frame -
-// so the daemon needs no fragile turn-state seeding, only the turn-end drain
-// (plus a kick whenever the head's own status shows it resting: on attach, on
-// a queued submit that arrived after the turn actually ended, and when an
-// interrupt settles idle - see kickIfResting and MarkInterrupted).
+// so the daemon needs no fragile turn-state seeding, only the stdout-driven
+// drains (plus a kick whenever the head's own status shows it resting: on
+// attach, on a queued submit that arrived after the turn actually ended, and
+// when an interrupt settles idle - see kickIfResting and MarkInterrupted).
 
 // QueuedMessage is one held user turn. ID is client-generated so the client can
 // reconcile its optimistic bubble and target a dequeue; Content is the verbatim
@@ -48,6 +53,10 @@ type ChatQueue struct {
 	mu   sync.Mutex
 	path string
 	msgs []QueuedMessage
+	// sendMu serializes a drain's pop+write pair: step/turn-end drains are
+	// dispatched on their own goroutines (one per stdout line), so without it
+	// two drains could pop in order but write to stdin out of order.
+	sendMu sync.Mutex
 }
 
 // queueFile is the on-disk shape.
@@ -362,11 +371,30 @@ func (m *ChatQueueManager) kickIfResting(projectRoot, id string) {
 	}
 }
 
-// drainFront pops the front message and writes it to stdin, if any.
+// drainFront pops the front message and writes it to stdin, if any. The pop and
+// the write happen under the queue's sendMu so concurrently-dispatched drains
+// deliver messages in queue order.
 func (m *ChatQueueManager) drainFront(projectRoot, id string) {
-	msg, ok := m.queue(projectRoot, id).PopFront()
+	q := m.queue(projectRoot, id)
+	q.sendMu.Lock()
+	defer q.sendMu.Unlock()
+	msg, ok := q.PopFront()
 	if !ok {
 		return
 	}
 	m.writeToStdin(id, msg.Content)
+}
+
+// OnTurnStep is the registry's mid-turn step-boundary hook (a completed
+// assistant line: a thinking block, a tool_use, a text block): drain the next
+// queued message NOW rather than waiting for the turn to end. The CLI injects
+// a mid-turn stdin user message into the running turn at its next step
+// boundary - the same steering the interactive terminal does (spike-verified)
+// - so a queued message reaches the agent within a step or two of being typed.
+func (m *ChatQueueManager) OnTurnStep(id string) {
+	root, ok := m.resolveRoot(id)
+	if !ok {
+		return
+	}
+	m.drainFront(root, id)
 }

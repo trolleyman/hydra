@@ -189,6 +189,29 @@ func TestRingFilterOnResult(t *testing.T) {
 	}
 }
 
+func TestRingFilterOnStep(t *testing.T) {
+	var steps int
+	f := &RingFilter{OnStep: func() { steps++ }}
+
+	// A completed main-conversation assistant line (thinking / tool_use / text)
+	// is a step boundary and fires OnStep; user echoes, tool_results, sidechain
+	// (sub-agent) lines, api-error lines, stream_events and results do not.
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"}]}}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash"}]}}` + "\n"))
+	if steps != 2 {
+		t.Fatalf("OnStep fired %d times after two assistant lines, want 2", steps)
+	}
+	f.Filter([]byte(`{"type":"user","message":{"content":[{"type":"text","text":"echoed user message"}]}}` + "\n"))
+	f.Filter([]byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","isSidechain":true,"agentId":"sub1","message":{"content":[{"type":"text","text":"sub"}]}}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"API Error"}]}}` + "\n"))
+	f.Filter([]byte(`{"type":"stream_event"}` + "\n"))
+	f.Filter([]byte(`{"type":"result","subtype":"success"}` + "\n"))
+	if steps != 2 {
+		t.Fatalf("OnStep fired %d times after non-step lines, want still 2", steps)
+	}
+}
+
 func TestLineBufferReassembly(t *testing.T) {
 	lb := &LineBuffer{}
 	var got []string

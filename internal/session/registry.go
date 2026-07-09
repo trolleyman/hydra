@@ -38,6 +38,7 @@ type Registry struct {
 	onExit         func(Info)
 	onChatAPIError func(id, msg string)
 	onChatResult   func(id string)
+	onChatStep     func(id string)
 }
 
 // NewRegistry returns an empty registry.
@@ -70,6 +71,16 @@ func (r *Registry) SetOnChatAPIError(fn func(id, msg string)) {
 func (r *Registry) SetOnChatResult(fn func(id string)) {
 	r.mu.Lock()
 	r.onChatResult = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatStep registers a callback invoked (off the read goroutine) each time
+// a chat-mode session's stdout carries a completed main-conversation assistant
+// line - a mid-turn step boundary (see claudestream.RingFilter.OnStep). The
+// daemon wires it to drain queued messages into the running turn early.
+func (r *Registry) SetOnChatStep(fn func(id string)) {
+	r.mu.Lock()
+	r.onChatStep = fn
 	r.mu.Unlock()
 }
 
@@ -152,6 +163,18 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 		ringFilter.OnResult = func() {
 			r.mu.RLock()
 			fn := r.onChatResult
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id)
+			}
+		}
+		// A completed assistant line is a mid-turn step boundary; same
+		// off-the-read-goroutine dispatch rules as OnResult. Ordering across
+		// these concurrent dispatches is restored by the queue's own send
+		// serialization (ChatQueue.sendMu).
+		ringFilter.OnStep = func() {
+			r.mu.RLock()
+			fn := r.onChatStep
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id)

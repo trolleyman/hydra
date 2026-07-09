@@ -129,11 +129,14 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	})
 
 	// Holds chat-mode heads' queued (not-yet-sent) user messages, daemon-side and
-	// disk-persisted, draining one per completed turn. Wired to the registry's
-	// turn-end (`result`) hook so a turn ending drains the next queued message
-	// even with no client attached (the agent keeps working through the queue).
+	// disk-persisted, draining one per observed step of the running turn (the
+	// CLI injects mid-turn stdin messages at its next step boundary, like the
+	// interactive terminal) and one at each turn end. Wired to the registry's
+	// stdout hooks so the queue drains even with no client attached (the agent
+	// keeps working through the queue).
 	chatQueues := heads.NewChatQueueManager(reg, store)
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
+	reg.SetOnChatStep(chatQueues.OnTurnStep)
 
 	// Fans change events to web clients over the events WS, replacing per-tab
 	// polling. A supervised service's state transition pushes services_changed.

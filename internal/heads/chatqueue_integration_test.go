@@ -204,6 +204,50 @@ func TestChatResultDrainsViaRegistry(t *testing.T) {
 		"result line did not drain the queued message to stdin")
 }
 
+// Mid-turn drain (terminal-style steering): each completed main-conversation
+// assistant line on stdout is a step boundary that drains one queued message,
+// so a queued message reaches the CLI within a step instead of waiting for
+// the turn to end. Sidechain (sub-agent) assistant lines don't count. Order
+// is preserved across the concurrently-dispatched drains.
+func TestChatStepDrainsViaRegistry(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatResult(mgr.OnTurnEnd)
+	reg.SetOnChatStep(mgr.OnTurnStep)
+
+	mgr.Submit(root, "agent-x", msg("a", "STEP-ONE"), true)
+	mgr.Submit(root, "agent-x", msg("b", "STEP-TWO"), true)
+	mgr.Submit(root, "agent-x", msg("c", "STEP-THREE"), true)
+
+	// A sub-agent's line is not a main-turn step: nothing drains.
+	pty.feed([]byte(`{"type":"assistant","isSidechain":true,"agentId":"sub1","message":{"content":[{"type":"text","text":"sub step"}]}}` + "\n"))
+	time.Sleep(50 * time.Millisecond)
+	if w := pty.written(); strings.Contains(w, "STEP-ONE") {
+		t.Fatalf("a sidechain line drained the queue: %q", w)
+	}
+
+	// One main-turn step drains exactly the front message.
+	pty.feed([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"}]}}` + "\n"))
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "STEP-ONE") },
+		"a step boundary did not drain the queued message")
+	if w := pty.written(); strings.Contains(w, "STEP-TWO") {
+		t.Fatalf("one step drained more than one message: %q", w)
+	}
+
+	// Two more steps in ONE chunk (two concurrent dispatches) drain the rest,
+	// in order.
+	pty.feed([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash"}]}}` + "\n" +
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}` + "\n"))
+	waitUntil(t, func() bool {
+		w := pty.written()
+		return strings.Contains(w, "STEP-TWO") && strings.Contains(w, "STEP-THREE")
+	}, "later steps did not drain the remaining messages")
+	w := pty.written()
+	if i1, i2, i3 := strings.Index(w, "STEP-ONE"), strings.Index(w, "STEP-TWO"), strings.Index(w, "STEP-THREE"); !(i1 < i2 && i2 < i3) {
+		t.Fatalf("step drains out of order: ONE@%d TWO@%d THREE@%d", i1, i2, i3)
+	}
+}
+
 // A user interrupt ends the turn with a `result` line (subtype
 // error_during_execution) but fires NO Stop hook (spike-verified against the
 // real CLI), so the daemon itself must flip the head out of "running". End to

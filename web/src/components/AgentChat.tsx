@@ -3257,8 +3257,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               </Tooltip>
               <div className="ml-auto flex items-center gap-1.5">
                 {/* Item 6: surface what Enter will do only when it isn't the
-                    obvious thing - i.e. the message will queue behind the
-                    running turn; otherwise show nothing. */}
+                    obvious thing - i.e. the message will queue, draining into
+                    the running turn at its next step (terminal-style
+                    steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
                   <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
                     Enter to queue

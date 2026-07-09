@@ -240,6 +240,18 @@ type RingFilter struct {
 	// OnAPIError it runs under the session lock, so it must be cheap (the session
 	// dispatches the real work off the read goroutine).
 	OnResult func()
+	// OnStep, if set, is called once per completed main-conversation assistant
+	// line - the end of a thinking block, a tool_use being issued, a text block.
+	// The chat message queue uses it to drain queued messages at step
+	// boundaries instead of waiting for the turn to end: the CLI injects a
+	// mid-turn stdin user message into the running turn at its next step
+	// boundary, exactly like typing in the interactive terminal
+	// (spike-verified). Sidechain (sub-agent) and isApiErrorMessage lines
+	// don't count - only the main turn making progress does. Deliberately NOT
+	// fired on `user` lines: those include the CLI's echo of a drained
+	// message, which would chain-drain the whole queue at one boundary. Same
+	// under-the-session-lock cheapness rule as the other hooks.
+	OnStep func()
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
@@ -258,6 +270,9 @@ func (f *RingFilter) Filter(chunk []byte) []byte {
 		}
 		if ok && ev.Type == "result" && f.OnResult != nil {
 			f.OnResult()
+		}
+		if ok && ev.Type == "assistant" && !ev.IsSidechain && !ev.IsAPIError && f.OnStep != nil {
+			f.OnStep()
 		}
 		out = append(out, line...)
 		out = append(out, '\n')
