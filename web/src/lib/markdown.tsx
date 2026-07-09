@@ -10,6 +10,9 @@ import hljs from './hljs'
 
 type Seg =
   | { kind: 'text'; value: string }
+  // A backslash-escaped metacharacter (`\_` etc.): renders as the literal
+  // character. Its source is '\' + value.
+  | { kind: 'escape'; value: string }
   | { kind: 'code'; marker: string; value: string }
   // A fenced ```code block```. `raw` is the exact matched source (fences and all)
   // so the textarea overlay stays glyph-aligned; `value` is just the inner code
@@ -47,16 +50,35 @@ const PATTERNS: { kind: 'code' | 'bold' | 'italic'; re: RegExp }[] = [
   { kind: 'italic', re: /^_([^\n]+?)_/ },
 ]
 
+// The metacharacters a backslash can escape - exactly the ones this parser
+// styles (CommonMark escapes all ASCII punctuation; we stay minimal so e.g. a
+// Windows path `C:\Users` is untouched). Backslash itself is escapable so a
+// literal backslash before a metachar can be written unambiguously.
+const ESCAPABLE = new Set(['`', '*', '_', '\\'])
+
 // parseInline splits text into styled/plain segments. The concatenation of all
-// segments' source (marker + value + marker) is exactly the input, so callers
-// that need character-for-character fidelity (e.g. a textarea overlay) can rely
-// on it.
+// segments' source (marker + value + marker, or '\' + value for an escape) is
+// exactly the input, so callers that need character-for-character fidelity
+// (e.g. a textarea overlay) can rely on it.
 function parseInline(text: string): Seg[] {
   const segs: Seg[] = []
   let buf = ''
   let i = 0
   while (i < text.length) {
     const rest = text.slice(i)
+    // Backslash escape: consumed before the inline patterns so an escaped
+    // marker can't open a code/emphasis span. This is how agent activity lines
+    // show literal file names like _LAYOUT_.tsx verbatim - the backend escapes
+    // them (internal/heads/activity.go escapeMarkdown).
+    if (text[i] === '\\' && ESCAPABLE.has(text[i + 1])) {
+      if (buf) {
+        segs.push({ kind: 'text', value: buf })
+        buf = ''
+      }
+      segs.push({ kind: 'escape', value: text[i + 1] })
+      i += 2
+      continue
+    }
     // Fenced code blocks only open at the start of a line (start of input or
     // just after a newline), matching how they're written in practice.
     const atLineStart = i === 0 || text[i - 1] === '\n'
@@ -183,6 +205,8 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
   const segs = trimAroundBlocks(parseInline(text))
   return segs.map((s, i) => {
     switch (s.kind) {
+      case 'escape':
+        return <span key={i}>{s.value}</span>
       case 'code':
         return (
           <code key={i} className={CODE_CLASS}>
@@ -263,6 +287,16 @@ export function renderMarkdownSource(text: string): ReactNode {
   const segs = parseInline(text)
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
+    if (s.kind === 'escape') {
+      // Both characters stay (char-for-char with the textarea); the backslash
+      // is dimmed like the emphasis markers to read as an escape.
+      return (
+        <span key={i}>
+          <span className="opacity-40">{'\\'}</span>
+          {s.value}
+        </span>
+      )
+    }
     if (s.kind === 'code') {
       // Background chip only, NOT tinted - same as the read-only inline style, so
       // it reads as the surrounding text wrapped in a chip. We must NOT switch to

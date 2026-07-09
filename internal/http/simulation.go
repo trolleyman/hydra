@@ -277,8 +277,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	resp := api.ListAgents200JSONResponse{
 		{
 			// Markdown-rendering demo agent. Its live-activity line carries inline
-			// markdown (code + bold + italic) so the sidebar shows the rendered
-			// activity; see agent-3 for the $-command override.
+			// markdown (code + bold + italic) plus a backslash-escaped file name
+			// (the shape the backend emits for a file like _LAYOUT_.tsx, which must
+			// show verbatim - not "LAYOUT" in italics) so the sidebar shows the
+			// rendered activity; see agent-3 for the $-command override.
 			Id:            "agent-md",
 			Title:         ptr("Add inline markdown rendering"),
 			AgentType:     "claude",
@@ -291,7 +293,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
 				Timestamp: simNow().Format(time.RFC3339),
-				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+				Activity:  ptr("Editing \\_LAYOUT\\_.tsx - `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 		},
 		{
@@ -532,7 +534,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
-				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+				Activity:  ptr("Editing \\_LAYOUT\\_.tsx - `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 			Tests:          simTestSummary("agent-md"),
 			MergeWhenGreen: ptr(true),

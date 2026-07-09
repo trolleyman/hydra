@@ -160,6 +160,15 @@ func TestDescribeActivity(t *testing.T) {
 		{"Grep", map[string]interface{}{"pattern": "TODO"}, "Searching: TODO"},
 		{"WebSearch", nil, "Searching the web"},
 		{"SomethingNew", nil, "Using SomethingNew"},
+		// Markdown metachars in interpolated literals are escaped so the web UI
+		// shows them verbatim (e.g. _LAYOUT_ must not render as italics).
+		{"Edit", map[string]interface{}{"file_path": "/a/routes/_LAYOUT_.tsx"}, `Editing \_LAYOUT\_.tsx`},
+		{"Read", map[string]interface{}{"file_path": "/a/b/__init__.py"}, `Reading \_\_init\_\_.py`},
+		{"Grep", map[string]interface{}{"pattern": "foo_*bar`"}, "Searching: foo\\_\\*bar\\`"},
+		{"mcp__hydra__git_commit", nil, `Using mcp\_\_hydra\_\_git\_commit`},
+		// Shell commands are NOT escaped - the "$ ..." line renders whole as a
+		// code span, never parsed as markdown.
+		{"Bash", map[string]interface{}{"command": "mv a_b c_d"}, "$ mv a_b c_d"},
 	}
 	for _, c := range cases {
 		if got := describeActivity(c.tool, c.input); got != c.want {
