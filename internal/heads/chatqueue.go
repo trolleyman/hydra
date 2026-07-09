@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
@@ -141,12 +142,25 @@ type ChatQueueManager struct {
 	// queues caches one ChatQueue per agent id (the in-memory copy of its disk
 	// file), so concurrent attachers/callbacks share one FIFO.
 	queues map[string]*ChatQueue
+	// interrupted records heads with a user interrupt in flight (the chat client
+	// sent an interrupt control_request). The CLI answers one by ending the turn
+	// with a `result` line (subtype error_during_execution) but fires NO Stop
+	// hook, so nothing in-sandbox ever flips status.json out of "running" - the
+	// head would spin forever and a queue restored on attach would never drain.
+	// OnTurnEnd consumes the mark and writes the "waiting" status itself.
+	interrupted map[string]time.Time
 }
+
+// interruptMarkTTL bounds how long a pending-interrupt mark stays valid. An
+// interrupt is answered by the CLI within milliseconds (spike-verified, even
+// mid-tool); a mark this stale belongs to an interrupt that raced a turn that
+// had already ended, and must not re-label a later, unrelated turn end.
+const interruptMarkTTL = time.Minute
 
 // NewChatQueueManager builds the manager. reg is used to write drained messages
 // to a session's stdin; store resolves an agent id to its project root.
 func NewChatQueueManager(reg *session.Registry, store *db.Store) *ChatQueueManager {
-	return &ChatQueueManager{reg: reg, store: store, queues: map[string]*ChatQueue{}}
+	return &ChatQueueManager{reg: reg, store: store, queues: map[string]*ChatQueue{}, interrupted: map[string]time.Time{}}
 }
 
 // queue returns the cached ChatQueue for id, loading it from disk on first use.
@@ -171,6 +185,29 @@ func (m *ChatQueueManager) resolveRoot(id string) (string, bool) {
 	return agent.ProjectPath, true
 }
 
+// MarkInterrupted records that the user interrupted id's in-flight turn, so the
+// turn end the CLI answers with (a `result` line, no Stop hook) writes the
+// head's post-interrupt status instead of leaving it stuck "running".
+func (m *ChatQueueManager) MarkInterrupted(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.interrupted[id] = time.Now()
+}
+
+// takeInterrupted consumes a pending-interrupt mark for id, reporting whether a
+// fresh one existed. Expired marks (an interrupt that never produced a turn
+// end, e.g. sent after the turn had already finished) are discarded.
+func (m *ChatQueueManager) takeInterrupted(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at, ok := m.interrupted[id]
+	if !ok {
+		return false
+	}
+	delete(m.interrupted, id)
+	return time.Since(at) < interruptMarkTTL
+}
+
 // writeToStdin hands one message's content to the CLI as a user turn.
 func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) {
 	line, err := claudestream.UserMessageLine(content)
@@ -178,6 +215,11 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) {
 		log.Printf("warn: chat queue: bad content for %s: %v", id, err)
 		return
 	}
+	// A new user turn is starting: a still-pending interrupt mark belongs to a
+	// turn that never answered (a race with its own end), not to this one.
+	m.mu.Lock()
+	delete(m.interrupted, id)
+	m.mu.Unlock()
 	if err := m.reg.Write(id, line); err != nil {
 		log.Printf("warn: chat queue: write to %s: %v", id, err)
 	}
@@ -208,10 +250,27 @@ func (m *ChatQueueManager) List(projectRoot, id string) []QueuedMessage {
 
 // OnTurnEnd is the registry's turn-end (`result` event) hook: the current turn
 // finished, so drain the next queued message to the CLI (one per whole turn).
+//
+// A turn ended by a user interrupt fires no Stop hook (unlike a normal turn
+// end), so nothing in-sandbox updates status.json and the head would sit in
+// "running" forever - spinner on, the client queueing instead of sending, and
+// OnAttach refusing to drain. Consume the pending-interrupt mark and write the
+// "waiting" status here, exactly as the hook would have; the JSON poller picks
+// it up within a tick and broadcasts it. Written BEFORE the drain, so a drained
+// message's own UserPromptSubmit hook (status running, newer timestamp)
+// supersedes it cleanly.
 func (m *ChatQueueManager) OnTurnEnd(id string) {
 	root, ok := m.resolveRoot(id)
 	if !ok {
 		return
+	}
+	if m.takeInterrupted(id) {
+		if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+			Status:    api.Waiting,
+			Timestamp: time.Now().Format(time.RFC3339Nano),
+		}); err != nil {
+			log.Printf("warn: write post-interrupt status for %s: %v", id, err)
+		}
 	}
 	m.drainFront(root, id)
 }

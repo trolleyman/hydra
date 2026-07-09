@@ -2000,6 +2000,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (done) setAllHistoryLoaded(true)
     }
 
+    // Whether the current turn was ended by a user interrupt (the CLI echoed
+    // its bracketed marker). The turn's `result` arrives as an error
+    // (subtype error_during_execution), but rendering a red "ended with an
+    // error" box right under the "Interrupted by user" chip reads as a second
+    // failure - so the result of an interrupted turn renders as a plain
+    // footer instead. Reset on the next real user message, so a marker whose
+    // result never arrived (e.g. lost to ring wrap) can't relabel a later,
+    // genuinely-failed turn.
+    let interruptPending = false
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
@@ -2034,6 +2044,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       if (text.startsWith('[Request interrupted by user')) {
         push({ kind: 'interrupted' })
+        interruptPending = true
         endPendingTools()
         return
       }
@@ -2068,6 +2079,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         return
       }
       settlePendingSend(text)
+      interruptPending = false
       push({ kind: 'user', text })
     }
 
@@ -2242,14 +2254,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // tallied live from the stream deltas (item 47/48).
           const liveOut = (turnTokensRef.current + curMsgTokensRef.current) || undefined
           const usage: TokenUsage | undefined = ev.usage ?? (liveOut ? { output_tokens: liveOut } : undefined)
+          // A user-interrupted turn "fails" by protocol (is_error, subtype
+          // error_during_execution), but the interrupt chip already tells that
+          // story - render its footer as a normal quiet one, not an error box.
+          const wasInterrupt = interruptPending
+          interruptPending = false
           push({
             kind: 'result',
-            isError: ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success'),
+            isError: !wasInterrupt && (ev.is_error === true || (ev.subtype != null && ev.subtype !== 'success')),
             durationMs: ev.duration_ms,
             costUsd: ev.total_cost_usd,
             usage,
             stopReason: turnStopReasonRef.current ?? undefined,
-            errorText: ev.is_error ? ev.result : undefined,
+            errorText: !wasInterrupt && ev.is_error ? ev.result : undefined,
           })
           // Consumed - clear it so it can't leak onto a later turn's result (the
           // live turn-start reset only fires between live turns, not between the

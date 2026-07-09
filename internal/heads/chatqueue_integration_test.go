@@ -203,3 +203,72 @@ func TestChatResultDrainsViaRegistry(t *testing.T) {
 	waitUntil(t, func() bool { return strings.Contains(pty.written(), "DRAINME") },
 		"result line did not drain the queued message to stdin")
 }
+
+// A user interrupt ends the turn with a `result` line (subtype
+// error_during_execution) but fires NO Stop hook (spike-verified against the
+// real CLI), so the daemon itself must flip the head out of "running". End to
+// end minus the CLI: mark the interrupt (as the chat WS handler does), feed the
+// CLI's actual post-interrupt output, and expect the status written as
+// "waiting" plus the queued message drained to stdin.
+func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatResult(mgr.OnTurnEnd)
+
+	// Mid-turn state: the hook marked the head running, and a message is queued.
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("q", "AFTER-INTERRUPT"), true)
+
+	mgr.MarkInterrupted("agent-x")
+	// What the CLI actually prints when interrupted (in this order).
+	pty.feed([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}` + "\n"))
+	pty.feed([]byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":7330}` + "\n"))
+
+	waitUntil(t, func() bool {
+		s := ReadAgentStatus(root, "agent-x")
+		return s != nil && s.Status == api.Waiting
+	}, "interrupted turn end did not write the waiting status")
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "AFTER-INTERRUPT") },
+		"interrupted turn end did not drain the queued message")
+}
+
+// A normal (un-interrupted) turn end must not touch the status file - that is
+// the Stop hook's job - and a stale interrupt mark (one whose turn never
+// answered, superseded by a later user send) must not relabel a later turn.
+func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain turn end: no mark, no status write.
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("un-interrupted turn end rewrote the status: %+v", s)
+	}
+
+	// A mark followed by a new user send is stale: the send starts a fresh turn
+	// whose end is a normal one.
+	mgr.MarkInterrupted("agent-x")
+	mgr.Submit(root, "agent-x", msg("d", "DIRECT"), false)
+	if !strings.Contains(pty.written(), "DIRECT") {
+		t.Fatalf("direct send not written to stdin: %q", pty.written())
+	}
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("stale interrupt mark relabeled a later turn end: %+v", s)
+	}
+
+	// An expired mark (interrupt that never produced a turn end) is discarded.
+	mgr.MarkInterrupted("agent-x")
+	mgr.mu.Lock()
+	mgr.interrupted["agent-x"] = time.Now().Add(-2 * interruptMarkTTL)
+	mgr.mu.Unlock()
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("expired interrupt mark relabeled a later turn end: %+v", s)
+	}
+}

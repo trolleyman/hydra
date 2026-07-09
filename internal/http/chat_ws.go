@@ -178,6 +178,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		id := fmt.Sprintf("hydra-interrupt-%d", chatInterruptSeq.Add(1))
 		if err := s.Sessions.Write(sessionID, claudestream.InterruptLine(id)); err != nil {
 			log.Printf("chat ws: write interrupt to %q: %v", sessionID, err)
+		} else if s.ChatQueues != nil {
+			// The CLI answers an interrupt by ending the turn with a `result`
+			// line but fires NO Stop hook, so status.json would stay "running"
+			// forever. Mark the interrupt; the turn-end drain consumes it and
+			// writes the resting status itself (see ChatQueueManager.OnTurnEnd).
+			s.ChatQueues.MarkInterrupted(sessionID)
 		}
 	case "set_model":
 		if msg.Model == "" {
