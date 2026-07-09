@@ -326,6 +326,32 @@ func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
 	}
 }
 
+// emitThinkingDurations replays the head's measured thinking-block durations
+// (from its .hydra/local/thinking/<id>.json sidecar) as synthetic hydra_thinking
+// claude_event frames. Sent BEFORE the transcript backfill so the client has
+// every duration in hand by the time it builds the matching thinking items -
+// letting a reload/resume render "Thought for Xs" (and keep empty
+// silently-reasoned thoughts visible) without the browser having timed them.
+// Best-effort: no sidecar (a head that never produced a thought) sends nothing.
+func emitThinkingDurations(conn *safeConn, projectRoot, agentID string) {
+	if projectRoot == "" || agentID == "" {
+		return
+	}
+	for messageID, durationMS := range heads.LoadThinkingDurations(projectRoot, agentID) {
+		line, err := json.Marshal(map[string]any{
+			"type":        "hydra_thinking",
+			"message_id":  messageID,
+			"duration_ms": durationMS,
+		})
+		if err != nil {
+			continue
+		}
+		if !sendChatEventLine(conn, line, agentID) {
+			return
+		}
+	}
+}
+
 // backfillChatHistory relays the head's conversation history from its Claude
 // transcript file (~/.claude/projects/<cwd-slug>/<session>.jsonl) as
 // claude_event frames. The scrollback ring only covers the current process
@@ -436,6 +462,9 @@ func claudeProjectDir(worktree string) string {
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
 	dir := claudeProjectDir(worktree)
 	subs := newSubagentResolver(dir)
+	// Replay measured thinking durations first, so the client has them before it
+	// builds the thinking items the transcript backfill is about to produce.
+	emitThinkingDurations(conn, projectRoot, agentID)
 	skip := backfillChatHistory(conn, agentID, dir, subs)
 	if skip == nil {
 		skip = map[string]struct{}{}

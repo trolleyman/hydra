@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 )
@@ -346,17 +347,128 @@ type RingFilter struct {
 	// hooks - the callback dispatches the actual stdin write off the read
 	// goroutine.
 	OnPlanApproval func(requestID string, input json.RawMessage)
+	// OnThinking, if set, fires once per completed thinking block with the block's
+	// message id and the wall-clock duration Hydra measured for it (from the
+	// block's content_block_start to its content_block_stop on the live stream).
+	// The daemon wires this to persist the duration to a small per-head sidecar,
+	// so a reload/resume can show "Thought for Xs" without the browser having to
+	// time it. Same under-the-session-lock cheapness rule as the other hooks - the
+	// callback dispatches the disk write off the read goroutine. Filter ALSO emits
+	// a synthetic hydra_thinking line (see Filter's injected return) so an
+	// already-attached client gets the duration live.
+	OnThinking func(messageID string, durationMS int64)
+	// timer measures thinking-block durations from the stream_event partial deltas
+	// that Filter otherwise drops. Lazily initialised on first stream_event.
+	timer thinkingTimer
+	// pendingInjected holds synthetic hydra_thinking lines measured mid-chunk,
+	// released to attachers only once the chunk stream reaches a line boundary
+	// (see Filter) so they never splice into a half-buffered line.
+	pendingInjected []byte
+}
+
+// nowFunc is the clock thinkingTimer reads; a package var so tests can pin it.
+// The production stream is live, so real wall-clock time is what we want.
+var nowFunc = time.Now
+
+// thinkingTimer tracks the currently-streaming assistant message id and the
+// start time of each in-flight thinking content block, so it can report a
+// block's duration when its content_block_stop arrives. Not safe for concurrent
+// use; it runs under the session lock inside RingFilter.Filter.
+type thinkingTimer struct {
+	msgID string
+	// starts maps a thinking block's stream content-block index to when its
+	// content_block_start was seen. Only thinking blocks get an entry, so a
+	// content_block_stop with no entry is a non-thinking block we ignore.
+	starts map[int]time.Time
+}
+
+// streamEventEnvelope is the minimal decode of a stream_event line: enough to
+// follow message boundaries and thinking content-block start/stop. Everything
+// else in the partial-delta stream is ignored.
+type streamEventEnvelope struct {
+	Event struct {
+		Type    string `json:"type"`
+		Index   int    `json:"index"`
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+		ContentBlock struct {
+			Type string `json:"type"`
+		} `json:"content_block"`
+	} `json:"event"`
+}
+
+// feed advances the timer with one stream_event line. When a thinking block's
+// content_block_stop is seen it returns that block's message id and duration
+// (ok=true); otherwise ok=false. A message_start resets the per-message index
+// map (indices are scoped to one message).
+func (t *thinkingTimer) feed(line []byte) (messageID string, durationMS int64, ok bool) {
+	var env streamEventEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return "", 0, false
+	}
+	switch env.Event.Type {
+	case "message_start":
+		t.msgID = env.Event.Message.ID
+		t.starts = nil
+	case "content_block_start":
+		if env.Event.ContentBlock.Type == "thinking" {
+			if t.starts == nil {
+				t.starts = map[int]time.Time{}
+			}
+			t.starts[env.Event.Index] = nowFunc()
+		}
+	case "content_block_stop":
+		start, isThinking := t.starts[env.Event.Index]
+		if !isThinking {
+			return "", 0, false
+		}
+		delete(t.starts, env.Event.Index)
+		// A message with no message_start (shouldn't happen on a live stream, but
+		// be defensive) has no id to key on - skip rather than record an orphan.
+		if t.msgID == "" {
+			return "", 0, false
+		}
+		return t.msgID, nowFunc().Sub(start).Milliseconds(), true
+	}
+	return "", 0, false
+}
+
+// thinkingLine builds the synthetic hydra_thinking stream line Filter injects so
+// an attached client learns a thinking block's measured duration live. The
+// client keys it by message_id (the same id its settled assistant event carries)
+// and shows "Thought for Xs"; on reload the daemon replays these from the head's
+// sidecar (see the http backfill).
+func thinkingLine(messageID string, durationMS int64) []byte {
+	line, _ := json.Marshal(map[string]any{
+		"type":        "hydra_thinking",
+		"message_id":  messageID,
+		"duration_ms": durationMS,
+	})
+	return append(line, '\n')
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
-// persist (complete non-stream_event lines, newline-terminated). A line the CLI
-// flagged as an API error fires OnAPIError as a side effect; a `result` line
-// (turn end) fires OnResult.
-func (f *RingFilter) Filter(chunk []byte) []byte {
+// persist (kept: complete non-stream_event lines, newline-terminated) plus any
+// synthetic lines to also stream live to attachers (injected: hydra_thinking
+// duration events - NOT persisted in the ring, since the daemon's per-head
+// sidecar is what a reconnect replays them from). A line the CLI flagged as an
+// API error fires OnAPIError; a `result` line (turn end) fires OnResult; a
+// completed thinking block fires OnThinking (for the sidecar write).
+func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 	var out []byte
 	for _, line := range f.lb.Feed(chunk) {
 		ev, ok := ParseEvent(line)
 		if ok && ev.Type == "stream_event" {
+			// stream_event partials aren't persisted, but they carry the thinking
+			// block timing: measure it here and, on completion, queue a synthetic
+			// hydra_thinking line (live) + fire OnThinking (durable sidecar write).
+			if msgID, durMS, done := f.timer.feed(line); done {
+				f.pendingInjected = append(f.pendingInjected, thinkingLine(msgID, durMS)...)
+				if f.OnThinking != nil {
+					f.OnThinking(msgID, durMS)
+				}
+			}
 			continue
 		}
 		if ok && ev.IsAPIError && f.OnAPIError != nil {
@@ -376,7 +488,17 @@ func (f *RingFilter) Filter(chunk []byte) []byte {
 		out = append(out, line...)
 		out = append(out, '\n')
 	}
-	return out
+	// Flush queued hydra_thinking lines to attachers only at a line boundary -
+	// i.e. when this chunk left no partial line buffered. Attachers receive the
+	// RAW chunk stream and reassemble it themselves (same bytes this filter sees),
+	// so their reassembler is at a boundary exactly when ours is; injecting a
+	// synthetic line mid-partial would splice into the half-line and corrupt both.
+	// A held line just waits for the next chunk that lands on a boundary.
+	if len(f.lb.buf) == 0 && len(f.pendingInjected) > 0 {
+		injected = f.pendingInjected
+		f.pendingInjected = nil
+	}
+	return out, injected
 }
 
 // Pending returns the buffered partial line not yet persisted. A new attacher

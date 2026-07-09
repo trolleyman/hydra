@@ -12,7 +12,7 @@ import (
 func TestRingFilterDropsStreamEvents(t *testing.T) {
 	f := &RingFilter{}
 	var kept string
-	feed := func(chunk string) { kept += string(f.Filter([]byte(chunk))) }
+	feed := func(chunk string) { k, _ := f.Filter([]byte(chunk)); kept += string(k) }
 
 	feed(`{"type":"assistant","uuid":"a1"}` + "\n")
 	feed(`{"type":"stream_event","event":{"type":"content_block_delta"}}` + "\n")

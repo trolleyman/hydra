@@ -176,15 +176,24 @@ func (s *Session) readLoop(onExit func(*Session)) {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			s.mu.Lock()
+			var injected []byte
 			if s.ringFilter != nil {
-				if kept := s.ringFilter.Filter(data); len(kept) > 0 {
+				kept, inj := s.ringFilter.Filter(data)
+				if len(kept) > 0 {
 					s.scroll.Write(kept)
 				}
+				injected = inj
 			} else {
 				s.scroll.Write(data)
 			}
 			for a := range s.attachers {
 				a.send(data)
+				// Synthetic hydra_thinking lines the filter measured from this
+				// chunk's stream_event partials: streamed live to attachers but not
+				// persisted in the ring (a reconnect replays them from the sidecar).
+				if len(injected) > 0 {
+					a.send(injected)
+				}
 			}
 			s.mu.Unlock()
 		}
