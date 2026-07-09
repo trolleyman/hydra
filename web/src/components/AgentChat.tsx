@@ -994,8 +994,11 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // The settled label keeps the same disclosure affordance but names the elapsed
-  // time when we timed it live (item 11), e.g. "Thought for 5s".
-  const settledLabel = durationMs != null ? `Thought for ${formatDuration(durationMs)}` : 'Thought'
+  // time when we have a duration (timed live, or estimated on replay - item 11,
+  // item 7), e.g. "Thought for 5s". Ceil to whole seconds with a 1s floor so a
+  // sub-second thought never reads "Thought for 0s".
+  const settledLabel =
+    durationMs != null ? `Thought for ${formatDuration(Math.max(1000, Math.ceil(durationMs / 1000) * 1000))}` : 'Thought'
 
   const trimmed = text.trim()
   const snippet = trimmed.split('\n')[0] ?? ''
@@ -1182,6 +1185,23 @@ function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
   return null
 }
 
+// reportSkipId picks the inner timeline item to hide so the final report is not
+// shown twice (item: don't duplicate the end message in the steps). When the
+// report came from an inner assistant message that item is skipped directly
+// (`itemId`); when it came from the parent Task tool_result - which echoes the
+// sub-agent's final assistant message verbatim - the matching last assistant
+// item is skipped instead.
+function reportSkipId(sub: SubagentView, report: SubReport | null): number | undefined {
+  if (!report) return undefined
+  if (report.itemId != null) return report.itemId
+  if (report.isError) return undefined
+  for (let i = sub.items.length - 1; i >= 0; i--) {
+    const it = sub.items[i]
+    if (it.kind === 'assistant') return it.text.trim() === report.text.trim() ? it.id : undefined
+  }
+  return undefined
+}
+
 // SubagentReport renders a sub-agent's final report (an error result as an error
 // panel), under a small "Report" heading.
 function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
@@ -1281,39 +1301,35 @@ function FinishedReportCard({
   )
 }
 
-// SubagentCard renders one sub-agent (Task tool) run: its opening prompt and,
-// once done, its final report, with the inner step timeline (thinking / tool
-// calls / replies) tucked behind a "N steps" toggle so it never dominates the
-// main conversation (#62). While running, steps are shown live; when it finishes
-// they auto-collapse, leaving prompt + report on show. When a Task tool card
+// SubagentCard renders one sub-agent (Task tool) run: its opening prompt, then
+// the inner step timeline (thinking / tool calls / replies) tucked behind a
+// "N steps" toggle - collapsed by default so it never dominates the main
+// conversation (#62) - and finally its report once done. When a Task tool card
 // spawned it (`tool` set), the card upgrades that tool card in place; an unlinked
 // sub-agent renders standalone. onOpenChat opens the sub-agent's own chat view
-// (the pane's top-left selector switches back).
+// (the pane's top-left selector switches back). finishedBadge shows an explicit
+// "finished" chip in the header, used when this same card stands in for the old
+// separate finished-report card (item: finished card should match the start card).
 const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
   worktree,
   serif,
   onOpenChat,
+  finishedBadge,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
   serif: boolean
   onOpenChat?: () => void
+  finishedBadge?: boolean
 }) {
   const running = isSubRunning(sub, tool)
   const [open, setOpen] = useState(true)
-  // The step timeline starts open while running (watch it live) and auto-collapses
-  // once done (prompt + report are the resting view), unless the user pinned it -
-  // the render-phase state-adjustment pattern React endorses over an effect.
-  const [stepsOpen, setStepsOpen] = useState(running)
-  const [stepsToggled, setStepsToggled] = useState(false)
-  const [prevRunning, setPrevRunning] = useState(running)
-  if (prevRunning !== running) {
-    setPrevRunning(running)
-    if (!running && !stepsToggled) setStepsOpen(false)
-  }
+  // The step timeline is collapsed by default (prompt + report are the resting
+  // view); the user expands it to inspect the sub-agent's inner work.
+  const [stepsOpen, setStepsOpen] = useState(false)
 
   const { label, desc } = subLabels(sub, tool)
   const steps = sub.items.length
@@ -1352,6 +1368,11 @@ const SubagentCard = memo(function SubagentCard({
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
+          ) : finishedBadge ? (
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+              <Check className="w-3 h-3" />
+              finished{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
+            </span>
           ) : (
             steps > 0 && (
               <span className="ml-auto shrink-0 text-[10px] text-stone-400 dark:text-stone-500">
@@ -1379,19 +1400,15 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
-                {sub.prompt}
+              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+                <Markdown text={sub.prompt} />
               </div>
             </div>
           )}
-          {report && <SubagentReport report={report} serif={serif} />}
           {steps > 0 && (
             <div>
               <button
-                onClick={() => {
-                  setStepsToggled(true)
-                  setStepsOpen((o) => !o)
-                }}
+                onClick={() => setStepsOpen((o) => !o)}
                 className="flex items-center gap-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
               >
                 <ChevronRight
@@ -1401,11 +1418,12 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
+                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
                 </div>
               </Expandable>
             </div>
           )}
+          {report && <SubagentReport report={report} serif={serif} />}
         </div>
       </Expandable>
     </div>
@@ -1453,13 +1471,13 @@ function SubagentChatView({
           <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
             Prompt
           </div>
-          <div className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
-            {sub.prompt}
+          <div className={`${PANEL_CLASS} break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
+            <Markdown text={sub.prompt} />
           </div>
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
       {running && (
@@ -2241,9 +2259,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   const onStatusUpdateRef = useRef(onStatusUpdate)
   const onDiffRefreshRef = useRef(onDiffRefresh)
+  // The current head status, read from inside the WS reducer closure (which is
+  // pinned to its own render) to decide at replay_done whether a still-"working"
+  // sub-agent is genuinely live or just stale replayed history (item 5).
+  const isTurnRunningRef = useRef(isTurnRunning)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
+    isTurnRunningRef.current = isTurnRunning
   })
 
   useEffect(() => {
@@ -2392,6 +2415,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       thinkingStart = null
       return ms
     }
+    // The wall-clock timestamp of the previously handled transcript event, so a
+    // replayed thought (which never streams, so the live timer above is empty)
+    // can still show "Thought for Xs" - estimated as the gap from the event that
+    // triggered the turn to this assistant message (item 7). Live stdout lines
+    // carry no timestamp, so this stays null there and the live timer is used.
+    let prevEventTs: number | null = null
     const scheduleStreamFlush = () => {
       if (streamTimer != null) return
       streamTimer = setTimeout(() => {
@@ -2417,7 +2446,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const subLocal: Record<string, SubagentView> = {}
     // Per-sub id counter (for inner item React keys) + seen-block set (idempotent
     // block handling, mirroring the main reducer's seenBlocks).
-    const subMeta = new Map<string, { nextId: number; seen: Map<string, Set<string>> }>()
+    const subMeta = new Map<string, { nextId: number; seen: Map<string, Set<string>>; lastTs: number | null }>()
     let subFlushScheduled = false
     const flushSubagents = () => {
       subFlushScheduled = false
@@ -2436,7 +2465,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (!sub) {
         sub = { agentId, status: 'running', items: [] }
         subLocal[agentId] = sub
-        subMeta.set(agentId, { nextId: 1, seen: new Map() })
+        subMeta.set(agentId, { nextId: 1, seen: new Map(), lastTs: null })
       }
       return sub
     }
@@ -2481,11 +2510,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[]) => {
       const resultImages = images.length > 0 ? images : undefined
-      for (const it of sub.items) {
+      // Replace the item with a fresh object (not an in-place mutation): the
+      // memoized ToolCard compares its `item` prop by reference, so mutating the
+      // existing object would leave a finished step stuck showing "running" until
+      // some other state forced a re-render (item: sub-agent step cards).
+      for (let i = 0; i < sub.items.length; i++) {
+        const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
-          it.result = result
-          it.isError = isError
-          it.resultImages = resultImages
+          sub.items[i] = { ...it, result, isError, resultImages }
           return
         }
       }
@@ -2529,6 +2561,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const sub = ensureSubagent(agentId)
       if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
       const meta = subMeta.get(agentId)!
+      // Snapshot the sub's previous event timestamp before advancing, so a
+      // replayed thought can estimate its duration (item 7); mirrors the main
+      // flow's prevEventTs.
+      const evTs = parseEventTs(ev)
+      const prevTs = meta.lastTs
+      if (evTs != null) meta.lastTs = evTs
       if (ev.type === 'user') {
         const content = ev.message?.content
         const takePrompt = (t: string) => {
@@ -2559,7 +2597,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (block.type === 'text' && block.text?.trim()) {
               sub.items.push({ kind: 'assistant', id: meta.nextId++, text: block.text })
             } else if (block.type === 'thinking' && block.thinking?.trim()) {
-              sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking })
+              const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
+              sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
             } else if (block.type === 'tool_use' && block.id) {
               sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
             }
@@ -2791,6 +2830,25 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // render a compact one-line notice instead of the raw XML (item 15).
       if (text.includes('<task-notification>')) {
         const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+        // A background/async sub-agent's completion arrives as this notification,
+        // not a tool_result we settle on (its tool_result was only the launch
+        // boilerplate), so a still-"working" sub would never clear otherwise
+        // (item 8). Match the notification's task-id / tool-use-id to the sub and
+        // mark it done unless the status says it is still going.
+        const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+        const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+        const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+        const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
+        if (!stillRunning && (taskId || noticeToolUse)) {
+          for (const key in subLocal) {
+            const sub = subLocal[key]
+            const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
+            if (matches && sub.status === 'running') {
+              sub.status = 'done'
+              scheduleSubFlush()
+            }
+          }
+        }
         markTurnStart()
         push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
         return
@@ -2842,6 +2900,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         if (ev.type !== 'stream_event') routeSidechain(ev)
         return
       }
+      // Snapshot the prior event's timestamp before advancing it - a replayed
+      // thought reads it to estimate its duration (item 7).
+      const evTs = parseEventTs(ev)
+      const prevTs = prevEventTs
+      if (evTs != null) prevEventTs = evTs
       // The first event carrying a uuid is the oldest loaded so far - the anchor
       // for load-older paging (item 25). Only set once (backfill is oldest-first;
       // a prepend updates it to something older).
@@ -2935,7 +2998,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // Xs" instead of the "Thinking..." indicator just vanishing (item
               // 11). Replayed empty thoughts (no duration) stay hidden so history
               // isn't cluttered with contentless cards.
-              const dur = takeThinkingDuration()
+              let dur = takeThinkingDuration()
+              // Replayed thought (no live timing): estimate its duration from the
+              // gap since the triggering event so history still reads "Thought for
+              // Xs" (item 7). Only for thoughts with visible text, so a contentless
+              // replayed thinking block stays hidden rather than cluttering history.
+              if (dur == null && block.thinking?.trim() && prevTs != null && evTs != null) {
+                dur = Math.max(0, evTs - prevTs)
+              }
               if (block.thinking?.trim() || dur != null) {
                 push({ kind: 'thinking', text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
               }
@@ -3120,6 +3190,25 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
+          // Same for sub-agents (item 5): a sub still marked running after the
+          // whole transcript replayed only stays genuinely live if the head is
+          // mid-turn right now (a reconnect during an active turn). Otherwise -
+          // e.g. after a server restart - the run is long over and never emitted
+          // the settling result, so mark it done (and end its orphaned steps) so
+          // it doesn't read "working" forever.
+          if (!isTurnRunningRef.current) {
+            for (const key in subLocal) {
+              const sub = subLocal[key]
+              if (sub.status !== 'running') continue
+              sub.status = 'done'
+              for (let i = 0; i < sub.items.length; i++) {
+                const it = sub.items[i]
+                if (it.kind === 'tool' && it.result === undefined && !it.ended) {
+                  sub.items[i] = { ...it, ended: true }
+                }
+              }
+            }
+          }
           flush()
           flushSubagents()
           // Anchor the "working" indicator to the running turn's real start
@@ -3832,20 +3921,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         )
       case 'notice': {
         // A "sub-agent finished" notice: when it links to a sub-agent we have,
-        // surface what it reported back as a card (#62), dropped at completion
-        // time so the user needn't scroll up to the launch card. Other notices
-        // (background-task completions etc.) stay as a compact pill.
+        // re-surface it at completion time (so the user needn't scroll up to the
+        // launch card) using the same SubagentCard as the launch, with a
+        // "finished" badge (#62, item 4). Other notices (background-task
+        // completions etc.) stay as a compact pill.
         const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
         if (sub) {
           const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
-          const { label, desc } = subLabels(sub, tool)
           return (
-            <FinishedReportCard
-              label={label}
-              desc={desc}
-              report={subReport(sub, tool)}
+            <SubagentCard
+              sub={sub}
+              tool={tool}
+              worktree={worktreePath}
               serif={serif}
               onOpenChat={() => openSubView(sub.agentId)}
+              finishedBadge
             />
           )
         }

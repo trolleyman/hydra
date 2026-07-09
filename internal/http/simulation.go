@@ -2766,8 +2766,11 @@ var simChatEvents = []string{
 	// $ figure on turn footers; model + slash_commands feed the composer's
 	// model dropdown and / autocomplete.
 	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
-	`{"type":"user","uuid":"sim-real-0","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
+	// Consecutive timestamps here let the replayed thought show "Thought for Xs"
+	// (item 7): the chat estimates the thinking duration from the gap between the
+	// triggering user turn and the assistant message that carried the thought.
+	`{"type":"user","uuid":"sim-real-0","timestamp":"2026-07-09T18:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
+	`{"type":"assistant","timestamp":"2026-07-09T18:00:03.000Z","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"text","text":"I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the ` + "`PUT`" + ` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."}]}}`,
 	// A /model switch early in the chat: the durable transcript records it as a
 	// caveat + /model command echo + a "Set model to ..." stdout sibling, each
@@ -2934,8 +2937,17 @@ func handleSimChatWS(conn *safeConn) {
 			// and the "finished" notice with its View link.
 			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_live_task","content":[{"type":"tool_use","id":"toolu_sim_live_task","name":"Task","input":{"description":"Live docs sweep","subagent_type":"Explore","prompt":"Sweep docs/ for retry guidance and report back."}}]}}`)
 			sendSimChatEvent(conn, `{"type":"user","parent_tool_use_id":"toolu_sim_live_task","session_id":"sim-chat","message":{"role":"user","content":[{"type":"text","text":"Sweep docs/ for retry guidance and report back."}]}}`)
+			// An inner tool step that starts "running" and must clear live once its
+			// result lands (item: sub-agent step cards must not stay stuck running).
+			sendSimChatEvent(conn, `{"type":"assistant","parent_tool_use_id":"toolu_sim_live_task","message":{"id":"msg_sim_live_sub_1","content":[{"type":"tool_use","id":"toolu_sim_live_grep","name":"Grep","input":{"pattern":"backoff","path":"docs"}}]}}`)
 			time.Sleep(1500 * time.Millisecond)
-			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_task","content":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff)."}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","parent_tool_use_id":"toolu_sim_live_task","session_id":"sim-chat","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_grep","content":"docs/retry.md:12: jittered exponential backoff"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","parent_tool_use_id":"toolu_sim_live_task","message":{"id":"msg_sim_live_sub_2","content":[{"type":"text","text":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff); the giving-up path is undocumented."}]}}`)
+			time.Sleep(800 * time.Millisecond)
+			// The parent tool_result echoes the sub's final message verbatim - the
+			// chat must not then show that message twice (once as a step, once as
+			// the report).
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_task","content":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff); the giving-up path is undocumented."}]}}`)
 			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":1600,"session_id":"sim-chat"}`)
 			return
 		}
