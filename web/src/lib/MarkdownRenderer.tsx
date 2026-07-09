@@ -190,7 +190,7 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
     ul: ({ children, className }) => (
       <ul className={`${s.ul}${className?.includes('contains-task-list') ? ' list-none pl-0' : ''}`}>{children}</ul>
     ),
-    ol: ({ children }) => <ol className={s.ol}>{children}</ol>,
+    ol: ({ children, start }) => <ol className={s.ol} start={start}>{children}</ol>,
     li: ({ children }) => <li className={s.li}>{children}</li>,
     blockquote: ({ children }) => <blockquote className={s.blockquote}>{children}</blockquote>,
     hr: () => <hr className={s.hr} />,
