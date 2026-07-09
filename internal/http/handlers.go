@@ -1926,6 +1926,41 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	return api.RestartAgent200JSONResponse(agentResponse(*newHead)), nil
 }
 
+// ResumeAgent revives an archived (killed/merged) agent: it recreates the
+// worktree+branch off the current base, un-archives the record, and relaunches
+// the agent so it continues from its saved conversation transcript. Unlike
+// RestartAgent (a fresh respawn), this preserves the prior conversation - see
+// heads.ResumeArchivedHead / PLAN #49.
+func (s *Server) ResumeAgent(ctx context.Context, request api.ResumeAgentRequestObject) (api.ResumeAgentResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: resume archived agent request: id=%q, project=%q", request.Id, projectRoot)
+
+	newHead, err := heads.ResumeArchivedHead(ctx, s.Sessions, s.DB, projectRoot, request.Id, 0, 0)
+	if err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			return api.ResumeAgent409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: "operation already in progress",
+			}, nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+	if newHead == nil {
+		return api.ResumeAgent404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "archived agent not found",
+		}, nil
+	}
+
+	s.notifyAgentsChanged(projectRoot, true)
+	return api.ResumeAgent200JSONResponse(agentResponse(*newHead)), nil
+}
+
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {

@@ -421,6 +421,18 @@ func (s *Store) ArchiveAgent(id, endState string) error {
 	return errtrace.Wrap(s.db.Delete(&Agent{}, "id = ?", id).Error)
 }
 
+// UnarchiveAgent restores a soft-deleted (archived) agent to an active state so
+// it can be resumed: it clears deleted_at and end_state and resets the transient
+// session/operation fields, while preserving the rest of the record (prompt,
+// title, review link, and the last-known AgentStatus the resume nudge reads).
+// Select lists the fields by Go name so their zero-value resets are written
+// (a plain struct Updates would skip them) and the column names stay in sync.
+func (s *Store) UnarchiveAgent(id string) error {
+	return errtrace.Wrap(s.db.Unscoped().Model(&Agent{}).Where("id = ?", id).
+		Select("DeletedAt", "EndState", "SessionStatus", "SessionPID", "HeadStatus", "LastError").
+		Updates(&Agent{SessionStatus: "pending", HeadStatus: "idle"}).Error)
+}
+
 // ListArchivedAgents returns a page of archived (soft-deleted, non-ephemeral,
 // with a recorded EndState) agents for the project, newest-created first - i.e.
 // ordered by the same creation timestamp the UI shows for each agent, matching

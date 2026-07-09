@@ -116,7 +116,31 @@ const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: s
 // "Resume" affordance is shown but not yet wired - see PLAN #49.
 function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentResponse; projectId: string | null; onPurged: (id: string) => void }) {
   const [purging, setPurging] = useState(false)
+  const [resuming, setResuming] = useState(false)
+  const navigate = useNavigate()
   const endBadge = archivedEndStateBadge(agent.end_state)
+
+  // Resume revives the archived head: the backend recreates its worktree+branch
+  // off the current base and relaunches the agent continuing from its saved
+  // conversation (the file changes start fresh). On success the head moves from
+  // the archived history into the live list and we open its live page.
+  async function handleResume() {
+    setResuming(true)
+    try {
+      const revived = await api.default.resumeAgent(projectId ?? '', agent.id)
+      useAgentStore.getState().removeArchived(agent.id)
+      useAgentStore.getState().addAgent(revived)
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: projectId ?? '', agentId: agent.id } })
+    } catch (e) {
+      useDialogStore.getState().show({
+        title: 'Resume Failed',
+        message: formatError(e),
+        type: 'error',
+      })
+    } finally {
+      setResuming(false)
+    }
+  }
 
   function handlePurge() {
     useDialogStore.getState().show({
@@ -189,20 +213,22 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         {/* Prompt */}
         {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
 
-        {/* Grayed-out terminal placeholder with a (not-yet-wired) Resume button. */}
+        {/* Grayed-out terminal placeholder with Resume / Delete actions. */}
         <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-8 flex flex-col items-center justify-center text-center gap-3">
           <TerminalSquare className="w-8 h-8 text-gray-300 dark:text-gray-600" />
           <div className="text-sm text-gray-500 dark:text-gray-400">
-            This agent was {endBadge.label}. Its session, worktree and branch were removed,
-            so there is no live terminal or diff to show.
+            This agent was {endBadge.label}. Its session, worktree and branch were removed.
+            Resume recreates its worktree off the current base and continues from its saved
+            conversation - the code changes start fresh.
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <Tooltip content="Resuming archived agents isn't available yet (see PLAN #49)">
+            <Tooltip content="Recreate this agent's worktree and continue from its saved conversation">
               <button
-                disabled
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500 cursor-not-allowed"
+                onClick={handleResume}
+                disabled={resuming}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                {resuming ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                 Resume agent
               </button>
             </Tooltip>

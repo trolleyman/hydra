@@ -660,6 +660,10 @@ func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, 
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
+func (s *SimulationServer) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
 func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.MergeAgentParams) {
 	w.WriteHeader(http.StatusNoContent)
 }

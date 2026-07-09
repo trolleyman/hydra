@@ -341,6 +341,32 @@ export class DefaultService {
         });
     }
     /**
+     * Resume an archived (killed/merged) agent, restoring its conversation
+     * Revives a killed or merged agent: recreates its worktree and branch off the current base, un-archives the record, and relaunches the agent so it continues from its saved conversation transcript (the file changes start fresh on a clean branch). Depends on the host conversation transcript still existing.
+     * @param projectId Project ID
+     * @param id
+     * @returns AgentResponse OK (Agent resumed, revived live agent returned)
+     * @throws ApiError
+     */
+    public resumeAgent(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/resume',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found (no archived agent with that ID)`,
+                409: `Conflict (operation already in progress)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
      * @param projectId Project ID
      * @param id

@@ -242,6 +242,71 @@ func TestCreateAgentRefusesTakenID(t *testing.T) {
 	}
 }
 
+func TestUnarchiveAgent(t *testing.T) {
+	store := newTestStore(t)
+
+	orig := &Agent{
+		ID:              "head",
+		ProjectPath:     "/tmp/proj",
+		AgentType:       "claude",
+		Prompt:          "do the thing",
+		Title:           "Do the thing",
+		BaseBranch:      "main",
+		AgentStatus:     strptr("running"),
+		AgentStatusTime: "2026-07-09T00:00:00Z",
+		SessionPID:      4242,
+		LastError:       strptr("boom"),
+	}
+	mustArchive(t, store, orig, "killed")
+
+	// Precondition: it is archived and hidden from the active view.
+	if a, err := store.GetAgent("head"); err != nil || a != nil {
+		t.Fatalf("archived head should be hidden from GetAgent: (%+v, %v)", a, err)
+	}
+	if a, err := store.GetArchivedAgent("head"); err != nil || a == nil {
+		t.Fatalf("archived head should be listed by GetArchivedAgent: (%+v, %v)", a, err)
+	}
+
+	if err := store.UnarchiveAgent("head"); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+
+	// It is active again (not in the archived list, visible to GetAgent).
+	if a, err := store.GetArchivedAgent("head"); err != nil || a != nil {
+		t.Fatalf("unarchived head should no longer be archived: (%+v, %v)", a, err)
+	}
+	a, err := store.GetAgent("head")
+	if err != nil || a == nil {
+		t.Fatalf("unarchived head should be active: (%+v, %v)", a, err)
+	}
+
+	// Transient session/operation fields are reset...
+	if a.EndState != "" {
+		t.Errorf("end_state: got %q, want empty", a.EndState)
+	}
+	if a.SessionStatus != "pending" {
+		t.Errorf("session_status: got %q, want pending", a.SessionStatus)
+	}
+	if a.SessionPID != 0 {
+		t.Errorf("session_pid: got %d, want 0", a.SessionPID)
+	}
+	if a.HeadStatus != "idle" {
+		t.Errorf("head_status: got %q, want idle", a.HeadStatus)
+	}
+	if a.LastError != nil {
+		t.Errorf("last_error: got %v, want nil", a.LastError)
+	}
+
+	// ...while the identity + the last-known AgentStatus the resume nudge reads
+	// are preserved.
+	if a.Prompt != "do the thing" || a.Title != "Do the thing" || a.BaseBranch != "main" {
+		t.Errorf("identity fields not preserved: %+v", a)
+	}
+	if a.AgentStatus == nil || *a.AgentStatus != "running" {
+		t.Errorf("agent_status not preserved: %v", a.AgentStatus)
+	}
+}
+
 func TestGetAgentAny(t *testing.T) {
 	store := newTestStore(t)
 
