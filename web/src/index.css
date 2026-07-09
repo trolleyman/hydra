@@ -280,6 +280,11 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 .chat-serif strong,
 .chat-serif b {
   font-weight: 700; /* Georgia's real bold face - no synthesized-weight size drift */
+  /* Georgia's bold is a heavy face that reads a touch larger than the regular
+     text around it (more so on systems that substitute a different serif for
+     Georgia, e.g. Linux). A small size trim pulls bold back to the same visual
+     size as the body so it reads as emphasis, not as bigger text. */
+  font-size: 0.94em;
 }
 
 /* New live chat items (messages, tool cards, the streamed block) ease in with
