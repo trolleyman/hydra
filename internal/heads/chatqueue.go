@@ -349,6 +349,23 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 	m.drainAll(root, id)
 }
 
+// OnPlanApproval auto-approves an ExitPlanMode plan-approval gate: a chat-mode
+// head runs with --permission-prompt-tool stdio, so when it leaves plan mode the
+// CLI emits a can_use_tool control_request and blocks the turn until it's
+// answered. Nothing answers it (the plan renders as an informational card in the
+// UI, with no approve button), so the head would hang forever. Approve it here by
+// writing the allow control_response straight to the CLI's stdin - the same
+// autonomous stance the terminal-mode PermissionRequest hook already takes
+// (trigger_hook.go): the user never opted into plan mode, and a Hydra head runs
+// fully autonomously in a throwaway sandbox + worktree, so there's nothing for
+// the gate to guard. Done daemon-side (not in the browser) so it fires even with
+// no client attached - a head resumed after a restart keeps moving on its own.
+func (m *ChatQueueManager) OnPlanApproval(id, requestID string, input json.RawMessage) {
+	if err := m.reg.Write(id, claudestream.ApproveToolLine(requestID, input)); err != nil {
+		log.Printf("warn: chat queue: auto-approve plan for %s: %v", id, err)
+	}
+}
+
 // OnAttach handles a client (re)connecting: if the head is sitting idle with a
 // queue that no future turn-end will drain (e.g. a queue restored from disk
 // after a daemon restart), send the front now. A running/starting head, or one

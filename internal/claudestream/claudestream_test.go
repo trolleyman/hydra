@@ -132,6 +132,93 @@ func TestControlResponseLine(t *testing.T) {
 	}
 }
 
+func TestParseToolPermissionRequest(t *testing.T) {
+	// A can_use_tool control_request for ExitPlanMode is recognised, with its
+	// request_id, tool name and input surfaced.
+	line := []byte(`{"type":"control_request","request_id":"req_7","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","tool_use_id":"t9","input":{"plan":"do the thing"}}}`)
+	req, ok := ParseToolPermissionRequest(line)
+	if !ok {
+		t.Fatalf("ParseToolPermissionRequest ok=false, want true")
+	}
+	if req.RequestID != "req_7" || req.ToolName != "ExitPlanMode" {
+		t.Errorf("parsed %+v", req)
+	}
+	if string(req.Input) != `{"plan":"do the thing"}` {
+		t.Errorf("input = %s", req.Input)
+	}
+
+	// Non-matching lines: a different control subtype, a non-control event, and
+	// malformed JSON all report ok=false.
+	for _, bad := range []string{
+		`{"type":"control_request","request_id":"r","request":{"subtype":"interrupt"}}`,
+		`{"type":"control_request","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode"}}`, // no request_id
+		`{"type":"assistant","message":{"content":[]}}`,
+		`{"broken"`,
+	} {
+		if _, ok := ParseToolPermissionRequest([]byte(bad)); ok {
+			t.Errorf("ParseToolPermissionRequest(%s) ok=true, want false", bad)
+		}
+	}
+}
+
+func TestApproveToolLine(t *testing.T) {
+	line := ApproveToolLine("req_7", json.RawMessage(`{"plan":"p"}`))
+	var msg struct {
+		Type     string `json:"type"`
+		Response struct {
+			Subtype   string `json:"subtype"`
+			RequestID string `json:"request_id"`
+			Response  struct {
+				Behavior     string          `json:"behavior"`
+				UpdatedInput json.RawMessage `json:"updatedInput"`
+			} `json:"response"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		t.Fatalf("unmarshal %s: %v", line, err)
+	}
+	if msg.Type != "control_response" || msg.Response.Subtype != "success" || msg.Response.RequestID != "req_7" {
+		t.Errorf("envelope: %s", line)
+	}
+	if msg.Response.Response.Behavior != "allow" {
+		t.Errorf("behavior = %q, want allow", msg.Response.Response.Behavior)
+	}
+	if string(msg.Response.Response.UpdatedInput) != `{"plan":"p"}` {
+		t.Errorf("updatedInput = %s", msg.Response.Response.UpdatedInput)
+	}
+	if line[len(line)-1] != '\n' {
+		t.Error("line not newline-terminated")
+	}
+
+	// A nil/invalid input degrades to an empty object rather than emitting
+	// invalid JSON.
+	line = ApproveToolLine("r", nil)
+	if !strings.Contains(string(line), `"updatedInput":{}`) {
+		t.Errorf("nil input line = %s", line)
+	}
+}
+
+func TestRingFilterOnPlanApproval(t *testing.T) {
+	var got []string
+	f := &RingFilter{OnPlanApproval: func(requestID string, _ json.RawMessage) {
+		got = append(got, requestID)
+	}}
+
+	// An ExitPlanMode can_use_tool control_request fires OnPlanApproval and is
+	// still persisted to the ring (the client renders the plan card from it).
+	kept := f.Filter([]byte(`{"type":"control_request","request_id":"req_1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"x"}}}` + "\n"))
+	if len(kept) == 0 {
+		t.Error("control_request line should still be persisted to the ring")
+	}
+	// A can_use_tool request for a different tool (AskUserQuestion, answered by
+	// the client) does NOT auto-approve; nor do ordinary lines.
+	f.Filter([]byte(`{"type":"control_request","request_id":"req_2","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{}}}` + "\n"))
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"))
+	if len(got) != 1 || got[0] != "req_1" {
+		t.Fatalf("OnPlanApproval fired %v, want [req_1]", got)
+	}
+}
+
 func TestParseEventAPIError(t *testing.T) {
 	line := []byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}]}}`)
 	ev, ok := ParseEvent(line)
