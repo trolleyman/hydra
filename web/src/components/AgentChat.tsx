@@ -124,6 +124,10 @@ interface SubagentView {
   // 'running' until a sidechain result (or the turn's result) settles it; for a
   // Task-linked sub the parent tool_result is the more precise done signal.
   status: 'running' | 'done'
+  // A background/async sub-agent (its Task tool_result was only the launch
+  // boilerplate). It runs on past the turn that launched it, so the turn's
+  // result must NOT settle it - only its own <task-notification> completion does.
+  background?: boolean
   items: ChatItem[]
 }
 
@@ -1407,7 +1411,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+              <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -1478,7 +1482,7 @@ function SubagentChatView({
           <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
             Prompt
           </div>
-          <div className={`${PANEL_CLASS} break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
+          <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
@@ -2484,6 +2488,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
+    // Task tool_use ids whose tool_result was the async-launch boilerplate: their
+    // sub-agents run in the background, past the launching turn, so a turn result
+    // never settles them (only their <task-notification> does). Tracked as a set
+    // because the boilerplate result can arrive before the sub is even created.
+    const backgroundToolUses = new Set<string>()
+    const markBackground = (sub: SubagentView, toolUseId: string) => {
+      if (toolUseId && backgroundToolUses.has(toolUseId)) sub.background = true
+    }
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
@@ -2494,6 +2506,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (description) sub.description = description
       if (toolUseId) {
         sub.toolUseId = toolUseId
+        markBackground(sub, toolUseId)
         toolUseToSub.set(toolUseId, agentId)
         // Absorb the placeholder accumulated from live parent_tool_use_id-only
         // lines, now that the meta names the real sub-agent.
@@ -2501,6 +2514,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const ph = subLocal[phKey]
         if (ph && phKey !== agentId) {
           if (!sub.prompt && ph.prompt) sub.prompt = ph.prompt
+          if (ph.background) sub.background = true
           const meta = subMeta.get(agentId)!
           for (const it of ph.items) sub.items.push({ ...it, id: meta.nextId++ } as ChatItem)
           if (ph.status === 'done' && sub.status === 'running') sub.status = 'done'
@@ -2545,7 +2559,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // background/async agent's result is only the launch boilerplate, though, so
     // it settles nothing - that sub stays running until its sidechain result.
     const settleSubagentByToolUse = (toolUseId: string, result: string) => {
-      if (isLaunchBoilerplate(result)) return
+      if (isLaunchBoilerplate(result)) {
+        // Not a completion - it just tells us this is a background/async sub.
+        // Flag it (and any sub already linked, incl. a live placeholder) so the
+        // turn's result won't settle it early; it ends via its task-notification.
+        backgroundToolUses.add(toolUseId)
+        for (const key in subLocal) {
+          if (subLocal[key].toolUseId === toolUseId) subLocal[key].background = true
+        }
+        return
+      }
       for (const key in subLocal) {
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
@@ -2601,6 +2624,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
       const sub = ensureSubagent(agentId)
       if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
+      if (parentTool) markBackground(sub, parentTool)
       const meta = subMeta.get(agentId)!
       // Snapshot the sub's previous event timestamp before advancing, so a
       // replayed thought can estimate its duration (item 7); mirrors the main
@@ -3154,11 +3178,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // the turn's pending synthesized footer.
           turnStopReasonRef.current = null
           discardHistFooter()
-          // A turn ends only once all its sub-agents have; settle any still
-          // marked running (a sub whose own result line we never saw).
+          // A synchronous sub-agent finishes within the turn that launched it, so
+          // a turn ending settles any still marked running (a sub whose own result
+          // line we never saw). A BACKGROUND sub-agent, though, outlives its
+          // launching turn - settling it here would wrongly flip it to "finished"
+          // while it is still working; it ends only via its <task-notification>.
           let changed = false
           for (const k in subLocal) {
-            if (subLocal[k].status === 'running') {
+            if (subLocal[k].status === 'running' && !subLocal[k].background) {
               subLocal[k].status = 'done'
               changed = true
             }
@@ -3234,11 +3261,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // mid-turn right now (a reconnect during an active turn). Otherwise -
           // e.g. after a server restart - the run is long over and never emitted
           // the settling result, so mark it done (and end its orphaned steps) so
-          // it doesn't read "working" forever.
+          // it doesn't read "working" forever. A BACKGROUND sub is the exception:
+          // it runs independently of any turn, and its completion notification is
+          // now backfilled (so a finished one already settled above) - a still-
+          // running one is genuinely live, so leave it be.
           if (!isTurnRunningRef.current) {
             for (const key in subLocal) {
               const sub = subLocal[key]
-              if (sub.status !== 'running') continue
+              if (sub.status !== 'running' || sub.background) continue
               sub.status = 'done'
               for (let i = 0; i < sub.items.length; i++) {
                 const it = sub.items[i]

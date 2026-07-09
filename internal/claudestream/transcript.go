@@ -305,13 +305,13 @@ var taskNotificationMarker = []byte("<task-notification>")
 // completion only through one of these, which the CLI writes into the main
 // transcript - as a queue-operation entry and an attachment entry - while the
 // parent turn sits idle. Those entries never reach the parent process stdout
-// (so the live stdout relay never sees them), and the main transcript is
-// otherwise read only by the attach-time backfill, which keeps just
-// user/assistant lines (see tailTranscript). Without this tail a finished
-// background sub-agent's card would keep reading "working" until the next turn
-// consumed the notification (or a reconnect settled it via the replay_done
-// fallback). Only the notification-bearing lines are returned; every other main
-// line already arrives via stdout + backfill.
+// (so the live stdout relay never sees them). The attach-time backfill does now
+// relay them (see tailTranscript) - which settles a background sub that had
+// already finished when the client connected - but a sub that finishes DURING a
+// live connection is only caught here. Without this tail such a sub would keep
+// reading "working" until the next turn consumed the notification. Only the
+// notification-bearing lines are returned; every other main line already arrives
+// via stdout + backfill.
 type NotificationTailer struct {
 	claudeProjectDir string
 	path             string
@@ -481,7 +481,14 @@ func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]
 		if ev.UUID != "" {
 			uuids[ev.UUID] = struct{}{}
 		}
-		if (ev.IsSidechain && !keepSidechain) || (ev.Type != "user" && ev.Type != "assistant") {
+		// Conversation lines (user/assistant, minus sidechains unless a sub-agent's
+		// own backfill) plus any <task-notification> record: a background/async
+		// sub-agent's completion is only ever one of those bookkeeping records
+		// (queue-operation/attachment), so relaying them here lets a reconnect
+		// settle a finished background sub - which the client can't otherwise tell
+		// from a still-running one after its live signal is gone.
+		isConversation := (!ev.IsSidechain || keepSidechain) && (ev.Type == "user" || ev.Type == "assistant")
+		if !isConversation && !bytes.Contains(line, taskNotificationMarker) {
 			continue
 		}
 		cp := make([]byte, len(line))

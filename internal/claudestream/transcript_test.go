@@ -43,6 +43,7 @@ func TestTailTranscript(t *testing.T) {
 		`{"type":"user","message":{"role":"user","content":[]},"uuid":"side1","isSidechain":true}`,
 		`not json at all`,
 		`{"type":"assistant","message":{"id":"m2","content":[]},"uuid":"a2"}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -52,8 +53,11 @@ func TestTailTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TailTranscript: %v", err)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("relayed %d lines, want 3 (user + 2 assistant, no summary/sidechain/garbage): %s", len(lines), lines)
+	if len(lines) != 4 {
+		t.Fatalf("relayed %d lines, want 4 (user + 2 assistant + task-notification, no summary/sidechain/garbage): %s", len(lines), lines)
+	}
+	if !bytes.Contains(lines[3], []byte("<task-notification>")) {
+		t.Errorf("backfill dropped the task-notification line: %q", lines)
 	}
 	for _, u := range []string{"s1", "u1", "a1", "side1", "a2"} {
 		if _, ok := uuids[u]; !ok {
@@ -69,7 +73,7 @@ func TestTailTranscript(t *testing.T) {
 		t.Fatalf("TailTranscript capped: %v", err)
 	}
 	for _, l := range lines {
-		if ev, ok := ParseEvent(l); !ok || ev.UUID == "" {
+		if _, ok := ParseEvent(l); !ok {
 			t.Errorf("capped tail returned a non-parseable line: %q", l)
 		}
 	}
