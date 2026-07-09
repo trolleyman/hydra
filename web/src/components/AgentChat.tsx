@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Circle,
   CircleStop,
+  ClipboardList,
   FilePen,
   FileText,
   Globe,
@@ -506,6 +507,20 @@ function parseTaskUpdate(
   }
 }
 
+// parseExitPlan reads an ExitPlanMode input ({plan, planFilePath}) - the plan
+// markdown the agent proposes when leaving plan mode, plus the file it was
+// written to. Returns the markdown and the file's basename (the long absolute
+// planFilePath is noise as a header), or null for anything malformed so the
+// call falls back to a normal tool card.
+function parseExitPlan(input: unknown): { plan: string; fileName: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  if (typeof o.plan !== 'string' || !o.plan.trim()) return null
+  const path = typeof o.planFilePath === 'string' ? o.planFilePath : ''
+  const fileName = path ? path.split('/').pop() || path : ''
+  return { plan: o.plan, fileName }
+}
+
 // PlanPanel floats the agent's current to-do list (its latest TodoWrite) in the
 // chat's top-right corner (item 17): a compact card that expands to the checklist
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
@@ -770,8 +785,11 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryMono = !mem && !isPathSummary && !(isBash && description)
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
-  // is already in the header. Bash shows its Command panel unlabelled (item 13).
-  const hideInput = simpleRead
+  // is already in the header - and for a tool with no arguments at all (an empty
+  // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
+  // its Command panel unlabelled (item 13).
+  const emptyInput = input == null || Object.keys(input).length === 0
+  const hideInput = simpleRead || emptyInput
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -863,6 +881,70 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                 </div>
               )}
             </>
+          )}
+        </div>
+      </Expandable>
+    </div>
+  )
+})
+
+// PlanCard renders an ExitPlanMode tool call: the agent's proposed plan shown
+// as rendered markdown (not the raw JSON a generic tool card would show),
+// headed by the plan file's basename (e.g. "compressed-sleeping-flame.md")
+// rather than its long absolute path. Expanded by default so the plan is
+// readable at a glance; a Raw toggle exposes the underlying tool-call JSON,
+// mirroring ToolCard. memo'd for the same reason as ToolCard (item 16).
+const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
+  const [open, setOpen] = useState(true)
+  const [showRaw, setShowRaw] = useState(false)
+  const parsed = useMemo(() => parseExitPlan(item.input), [item.input])
+  const rawJson = useMemo(() => {
+    if (!showRaw) return ''
+    const raw: Record<string, unknown> = { input: item.input }
+    if (item.result !== undefined) raw.result = item.result
+    return JSON.stringify(raw, null, 2)
+  }, [showRaw, item.input, item.result])
+  // A malformed ExitPlanMode input (no plan text) falls back to the generic card.
+  if (!parsed) return <ToolCard item={item} worktree={null} />
+
+  return (
+    <div className="rounded-lg border border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03] text-xs overflow-hidden">
+      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <ClipboardList className="w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500" />
+          <span className="font-medium shrink-0">Plan</span>
+          {parsed.fileName && (
+            <span className="truncate font-mono text-stone-400 dark:text-stone-500">{parsed.fileName}</span>
+          )}
+        </button>
+        {open && (
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              showRaw
+                ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
+                : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
+            }`}
+            title="Toggle the raw tool-call JSON"
+          >
+            Raw
+          </button>
+        )}
+      </div>
+      <Expandable open={open}>
+        <div className="px-2.5 pb-2">
+          {showRaw ? (
+            <CodePanel code={rawJson} lang="json" />
+          ) : (
+            <div className="rounded-md border border-stone-200/70 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] px-3 py-1.5">
+              <Markdown text={parsed.plan} />
+            </div>
           )}
         </div>
       </Expandable>
@@ -1011,7 +1093,11 @@ function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktre
         it.kind === 'thinking' ? (
           <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
         ) : it.kind === 'tool' ? (
-          <ToolCard key={it.id} item={it} worktree={worktree} />
+          it.name === 'ExitPlanMode' ? (
+            <PlanCard key={it.id} item={it} />
+          ) : (
+            <ToolCard key={it.id} item={it} worktree={worktree} />
+          )
         ) : it.kind === 'assistant' ? (
           <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={it.text} />
@@ -3398,6 +3484,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return (
             <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
           )
+        // ExitPlanMode gets a dedicated card that renders the plan markdown.
+        if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
         return <ToolCard item={item} worktree={worktreePath} />
       }
       case 'subagent': {
