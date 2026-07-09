@@ -963,7 +963,36 @@ func StopSessionAndWait(reg *session.Registry, id string, timeout time.Duration)
 	}
 }
 
+// resumeLocks serializes resumes per head id. Several paths can race to resume
+// the same head (two attaching clients, the pane's auto-reconnect, the
+// auto-restart watcher); without the lock each spawns its own agent process and
+// all but the registry winner leak unmanaged inside the supervisor.
+var resumeLocks = struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}{m: map[string]*sync.Mutex{}}
+
+func resumeLock(id string) *sync.Mutex {
+	resumeLocks.mu.Lock()
+	defer resumeLocks.mu.Unlock()
+	lk := resumeLocks.m[id]
+	if lk == nil {
+		lk = &sync.Mutex{}
+		resumeLocks.m[id] = lk
+	}
+	return lk
+}
+
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
+	lk := resumeLock(head.ID)
+	lk.Lock()
+	defer lk.Unlock()
+	// A concurrent resume won while we waited on the lock: the head is live,
+	// nothing to do.
+	if reg.IsLive(head.ID) {
+		return nil
+	}
+
 	worktreePath := projectRoot
 	if head.Worktree != nil {
 		worktreePath = *head.Worktree
@@ -1261,6 +1290,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 	// single bwrap owning the writable COW overlay is no longer needed. Unconditional
 	// so a failed kill still reclaims it.
 	removeNamespaceHost(head.ID)
+
+	// The head is gone; its auto-restart history has nothing left to guard.
+	autoRestarts.forget(head.ID)
 
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {
