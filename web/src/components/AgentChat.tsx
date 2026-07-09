@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Circle,
   CircleStop,
+  ClipboardList,
   FilePen,
   FileText,
   Globe,
@@ -33,6 +34,7 @@ import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
@@ -513,6 +515,20 @@ function parseTaskUpdate(
   }
 }
 
+// parseExitPlan reads an ExitPlanMode input ({plan, planFilePath}) - the plan
+// markdown the agent proposes when leaving plan mode, plus the file it was
+// written to. Returns the markdown and the file's basename (the long absolute
+// planFilePath is noise as a header), or null for anything malformed so the
+// call falls back to a normal tool card.
+function parseExitPlan(input: unknown): { plan: string; fileName: string } | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  if (typeof o.plan !== 'string' || !o.plan.trim()) return null
+  const path = typeof o.planFilePath === 'string' ? o.planFilePath : ''
+  const fileName = path ? path.split('/').pop() || path : ''
+  return { plan: o.plan, fileName }
+}
+
 // PlanPanel floats the agent's current to-do list (its latest TodoWrite) in the
 // chat's top-right corner (item 17): a compact card that expands to the checklist
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
@@ -777,8 +793,11 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryMono = !mem && !isPathSummary && !(isBash && description)
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
-  // is already in the header. Bash shows its Command panel unlabelled (item 13).
-  const hideInput = simpleRead
+  // is already in the header - and for a tool with no arguments at all (an empty
+  // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
+  // its Command panel unlabelled (item 13).
+  const emptyInput = input == null || Object.keys(input).length === 0
+  const hideInput = simpleRead || emptyInput
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -870,6 +889,70 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                 </div>
               )}
             </>
+          )}
+        </div>
+      </Expandable>
+    </div>
+  )
+})
+
+// PlanCard renders an ExitPlanMode tool call: the agent's proposed plan shown
+// as rendered markdown (not the raw JSON a generic tool card would show),
+// headed by the plan file's basename (e.g. "compressed-sleeping-flame.md")
+// rather than its long absolute path. Expanded by default so the plan is
+// readable at a glance; a Raw toggle exposes the underlying tool-call JSON,
+// mirroring ToolCard. memo'd for the same reason as ToolCard (item 16).
+const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
+  const [open, setOpen] = useState(true)
+  const [showRaw, setShowRaw] = useState(false)
+  const parsed = useMemo(() => parseExitPlan(item.input), [item.input])
+  const rawJson = useMemo(() => {
+    if (!showRaw) return ''
+    const raw: Record<string, unknown> = { input: item.input }
+    if (item.result !== undefined) raw.result = item.result
+    return JSON.stringify(raw, null, 2)
+  }, [showRaw, item.input, item.result])
+  // A malformed ExitPlanMode input (no plan text) falls back to the generic card.
+  if (!parsed) return <ToolCard item={item} worktree={null} />
+
+  return (
+    <div className="rounded-lg border border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03] text-xs overflow-hidden">
+      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <ClipboardList className="w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500" />
+          <span className="font-medium shrink-0">Plan</span>
+          {parsed.fileName && (
+            <span className="truncate font-mono text-stone-400 dark:text-stone-500">{parsed.fileName}</span>
+          )}
+        </button>
+        {open && (
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              showRaw
+                ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
+                : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
+            }`}
+            title="Toggle the raw tool-call JSON"
+          >
+            Raw
+          </button>
+        )}
+      </div>
+      <Expandable open={open}>
+        <div className="px-2.5 pb-2">
+          {showRaw ? (
+            <CodePanel code={rawJson} lang="json" />
+          ) : (
+            <div className="rounded-md border border-stone-200/70 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] px-3 py-1.5">
+              <Markdown text={parsed.plan} />
+            </div>
           )}
         </div>
       </Expandable>
@@ -1030,7 +1113,11 @@ function SubagentTimeline({
         it.id === skipId ? null : it.kind === 'thinking' ? (
           <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
         ) : it.kind === 'tool' ? (
-          <ToolCard key={it.id} item={it} worktree={worktree} />
+          it.name === 'ExitPlanMode' ? (
+            <PlanCard key={it.id} item={it} />
+          ) : (
+            <ToolCard key={it.id} item={it} worktree={worktree} />
+          )
         ) : it.kind === 'assistant' ? (
           <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={it.text} />
@@ -1512,6 +1599,48 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
+// deriveAnswered reconstructs which options (and any free-text "Other") each
+// question resolved to, from the recorded tool_result text. On a resume the
+// card's local selection state is gone - all we have is the durable result,
+// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
+// shape the real CLI's AskUserQuestion result produces, mirrored by the
+// simulation). Matching those labels back to option indices lets a replayed
+// card highlight the chosen options just as it did right after answering.
+function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+  const selected = specs.map(() => new Set<number>())
+  const other = specs.map(() => '')
+  specs.forEach((q, qi) => {
+    const needle = `"${q.question}"="`
+    const start = answeredText.indexOf(needle)
+    if (start === -1) return
+    const from = start + needle.length
+    const end = answeredText.indexOf('"', from)
+    if (end === -1) return
+    // The labels were joined with ", " (see submit()). Consume the value left to
+    // right, matching whole option labels (longest first, so a label that itself
+    // contains ", " isn't mistaken for two) and dropping anything else into the
+    // free-text "Other" field.
+    let rest = answeredText.slice(from, end)
+    const extras: string[] = []
+    while (rest.length > 0) {
+      const match = q.options
+        .map((o) => o.label)
+        .filter((l) => rest === l || rest.startsWith(l + ', '))
+        .sort((a, b) => b.length - a.length)[0]
+      if (match != null) {
+        selected[qi].add(q.options.findIndex((o) => o.label === match))
+        rest = rest.slice(match.length).replace(/^, /, '')
+      } else {
+        const sep = rest.indexOf(', ')
+        extras.push(sep === -1 ? rest : rest.slice(0, sep))
+        rest = sep === -1 ? '' : rest.slice(sep + 2)
+      }
+    }
+    if (extras.length) other[qi] = extras.join(', ')
+  })
+  return { selected, other }
+}
+
 function QuestionCard({
   specs,
   disabled,
@@ -1530,6 +1659,19 @@ function QuestionCard({
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
+
+  // On a resume the card mounts already-answered with no local selection - and
+  // the same holds if it was answered in another tab. Recover the chosen
+  // options from the recorded result so the settled card highlights them just
+  // as it did right after answering. A live answer in this tab keeps its own
+  // local selection, so only fall back when nothing was picked here.
+  const derived = useMemo(
+    () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
+    [specs, answeredText],
+  )
+  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const showSelected = derived && localEmpty ? derived.selected : selected
+  const showOther = derived && localEmpty ? derived.other : other
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -1576,7 +1718,7 @@ function QuestionCard({
           </div>
           <div className="space-y-1">
             {q.options.map((o, oi) => {
-              const isSel = selected[qi].has(oi)
+              const isSel = showSelected[qi].has(oi)
               return (
                 <button
                   key={oi}
@@ -1608,7 +1750,7 @@ function QuestionCard({
             })}
             <input
               type="text"
-              value={other[qi]}
+              value={showOther[qi]}
               onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
               disabled={answered}
               placeholder="Other..."
@@ -2010,6 +2152,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [minRows, setMinRows] = useState(() => {
     const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+  })
+  // Explicit composer height (px), driven by the per-line auto-grow effect. The
+  // markdown-highlight textarea is absolutely positioned inside its wrapper, so
+  // it can't size the box itself - the wrapper carries the height instead. Seed
+  // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
+  // so the composer opens at the right height before the effect measures.
+  const [composerHeight, setComposerHeight] = useState<number>(() => {
+    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+    return rows * 20 + 14
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -3204,11 +3356,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const cs = getComputedStyle(ta)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    ta.style.height = 'auto'
+    // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
+    // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
+    // is empty but the content overflows, so scrollHeight reports the true content
+    // height. Restore to '' afterwards to hand sizing back to the wrapper.
+    ta.style.height = '0px'
     const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
+    ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.height = `${rows * lineHeight + pad}px`
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    setComposerHeight(rows * lineHeight + pad)
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -3564,6 +3721,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return (
             <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
           )
+        // ExitPlanMode gets a dedicated card that renders the plan markdown.
+        if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
         // A TaskOutput retrieval whose result has landed: render the reported
         // output as a finished card (linking to the sub-agent's steps when the
         // task_id matches one we're tracking) rather than the raw XML envelope.
@@ -3897,7 +4056,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               onRemove={removeAttachment}
               onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
             />
-            <textarea
+            <HighlightedTextarea
               ref={textareaRef}
               value={input}
               onChange={(e) => {
@@ -3909,7 +4068,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
-              className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-[13px] leading-5 text-stone-800 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-50"
+              wrapperClassName="w-full"
+              wrapperStyle={{ height: composerHeight }}
+              textColorClassName="text-stone-800 dark:text-stone-100"
+              caretClassName="caret-stone-800 dark:caret-stone-100"
+              textClassName="px-3.5 pt-2.5 pb-1 text-[13px] leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
