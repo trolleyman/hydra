@@ -34,6 +34,7 @@ import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
@@ -69,8 +70,11 @@ type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
   // the instant it's sent - above the thinking/response it triggers - and the
   // flag clears when the CLI's echo confirms it (which can arrive after the
-  // response, so we render our own copy rather than wait for it).
-  | { kind: 'user'; id: number; text: string; sending?: boolean }
+  // response, so we render our own copy rather than wait for it). noEntrance
+  // suppresses the fade/slide entrance for a message that takes the place of a
+  // queued bubble already on screen (item 21) - it was visible, so re-animating
+  // it as it settles reads as a flicker.
+  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -1457,6 +1461,48 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
+// deriveAnswered reconstructs which options (and any free-text "Other") each
+// question resolved to, from the recorded tool_result text. On a resume the
+// card's local selection state is gone - all we have is the durable result,
+// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
+// shape the real CLI's AskUserQuestion result produces, mirrored by the
+// simulation). Matching those labels back to option indices lets a replayed
+// card highlight the chosen options just as it did right after answering.
+function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+  const selected = specs.map(() => new Set<number>())
+  const other = specs.map(() => '')
+  specs.forEach((q, qi) => {
+    const needle = `"${q.question}"="`
+    const start = answeredText.indexOf(needle)
+    if (start === -1) return
+    const from = start + needle.length
+    const end = answeredText.indexOf('"', from)
+    if (end === -1) return
+    // The labels were joined with ", " (see submit()). Consume the value left to
+    // right, matching whole option labels (longest first, so a label that itself
+    // contains ", " isn't mistaken for two) and dropping anything else into the
+    // free-text "Other" field.
+    let rest = answeredText.slice(from, end)
+    const extras: string[] = []
+    while (rest.length > 0) {
+      const match = q.options
+        .map((o) => o.label)
+        .filter((l) => rest === l || rest.startsWith(l + ', '))
+        .sort((a, b) => b.length - a.length)[0]
+      if (match != null) {
+        selected[qi].add(q.options.findIndex((o) => o.label === match))
+        rest = rest.slice(match.length).replace(/^, /, '')
+      } else {
+        const sep = rest.indexOf(', ')
+        extras.push(sep === -1 ? rest : rest.slice(0, sep))
+        rest = sep === -1 ? '' : rest.slice(sep + 2)
+      }
+    }
+    if (extras.length) other[qi] = extras.join(', ')
+  })
+  return { selected, other }
+}
+
 function QuestionCard({
   specs,
   disabled,
@@ -1475,6 +1521,19 @@ function QuestionCard({
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
+
+  // On a resume the card mounts already-answered with no local selection - and
+  // the same holds if it was answered in another tab. Recover the chosen
+  // options from the recorded result so the settled card highlights them just
+  // as it did right after answering. A live answer in this tab keeps its own
+  // local selection, so only fall back when nothing was picked here.
+  const derived = useMemo(
+    () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
+    [specs, answeredText],
+  )
+  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const showSelected = derived && localEmpty ? derived.selected : selected
+  const showOther = derived && localEmpty ? derived.other : other
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -1521,7 +1580,7 @@ function QuestionCard({
           </div>
           <div className="space-y-1">
             {q.options.map((o, oi) => {
-              const isSel = selected[qi].has(oi)
+              const isSel = showSelected[qi].has(oi)
               return (
                 <button
                   key={oi}
@@ -1553,7 +1612,7 @@ function QuestionCard({
             })}
             <input
               type="text"
-              value={other[qi]}
+              value={showOther[qi]}
               onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
               disabled={answered}
               placeholder="Other..."
@@ -1591,22 +1650,27 @@ function QuestionCard({
 const ChatUserMessage = memo(function ChatUserMessage({
   text,
   sending,
+  dimmed,
   projectId,
 }: {
   text: string
   sending?: boolean
+  // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
+  // used for a queued message pinned under the transcript, so it shows the same
+  // image thumbnails / chips as a finalized turn instead of raw upload paths.
+  dimmed?: boolean
   projectId: string | null
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
-  if (!body && attachments.length === 0 && !sending) return null
+  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending ? ' opacity-75' : ''}`}>
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -1828,7 +1892,14 @@ const SettledMessages = memo(
     return (
       <>
         {items.map((item) => (
-          <div key={item.id} className={liveFromId != null && item.id >= liveFromId ? 'animate-chat-item-in' : undefined}>
+          <div
+            key={item.id}
+            className={
+              liveFromId != null && item.id >= liveFromId && !(item.kind === 'user' && item.noEntrance)
+                ? 'animate-chat-item-in'
+                : undefined
+            }
+          >
             {renderItem(item)}
           </div>
         ))}
@@ -1922,6 +1993,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // (see PendingSend). Rendered pinned under the settled items.
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
   const sendSeqRef = useRef(1)
+  // A ref mirror of pendingSends so the (effect-scoped) reducer can tell whether
+  // a just-echoed user turn came from a queued bubble - if so, the settled item
+  // replaces it without an entrance animation (it was already on screen).
+  const pendingSendsRef = useRef<PendingSend[]>([])
+  useEffect(() => {
+    pendingSendsRef.current = pendingSends
+  }, [pendingSends])
   // Optimistically-shown user messages (item 26): a decreasing id counter (kept
   // negative so it never collides with the reducer's positive ids) and the
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
@@ -1961,6 +2039,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [minRows, setMinRows] = useState(() => {
     const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+  })
+  // Explicit composer height (px), driven by the per-line auto-grow effect. The
+  // markdown-highlight textarea is absolutely positioned inside its wrapper, so
+  // it can't size the box itself - the wrapper carries the height instead. Seed
+  // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
+  // so the composer opens at the right height before the effect measures.
+  const [composerHeight, setComposerHeight] = useState<number>(() => {
+    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+    return rows * 20 + 14
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -2535,9 +2623,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         return
       }
       markTurnStart()
+      // A queued bubble being echoed back: the settled item takes its place, so
+      // it enters without the fade/slide (it was already visible as the pending
+      // bubble - item 21).
+      const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text })
+      push({ kind: 'user', text, noEntrance: fromQueue })
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
@@ -3183,11 +3275,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const cs = getComputedStyle(ta)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    ta.style.height = 'auto'
+    // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
+    // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
+    // is empty but the content overflows, so scrollHeight reports the true content
+    // height. Restore to '' afterwards to hand sizing back to the wrapper.
+    ta.style.height = '0px'
     const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
+    ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.height = `${rows * lineHeight + pad}px`
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    setComposerHeight(rows * lineHeight + pad)
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -3376,7 +3473,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // (unsent) message back into the box to edit (item 21). Only queued holds
     // qualify - a message already handed to the CLI can't be recalled. Tell the
     // daemon to drop it from the server queue too.
-    if (e.key === 'ArrowUp' && input === '' && slashMatches.length === 0) {
+    // A staged attachment counts as a non-empty composer too, so recalling never
+    // clobbers files the user is mid-way through attaching.
+    if (e.key === 'ArrowUp' && input === '' && attachments.length === 0 && slashMatches.length === 0) {
       const last = [...pendingSends].reverse().find((p) => p.queued)
       if (last) {
         e.preventDefault()
@@ -3385,7 +3484,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
         }
         setPendingSends((prev) => prev.filter((p) => p.id !== last.id))
-        setInput(last.text)
+        // Split the recalled message back into its typed text and the uploads it
+        // referenced, so image attachments return to the composer as chips - not
+        // raw upload paths pasted into the textarea (the send flow re-appends
+        // them). Fresh ids keep them unique against later attachments.
+        const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
+        setInput(body)
+        setAttachments(recalled.map((a) => ({ ...a, id: nextAttachmentId() })))
         return
       }
     }
@@ -3735,10 +3840,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               {pendingSends.map((p) => (
                 <div key={`pending-${p.id}`} className="group relative flex justify-end animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
-                      is sent (a real user bubble). */}
-                  <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
-                    <Markdown text={p.text} />
-                  </div>
+                      is sent (a real user bubble) - and rendered the same way, so
+                      image thumbnails / attachment chips show here too, not raw
+                      upload paths (dimmed while it waits). */}
+                  <ChatUserMessage text={p.text} dimmed projectId={projectId} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -3843,7 +3948,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               onRemove={removeAttachment}
               onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
             />
-            <textarea
+            <HighlightedTextarea
               ref={textareaRef}
               value={input}
               onChange={(e) => {
@@ -3855,7 +3960,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
-              className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-[13px] leading-5 text-stone-800 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-50"
+              wrapperClassName="w-full"
+              wrapperStyle={{ height: composerHeight }}
+              textColorClassName="text-stone-800 dark:text-stone-100"
+              caretClassName="caret-stone-800 dark:caret-stone-100"
+              textClassName="px-3.5 pt-2.5 pb-1 text-[13px] leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
