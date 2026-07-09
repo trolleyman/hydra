@@ -7,6 +7,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Pin the serif family to Merriweather (loaded in index.html) so every `serif`
+   surface - `.chat-serif` prose and the Tailwind `font-serif` utility used for
+   subagent prose / the settings preview - renders the same font on every OS.
+   Georgia and the system serif stay as graceful fallbacks. */
+@theme {
+  --font-serif: 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
+}
+
 :root {
   color-scheme: light;
 }
@@ -266,25 +274,24 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 
 /* --- Chat mode (AgentChat) ------------------------------------------------ */
 
-/* Serif agent prose (item 9/29). A controlled serif stack - Georgia leads
-   because its regular and bold faces share metrics, so bold text keeps the same
-   size and line box as the surrounding text (the generic `ui-serif` maps to a
-   system serif whose synthesized 600 weight rendered noticeably larger). A
-   touch larger than the 13px pane base, with its own line-height so bold and
-   regular lines stay even. Code inside keeps its own mono class + em sizing. */
+/* Serif agent prose (item 9/29). Pinned to Merriweather via --font-serif (see
+   index.html) so bold and regular share exact metrics on every OS. Merriweather
+   is a variable font, so its bold is a real weight that keeps the same size and
+   line box as the body - no synthesized-weight bloat, which is what made bold
+   read as bigger text under the old system-serif fallback. A touch larger than
+   the 13px pane base, with its own line-height. Code inside keeps its own mono
+   class + em sizing. */
 .chat-serif {
-  font-family: Georgia, Cambria, 'Times New Roman', Times, serif;
+  font-family: var(--font-serif);
   font-size: 0.9375rem; /* 15px */
   line-height: 1.6;
 }
 .chat-serif strong,
 .chat-serif b {
-  font-weight: 700; /* Georgia's real bold face - no synthesized-weight size drift */
-  /* Georgia's bold is a heavy face that reads a touch larger than the regular
-     text around it (more so on systems that substitute a different serif for
-     Georgia, e.g. Linux). A small size trim pulls bold back to the same visual
-     size as the body so it reads as emphasis, not as bigger text. */
-  font-size: 0.94em;
+  /* Merriweather semibold - a real intermediate weight the same size as the
+     body, so bold reads as emphasis rather than bigger/heavier text (and
+     matches the sans-mode font-semibold). */
+  font-weight: 600;
 }
 
 /* New live chat items (messages, tool cards, the streamed block) ease in with
