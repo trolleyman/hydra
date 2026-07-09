@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
@@ -96,6 +97,25 @@ func TestNudgeResumedAgentTypesMessageAndEnter(t *testing.T) {
 
 	if got := pty.written(); got != "Continue\r" {
 		t.Errorf("nudge wrote %q, want %q", got, "Continue\r")
+	}
+}
+
+// A chat-mode head has no TUI: the nudge is written straight to stdin as a
+// stream-json user turn (no wait-for-quiet, no keystroke Enter), so the CLI
+// reads it as the resume "Continue" message.
+func TestNudgeResumedChatAgentWritesUserMessage(t *testing.T) {
+	reg := session.NewRegistry()
+	pty := newFakePTY(nil)
+	if _, err := reg.StartWithProc("chat1", sandbox.AgentTypeClaude, t.TempDir(), 24, 80, false, session.KindChat, pty); err != nil {
+		t.Fatalf("StartWithProc: %v", err)
+	}
+	defer reg.Kill("chat1")
+
+	nudgeResumedChatAgent(reg, "chat1", "Continue")
+
+	want := string(claudestream.TextUserMessageLine("Continue"))
+	if got := pty.written(); got != want {
+		t.Errorf("chat nudge wrote %q, want %q", got, want)
 	}
 }
 
