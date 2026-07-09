@@ -241,6 +241,12 @@ const WORKING_VERBS = [
   'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
 ]
 
+// Auto-reconnect tuning: a connection that stayed open this long counts as
+// healthy (resets the failure streak), and quick-failure retries back off
+// exponentially up to this cap.
+const RECONNECT_HEALTHY_MS = 15_000
+const RECONNECT_MAX_DELAY_MS = 15_000
+
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
 function formatDuration(ms: number): string {
@@ -1549,6 +1555,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
   const [connected, setConnected] = useState(false)
+  // Auto-reconnect: without it the pane sits on a dead socket forever after any
+  // drop (a daemon restart/upgrade, the terminal<->chat mode toggle's session
+  // relaunch, a network blip) - nothing else ever bumps reconnectAttempt, so
+  // the composer showed "Disconnected" until a manual refresh. Every close
+  // schedules a retry that re-runs the connect effect; the backend lazy-resumes
+  // the head on attach, so reconnecting is always safe. retryStreakRef counts
+  // consecutive quick failures (connect -> die within seconds) for backoff; a
+  // connection that stayed up resets it so the first retry after a healthy run
+  // is near-instant.
+  const [autoRetry, setAutoRetry] = useState(0)
+  const retryStreakRef = useRef(0)
   // The composer draft (text + attachments) is restored per agent so it survives
   // switching agents/reloads (item 30): text from agentViewPrefs, attachments
   // from the in-memory chatDrafts cache.
@@ -2279,7 +2296,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
     const ws = new WebSocket(getWsUrl(agentId, projectId))
     wsRef.current = ws
-    ws.onopen = () => setConnected(true)
+    let retryTimer: number | null = null
+    let openedAt: number | null = null
+    ws.onopen = () => {
+      openedAt = Date.now()
+      setConnected(true)
+    }
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data !== 'string') return
       let msg: {
@@ -2343,15 +2365,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.onclose = () => {
       setConnected(false)
       onStatusUpdateRef.current?.('stopped')
+      // Schedule the reconnect. A drop after a healthy stretch retries almost
+      // immediately; a streak of quick failures (the daemon is down, the head
+      // can't resume) backs off exponentially to a slow poll. Unmount detaches
+      // this handler (closeWebSocket), so a deliberate teardown never retries.
+      const healthy = openedAt != null && Date.now() - openedAt >= RECONNECT_HEALTHY_MS
+      retryStreakRef.current = healthy ? 0 : retryStreakRef.current + 1
+      const delay =
+        retryStreakRef.current === 0
+          ? 500
+          : Math.min(RECONNECT_MAX_DELAY_MS, 1000 * 2 ** (retryStreakRef.current - 1))
+      retryTimer = window.setTimeout(() => setAutoRetry((n) => n + 1), delay)
     }
 
     return () => {
       if (streamTimer != null) clearTimeout(streamTimer)
+      if (retryTimer != null) clearTimeout(retryTimer)
       closeWebSocket(ws)
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, projectId, reconnectAttempt])
+  }, [agentId, projectId, reconnectAttempt, autoRetry])
 
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
@@ -3217,7 +3251,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               }}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
-              placeholder={connected ? 'Write a message...' : 'Disconnected'}
+              placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
               className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-[13px] leading-5 text-stone-800 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-50"

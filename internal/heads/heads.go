@@ -947,6 +947,20 @@ func StopSessionAndWait(reg *session.Registry, id string, timeout time.Duration)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// KillNow only delivers the SIGKILL; the session stays "live" in the
+	// registry until the read loop observes the exit. Returning while the corpse
+	// is still registered breaks the contract above: the client reconnecting on
+	// the API response would attach to it (no lazy resume) and get its socket
+	// closed moments later, showing a dead pane. Wait out the exit, and reap a
+	// session whose PTY never reports it (see Registry.ReapDead).
+	reapDeadline := time.Now().Add(2 * time.Second)
+	for reg.IsLive(id) {
+		if time.Now().After(reapDeadline) {
+			_ = reg.ReapDead(id)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
