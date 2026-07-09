@@ -125,11 +125,13 @@ const STYLES: Record<Variant, Style> = {
     hr: 'my-2 border-gray-300 dark:border-gray-600',
     // Clean framed table: one rounded outer border (no per-cell gridlines), a
     // tinted header row, horizontal row rules only, and subtle zebra striping.
-    tableWrap: 'my-2 max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700',
+    // Warm stone tones (not cool gray) so it doesn't read blue against the chat
+    // view's warm palette (#faf9f5 / #262624, stone borders, white/opacity tints).
+    tableWrap: 'my-2 max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
     table: 'w-full border-collapse text-sm',
-    th: 'px-3 py-1.5 text-left font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
-    td: 'px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 align-top',
-    tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-gray-500/[0.035] dark:[&>tr:nth-child(even)]:bg-white/[0.03]',
+    th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
+    td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
+    tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
     // Claude-app-style code (chat items 1/10): bordered terracotta chips for
     // inline code, a bordered near-black warm panel for blocks in dark mode.
     // Kept in sync with CODE_CLASS/CODEBLOCK_CLASS in ./markdown (the inline
