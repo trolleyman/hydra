@@ -1545,13 +1545,14 @@ export function AgentDetail({
           {paneCollapse === 'none' && (
             <div
               onPointerDown={handleSplitResizeStart}
-              className="relative shrink-0 w-1.5 cursor-col-resize group touch-none self-stretch"
+              className="group shrink-0 w-3 -ml-1.5 flex items-center justify-center cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800"
+              title="Drag to resize"
             >
-              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-gray-200 dark:bg-gray-700 group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
+              <div className="w-1 h-20 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
             </div>
           )}
           {paneCollapse !== 'inspector' && (
-            <div className="flex flex-col min-w-0 min-h-0 flex-1 overflow-hidden border-l border-gray-200 dark:border-gray-800">
+            <div className="flex flex-col min-w-0 min-h-0 flex-1 overflow-hidden">
               <InspectorPane
                 agent={agent}
                 projectId={projectId}
