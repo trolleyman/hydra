@@ -124,6 +124,10 @@ interface SubagentView {
   // 'running' until a sidechain result (or the turn's result) settles it; for a
   // Task-linked sub the parent tool_result is the more precise done signal.
   status: 'running' | 'done'
+  // A background/async sub-agent (its Task tool_result was only the launch
+  // boilerplate). It runs on past the turn that launched it, so the turn's
+  // result must NOT settle it - only its own <task-notification> completion does.
+  background?: boolean
   items: ChatItem[]
 }
 
@@ -235,6 +239,13 @@ interface ClaudeEvent {
   isSidechain?: boolean
   agentId?: string
   parent_tool_use_id?: string | null
+  // A background/async sub-agent's completion <task-notification> is written to
+  // the main transcript not as a user turn but as bookkeeping records the chat
+  // socket relays live: a queue-operation (XML on top-level `content`) and an
+  // attachment (XML on `attachment.prompt`). handleClaudeEvent settles the sub
+  // off whichever carries it (see handleTaskNotification).
+  content?: string
+  attachment?: { prompt?: string; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -1402,7 +1413,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+              <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -1473,7 +1484,7 @@ function SubagentChatView({
           <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
             Prompt
           </div>
-          <div className={`${PANEL_CLASS} break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
+          <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
@@ -2479,6 +2490,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
+    // Task tool_use ids whose tool_result was the async-launch boilerplate: their
+    // sub-agents run in the background, past the launching turn, so a turn result
+    // never settles them (only their <task-notification> does). Tracked as a set
+    // because the boilerplate result can arrive before the sub is even created.
+    const backgroundToolUses = new Set<string>()
+    const markBackground = (sub: SubagentView, toolUseId: string) => {
+      if (toolUseId && backgroundToolUses.has(toolUseId)) sub.background = true
+    }
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
@@ -2489,6 +2508,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (description) sub.description = description
       if (toolUseId) {
         sub.toolUseId = toolUseId
+        markBackground(sub, toolUseId)
         toolUseToSub.set(toolUseId, agentId)
         // Absorb the placeholder accumulated from live parent_tool_use_id-only
         // lines, now that the meta names the real sub-agent.
@@ -2496,6 +2516,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const ph = subLocal[phKey]
         if (ph && phKey !== agentId) {
           if (!sub.prompt && ph.prompt) sub.prompt = ph.prompt
+          if (ph.background) sub.background = true
           const meta = subMeta.get(agentId)!
           for (const it of ph.items) sub.items.push({ ...it, id: meta.nextId++ } as ChatItem)
           if (ph.status === 'done' && sub.status === 'running') sub.status = 'done'
@@ -2540,7 +2561,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // background/async agent's result is only the launch boilerplate, though, so
     // it settles nothing - that sub stays running until its sidechain result.
     const settleSubagentByToolUse = (toolUseId: string, result: string) => {
-      if (isLaunchBoilerplate(result)) return
+      if (isLaunchBoilerplate(result)) {
+        // Not a completion - it just tells us this is a background/async sub.
+        // Flag it (and any sub already linked, incl. a live placeholder) so the
+        // turn's result won't settle it early; it ends via its task-notification.
+        backgroundToolUses.add(toolUseId)
+        for (const key in subLocal) {
+          if (subLocal[key].toolUseId === toolUseId) subLocal[key].background = true
+        }
+        return
+      }
       for (const key in subLocal) {
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
@@ -2549,6 +2579,40 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           scheduleSubFlush()
         }
       }
+    }
+    // Distinct task-notifications already surfaced this connection: the notice +
+    // settle fire once even though the CLI writes each notification more than
+    // once (a queue-operation and an attachment, both relayed live off the main
+    // transcript) and a later real user turn may consume it again.
+    const seenNotif = new Set<string>()
+    // handleTaskNotification folds one <task-notification> record into the flow:
+    // a compact notice, plus - for a background/async sub-agent whose completion
+    // this is (its Task tool_result was only launch boilerplate, so nothing else
+    // settles it) - marking the matching still-"working" card done by task-id /
+    // tool-use-id. Reached both from a user turn that consumed the notification
+    // and from the live main-transcript relay, so it dedups its own copies.
+    const handleTaskNotification = (text: string, ts?: number | null) => {
+      const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+      const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+      const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
+      if (seenNotif.has(dedupKey)) return
+      seenNotif.add(dedupKey)
+      const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
+      if (!stillRunning && (taskId || noticeToolUse)) {
+        for (const key in subLocal) {
+          const sub = subLocal[key]
+          const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
+          if (matches && sub.status === 'running') {
+            sub.status = 'done'
+            scheduleSubFlush()
+          }
+        }
+      }
+      // A genuine turn-starting continuation anchors the "working" clock (item 48).
+      if (ts != null) turnStartClockRef.current = ts
+      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
     }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
@@ -2562,6 +2626,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
       const sub = ensureSubagent(agentId)
       if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
+      if (parentTool) markBackground(sub, parentTool)
       const meta = subMeta.get(agentId)!
       // Snapshot the sub's previous event timestamp before advancing, so a
       // replayed thought can estimate its duration (item 7); mirrors the main
@@ -2828,31 +2893,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         endPendingTools()
         return
       }
-      // A harness-injected background-task notification (<task-notification>):
-      // render a compact one-line notice instead of the raw XML (item 15).
+      // A harness-injected background-task notification (<task-notification>)
+      // consumed as a user turn: fold it into a notice (and settle a background
+      // sub-agent) via the shared handler, which dedups against the live
+      // main-transcript relay of the same notification (item 8/15).
       if (text.includes('<task-notification>')) {
-        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
-        // A background/async sub-agent's completion arrives as this notification,
-        // not a tool_result we settle on (its tool_result was only the launch
-        // boilerplate), so a still-"working" sub would never clear otherwise
-        // (item 8). Match the notification's task-id / tool-use-id to the sub and
-        // mark it done unless the status says it is still going.
-        const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
-        const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
-        const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
-        const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
-        if (!stillRunning && (taskId || noticeToolUse)) {
-          for (const key in subLocal) {
-            const sub = subLocal[key]
-            const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
-            if (matches && sub.status === 'running') {
-              sub.status = 'done'
-              scheduleSubFlush()
-            }
-          }
-        }
-        markTurnStart()
-        push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+        handleTaskNotification(text, ts)
         return
       }
       // The echo of a message we already showed optimistically (item 26): just
@@ -2890,6 +2936,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // A background/async sub-agent's completion arrives NOT as a user turn but
+      // as a <task-notification> bookkeeping record the chat socket relays live
+      // off the main transcript: a queue-operation (XML on `content`) or an
+      // attachment (XML on `attachment.prompt`). Settle off it up front, whatever
+      // the event type, so a finished background sub-agent's card stops reading
+      // "working" the moment it ends. A notification later consumed by a real
+      // user turn routes through routeUserText instead, and dedups there.
+      const notifText =
+        (typeof ev.content === 'string' && ev.content.includes('<task-notification>') && ev.content) ||
+        (typeof ev.attachment?.prompt === 'string' &&
+          ev.attachment.prompt.includes('<task-notification>') &&
+          ev.attachment.prompt) ||
+        ''
+      if (notifText) {
+        handleTaskNotification(notifText, parseEventTs(ev))
+        return
+      }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
       // main flow. This is the fix for sub-agent prompts showing as user
       // messages (they arrive as sidechain `user` events - live ones marked
@@ -3117,11 +3180,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // the turn's pending synthesized footer.
           turnStopReasonRef.current = null
           discardHistFooter()
-          // A turn ends only once all its sub-agents have; settle any still
-          // marked running (a sub whose own result line we never saw).
+          // A synchronous sub-agent finishes within the turn that launched it, so
+          // a turn ending settles any still marked running (a sub whose own result
+          // line we never saw). A BACKGROUND sub-agent, though, outlives its
+          // launching turn - settling it here would wrongly flip it to "finished"
+          // while it is still working; it ends only via its <task-notification>.
           let changed = false
           for (const k in subLocal) {
-            if (subLocal[k].status === 'running') {
+            if (subLocal[k].status === 'running' && !subLocal[k].background) {
               subLocal[k].status = 'done'
               changed = true
             }
@@ -3197,11 +3263,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // mid-turn right now (a reconnect during an active turn). Otherwise -
           // e.g. after a server restart - the run is long over and never emitted
           // the settling result, so mark it done (and end its orphaned steps) so
-          // it doesn't read "working" forever.
+          // it doesn't read "working" forever. A BACKGROUND sub is the exception:
+          // it runs independently of any turn, and its completion notification is
+          // now backfilled (so a finished one already settled above) - a still-
+          // running one is genuinely live, so leave it be.
           if (!isTurnRunningRef.current) {
             for (const key in subLocal) {
               const sub = subLocal[key]
-              if (sub.status !== 'running') continue
+              if (sub.status !== 'running' || sub.background) continue
               sub.status = 'done'
               for (let i = 0; i < sub.items.length; i++) {
                 const it = sub.items[i]

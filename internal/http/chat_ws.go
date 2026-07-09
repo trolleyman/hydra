@@ -298,6 +298,34 @@ func tailSubagentGrowth(dir string, stop <-chan struct{}, out chan<- []claudestr
 	}
 }
 
+// tailNotifications polls the newest session's main transcript for
+// <task-notification> records and sends each Poll's growth on out until stop
+// closes. Runs as a goroutine per chat connection; the pump goroutine owns all
+// socket writes and dedup. These records (a background/async sub-agent's
+// completion) are never on the parent stdout, so this is the only live source
+// for settling a finished background sub-agent's card.
+func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
+	tail := claudestream.NewNotificationTailer(dir)
+	ticker := time.NewTicker(subagentPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			lines := tail.Poll()
+			if len(lines) == 0 {
+				continue
+			}
+			select {
+			case out <- lines:
+			case <-stop:
+				return
+			}
+		}
+	}
+}
+
 // backfillChatHistory relays the head's conversation history from its Claude
 // transcript file (~/.claude/projects/<cwd-slug>/<session>.jsonl) as
 // claude_event frames. The scrollback ring only covers the current process
@@ -440,15 +468,19 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		s.ChatQueues.OnAttach(projectRoot, agentID)
 	}
 
-	// Live sub-agent activity: tail the session's subagents/*.jsonl growth in
-	// a goroutine and relay it here, so all socket writes and uuid dedup stay
-	// on this goroutine.
+	// Live sub-agent activity: tail the session's subagents/*.jsonl growth (its
+	// inner steps) and the main transcript's <task-notification> records (a
+	// background/async sub-agent's completion) in goroutines and relay both here,
+	// so all socket writes and uuid dedup stay on this goroutine.
 	var subGrowth chan []claudestream.SubagentGrowth
+	var notif chan [][]byte
 	if dir != "" {
 		subGrowth = make(chan []claudestream.SubagentGrowth, 1)
+		notif = make(chan [][]byte, 1)
 		stop := make(chan struct{})
 		defer close(stop)
 		go tailSubagentGrowth(dir, stop, subGrowth)
+		go tailNotifications(dir, stop, notif)
 	}
 
 	for {
@@ -474,6 +506,23 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 					if !sendChatEventLine(conn, line, agentID) {
 						return
 					}
+				}
+			}
+		case lines := <-notif:
+			// A background/async sub-agent's completion notification, off the main
+			// transcript (never on stdout). Relay it verbatim - the client folds it
+			// into a notice and settles the matching sub-agent card. Dedup the
+			// attachment copy by uuid against stdout/backfill; the queue-operation
+			// copy has none, so the client dedups the duplicate by content.
+			for _, line := range lines {
+				if ev, ok := claudestream.ParseEvent(line); ok && ev.UUID != "" {
+					if _, dup := skip[ev.UUID]; dup {
+						continue
+					}
+					skip[ev.UUID] = struct{}{}
+				}
+				if !sendChatEventLine(conn, line, agentID) {
+					return
 				}
 			}
 		case data, ok := <-att.Output:

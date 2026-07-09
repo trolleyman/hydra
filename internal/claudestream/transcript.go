@@ -294,6 +294,86 @@ func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
 	return lines, true
 }
 
+// taskNotificationMarker is the substring every <task-notification> record
+// carries, used to pick them out of the main transcript. A background/async
+// sub-agent (and a background bash task) reports completion ONLY through one of
+// these records.
+var taskNotificationMarker = []byte("<task-notification>")
+
+// NotificationTailer incrementally tails the newest session's MAIN transcript
+// for <task-notification> records. A background/async sub-agent reports its
+// completion only through one of these, which the CLI writes into the main
+// transcript - as a queue-operation entry and an attachment entry - while the
+// parent turn sits idle. Those entries never reach the parent process stdout
+// (so the live stdout relay never sees them). The attach-time backfill does now
+// relay them (see tailTranscript) - which settles a background sub that had
+// already finished when the client connected - but a sub that finishes DURING a
+// live connection is only caught here. Without this tail such a sub would keep
+// reading "working" until the next turn consumed the notification. Only the
+// notification-bearing lines are returned; every other main line already arrives
+// via stdout + backfill.
+type NotificationTailer struct {
+	claudeProjectDir string
+	path             string
+	offset           int64
+}
+
+// NewNotificationTailer starts tailing at the current end of the newest
+// transcript, so only notifications appended AFTER it is created are returned -
+// anything already recorded came through the attach-time backfill / replay.
+func NewNotificationTailer(claudeProjectDir string) *NotificationTailer {
+	t := &NotificationTailer{claudeProjectDir: claudeProjectDir}
+	if p := LatestTranscript(claudeProjectDir); p != "" {
+		t.path = p
+		if info, err := os.Stat(p); err == nil {
+			t.offset = info.Size()
+		}
+	}
+	return t
+}
+
+// Poll returns every complete main-transcript line gained since the last Poll
+// that carries a task-notification. A session change (newer transcript file)
+// restarts the tail at the new file's start. Best-effort: an unreadable file is
+// retried next Poll with the offset unchanged; a trailing partial line waits for
+// its newline.
+func (t *NotificationTailer) Poll() [][]byte {
+	transcript := LatestTranscript(t.claudeProjectDir)
+	if transcript == "" {
+		return nil
+	}
+	if transcript != t.path {
+		t.path, t.offset = transcript, 0
+	}
+	f, err := os.Open(transcript)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	end := bytes.LastIndexByte(data, '\n')
+	if end < 0 {
+		return nil
+	}
+	t.offset += int64(end + 1)
+	var lines [][]byte
+	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
+		if len(line) == 0 || !bytes.Contains(line, taskNotificationMarker) {
+			continue
+		}
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		lines = append(lines, cp)
+	}
+	return lines
+}
+
 // HistoryBatchBytes is how much older conversation one load-older request pulls.
 const HistoryBatchBytes = 512 * 1024
 
@@ -401,7 +481,14 @@ func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]
 		if ev.UUID != "" {
 			uuids[ev.UUID] = struct{}{}
 		}
-		if (ev.IsSidechain && !keepSidechain) || (ev.Type != "user" && ev.Type != "assistant") {
+		// Conversation lines (user/assistant, minus sidechains unless a sub-agent's
+		// own backfill) plus any <task-notification> record: a background/async
+		// sub-agent's completion is only ever one of those bookkeeping records
+		// (queue-operation/attachment), so relaying them here lets a reconnect
+		// settle a finished background sub - which the client can't otherwise tell
+		// from a still-running one after its live signal is gone.
+		isConversation := (!ev.IsSidechain || keepSidechain) && (ev.Type == "user" || ev.Type == "assistant")
+		if !isConversation && !bytes.Contains(line, taskNotificationMarker) {
 			continue
 		}
 		cp := make([]byte, len(line))
