@@ -16,6 +16,7 @@ import {
   ListEnd,
   ListPlus,
   LoaderCircle,
+  MessageSquare,
   Plus,
   Search,
   SquareTerminal,
@@ -75,7 +76,9 @@ type ChatItem =
   | { kind: 'cmdout'; id: number; text: string }
   // A harness-injected system notice (e.g. a <task-notification> when a
   // background task finishes), rendered as a compact muted line, not raw XML.
-  | { kind: 'notice'; id: number; text: string }
+  // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
+  // the pill can offer a View button.
+  | { kind: 'notice'; id: number; text: string; subagentKey?: string }
   | { kind: 'interrupted'; id: number }
   | { kind: 'assistant'; id: number; text: string }
   // durationMs is set for a thought whose streaming we timed live (item 11);
@@ -96,10 +99,13 @@ type ChatItem =
   | { kind: 'subagent'; id: number; agentId: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
-// Keyed by agentId in the `subagents` map. `toolUseId` (from the meta frame)
-// links it to the parent Task tool card, which upgrades into a SubagentCard;
-// `items` is the sub-agent's own inner timeline (its thinking, tool calls and
-// replies) and `prompt` its opening instruction.
+// Keyed by agentId in the `subagents` map (a live line that carries only a
+// parent_tool_use_id accumulates under the placeholder key "tool:<id>" until
+// the meta frame links it to its real agentId). `toolUseId` (from the meta
+// frame, or the live parent_tool_use_id) links it to the parent Task tool
+// card, which upgrades into a SubagentCard; `items` is the sub-agent's own
+// inner timeline (its thinking, tool calls and replies) and `prompt` its
+// opening instruction.
 interface SubagentView {
   agentId: string
   toolUseId?: string
@@ -110,6 +116,30 @@ interface SubagentView {
   // Task-linked sub the parent tool_result is the more precise done signal.
   status: 'running' | 'done'
   items: ChatItem[]
+}
+
+type ToolItem = Extract<ChatItem, { kind: 'tool' }>
+
+// isSubRunning reports whether a sub-agent is still working: the parent Task
+// card's tool_result (or its turn ending, `ended`) is the precise done signal
+// for a linked sub; an unlinked one falls back to its own status.
+function isSubRunning(sub: SubagentView, tool?: ToolItem): boolean {
+  return tool ? tool.result === undefined && !tool.ended : sub.status === 'running'
+}
+
+// subLabels derives a sub-agent's display label + description, preferring the
+// meta frame's fields and falling back to the Task tool input / prompt.
+function subLabels(sub: SubagentView, tool?: ToolItem): { label: string; desc: string } {
+  const input = (typeof tool?.input === 'object' && tool?.input !== null ? tool.input : null) as
+    | Record<string, unknown>
+    | null
+  const label =
+    sub.agentType || (typeof input?.subagent_type === 'string' ? (input.subagent_type as string) : '') || 'Sub-agent'
+  const desc =
+    sub.description ||
+    (typeof input?.description === 'string' ? (input.description as string) : '') ||
+    (sub.prompt ? sub.prompt.split('\n')[0] : '')
+  return { label, desc }
 }
 
 // A message handed to the socket but not yet echoed back by the CLI
@@ -176,9 +206,13 @@ interface ClaudeEvent {
   // own inner steps, not part of the main conversation; agentId names which
   // sub-agent. The reducer routes these into that sub-agent's card instead of
   // the main flow (so a sub-agent's prompt no longer masquerades as a user
-  // message). Both fields ride verbatim on the stream-json lines.
+  // message). Both fields ride verbatim on the stream-json lines - but only
+  // TRANSCRIPT lines carry them; a sub-agent line on live stdout (CLI 2.1.x)
+  // is marked solely by parent_tool_use_id (the Task tool_use that spawned
+  // it), null on main-conversation lines.
   isSidechain?: boolean
   agentId?: string
+  parent_tool_use_id?: string | null
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -962,6 +996,46 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   )
 })
 
+// SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
+// replies), shared by the folded SubagentCard and the full SubagentChatView.
+function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktree: string | null; serif: boolean }) {
+  return (
+    <>
+      {sub.items.map((it) =>
+        it.kind === 'thinking' ? (
+          <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+        ) : it.kind === 'tool' ? (
+          <ToolCard key={it.id} item={it} worktree={worktree} />
+        ) : it.kind === 'assistant' ? (
+          <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <Markdown text={it.text} />
+          </div>
+        ) : null,
+      )}
+    </>
+  )
+}
+
+// SubagentReport renders the parent Task tool_result as the sub-agent's final
+// report (an error result as an error panel).
+function SubagentReport({ tool, serif }: { tool: ToolItem; serif: boolean }) {
+  if (tool.result === undefined || tool.result === '') return null
+  return (
+    <div>
+      <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+        Report
+      </div>
+      {tool.isError ? (
+        <OutputPanel text={tool.result} lang="" isError />
+      ) : (
+        <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={tool.result} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // SubagentCard renders one sub-agent (Task tool) run: its inner timeline
 // (thinking / tool calls / replies), folded into a single collapsible card so a
 // sub-agent's steps - and especially its opening prompt - never leak into the
@@ -969,19 +1043,22 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
 // spawned it (`tool` set), the card upgrades that tool card in place and shows
 // the tool_result as the sub-agent's final report; an unlinked sub-agent
 // renders standalone. Auto-expanded while running, then collapses once done
-// (unless the user pinned it open).
+// (unless the user pinned it open). onOpenChat opens the sub-agent's own chat
+// view (the pane's top-left selector switches back).
 const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
   worktree,
   serif,
+  onOpenChat,
 }: {
   sub: SubagentView
-  tool?: Extract<ChatItem, { kind: 'tool' }>
+  tool?: ToolItem
   worktree: string | null
   serif: boolean
+  onOpenChat?: () => void
 }) {
-  const running = tool ? tool.result === undefined : sub.status === 'running'
+  const running = isSubRunning(sub, tool)
   const [open, setOpen] = useState(running)
   const [userToggled, setUserToggled] = useState(false)
   // Auto-collapse when the run finishes (unless the user pinned it open), via
@@ -992,15 +1069,7 @@ const SubagentCard = memo(function SubagentCard({
     if (!running && !userToggled) setOpen(false)
   }
 
-  const toolInput = (typeof tool?.input === 'object' && tool?.input !== null ? tool.input : null) as
-    | Record<string, unknown>
-    | null
-  const description =
-    sub.description ||
-    (typeof toolInput?.description === 'string' ? (toolInput.description as string) : '') ||
-    (sub.prompt ? sub.prompt.split('\n')[0] : '')
-  const label = sub.agentType || (typeof toolInput?.subagent_type === 'string' ? (toolInput.subagent_type as string) : '') || 'Sub-agent'
-  const report = tool?.result
+  const { label, desc } = subLabels(sub, tool)
   const steps = sub.items.length
 
   return (
@@ -1011,32 +1080,45 @@ const SubagentCard = memo(function SubagentCard({
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <button
-        onClick={() => {
-          setUserToggled(true)
-          setOpen((o) => !o)
-        }}
-        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
-        <span className="font-medium shrink-0">{label}</span>
-        {description && <span className="truncate text-stone-400 dark:text-stone-500">{description}</span>}
-        {running ? (
-          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
-            <LoaderCircle className="w-3 h-3 animate-spin" />
-            working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
-          </span>
-        ) : (
-          steps > 0 && (
-            <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
-              {steps} step{steps === 1 ? '' : 's'}
+      <div className="flex w-full items-baseline gap-1.5 pl-2.5 pr-1 text-stone-600 dark:text-stone-300">
+        <button
+          onClick={() => {
+            setUserToggled(true)
+            setOpen((o) => !o)
+          }}
+          className="flex min-w-0 flex-1 items-baseline gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+          <span className="font-medium shrink-0">{label}</span>
+          {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
+          {running ? (
+            <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
-          )
+          ) : (
+            steps > 0 && (
+              <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
+                {steps} step{steps === 1 ? '' : 's'}
+              </span>
+            )
+          )}
+        </button>
+        {onOpenChat && (
+          <Tooltip content="Open sub-agent chat" side="top">
+            <button
+              onClick={onOpenChat}
+              aria-label="Open sub-agent chat"
+              className="shrink-0 self-center rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
         )}
-      </button>
+      </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-2 border-t border-stone-200/70 dark:border-white/[0.05] pt-2">
           {sub.prompt && (
@@ -1051,38 +1133,160 @@ const SubagentCard = memo(function SubagentCard({
           )}
           {sub.items.length > 0 && (
             <div className="space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-              {sub.items.map((it) =>
-                it.kind === 'thinking' ? (
-                  <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-                ) : it.kind === 'tool' ? (
-                  <ToolCard key={it.id} item={it} worktree={worktree} />
-                ) : it.kind === 'assistant' ? (
-                  <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-                    <Markdown text={it.text} />
-                  </div>
-                ) : null,
-              )}
+              <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
             </div>
           )}
-          {report !== undefined && report !== '' && (
-            <div>
-              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-                Report
-              </div>
-              {tool?.isError ? (
-                <OutputPanel text={report} lang="" isError />
-              ) : (
-                <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-                  <Markdown text={report} />
-                </div>
-              )}
-            </div>
-          )}
+          {tool && <SubagentReport tool={tool} serif={serif} />}
         </div>
       </Expandable>
     </div>
   )
 })
+
+// SubagentChatView is a sub-agent's conversation as its own full view: the
+// pane's timeline area shows the sub-agent's prompt, inner steps and report
+// instead of the main conversation. Reached via the top-left selector, the
+// Task card's open-chat button or a finished notice's View link.
+function SubagentChatView({
+  sub,
+  tool,
+  worktree,
+  serif,
+}: {
+  sub: SubagentView
+  tool?: ToolItem
+  worktree: string | null
+  serif: boolean
+}) {
+  const running = isSubRunning(sub, tool)
+  const { label, desc } = subLabels(sub, tool)
+  return (
+    <>
+      <div className="flex items-baseline gap-2 pt-8 text-stone-600 dark:text-stone-300">
+        <Bot className="w-4 h-4 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+        <span className="text-sm font-semibold">{label}</span>
+        {desc && <span className="truncate text-xs text-stone-400 dark:text-stone-500">{desc}</span>}
+        {running ? (
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400/90">
+            <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+            working
+          </span>
+        ) : (
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
+            <Check className="w-3.5 h-3.5" />
+            finished
+          </span>
+        )}
+      </div>
+      {sub.prompt && (
+        <div>
+          <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+            Prompt
+          </div>
+          <div className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
+            {sub.prompt}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-col gap-3 text-xs">
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
+      </div>
+      {tool && <SubagentReport tool={tool} serif={serif} />}
+      {running && (
+        <div className="flex items-center gap-1.5 text-[11px] select-none">
+          <span className="text-[#c96442]">✳</span>
+          <span className="chat-text-shimmer font-medium">Working...</span>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ChatViewSelector is the top-left dropdown listing the current agents - the
+// main conversation plus each sub-agent (Task tool run) with its live status -
+// switching which conversation the pane shows. Rendered only once sub-agents
+// exist; floats over the timeline like the jump-to-bottom button.
+function ChatViewSelector({
+  chatView,
+  subagents,
+  taskToolByUse,
+  onSelect,
+}: {
+  chatView: string
+  subagents: Record<string, SubagentView>
+  taskToolByUse: Record<string, ToolItem>
+  onSelect: (key: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const subs = Object.values(subagents)
+  const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
+  const current = chatView !== 'main' ? subagents[chatView] : undefined
+  const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
+  const pick = (key: string) => {
+    setOpen(false)
+    onSelect(key)
+  }
+  return (
+    <div className="absolute top-2 left-3 z-20 text-xs">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Switch agent chat"
+        className={`flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 backdrop-blur px-2.5 py-1 shadow-sm transition-colors cursor-pointer ${
+          open
+            ? 'text-stone-800 dark:text-stone-100'
+            : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
+        }`}
+      >
+        {current ? (
+          <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+        ) : (
+          <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+        )}
+        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        {current && isSubRunning(current, toolOf(current)) && (
+          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
+        )}
+        <ChevronDown className="w-3 h-3 shrink-0" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 z-20 w-72 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+            <button
+              onClick={() => pick('main')}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
+            >
+              <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+              <span className="font-medium">Main conversation</span>
+              {chatView === 'main' && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-[#c96442]" />}
+            </button>
+            {subs.map((sub) => {
+              const tool = toolOf(sub)
+              const { label, desc } = subLabels(sub, tool)
+              return (
+                <button
+                  key={sub.agentId}
+                  onClick={() => pick(sub.agentId)}
+                  className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
+                >
+                  <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+                  <span className="shrink-0 font-medium">{label}</span>
+                  {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
+                  <span className="ml-auto shrink-0 flex items-center gap-1">
+                    {isSubRunning(sub, tool) && (
+                      <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
+                    )}
+                    {chatView === sub.agentId && <Check className="w-3.5 h-3.5 text-[#c96442]" />}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 // --- Question cards (AskUserQuestion) ----------------------------------------
 //
@@ -1541,6 +1745,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // sidechain events. A linked sub folds into its Task card; an unlinked one
   // renders via a 'subagent' item. Reset per connection like `items`.
   const [subagents, setSubagents] = useState<Record<string, SubagentView>>({})
+  // Which conversation the pane shows: the main agent's, or one sub-agent's
+  // own chat ('main' | a `subagents` key). Switched by the top-left selector,
+  // the Task card's open-chat button and a finished notice's View link. It
+  // survives reconnects (the replay rebuilds the same keys); while the key is
+  // missing (mid-replay, or a stale key) the pane falls back to the main view.
+  const [chatView, setChatView] = useState<string>('main')
+  // The main view's scroll spot, parked while a sub-agent view is open so
+  // coming back lands where the reader left off.
+  const mainScrollRef = useRef<{ top: number; pinned: boolean } | null>(null)
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -1804,13 +2017,35 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
     // into, so it gets a standalone 'subagent' item instead.
     const markedStandalone = new Set<string>()
+    // toolUseId -> real sub key, learned from meta frames, so a live line that
+    // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
+    const toolUseToSub = new Map<string, string>()
+    // Task tool_use inputs by id: the label/description fallback for a sub-agent
+    // whose meta frame hasn't arrived (the live placeholder route).
+    const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
     const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string) => {
       if (!agentId) return
       const sub = ensureSubagent(agentId)
       if (agentType) sub.agentType = agentType
       if (description) sub.description = description
-      if (toolUseId) sub.toolUseId = toolUseId
-      else if (!markedStandalone.has(agentId)) {
+      if (toolUseId) {
+        sub.toolUseId = toolUseId
+        toolUseToSub.set(toolUseId, agentId)
+        // Absorb the placeholder accumulated from live parent_tool_use_id-only
+        // lines, now that the meta names the real sub-agent.
+        const phKey = 'tool:' + toolUseId
+        const ph = subLocal[phKey]
+        if (ph && phKey !== agentId) {
+          if (!sub.prompt && ph.prompt) sub.prompt = ph.prompt
+          const meta = subMeta.get(agentId)!
+          for (const it of ph.items) sub.items.push({ ...it, id: meta.nextId++ } as ChatItem)
+          if (ph.status === 'done' && sub.status === 'running') sub.status = 'done'
+          delete subLocal[phKey]
+          subMeta.delete(phKey)
+          // A viewer parked on the placeholder follows it to the real key.
+          setChatView((cur) => (cur === phKey ? agentId : cur))
+        }
+      } else if (!markedStandalone.has(agentId)) {
         markedStandalone.add(agentId)
         push({ kind: 'subagent', agentId })
       }
@@ -1827,13 +2062,41 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
       }
     }
+    // noticeSubDone drops a compact "finished" notice (with a View link to the
+    // sub-agent's chat) into the main flow when a sub-agent completes LIVE -
+    // replayed history stays quiet (the folded card already tells the story).
+    const noticeSubDone = (key: string, sub: SubagentView) => {
+      if (replaying) return
+      const info = sub.toolUseId ? taskInputByUse.get(sub.toolUseId) : undefined
+      const label = sub.agentType || info?.type || 'Sub-agent'
+      const desc = sub.description || info?.desc || ''
+      push({ kind: 'notice', text: `${label} finished${desc ? ': ' + desc : ''}`, subagentKey: key })
+    }
+    // settleSubagentByToolUse marks the sub-agent spawned by a Task tool_use as
+    // done - the parent tool_result arriving is the authoritative live end
+    // signal (current CLIs never put the sub's own result line on stdout).
+    const settleSubagentByToolUse = (toolUseId: string) => {
+      for (const key in subLocal) {
+        const sub = subLocal[key]
+        if (sub.toolUseId === toolUseId && sub.status === 'running') {
+          sub.status = 'done'
+          noticeSubDone(key, sub)
+          scheduleSubFlush()
+        }
+      }
+    }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
     // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
     // the queue) - those render as plain items or are ignored.
     const routeSidechain = (ev: ClaudeEvent) => {
-      const agentId = ev.agentId || '_sub'
+      const parentTool = typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : ''
+      // Transcript lines name their sub-agent; a live stdout line carries only
+      // the spawning Task tool_use - land it in the linked sub if the meta
+      // frame already arrived, else in a placeholder merged later.
+      const agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
       const sub = ensureSubagent(agentId)
+      if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
       const meta = subMeta.get(agentId)!
       if (ev.type === 'user') {
         const content = ev.message?.content
@@ -1872,7 +2135,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           }
         }
       } else if (ev.type === 'result') {
-        sub.status = 'done'
+        if (sub.status === 'running') {
+          sub.status = 'done'
+          noticeSubDone(agentId, sub)
+        }
       }
       scheduleSubFlush()
     }
@@ -2086,11 +2352,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const handleClaudeEvent = (ev: ClaudeEvent) => {
       // A sub-agent's inner step: route it into that sub-agent's card, never the
       // main flow. This is the fix for sub-agent prompts showing as user
-      // messages (they arrive as sidechain `user` events). Checked before the
-      // load-older anchor below: sidechain uuids live in sub-agent transcripts,
-      // so anchoring history paging on one would never resolve.
-      if (ev.isSidechain) {
-        routeSidechain(ev)
+      // messages (they arrive as sidechain `user` events - live ones marked
+      // only by parent_tool_use_id). Checked before the load-older anchor
+      // below: sidechain uuids live in sub-agent transcripts, so anchoring
+      // history paging on one would never resolve.
+      if (ev.isSidechain || (typeof ev.parent_tool_use_id === 'string' && ev.parent_tool_use_id)) {
+        // A sub-agent's partial deltas aren't token-streamed into the main
+        // bubble; its complete blocks arrive via the transcript tail.
+        if (ev.type !== 'stream_event') routeSidechain(ev)
         return
       }
       // The first event carrying a uuid is the oldest loaded so far - the anchor
@@ -2134,6 +2403,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
+              settleSubagentByToolUse(block.tool_use_id)
             }
           }
           return
@@ -2188,6 +2458,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                 setTodos(todos)
               } else {
                 applyTaskTool(block.name, block.input)
+                if (block.name === 'Task') {
+                  const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
+                  taskInputByUse.set(block.id, {
+                    type: typeof inp.subagent_type === 'string' ? inp.subagent_type : undefined,
+                    desc: typeof inp.description === 'string' ? inp.description : undefined,
+                  })
+                }
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
               }
             }
@@ -2370,6 +2647,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
   }, [agentId, projectId, reconnectAttempt])
 
+  // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
+  // labels, the live/done state and the final report.
+  const taskToolByUse = useMemo(() => {
+    const m: Record<string, ToolItem> = {}
+    for (const it of items) if (it.kind === 'tool') m[it.toolUseId] = it
+    return m
+  }, [items])
+
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
     if (!el) return
@@ -2378,6 +2663,45 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  // --- Sub-agent chat views --------------------------------------------------
+
+  // Viewing another agent's chat is per-head ephemeral UI; a different head
+  // starts back on its main conversation.
+  useEffect(() => {
+    setChatView('main')
+    mainScrollRef.current = null
+  }, [agentId, projectId])
+
+  function openSubView(key: string) {
+    if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
+    setChatView(key)
+  }
+
+  // Position the viewport when the view switches: a running sub-agent pins to
+  // the bottom (follow it live), a finished one starts at the top (read the
+  // run from the start), and returning to main restores the parked spot.
+  const prevChatViewRef = useRef(chatView)
+  useLayoutEffect(() => {
+    if (prevChatViewRef.current === chatView) return
+    prevChatViewRef.current = chatView
+    const el = scrollRef.current
+    if (!el) return
+    if (chatView === 'main') {
+      const saved = mainScrollRef.current
+      const pin = saved?.pinned ?? true
+      pinnedRef.current = pin
+      setPinned(pin)
+      el.scrollTop = pin ? el.scrollHeight : (saved?.top ?? 0)
+    } else {
+      const sub = subagents[chatView]
+      const tool = sub?.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
+      const running = sub ? isSubRunning(sub, tool) : false
+      pinnedRef.current = running
+      setPinned(running)
+      el.scrollTop = running ? el.scrollHeight : 0
+    }
+  }, [chatView, subagents, taskToolByUse])
 
   // Keep the viewport anchored across a load-older prepend (item 25): before
   // paint, grow scrollTop by however much taller the content got, so the lines
@@ -2415,11 +2739,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return () => clearInterval(iv)
   }, [isTurnRunning])
 
-  // Auto-scroll to the bottom on new content while pinned.
+  // Auto-scroll to the bottom on new content while pinned. `subagents` is a
+  // dep so a sub-agent view follows its own live growth too.
   useEffect(() => {
     const el = scrollRef.current
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
-  }, [items, stream, replayDone, pendingSends])
+  }, [items, stream, replayDone, pendingSends, subagents])
 
   // Track the pane width so the plan panel (item 17) can collapse when there's
   // no room to float it alongside the centered transcript.
@@ -2491,13 +2816,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
-    if (el.scrollTop < 300) requestOlderHistory()
+    // Load-older pages main history; a sub-agent view has its whole run already.
+    if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     pinnedRef.current = nearBottom
     setPinned(nearBottom)
     // A hidden pane has no geometry; don't let a stray 0-measurement clobber
-    // the remembered offset.
-    if (!active || el.clientHeight === 0) return
+    // the remembered offset. A sub-agent view's offsets aren't remembered at
+    // all - the saved spot belongs to the main conversation.
+    if (!active || el.clientHeight === 0 || chatView !== 'main') return
     lastScrollRef.current = { top: el.scrollTop, pinned: nearBottom }
     if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
     persistScrollTimer.current = setTimeout(() => {
@@ -2937,14 +3264,25 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             {item.text}
           </pre>
         )
-      case 'notice':
+      case 'notice': {
+        // A "sub-agent finished" notice links to that sub-agent's chat view.
+        const target = item.subagentKey && subagents[item.subagentKey] ? item.subagentKey : null
         return (
           <div className="flex justify-center">
-            <div className="max-w-[90%] truncate rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
-              {item.text}
+            <div className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
+              <span className="truncate">{item.text}</span>
+              {target && (
+                <button
+                  onClick={() => openSubView(target)}
+                  className="shrink-0 font-medium text-[#c96442] hover:underline cursor-pointer"
+                >
+                  View
+                </button>
+              )}
             </div>
           </div>
         )
+      }
       case 'interrupted':
         return (
           <div className="flex justify-end">
@@ -2961,14 +3299,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         // A Task tool card whose sub-agent we've linked upgrades into the
         // richer SubagentCard (its inner timeline + report) in place.
         const sub = subByToolUse[item.toolUseId]
-        if (sub) return <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} />
+        if (sub)
+          return (
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
+          )
         return <ToolCard item={item} worktree={worktreePath} />
       }
       case 'subagent': {
         // A sub-agent with no parent Task card (its meta lacked a tool_use id).
         const sub = subagents[item.agentId]
         if (!sub) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} />
+        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question':
         return (
@@ -3046,6 +3387,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return m
   }, [subagents])
 
+  // The sub-agent whose chat the pane currently shows (undefined = main view,
+  // also the fallback while a selected key is missing mid-replay).
+  const viewSub = chatView !== 'main' ? subagents[chatView] : undefined
+  const viewSubTool = viewSub?.toolUseId ? taskToolByUse[viewSub.toolUseId] : undefined
+  const hasSubagents = Object.keys(subagents).length > 0
+
   // A stable wrapper around renderChatItem (a per-render closure) so it never
   // trips SettledMessages' memo. It always calls the latest closure via a ref, so
   // it never renders stale data; the inputs that actually change a row's output
@@ -3076,8 +3423,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }}
     >
       <div className="relative flex-1 min-h-0">
+        {/* The current-agents selector (main + sub-agents), floated top-left
+            once any sub-agent exists. */}
+        {hasSubagents && (
+          <ChatViewSelector
+            chatView={viewSub ? chatView : 'main'}
+            subagents={subagents}
+            taskToolByUse={taskToolByUse}
+            onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+          />
+        )}
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
           <div className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
+          {viewSub ? (
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />
+          ) : (
+          <>
           {!replayDone && items.length === 0 && (
             <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
               {connected ? 'Loading conversation...' : 'Connecting...'}
@@ -3162,6 +3523,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               ))}
             </div>
           )}
+          </>
+          )}
           </div>
         </div>
         {/* Jump to bottom (item 14): floats above the composer while the user
@@ -3177,10 +3540,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </button>
         )}
         {/* Current plan (item 17): the agent's latest TodoWrite, floated in the
-            top-right; collapses to a chip when the pane is narrow. */}
-        {todos.length > 0 && replayDone && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
+            top-right; collapses to a chip when the pane is narrow. Main view
+            only - it is the main agent's plan. */}
+        {todos.length > 0 && replayDone && !viewSub && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
       </div>
 
+      {/* A sub-agent's chat can only be read, not talked to: swap the composer
+          for a quiet bar with the way back. */}
+      {viewSub ? (
+        <div className="shrink-0 px-3 pb-3 pt-2">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 rounded-2xl border border-stone-300/70 dark:border-white/[0.09] bg-white dark:bg-[#30302e] px-3.5 py-2.5 text-xs text-stone-400 dark:text-stone-500 shadow-sm">
+            <span className="select-none">Sub-agent conversation - read-only</span>
+            <button
+              onClick={() => setChatView('main')}
+              className="shrink-0 rounded-lg px-2 py-1 text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
+            >
+              Back to main conversation
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* Composer (item 12): one rounded card - textarea on top, controls in a
           row underneath with no separator, per the Claude app layout. */}
       <div className="shrink-0 px-3 pb-3">
@@ -3329,6 +3709,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {dragActive && (
         <div className="absolute inset-0 z-20 flex items-center justify-center rounded border-2 border-dashed border-[#c96442] bg-[#c96442]/10 pointer-events-none">

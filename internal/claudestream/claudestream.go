@@ -39,6 +39,12 @@ type Event struct {
 	// the daemon uses it to resolve the sub-agent's meta.json (its parent Task
 	// tool_use id, agent type and description) - see the subagent_meta relay.
 	AgentID string `json:"agentId,omitempty"`
+	// ParentToolUseID is how CURRENT CLIs (2.1.x) mark a sub-agent line on live
+	// stdout: the Task tool_use that spawned it. Those lines carry NO
+	// isSidechain/agentId (only transcript-file lines do), so a non-empty value
+	// here is the live-stream sidechain signal. null unmarshals to "" (main
+	// conversation).
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 	// IsAPIError marks a synthesized assistant message the CLI emits when a turn
 	// fails mid-response (e.g. "API Error: Server error mid-response. The response
 	// above may be incomplete."). It carries the same shape on stdout as in the

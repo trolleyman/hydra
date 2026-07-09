@@ -174,6 +174,126 @@ func TailSubagentTranscripts(claudeProjectDir, sessionID string, maxBytes int64)
 	return subs, uuids
 }
 
+// SubagentGrowth is one Poll's worth of new relayable lines from one
+// sub-agent's transcript (user/assistant lines appended since the last Poll).
+type SubagentGrowth struct {
+	AgentID   string
+	SessionID string
+	Lines     [][]byte
+}
+
+// SubagentTailer incrementally reads sub-agent transcript growth for a Claude
+// project directory. Current CLIs (2.1.x) do NOT relay a sub-agent's inner
+// steps on the main process stdout - they exist only in the per-session
+// subagents/agent-*.jsonl files, appended live - so the chat socket tails
+// those files to stream sub-agent activity while it runs. Each Poll scans the
+// newest session's subagents/ dir and returns the complete lines each file
+// gained since the previous Poll (a trailing partial line stays buffered in
+// the file until its newline arrives). A file first seen is read from its
+// start (capped like backfill), so Poll overlaps the attach-time backfill;
+// the caller dedups by uuid, exactly like the ring replay.
+type SubagentTailer struct {
+	claudeProjectDir string
+	maxBytes         int64
+	// offsets tracks consumed bytes per transcript path (absolute), so a
+	// session change mid-connection just starts tracking the new dir's files.
+	offsets map[string]int64
+}
+
+// NewSubagentTailer tails the sub-agent transcripts of whatever session is
+// newest in claudeProjectDir. maxBytes caps how much of a file first seen is
+// read (0 = unlimited), mirroring the backfill cap.
+func NewSubagentTailer(claudeProjectDir string, maxBytes int64) *SubagentTailer {
+	return &SubagentTailer{claudeProjectDir: claudeProjectDir, maxBytes: maxBytes, offsets: map[string]int64{}}
+}
+
+// Poll returns the relayable growth of every sub-agent transcript of the
+// newest session since the last Poll. Best-effort: no session or no
+// subagents/ dir returns nil, unreadable files are skipped (retried next
+// Poll, offsets unchanged on error).
+func (t *SubagentTailer) Poll() []SubagentGrowth {
+	transcript := LatestTranscript(t.claudeProjectDir)
+	if transcript == "" {
+		return nil
+	}
+	sessionID := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
+	dir := subagentsSubdir(t.claudeProjectDir, sessionID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var growth []SubagentGrowth
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "agent-") || filepath.Ext(name) != ".jsonl" {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		lines, ok := t.pollFile(path)
+		if !ok || len(lines) == 0 {
+			continue
+		}
+		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		growth = append(growth, SubagentGrowth{AgentID: agentID, SessionID: sessionID, Lines: lines})
+	}
+	return growth
+}
+
+// pollFile reads path's complete new lines since the recorded offset,
+// advancing the offset past them (a trailing partial line is left for the
+// next Poll). First sight of a large file seeks like tailTranscript and drops
+// the fragment before the first newline.
+func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	offset, seen := t.offsets[path]
+	if !seen && t.maxBytes > 0 {
+		if info, err := f.Stat(); err == nil && info.Size() > t.maxBytes {
+			offset = info.Size() - t.maxBytes
+		}
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, false
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, false
+	}
+	consumed := int64(0)
+	if !seen && offset > 0 {
+		// The seek landed mid-line; drop the fragment before the first newline.
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			consumed = int64(idx + 1)
+			data = data[idx+1:]
+		} else {
+			t.offsets[path] = offset
+			return nil, true
+		}
+	}
+	// Cut at the last newline: everything after it is a partial line still
+	// being written, left unconsumed for the next Poll.
+	end := bytes.LastIndexByte(data, '\n')
+	if end < 0 {
+		t.offsets[path] = offset + consumed
+		return nil, true
+	}
+	consumed += int64(end + 1)
+	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
+		ev, evOK := ParseEvent(line)
+		if !evOK || (ev.Type != "user" && ev.Type != "assistant") {
+			continue
+		}
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		lines = append(lines, cp)
+	}
+	t.offsets[path] = offset + consumed
+	return lines, true
+}
+
 // HistoryBatchBytes is how much older conversation one load-older request pulls.
 const HistoryBatchBytes = 512 * 1024
 
