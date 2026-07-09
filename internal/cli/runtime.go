@@ -66,6 +66,11 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if info.Ephemeral {
 			heads.StopShellEgress(info.ID)
 		}
+		// A head whose process died without hydra asking (an agent pkill-ing
+		// itself, a crash, an OOM kill) is brought back automatically -
+		// crash-loop capped; see MaybeAutoRestartHead. Deliberate stops carry
+		// info.StopRequested and are ignored.
+		heads.MaybeAutoRestartHead(reg, store, info)
 	})
 	// A chat-mode turn that fails mid-response (Claude's "API Error: ... The
 	// response above may be incomplete.") emits an isApiErrorMessage assistant
