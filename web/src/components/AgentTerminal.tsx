@@ -945,10 +945,11 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
               </Tooltip>
               {shellMenuOpen && (
                 <>
-                  {/* click-away backdrop */}
-                  <div className="fixed inset-0 z-10" onClick={() => setShellMenuOpen(false)} />
+                  {/* click-away backdrop. z-30 keeps it above the chat pane's
+                      ChatViewSelector (z-20) so this dropdown wins the overlap. */}
+                  <div className="fixed inset-0 z-30" onClick={() => setShellMenuOpen(false)} />
                   <div
-                    className={`absolute left-0 top-full mt-1 z-20 w-56 rounded-md border shadow-lg py-1 text-xs ${
+                    className={`absolute left-0 top-full mt-1 z-40 w-56 rounded-md border shadow-lg py-1 text-xs ${
                       chatActive
                         ? 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e]'
                         : 'border-gray-700 bg-gray-800'
