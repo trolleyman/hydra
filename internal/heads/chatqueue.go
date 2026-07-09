@@ -30,7 +30,10 @@ import (
 // messages, and the daemon pops the front each time it observes a turn end.
 // Whether a fresh message is queued vs sent immediately is decided by the client
 // (which knows, and shows, whether a turn is running) and passed in the frame -
-// so the daemon needs no fragile turn-state seeding, only the turn-end drain.
+// so the daemon needs no fragile turn-state seeding, only the turn-end drain
+// (plus a kick whenever the head's own status shows it resting: on attach, on
+// a queued submit that arrived after the turn actually ended, and when an
+// interrupt settles idle - see kickIfResting and MarkInterrupted).
 
 // QueuedMessage is one held user turn. ID is client-generated so the client can
 // reconcile its optimistic bubble and target a dequeue; Content is the verbatim
@@ -157,6 +160,16 @@ type ChatQueueManager struct {
 // had already ended, and must not re-label a later, unrelated turn end.
 const interruptMarkTTL = time.Minute
 
+// interruptSettleTimeout is how long MarkInterrupted waits for the CLI's
+// answering `result` line before concluding there was no turn to interrupt.
+// An interrupt sent to an idle CLI returns only a control_response - no
+// result, no echo (spike-verified) - which happens exactly when the head is
+// stuck showing "running" with nothing actually in flight; the settle timer
+// is what makes Ctrl+C unstick it. A real mid-turn interrupt answers within
+// milliseconds, so seconds of grace cannot misfire on one. Var so tests can
+// shorten it.
+var interruptSettleTimeout = 5 * time.Second
+
 // NewChatQueueManager builds the manager. reg is used to write drained messages
 // to a session's stdin; store resolves an agent id to its project root.
 func NewChatQueueManager(reg *session.Registry, store *db.Store) *ChatQueueManager {
@@ -188,10 +201,51 @@ func (m *ChatQueueManager) resolveRoot(id string) (string, bool) {
 // MarkInterrupted records that the user interrupted id's in-flight turn, so the
 // turn end the CLI answers with (a `result` line, no Stop hook) writes the
 // head's post-interrupt status instead of leaving it stuck "running".
+//
+// If no result consumes the mark within interruptSettleTimeout, the interrupt
+// hit an idle CLI - there was no turn to end, and the head is stuck showing
+// "running" (e.g. state left behind by an older daemon, or a turn whose end
+// was lost). Settle it: flip the status to waiting and kick the queue, so
+// Ctrl+C always means "make it stop".
 func (m *ChatQueueManager) MarkInterrupted(id string) {
+	at := time.Now()
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.interrupted[id] = time.Now()
+	m.interrupted[id] = at
+	m.mu.Unlock()
+	time.AfterFunc(interruptSettleTimeout, func() { m.settleIdleInterrupt(id, at) })
+}
+
+// settleIdleInterrupt handles an interrupt mark that no `result` line ever
+// consumed (see MarkInterrupted). It is a no-op unless the exact mark is still
+// pending (a result, a newer interrupt, or a new user turn each invalidate it)
+// and the head still reads as mid-turn.
+func (m *ChatQueueManager) settleIdleInterrupt(id string, at time.Time) {
+	m.mu.Lock()
+	pending, ok := m.interrupted[id]
+	if !ok || !pending.Equal(at) {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.interrupted, id)
+	m.mu.Unlock()
+
+	root, ok := m.resolveRoot(id)
+	if !ok {
+		return
+	}
+	// Only unstick a head that still claims to be working; a status a hook (or
+	// the API-error flip) has since written is the truth, not staleness.
+	if info := ReadAgentStatus(root, id); info == nil || (info.Status != api.Running && info.Status != api.Starting) {
+		return
+	}
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+		Status:    api.Waiting,
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	}); err != nil {
+		log.Printf("warn: settle idle interrupt for %s: %v", id, err)
+		return
+	}
+	m.drainFront(root, id)
 }
 
 // takeInterrupted consumes a pending-interrupt mark for id, reporting whether a
@@ -229,9 +283,19 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) {
 // turn is running: when true the message is HELD (persisted) to drain later;
 // when false it is sent to the CLI now (a sent message is surfaced via the CLI's
 // own echo, so it is never stored).
+//
+// The client's view can lag the truth by a beat (its status arrives via the
+// 1s poller + events fan-out), so a message can be marked queued right after
+// the turn actually ended - e.g. typed quickly after an interrupt. Held as-is
+// it would hang until the next attach (no turn end is coming to drain it), so
+// when the head's own status says it is resting, kick the queue now instead.
+// The opposite lag (a turn just started but status.json still reads resting)
+// is benign: the CLI accepts a mid-turn stdin message and runs it as the next
+// turn (spike-verified), which is what queueing would have done anyway.
 func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
+		m.kickIfResting(projectRoot, id)
 		return
 	}
 	m.writeToStdin(id, msg.Content)
@@ -280,6 +344,14 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 // after a daemon restart), send the front now. A running/starting head, or one
 // awaiting a question (needs_input), is left to its normal turn-end drain.
 func (m *ChatQueueManager) OnAttach(projectRoot, id string) {
+	m.kickIfResting(projectRoot, id)
+}
+
+// kickIfResting drains the front of the queue iff the head's own status says
+// it is resting - no turn is in flight, so no turn end is coming to drain it.
+// A running/starting head, or one awaiting a question (needs_input), is left
+// to its normal turn-end drain.
+func (m *ChatQueueManager) kickIfResting(projectRoot, id string) {
 	info := ReadAgentStatus(projectRoot, id)
 	if info == nil {
 		return

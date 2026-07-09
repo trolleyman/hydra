@@ -234,6 +234,83 @@ func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
 		"interrupted turn end did not drain the queued message")
 }
 
+// An interrupt sent to an idle CLI is answered by a control_response only -
+// no `result` line ever consumes the mark (spike-verified) - which is exactly
+// the stuck-"running" state. The settle timer must flip the status to waiting
+// and kick the queue, making Ctrl+C the universal unstick.
+func TestChatIdleInterruptSettles(t *testing.T) {
+	prev := interruptSettleTimeout
+	interruptSettleTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { interruptSettleTimeout = prev })
+
+	mgr, pty, root := managerFixture(t)
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	// A message the client queued against the phantom turn: nothing will ever
+	// drain it via a turn end.
+	mgr.queue(root, "agent-x").Enqueue(msg("s", "STUCK"))
+
+	mgr.MarkInterrupted("agent-x")
+	waitUntil(t, func() bool {
+		s := ReadAgentStatus(root, "agent-x")
+		return s != nil && s.Status == api.Waiting
+	}, "idle interrupt did not settle the status to waiting")
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "STUCK") },
+		"idle interrupt settle did not kick the queue")
+}
+
+// The settle timer must NOT fire for an interrupt whose mark was consumed by a
+// real turn end, nor overwrite a status a hook has since written.
+func TestChatIdleInterruptSettleInvalidated(t *testing.T) {
+	prev := interruptSettleTimeout
+	interruptSettleTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { interruptSettleTimeout = prev })
+
+	mgr, _, root := managerFixture(t)
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	// The turn end consumed the mark (and wrote waiting); a hook then flipped
+	// the head back to running (the drained message's UserPromptSubmit).
+	mgr.MarkInterrupted("agent-x")
+	mgr.OnTurnEnd("agent-x")
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:01Z"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(4 * interruptSettleTimeout)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("settle timer fired despite its mark being consumed: %+v", s)
+	}
+}
+
+// A message submitted as queued while the head is actually resting (the
+// client's turn-running view lagged, e.g. typed right after an interrupt)
+// must drain immediately - no turn end is coming to drain it.
+func TestChatQueuedSubmitWhileRestingDrains(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Waiting, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("l", "LAGGED"), true)
+	if !strings.Contains(pty.written(), "LAGGED") {
+		t.Fatalf("queued submit against a resting head was not drained: %q", pty.written())
+	}
+	if got := mgr.List(root, "agent-x"); len(got) != 0 {
+		t.Fatalf("drained message still in the queue: %+v", got)
+	}
+
+	// While genuinely running, a queued submit stays held.
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:01Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("h", "HELD"), true)
+	if strings.Contains(pty.written(), "HELD") {
+		t.Fatalf("queued submit against a running head was sent: %q", pty.written())
+	}
+}
+
 // A normal (un-interrupted) turn end must not touch the status file - that is
 // the Stop hook's job - and a stale interrupt mark (one whose turn never
 // answered, superseded by a later user send) must not relabel a later turn.
