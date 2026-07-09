@@ -1361,6 +1361,9 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
   const routeUser = (rawText: string) => {
     const text = stripLocalCommandCaveat(rawText)
     if (!text) return
+    // A user turn starting settles the previous turn's synthesized footer
+    // (mirrors the live reducer's routeUserText).
+    flushHistFooter()
     const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
     if (cmd) {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -1387,11 +1390,32 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
   const seenBlocks = new Map<string, Set<string>>()
   // The transcript has no `result` events (they aren't part of Claude's durable
   // record), so a historical turn's footer is synthesized from the assistant
-  // messages' own usage: accumulate output tokens across the turn's messages and
-  // flush a footer when a message ends the turn (stop_reason other than the
-  // mid-turn "tool_use"). No duration/cost is recoverable, so the footer shows
-  // just the token count (+ any truncation flag).
+  // messages' own usage. The transcript records one assistant event per content
+  // block, each carrying the same message envelope (id, usage, stop_reason even
+  // on non-final blocks), so usage counts once per message id and the footer
+  // flushes only at a turn boundary (the next user message) - never per event,
+  // which interleaved footers with the conversation. No duration/cost is
+  // recoverable, so the footer shows just the token count (+ any abnormal-stop
+  // flag).
   let histTurnOut = 0
+  let histLastUsage: TokenUsage | undefined
+  let histStopReason: string | null = null
+  const histUsageCounted = new Set<string>()
+  const flushHistFooter = () => {
+    const total = histTurnOut
+    const sr = histStopReason
+    histTurnOut = 0
+    histStopReason = null
+    if (!sr) return
+    if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+      push({
+        kind: 'result',
+        isError: false,
+        usage: total ? { ...(histLastUsage ?? {}), output_tokens: total } : histLastUsage,
+        stopReason: sr,
+      })
+    }
+  }
   for (const ev of events) {
     if (ev.type === 'user') {
       const content = ev.message?.content
@@ -1441,24 +1465,20 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
           else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
         }
       }
-      // Turn-footer synthesis (item: historical usage). Roll this message's
-      // output into the turn total; flush a footer when the turn ends.
+      // Turn-footer synthesis (item: historical usage): roll this message's
+      // output into the pending turn footer, once per message id.
       const u = ev.message?.usage
-      if (u?.output_tokens) histTurnOut += u.output_tokens
-      const sr = ev.message?.stop_reason
-      if (sr && sr !== 'tool_use') {
-        const total = histTurnOut || u?.output_tokens
-        if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
-          push({
-            kind: 'result',
-            isError: false,
-            usage: total ? { ...u, output_tokens: total } : u,
-            stopReason: sr,
-          })
-        }
-        histTurnOut = 0
+      if (u?.output_tokens && (!msgId || !histUsageCounted.has(msgId))) {
+        if (msgId) histUsageCounted.add(msgId)
+        histTurnOut += u.output_tokens
+        histLastUsage = u
       }
+      const sr = ev.message?.stop_reason
+      if (sr && sr !== 'tool_use') histStopReason = sr
     } else if (ev.type === 'result') {
+      // A real result footer replaces the turn's pending synthesized one.
+      histTurnOut = 0
+      histStopReason = null
       const out = ev.usage?.output_tokens
       push({
         kind: 'result',
@@ -1470,6 +1490,11 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
       })
     }
   }
+  // A pending footer at the end of the page is deliberately dropped, not
+  // flushed: this page's last event adjoins the previously-oldest event, so a
+  // turn straddling the boundary already produced its footer in the items
+  // below - flushing here would duplicate it (with content in between, where
+  // the consecutive-results dedup can't collapse it).
   return items
 }
 
@@ -1752,12 +1777,40 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // in-flight block, which stays small.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let streamTimer: ReturnType<typeof setTimeout> | null = null
-    // Output tokens accumulated across the current turn's assistant messages, so
-    // a footer can be synthesized from message usage (the transcript backfill has
-    // no `result` event to carry it). Flushed at each turn end. A live turn also
-    // synthesizes one, but the real `result` footer that immediately follows it
-    // supersedes it (visibleItems drops a result followed by another result).
+    // Turn-footer synthesis for backfilled history (the transcript has no
+    // `result` events to carry usage). The transcript records one assistant
+    // event PER CONTENT BLOCK, each carrying the same message envelope (id,
+    // usage, stop_reason - even on non-final blocks), so usage is counted once
+    // per message id and the footer is flushed only at a turn boundary (the
+    // next user message, or replay end) - synthesizing it per event put a
+    // footer BEFORE the text of a [thinking, text] message and a duplicate
+    // after it, interleaved with the conversation. A live turn's real `result`
+    // event discards the pending footer and renders its own instead.
     let histTurnOut = 0
+    let histLastUsage: TokenUsage | undefined
+    let histStopReason: string | null = null
+    const histUsageCounted = new Set<string>()
+    const discardHistFooter = () => {
+      histTurnOut = 0
+      histStopReason = null
+    }
+    const flushHistFooter = () => {
+      const total = histTurnOut
+      const sr = histStopReason
+      discardHistFooter()
+      // No stop_reason seen -> the turn never completed (an interrupt, or the
+      // replay caught it mid-flight); its live continuation or real result
+      // handles the footer, so pushing partial usage here would be noise.
+      if (!sr) return
+      if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
+        push({
+          kind: 'result',
+          isError: false,
+          usage: total ? { ...(histLastUsage ?? {}), output_tokens: total } : histLastUsage,
+          stopReason: sr,
+        })
+      }
+    }
     // When a thinking block starts streaming we stamp the start time; the settled
     // thinking item picks it up (and clears it) to show "Thought for Xs" (item
     // 11). Replayed history never streams, so it stays null -> a plain "Thought".
@@ -2025,6 +2078,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
       if (!text) return
+      // A user turn starting is the boundary that settles the previous turn's
+      // synthesized footer (backfill only - live turns' pending footers are
+      // discarded by their real result event before the next user turn).
+      flushHistFooter()
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
@@ -2197,19 +2254,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               }
             }
           }
-          // Synthesize a turn footer from this message's usage + stop_reason, so
-          // backfilled history (no `result` event) still gets one. A live turn's
-          // real `result` follows immediately and supersedes it (see histTurnOut).
+          // Roll this message's usage into the pending turn footer (see
+          // flushHistFooter) - once per message id, since every content block
+          // arrives as its own assistant event carrying the same envelope.
           const u = ev.message?.usage
-          if (u?.output_tokens) histTurnOut += u.output_tokens
-          const sr = ev.message?.stop_reason
-          if (sr && sr !== 'tool_use') {
-            const total = histTurnOut || u?.output_tokens
-            if (total || (sr !== 'end_turn' && STOP_REASON_LABEL[sr])) {
-              push({ kind: 'result', isError: false, usage: total ? { ...u, output_tokens: total } : u, stopReason: sr })
-            }
-            histTurnOut = 0
+          if (u?.output_tokens && (!msgId || !histUsageCounted.has(msgId))) {
+            if (msgId) histUsageCounted.add(msgId)
+            histTurnOut += u.output_tokens
+            histLastUsage = u
           }
+          const sr = ev.message?.stop_reason
+          if (sr && sr !== 'tool_use') histStopReason = sr
           // The complete event supersedes any in-flight streamed block (finals
           // always follow their own deltas). Cleared in the same batch as the
           // push above, so the text swaps without a flash.
@@ -2270,9 +2325,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           })
           // Consumed - clear it so it can't leak onto a later turn's result (the
           // live turn-start reset only fires between live turns, not between the
-          // several results a backfill can carry).
+          // several results a backfill can carry). The real result also replaces
+          // the turn's pending synthesized footer.
           turnStopReasonRef.current = null
-          histTurnOut = 0
+          discardHistFooter()
           // A turn ends only once all its sub-agents have; settle any still
           // marked running (a sub whose own result line we never saw).
           let changed = false
@@ -2339,6 +2395,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
           return
         case 'replay_done':
+          // History that ends on a completed turn (no trailing user message to
+          // settle it, and no result event in the replay to supersede it) gets
+          // its synthesized footer here. Flushed before `replaying` clears so
+          // it commits in the same single batch as the history.
+          flushHistFooter()
           replaying = false
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).

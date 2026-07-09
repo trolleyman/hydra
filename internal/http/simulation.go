@@ -2808,6 +2808,12 @@ var simChatEvents = []string{
 	// A turn-ending assistant message carrying usage + stop_reason: the chat
 	// synthesizes a per-turn footer from it (the transcript has no `result`
 	// event), showing "↓ N tokens" with the full input/cache breakdown on hover.
+	// Mirrors the real transcript shape: one assistant event PER CONTENT BLOCK
+	// (an empty silent-reasoning thinking block, then the text), each carrying
+	// the same envelope - id, usage and stop_reason even on the non-final block.
+	// The chat must count the usage once and render ONE footer at the turn
+	// boundary - not one per event, interleaved around the text.
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"thinking","thinking":""}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
