@@ -15,6 +15,18 @@ export const StorageKeys = {
   // explicit toggle persists this; the small-screen auto-close on navigation is
   // transient so it doesn't clobber the desktop preference.
   sidebarCollapsed: 'hydra-sidebar-collapsed',
+  // '0' when the user has opted OUT of the new two-pane agent layout, falling
+  // back to the classic single-scroll stacked layout. Absent/'1' = the new split
+  // layout (the default). Browser-scoped, global (see lib/layout.ts).
+  splitLayoutEnabled: 'hydra-split-layout',
+  // The left (working) pane's share of the agent-page split, as a stored float
+  // fraction in [0,1] (e.g. '0.4' = 40% terminal / 60% inspector). Global, like
+  // sidebarWidth. See AgentDetail / lib/layout.ts.
+  agentSplitRatio: 'hydra-agent-split-ratio',
+  // Which agent-page pane is collapsed for a focus view: 'none' (the split),
+  // 'inspector' (terminal-only) or 'working' (inspector-only). Global, mirrors
+  // the sidebar collapse toggle. See lib/layout.ts.
+  agentPaneCollapse: 'hydra-agent-pane-collapse',
   defaultAgentType: 'hydra-default-agent-type',
   // Most-recently-visited project ordering (JSON array of project IDs, most
   // recent first). Drives the Ctrl+` alt-tab switcher's order. See

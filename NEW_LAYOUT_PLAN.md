@@ -23,8 +23,11 @@ Everything on the agent page is a single vertically-stacked scroll container
 | |          |  | +--------------------------------------+ ||
 | | project  |  | | [data-main-scroll] (one scroll col)  | ||
 | | spawn    |  | |   metadata SeparatedRow              | ||
-| | agents   |  | |   PromptBlock (read-only)            | ||
-| | list     |  | |   AgentTerminal (live)              | ||
+| | agents   |  | |   PromptBlock (terminal mode only)   | ||
+| | list     |  | |   AgentTerminal panel (fixed-height  | ||
+| |          |  | |     drag window; tab strip: agent    | ||
+| |          |  | |     tab = xterm OR ChatPane + bash   | ||
+| |          |  | |     tabs + "+")                      | ||
 | |          |  | |   DiffViewer:                        | ||
 | |          |  | |     Changes bar (selectors, cog)    | ||
 | |          |  | |     TestsPanel (collapsible card)   | ||
@@ -51,9 +54,30 @@ Key facts that constrain the redesign:
   file diffs. Tests and previews wrap in `CollapsibleCard`; `ArtifactsPanel`
   has no single outer card - it renders a filter bar plus one `CollapsibleCard`
   *per artifact set*, each set's files in a masonry grid.
+- **Chat mode is a persisted per-agent mode, but today it renders as a tab of
+  the terminal panel.** `agent.chat_mode` (Claude only) is toggled in the
+  metadata row; switching restarts the Claude process in the new framing
+  (conversation preserved via `--continue`). In `AgentTerminal.tsx` the fixed
+  agent tab renders `ChatPane` (`web/src/components/AgentChat.tsx`) instead of
+  an xterm; bash tabs stay real terminals alongside it, and the whole tab strip
+  sits inside the same fixed-height row-snapping drag window (chat gets its own
+  default height, 600px / a global pref in `web/src/lib/chatPrefs.ts`).
+- **`ChatPane` brings its own chrome** and manages it internally: a top-left
+  selector switching between the main conversation and per-sub-agent chats, the
+  transcript (scroll position persisted via `agentViewPrefs.chatScrollTop`),
+  and a bottom composer with attachments, slash commands, a drag-resizable
+  min-height and a persisted draft (`chatDraft` / `chatComposerRows` in
+  `agentViewPrefs`). None of that needs to change for the split - it is all
+  internal to the pane.
 - **Prompt** is `PromptBlock` (read-only, in `AgentDetail.tsx`), rendered above
-  the terminal. There is no live prompt *input* on this page - prompting is done
-  through the terminal/chat.
+  the terminal - but **only in terminal mode**. Chat-mode heads skip it
+  entirely: the task is replayed as the first message in the chat
+  (`--replay-user-messages`), so the block would be redundant. There is no live
+  prompt *input* on this page - prompting is done through the terminal/chat.
+- **Diff comments flow into chat.** Inline diff comments and "Fix with agent"
+  are delivered to chat-mode agents as chat messages. In the split this becomes
+  a cross-pane interaction: comment on a diff line in the right pane, see it
+  land in the left chat.
 - **No split-pane library.** All resizing is hand-rolled pointer-drag
   (`handleSidebarResizeStart` in `__root.tsx`, `startResizing` for the diff
   file-list, terminal vertical drag in `AgentTerminal.tsx`). Sticky headers
@@ -73,9 +97,10 @@ column) into two independently-scrolling panes with a draggable divider:
 |          |                           |::| +--------------------------+ |
 |          |  metadata SeparatedRow    |::| | [ Diff | Tests | Preview]| |  <- selector
 |          |                           |::| +--------------------------+ |
-|          |  > Prompt (collapsed)     |::| | Files | diff content     | |
+|          |  > Prompt (terminal mode) |::| | Files | diff content     | |
 |          |                           |::| |  ...  |  ...              | |
-|          |  AgentTerminal / Chat     |::| |       |                  | |
+|          |  ChatPane (chat mode) OR  |::| |       |                  | |
+|          |  AgentTerminal (terminal) |::| |       |                  | |
 |          |  (fills remaining height) |::| |       |                  | |
 |          |                           |::| |       |                  | |
 +----------+---------------------------+--+------------------------------+
@@ -84,17 +109,34 @@ column) into two independently-scrolling panes with a draggable divider:
 
 ### Left pane - "working" pane
 
+The left pane's content depends on the head's mode (`agent.chat_mode`), and
+**chat stops being a tab inside a terminal window - it becomes the pane
+itself** (decided, see decision #6):
+
 - Metadata `SeparatedRow` (badges: type, status, verdict chip, branch, base
-  selector, terminal/chat toggle, MR chip, created-ago) stays at the top.
-- **Prompt collapsed by default.** Wrap `PromptBlock` in a
+  selector, terminal/chat toggle, MR chip, created-ago) stays at the top in
+  both modes.
+- **Chat mode:** `ChatPane` fills the whole remaining pane height directly -
+  transcript in the middle, composer docked at the bottom, its own sub-agent
+  selector at the top. No `AgentTerminal` window framing, no fixed drag
+  height, no `PromptBlock` (already skipped in chat mode today - the task is
+  the first chat message). Bash shells stay reachable: the slim tab strip
+  (agent tab + bash tabs + "+") survives as a one-row switcher at the top of
+  the pane, but the *active view fills the pane* instead of living in a
+  height-dragged window. With no bash tabs open, the strip collapses to just
+  the "+" affordance (or hides behind one) so chat truly owns the pane.
+- **Terminal mode:** same shell - the xterm agent tab plus bash tabs fill the
+  remaining height and scroll internally. The row-snapping height-drag handle,
+  `terminalHeight` in `agentViewPrefs` and the global chat-default-height pref
+  (`chatPrefs.ts`) are all artifacts of the terminal being a window inside a
+  scroll column; in the split they become dead weight (keep them only if the
+  old stacked layout survives behind a flag, else remove).
+- **Prompt collapsed by default (terminal mode only).** Wrap `PromptBlock` in a
   `CollapsibleCard` (or a lightweight disclosure) titled with a one-line
   truncated preview of the prompt, expandable on click. Persist the
   open/closed state per agent (reuse the `agentViewPrefs` pattern). This
-  reclaims vertical space for the terminal.
-- `AgentTerminal` / `AgentChat` fills the remaining height of the left pane
-  and scrolls internally (it already manages its own height via the drag
-  handle; here it should default to "fill available" instead of a fixed px
-  height).
+  reclaims vertical space for the terminal. (Chat mode has no prompt block at
+  all, so nothing to collapse there.)
 
 ### Right pane - "inspector" pane
 
@@ -281,10 +323,10 @@ its contents; it simply spans both new panes.
    inspector-only / diff-focus collapse to reclaim full width on demand.
 2. **Terminal column count - softened by chat mode.** A raw PTY terminal
    reflows tighter when the left pane narrows, and a wide terminal was
-   implicitly a feature. But the terminal can run in **chat mode**
-   (`AgentChat`), which reads fine in a narrow column - so this mainly affects
-   raw-terminal users, and the split can even nudge toward chat mode. Not a
-   blocker.
+   implicitly a feature. But chat mode is now a first-class persisted mode
+   (`agent.chat_mode`, metadata-row toggle) and `ChatPane` reads fine in a
+   narrow column - so this mainly affects terminal-mode heads, and the split
+   even nudges toward chat mode. Not a blocker.
 3. **Sticky-header re-scoping.** Removing the single `[data-main-scroll]`
    container breaks three things that assume it: the CSS-var docking
    (`--sticky-changes-h`, `FILE_STICKY_TOP`, `useMeasuredHeight`),
@@ -308,9 +350,13 @@ its contents; it simply spans both new panes.
    handle are both near each other - visually distinguish them.
 7. **The archived-agent view is a second render path.** `AgentDetail.tsx` has
    *two* `[data-main-scroll]` containers - the active-agent page and a simpler
-   archived-agent view with its own metadata row. Decide whether archived
-   agents get the split too or explicitly keep the single column (probably the
-   latter - no live terminal to sit beside).
+   archived-agent view (`ArchivedAgentDetail`) with its own metadata row.
+   Decide whether archived agents get the split too or explicitly keep the
+   single column (probably the latter - no live terminal to sit beside).
+   Archived heads can now be *resumed* (revival recreates the worktree/branch
+   and reopens the live page), so the single-column archived view is only ever
+   one click away from the split layout - fine, just make sure the transition
+   between the two render paths doesn't jar.
 8. **Unmounting the diff unmounts its keyboard handlers.** `DiffViewer`
    registers window-level `keydown` handlers (merge-conflict fix flow, the
    B/H artifact-highlight toggle). With unmount-inactive-views (decision #4)
@@ -352,11 +398,33 @@ selectors today; moving that block into a right panel changes nothing.)
 5. ~~**Default split ratio**~~ DECIDED: 40% terminal / 60% inspector. The diff
    (especially side-by-side + file list) needs the extra room; chat mode reads
    fine at 40%.
+6. ~~**Chat: tab of the terminal window, or the pane itself?**~~ DECIDED: in
+   the new layout chat is **the pane itself**. Today `ChatPane` renders inside
+   `AgentTerminal`'s tab strip, boxed in the same fixed-height drag window as
+   the xterm; in the split, a chat-mode head's left pane *is* the chat -
+   transcript fills, composer docks at the bottom, no window chrome. The tab
+   strip survives only as a slim top-of-pane switcher for bash shells (and
+   collapses/hides when there are none); the height-drag handle and the
+   chat-default-height pref (`chatPrefs.ts`) don't apply in the split. The
+   metadata row's terminal/chat toggle now swaps the whole pane's content
+   (it already restarts the Claude process; the pane swap is the visual half
+   of the same action).
 
 ## Affected files (first pass)
 
 - `web/src/components/AgentDetail.tsx` - restructure the scroll region into the
-  two-pane split; collapse `PromptBlock`; make the terminal fill height.
+  two-pane split; collapse `PromptBlock` (terminal mode); pick the left pane's
+  occupant by `agent.chat_mode`.
+- `web/src/components/AgentTerminal.tsx` - biggest single change on the left:
+  drop the fixed-height window framing (height-drag handle, row-snap,
+  `terminalHeight` / chat-default-height prefs) in favour of fill-pane; keep
+  the tab strip as a slim top-of-pane switcher; in chat mode hand the pane to
+  `ChatPane` directly.
+- `web/src/components/AgentChat.tsx` - `ChatPane` itself barely changes (its
+  chrome is internal); verify it lays out correctly as a flex-fill child
+  instead of inside a fixed-px box.
+- `web/src/lib/chatPrefs.ts` - the global chat-default-height pref has no role
+  in the split; retire it (or keep it only while the stacked layout survives).
 - `web/src/DiffViewer.tsx` - factor the tests/previews/artifacts cards out of
   the stacked layout; make Diff a standalone view; re-scope sticky CSS vars to
   the right pane.

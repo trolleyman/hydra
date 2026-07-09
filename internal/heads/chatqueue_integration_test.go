@@ -100,8 +100,8 @@ func waitUntil(t *testing.T, cond func() bool, msg string) {
 	t.Fatal(msg)
 }
 
-// An idle send goes straight to stdin; queued sends are held and drain one per
-// turn end, in order, writing to the session's stdin.
+// An idle send goes straight to stdin; queued sends are held and the whole
+// queue dumps, in order, at the next turn end.
 func TestChatQueueManagerDrainsToStdin(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 
@@ -116,15 +116,14 @@ func TestChatQueueManagerDrainsToStdin(t *testing.T) {
 		t.Fatal("a queued message was written before its turn")
 	}
 
-	mgr.OnTurnEnd("agent-x") // drains SECOND
-	mgr.OnTurnEnd("agent-x") // drains THIRD
+	mgr.OnTurnEnd("agent-x") // dumps SECOND and THIRD together
 	w := pty.written()
 	iF, iS, iT := strings.Index(w, "FIRST"), strings.Index(w, "SECOND"), strings.Index(w, "THIRD")
 	if iS < 0 || iT < 0 {
-		t.Fatalf("queued drains missing from stdin: %q", w)
+		t.Fatalf("queued dump missing from stdin: %q", w)
 	}
 	if !(iF < iS && iS < iT) {
-		t.Fatalf("drain order wrong: FIRST@%d SECOND@%d THIRD@%d", iF, iS, iT)
+		t.Fatalf("dump order wrong: FIRST@%d SECOND@%d THIRD@%d", iF, iS, iT)
 	}
 
 	before := len(pty.written())
@@ -202,4 +201,214 @@ func TestChatResultDrainsViaRegistry(t *testing.T) {
 	pty.feed([]byte(`{"type":"result","subtype":"success","duration_ms":10}` + "\n"))
 	waitUntil(t, func() bool { return strings.Contains(pty.written(), "DRAINME") },
 		"result line did not drain the queued message to stdin")
+}
+
+// Mid-turn drain (terminal-style steering): the first completed
+// main-conversation assistant line on stdout is a step boundary that dumps
+// the WHOLE queue, in order, so queued messages reach the CLI within a step
+// instead of waiting for the turn to end. Sidechain (sub-agent) assistant
+// lines don't count.
+func TestChatStepDrainsViaRegistry(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatResult(mgr.OnTurnEnd)
+	reg.SetOnChatStep(mgr.OnTurnStep)
+
+	mgr.Submit(root, "agent-x", msg("a", "STEP-ONE"), true)
+	mgr.Submit(root, "agent-x", msg("b", "STEP-TWO"), true)
+	mgr.Submit(root, "agent-x", msg("c", "STEP-THREE"), true)
+
+	// A sub-agent's line is not a main-turn step: nothing drains.
+	pty.feed([]byte(`{"type":"assistant","isSidechain":true,"agentId":"sub1","message":{"content":[{"type":"text","text":"sub step"}]}}` + "\n"))
+	time.Sleep(50 * time.Millisecond)
+	if w := pty.written(); strings.Contains(w, "STEP-ONE") {
+		t.Fatalf("a sidechain line drained the queue: %q", w)
+	}
+
+	// One main-turn step dumps the whole queue, in order.
+	pty.feed([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"}]}}` + "\n"))
+	waitUntil(t, func() bool {
+		w := pty.written()
+		return strings.Contains(w, "STEP-ONE") && strings.Contains(w, "STEP-TWO") && strings.Contains(w, "STEP-THREE")
+	}, "a step boundary did not dump the queue")
+	w := pty.written()
+	if i1, i2, i3 := strings.Index(w, "STEP-ONE"), strings.Index(w, "STEP-TWO"), strings.Index(w, "STEP-THREE"); !(i1 < i2 && i2 < i3) {
+		t.Fatalf("queue dump out of order: ONE@%d TWO@%d THREE@%d", i1, i2, i3)
+	}
+}
+
+// End to end (daemon side, minus the real CLI): an ExitPlanMode can_use_tool
+// control_request on the chat session's stdout - the plan-approval gate a chat
+// head hits leaving plan mode - fires the registry's OnChatPlanApproval hook,
+// which writes an allow control_response back to stdin so the head proceeds
+// instead of hanging. A can_use_tool request for a different tool (answered by
+// the client) is left alone.
+func TestChatPlanApprovalViaRegistry(t *testing.T) {
+	mgr, pty, _ := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatPlanApproval(mgr.OnPlanApproval)
+
+	// The CLI asks to leave plan mode; the daemon auto-approves.
+	pty.feed([]byte(`{"type":"control_request","request_id":"req_9","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"ship it"}}}` + "\n"))
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "req_9") },
+		"ExitPlanMode gate was not auto-approved to stdin")
+	w := pty.written()
+	if !strings.Contains(w, `"behavior":"allow"`) || !strings.Contains(w, `"control_response"`) {
+		t.Fatalf("plan approval was not an allow control_response: %q", w)
+	}
+
+	// An AskUserQuestion can_use_tool request is the client's to answer, not the
+	// daemon's - it must NOT be auto-approved here.
+	before := len(pty.written())
+	pty.feed([]byte(`{"type":"control_request","request_id":"req_10","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{}}}` + "\n"))
+	time.Sleep(50 * time.Millisecond)
+	if strings.Contains(pty.written()[before:], "req_10") {
+		t.Fatalf("an AskUserQuestion request was auto-approved: %q", pty.written())
+	}
+}
+
+// A user interrupt ends the turn with a `result` line (subtype
+// error_during_execution) but fires NO Stop hook (spike-verified against the
+// real CLI), so the daemon itself must flip the head out of "running". End to
+// end minus the CLI: mark the interrupt (as the chat WS handler does), feed the
+// CLI's actual post-interrupt output, and expect the status written as
+// "waiting" plus the queued message drained to stdin.
+func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+	reg := mgr.reg
+	reg.SetOnChatResult(mgr.OnTurnEnd)
+
+	// Mid-turn state: the hook marked the head running, and a message is queued.
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("q", "AFTER-INTERRUPT"), true)
+
+	mgr.MarkInterrupted("agent-x")
+	// What the CLI actually prints when interrupted (in this order).
+	pty.feed([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}` + "\n"))
+	pty.feed([]byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":7330}` + "\n"))
+
+	waitUntil(t, func() bool {
+		s := ReadAgentStatus(root, "agent-x")
+		return s != nil && s.Status == api.Waiting
+	}, "interrupted turn end did not write the waiting status")
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "AFTER-INTERRUPT") },
+		"interrupted turn end did not drain the queued message")
+}
+
+// An interrupt sent to an idle CLI is answered by a control_response only -
+// no `result` line ever consumes the mark (spike-verified) - which is exactly
+// the stuck-"running" state. The settle timer must flip the status to waiting
+// and kick the queue, making Ctrl+C the universal unstick.
+func TestChatIdleInterruptSettles(t *testing.T) {
+	prev := interruptSettleTimeout
+	interruptSettleTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { interruptSettleTimeout = prev })
+
+	mgr, pty, root := managerFixture(t)
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	// A message the client queued against the phantom turn: nothing will ever
+	// drain it via a turn end.
+	mgr.queue(root, "agent-x").Enqueue(msg("s", "STUCK"))
+
+	mgr.MarkInterrupted("agent-x")
+	waitUntil(t, func() bool {
+		s := ReadAgentStatus(root, "agent-x")
+		return s != nil && s.Status == api.Waiting
+	}, "idle interrupt did not settle the status to waiting")
+	waitUntil(t, func() bool { return strings.Contains(pty.written(), "STUCK") },
+		"idle interrupt settle did not kick the queue")
+}
+
+// The settle timer must NOT fire for an interrupt whose mark was consumed by a
+// real turn end, nor overwrite a status a hook has since written.
+func TestChatIdleInterruptSettleInvalidated(t *testing.T) {
+	prev := interruptSettleTimeout
+	interruptSettleTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { interruptSettleTimeout = prev })
+
+	mgr, _, root := managerFixture(t)
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	// The turn end consumed the mark (and wrote waiting); a hook then flipped
+	// the head back to running (the drained message's UserPromptSubmit).
+	mgr.MarkInterrupted("agent-x")
+	mgr.OnTurnEnd("agent-x")
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:01Z"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(4 * interruptSettleTimeout)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("settle timer fired despite its mark being consumed: %+v", s)
+	}
+}
+
+// A message submitted as queued while the head is actually resting (the
+// client's turn-running view lagged, e.g. typed right after an interrupt)
+// must drain immediately - no turn end is coming to drain it.
+func TestChatQueuedSubmitWhileRestingDrains(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Waiting, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("l", "LAGGED"), true)
+	if !strings.Contains(pty.written(), "LAGGED") {
+		t.Fatalf("queued submit against a resting head was not drained: %q", pty.written())
+	}
+	if got := mgr.List(root, "agent-x"); len(got) != 0 {
+		t.Fatalf("drained message still in the queue: %+v", got)
+	}
+
+	// While genuinely running, a queued submit stays held.
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:01Z"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.Submit(root, "agent-x", msg("h", "HELD"), true)
+	if strings.Contains(pty.written(), "HELD") {
+		t.Fatalf("queued submit against a running head was sent: %q", pty.written())
+	}
+}
+
+// A normal (un-interrupted) turn end must not touch the status file - that is
+// the Stop hook's job - and a stale interrupt mark (one whose turn never
+// answered, superseded by a later user send) must not relabel a later turn.
+func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
+	mgr, pty, root := managerFixture(t)
+
+	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain turn end: no mark, no status write.
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("un-interrupted turn end rewrote the status: %+v", s)
+	}
+
+	// A mark followed by a new user send is stale: the send starts a fresh turn
+	// whose end is a normal one.
+	mgr.MarkInterrupted("agent-x")
+	mgr.Submit(root, "agent-x", msg("d", "DIRECT"), false)
+	if !strings.Contains(pty.written(), "DIRECT") {
+		t.Fatalf("direct send not written to stdin: %q", pty.written())
+	}
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("stale interrupt mark relabeled a later turn end: %+v", s)
+	}
+
+	// An expired mark (interrupt that never produced a turn end) is discarded.
+	mgr.MarkInterrupted("agent-x")
+	mgr.mu.Lock()
+	mgr.interrupted["agent-x"] = time.Now().Add(-2 * interruptMarkTTL)
+	mgr.mu.Unlock()
+	mgr.OnTurnEnd("agent-x")
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
+		t.Fatalf("expired interrupt mark relabeled a later turn end: %+v", s)
+	}
 }

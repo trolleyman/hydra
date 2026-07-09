@@ -448,6 +448,54 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/resume:
+    post:
+      summary: Resume an archived (killed/merged) agent, restoring its conversation
+      description: >-
+        Revives a killed or merged agent: recreates its worktree and branch off
+        the current base, un-archives the record, and relaunches the agent so it
+        continues from its saved conversation transcript (the file changes start
+        fresh on a clean branch). Depends on the host conversation transcript
+        still existing.
+      operationId: resumeAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK (Agent resumed, revived live agent returned)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '404':
+          description: Not Found (no archived agent with that ID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/merge:
     post:
       summary: Merge a Hydra agent's branch into its base branch and, unless close=false, kill it

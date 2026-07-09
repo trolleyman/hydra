@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,11 +34,13 @@ type StartOptions struct {
 
 // Registry owns all live agent sessions for the daemon.
 type Registry struct {
-	mu             sync.RWMutex
-	sessions       map[string]*Session
-	onExit         func(Info)
-	onChatAPIError func(id, msg string)
-	onChatResult   func(id string)
+	mu                sync.RWMutex
+	sessions          map[string]*Session
+	onExit            func(Info)
+	onChatAPIError    func(id, msg string)
+	onChatResult      func(id string)
+	onChatStep        func(id string)
+	onChatPlanApprove func(id, requestID string, input json.RawMessage)
 }
 
 // NewRegistry returns an empty registry.
@@ -70,6 +73,29 @@ func (r *Registry) SetOnChatAPIError(fn func(id, msg string)) {
 func (r *Registry) SetOnChatResult(fn func(id string)) {
 	r.mu.Lock()
 	r.onChatResult = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatStep registers a callback invoked (off the read goroutine) each time
+// a chat-mode session's stdout carries a completed main-conversation assistant
+// line - a mid-turn step boundary (see claudestream.RingFilter.OnStep). The
+// daemon wires it to drain queued messages into the running turn early.
+func (r *Registry) SetOnChatStep(fn func(id string)) {
+	r.mu.Lock()
+	r.onChatStep = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatPlanApproval registers a callback invoked (off the read goroutine)
+// when a chat-mode session's stdout carries a can_use_tool control_request for
+// ExitPlanMode - the plan-approval gate a head hits when it leaves plan mode.
+// Chat heads run with --permission-prompt-tool stdio, so this gate arrives as a
+// control_request nothing answers; the daemon wires this to auto-approve it by
+// writing the allow control_response back to the session's stdin. id is the
+// session/head id; requestID/input come from the control_request.
+func (r *Registry) SetOnChatPlanApproval(fn func(id, requestID string, input json.RawMessage)) {
+	r.mu.Lock()
+	r.onChatPlanApprove = fn
 	r.mu.Unlock()
 }
 
@@ -155,6 +181,30 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id)
+			}
+		}
+		// A completed assistant line is a mid-turn step boundary; same
+		// off-the-read-goroutine dispatch rules as OnResult. Ordering across
+		// these concurrent dispatches is restored by the queue's own send
+		// serialization (ChatQueue.sendMu).
+		ringFilter.OnStep = func() {
+			r.mu.RLock()
+			fn := r.onChatStep
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id)
+			}
+		}
+		// An ExitPlanMode can_use_tool control_request is the plan-approval gate;
+		// dispatch the auto-approve (a stdin write) off the read goroutine, same
+		// as the drains, so it can't deadlock against the read side under the
+		// session lock.
+		ringFilter.OnPlanApproval = func(requestID string, input json.RawMessage) {
+			r.mu.RLock()
+			fn := r.onChatPlanApprove
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, requestID, input)
 			}
 		}
 	}

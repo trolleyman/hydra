@@ -1841,6 +1841,9 @@ type ServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Resume an archived (killed/merged) agent, restoring its conversation
+	// (POST /api/projects/{project_id}/agents/{id}/resume)
+	ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{id}/tests)
 	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams)
@@ -3239,6 +3242,40 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ResumeAgent operation middleware
+func (siw *ServerInterfaceWrapper) ResumeAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAgentTests operation middleware
 func (siw *ServerInterfaceWrapper) GetAgentTests(w http.ResponseWriter, r *http.Request) {
 
@@ -4181,6 +4218,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/resume", wrapper.ResumeAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/tests", wrapper.GetAgentTests)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
@@ -5520,6 +5558,51 @@ func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.Res
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ResumeAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type ResumeAgentResponseObject interface {
+	VisitResumeAgentResponse(w http.ResponseWriter) error
+}
+
+type ResumeAgent200JSONResponse AgentResponse
+
+func (response ResumeAgent200JSONResponse) VisitResumeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeAgent404JSONResponse ErrorResponse
+
+func (response ResumeAgent404JSONResponse) VisitResumeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeAgent409JSONResponse ErrorResponse
+
+func (response ResumeAgent409JSONResponse) VisitResumeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeAgent500JSONResponse ErrorResponse
+
+func (response ResumeAgent500JSONResponse) VisitResumeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetAgentTestsRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -6431,6 +6514,9 @@ type StrictServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Resume an archived (killed/merged) agent, restoring its conversation
+	// (POST /api/projects/{project_id}/agents/{id}/resume)
+	ResumeAgent(ctx context.Context, request ResumeAgentRequestObject) (ResumeAgentResponseObject, error)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{id}/tests)
 	GetAgentTests(ctx context.Context, request GetAgentTestsRequestObject) (GetAgentTestsResponseObject, error)
@@ -7486,6 +7572,33 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, pr
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
 		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeAgent operation middleware
+func (sh *strictHandler) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request ResumeAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeAgent(ctx, request.(ResumeAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeAgentResponseObject); ok {
+		if err := validResponse.VisitResumeAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

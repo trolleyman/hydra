@@ -92,6 +92,13 @@ type Session struct {
 	// guarded by mu.
 	ephemeral bool
 	reapTimer *time.Timer
+
+	// stopRequested records that hydra itself asked this session to terminate
+	// (kill/merge, the chat-mode toggle, daemon drain). Exit handlers use it to
+	// tell a deliberate stop from a process dying on its own (a crash, an OOM
+	// kill, an agent pkill-ing itself), which is what auto-restart acts on.
+	// Guarded by mu.
+	stopRequested bool
 }
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before
@@ -285,12 +292,20 @@ func (s *Session) resize(rows, cols uint16) error {
 
 // stop signals the process to terminate; the readLoop handles cleanup.
 func (s *Session) stop() {
+	s.markStopRequested()
 	_ = s.proc.Signal(syscall.SIGTERM)
 }
 
 // kill forcibly terminates the process.
 func (s *Session) kill() {
+	s.markStopRequested()
 	_ = s.proc.Signal(os.Kill)
+}
+
+func (s *Session) markStopRequested() {
+	s.mu.Lock()
+	s.stopRequested = true
+	s.mu.Unlock()
 }
 
 // Info is a point-in-time snapshot of a session's state.
@@ -301,6 +316,9 @@ type Info struct {
 	Status    Status
 	StartedAt time.Time
 	Ephemeral bool
+	// StopRequested is true when hydra itself terminated the session (kill,
+	// mode toggle, drain) - as opposed to the process dying on its own.
+	StopRequested bool
 }
 
 // PID returns the sandbox process PID (0 if not started).
@@ -342,13 +360,15 @@ func (s *Session) reapIfDead() bool {
 func (s *Session) info() Info {
 	s.mu.Lock()
 	status := s.status
+	stopRequested := s.stopRequested
 	s.mu.Unlock()
 	return Info{
-		ID:        s.ID,
-		AgentType: s.AgentType,
-		PID:       s.proc.Pid(),
-		Status:    status,
-		StartedAt: s.StartedAt,
-		Ephemeral: s.ephemeral,
+		ID:            s.ID,
+		AgentType:     s.AgentType,
+		PID:           s.proc.Pid(),
+		Status:        status,
+		StartedAt:     s.StartedAt,
+		Ephemeral:     s.ephemeral,
+		StopRequested: stopRequested,
 	}
 }

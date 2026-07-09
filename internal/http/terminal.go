@@ -18,6 +18,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/session"
 )
 
 // checkOrigin guards WebSocket upgrades against cross-origin (CSRF) connections.
@@ -293,6 +294,28 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = shellID
+	}
+
+	// A live session left over in the OTHER mode can't speak this framing: a
+	// chat client would be fed VT100 bytes, an xterm fed JSONL. It happens when
+	// a mode toggle races a resume already in flight - UpdateAgent stops only a
+	// session that is live at that instant, and a sandbox spawn takes seconds,
+	// so toggling chat -> terminal -> chat quickly leaves the stale-mode session
+	// as the survivor (either as the one this socket attaches, or by making the
+	// new mode's resume fail with "session already exists"). Detect the mismatch
+	// on attach and stop the stale session; the resume below then relaunches the
+	// head in the mode it is actually set to (the conversation carries over,
+	// exactly like the toggle itself).
+	if !useShell && head.Worktree != nil {
+		wantKind := session.KindTerminal
+		if chatMode {
+			wantKind = session.KindChat
+		}
+		if sess, ok := s.Sessions.Get(head.ID); ok && sess.Kind != wantKind && s.Sessions.IsLive(head.ID) {
+			log.Printf("terminal ws: agent %q has a live %s session but the head wants %s; restarting it in the current mode", head.ID, sess.Kind, wantKind)
+			sendStatusUpdate(conn, "starting")
+			heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+		}
 	}
 
 	resumed := false

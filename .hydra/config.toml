@@ -37,7 +37,7 @@ icon = "web/public/icon.png"
 # resume_prompt = "Continue"
 
 ## max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default 2).
-artifact_concurrency = 4
+artifact_concurrency = 2
 
 ## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing - foreground generation and the concurrency cap still apply (default true).
 # artifact_prefetch = true
@@ -123,7 +123,7 @@ mode = "hard"
 ##     codex: api.openai.com, *.openai.com, chatgpt.com
 ##     gemini: *.googleapis.com
 ##     copilot: *.githubcopilot.com
-allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com", "cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com"]
+allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com", "cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []
@@ -356,7 +356,6 @@ type = "stdout"
 # [review]
 # provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)
 # remote = "origin"
-# target_branch = "main"       # default MR target; per-head editable
 # auth = "cli"                 # cli (shell out to gh/glab) | token (REST)
 # default_action = "merge"     # merge (local, as today) | create_mr
 # push_branch_template = "{id}" # e.g. "feat/{ticket}-{id}"; {id} {ticket} {base}

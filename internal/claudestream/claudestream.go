@@ -39,6 +39,12 @@ type Event struct {
 	// the daemon uses it to resolve the sub-agent's meta.json (its parent Task
 	// tool_use id, agent type and description) - see the subagent_meta relay.
 	AgentID string `json:"agentId,omitempty"`
+	// ParentToolUseID is how CURRENT CLIs (2.1.x) mark a sub-agent line on live
+	// stdout: the Task tool_use that spawned it. Those lines carry NO
+	// isSidechain/agentId (only transcript-file lines do), so a non-empty value
+	// here is the live-stream sidechain signal. null unmarshals to "" (main
+	// conversation).
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 	// IsAPIError marks a synthesized assistant message the CLI emits when a turn
 	// fails mid-response (e.g. "API Error: Server error mid-response. The response
 	// above may be incomplete."). It carries the same shape on stdout as in the
@@ -87,6 +93,73 @@ func ParseEvent(line []byte) (Event, bool) {
 	return ev, true
 }
 
+// controlRequest is the minimal decode of a control_request stdout line the CLI
+// emits when --permission-prompt-tool stdio routes a tool call through the client
+// for approval. Only the can_use_tool subtype is modeled; note the subtype lives
+// NESTED under `request` (unlike a top-level event subtype), so ParseEvent won't
+// surface it - ParseToolPermissionRequest decodes this shape instead.
+type controlRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Request   struct {
+		Subtype  string          `json:"subtype"`
+		ToolName string          `json:"tool_name"`
+		Input    json.RawMessage `json:"input"`
+	} `json:"request"`
+}
+
+// ToolPermissionRequest is a parsed can_use_tool control_request: the CLI asking
+// the client to approve ToolName's call. RequestID is the channel the answer goes
+// back on (via ApproveToolLine / ControlResponseLine); Input is the tool input,
+// echoed back verbatim as updatedInput on an allow.
+type ToolPermissionRequest struct {
+	RequestID string
+	ToolName  string
+	Input     json.RawMessage
+}
+
+// ParseToolPermissionRequest decodes one stdout line as a can_use_tool
+// control_request, reporting ok=false for any other line (a different control
+// subtype, a non-control event, or malformed JSON). Used to detect the
+// ExitPlanMode plan-approval gate a chat-mode head hits headless.
+func ParseToolPermissionRequest(line []byte) (ToolPermissionRequest, bool) {
+	var cr controlRequest
+	if err := json.Unmarshal(line, &cr); err != nil {
+		return ToolPermissionRequest{}, false
+	}
+	if cr.Type != "control_request" || cr.Request.Subtype != "can_use_tool" ||
+		cr.RequestID == "" || cr.Request.ToolName == "" {
+		return ToolPermissionRequest{}, false
+	}
+	return ToolPermissionRequest{
+		RequestID: cr.RequestID,
+		ToolName:  cr.Request.ToolName,
+		Input:     cr.Request.Input,
+	}, true
+}
+
+// ApproveToolLine builds the control_response stdin line that ALLOWS a
+// can_use_tool request, mirroring what the chat client sends to answer an
+// AskUserQuestion: subtype "success", behavior "allow", with the original tool
+// input echoed back as updatedInput (a nil/invalid input becomes `{}`). Used to
+// auto-approve ExitPlanMode so a chat-mode head doesn't hang on the plan gate.
+func ApproveToolLine(requestID string, input json.RawMessage) []byte {
+	updatedInput := json.RawMessage(bytes.TrimSpace(input))
+	if len(updatedInput) == 0 || !json.Valid(updatedInput) {
+		updatedInput = json.RawMessage("{}")
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"subtype":    "success",
+		"request_id": requestID,
+		"response": map[string]any{
+			"behavior":     "allow",
+			"updatedInput": updatedInput,
+		},
+	})
+	line, _ := ControlResponseLine(payload)
+	return line
+}
+
 // userMessage is the stdin envelope for one user turn
 // (--input-format stream-json).
 type userMessage struct {
@@ -131,6 +204,14 @@ func TextUserMessageLine(text string) []byte {
 	content, _ := json.Marshal([]textBlock{{Type: "text", Text: text}})
 	line, _ := UserMessageLine(content)
 	return line
+}
+
+// TextUserContent builds the content-block array (a single text block) for a
+// plain-text user turn - the shape QueuedMessage.Content / a chat user_message
+// frame carries, ready to hand to heads.ChatQueueManager.Submit.
+func TextUserContent(text string) json.RawMessage {
+	content, _ := json.Marshal([]textBlock{{Type: "text", Text: text}})
+	return content
 }
 
 // InterruptLine builds the control_request line that cancels the in-flight
@@ -240,6 +321,31 @@ type RingFilter struct {
 	// OnAPIError it runs under the session lock, so it must be cheap (the session
 	// dispatches the real work off the read goroutine).
 	OnResult func()
+	// OnStep, if set, is called once per completed main-conversation assistant
+	// line - the end of a thinking block, a tool_use being issued, a text block.
+	// The chat message queue uses it to dump queued messages at step
+	// boundaries instead of waiting for the turn to end: the CLI injects a
+	// mid-turn stdin user message into the running turn at its next step
+	// boundary, exactly like typing in the interactive terminal
+	// (spike-verified). Sidechain (sub-agent) and isApiErrorMessage lines
+	// don't count - only the main turn making progress does. Deliberately NOT
+	// fired on `user` lines: those include the interrupt echo, whose drain
+	// would eat the pending-interrupt mark before its own result consumed it,
+	// and the CLI's echoes of drained messages. Same under-the-session-lock
+	// cheapness rule as the other hooks.
+	OnStep func()
+	// OnPlanApproval, if set, is called (once per matching line) with the
+	// request_id and tool input of a can_use_tool control_request for
+	// ExitPlanMode - the plan-approval gate a chat-mode head hits when it leaves
+	// plan mode. Chat heads run with --permission-prompt-tool stdio, so this gate
+	// arrives as a control_request the client must answer; nothing does, so the
+	// head would hang forever. The daemon wires this to auto-approve it (the same
+	// stance the terminal-mode PermissionRequest hook takes: a Hydra head already
+	// runs autonomously in a throwaway sandbox, so there's nothing for the plan
+	// gate to guard). Same under-the-session-lock cheapness rule as the other
+	// hooks - the callback dispatches the actual stdin write off the read
+	// goroutine.
+	OnPlanApproval func(requestID string, input json.RawMessage)
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
@@ -258,6 +364,14 @@ func (f *RingFilter) Filter(chunk []byte) []byte {
 		}
 		if ok && ev.Type == "result" && f.OnResult != nil {
 			f.OnResult()
+		}
+		if ok && ev.Type == "assistant" && !ev.IsSidechain && !ev.IsAPIError && f.OnStep != nil {
+			f.OnStep()
+		}
+		if ok && ev.Type == "control_request" && f.OnPlanApproval != nil {
+			if req, isReq := ParseToolPermissionRequest(line); isReq && req.ToolName == "ExitPlanMode" {
+				f.OnPlanApproval(req.RequestID, req.Input)
+			}
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

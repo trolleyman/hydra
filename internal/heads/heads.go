@@ -1008,9 +1008,52 @@ func StopSessionAndWait(reg *session.Registry, id string, timeout time.Duration)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// KillNow only delivers the SIGKILL; the session stays "live" in the
+	// registry until the read loop observes the exit. Returning while the corpse
+	// is still registered breaks the contract above: the client reconnecting on
+	// the API response would attach to it (no lazy resume) and get its socket
+	// closed moments later, showing a dead pane. Wait out the exit, and reap a
+	// session whose PTY never reports it (see Registry.ReapDead).
+	reapDeadline := time.Now().Add(2 * time.Second)
+	for reg.IsLive(id) {
+		if time.Now().After(reapDeadline) {
+			_ = reg.ReapDead(id)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// resumeLocks serializes resumes per head id. Several paths can race to resume
+// the same head (two attaching clients, the pane's auto-reconnect, the
+// auto-restart watcher); without the lock each spawns its own agent process and
+// all but the registry winner leak unmanaged inside the supervisor.
+var resumeLocks = struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}{m: map[string]*sync.Mutex{}}
+
+func resumeLock(id string) *sync.Mutex {
+	resumeLocks.mu.Lock()
+	defer resumeLocks.mu.Unlock()
+	lk := resumeLocks.m[id]
+	if lk == nil {
+		lk = &sync.Mutex{}
+		resumeLocks.m[id] = lk
+	}
+	return lk
 }
 
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
+	lk := resumeLock(head.ID)
+	lk.Lock()
+	defer lk.Unlock()
+	// A concurrent resume won while we waited on the lock: the head is live,
+	// nothing to do.
+	if reg.IsLive(head.ID) {
+		return nil
+	}
+
 	worktreePath := projectRoot
 	if head.Worktree != nil {
 		worktreePath = *head.Worktree
@@ -1158,6 +1201,80 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		go nudgeResumedAgent(reg, head.ID, nudge)
 	}
 	return nil
+}
+
+// ResumeArchivedHead revives a killed/merged (archived) head: it recreates the
+// worktree+branch at the head's original path off the current base, un-archives
+// the DB record, then relaunches the agent via ResumeHead. Because the worktree
+// path is unchanged, Claude's transcript dir matches and `--continue` restores
+// the prior conversation - the agent keeps its memory of what it did while the
+// actual file changes start over on a clean branch (PLAN #49). Gemini resumes
+// analogously via `--resume latest`. Returns the revived live head, or nil if no
+// archived record with that ID exists (caller maps that to 404).
+func ResumeArchivedHead(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot, id string, rows, cols uint16) (*Head, error) {
+	if store == nil {
+		return nil, errtrace.Wrap(errors.New("resume archived head: store required"))
+	}
+	a, err := store.GetArchivedAgent(id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if a == nil {
+		return nil, nil
+	}
+	if a.ProjectPath != projectRoot {
+		return nil, errtrace.Wrap(fmt.Errorf("archived agent %q belongs to a different project", id))
+	}
+
+	// Already back on disk - a double-resume, or a raced revive won first. Nothing
+	// to recreate; hand back the live head (ResumeHead below would no-op anyway).
+	if reg.IsLive(id) || headWorktreeExists(projectRoot, id) {
+		return errtrace.Wrap2(GetHeadByID(ctx, reg, store, projectRoot, id))
+	}
+
+	branchName := git.BranchName(id)
+	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
+	baseBranch := a.BaseBranch
+	if baseBranch == "" {
+		baseBranch, err = git.GetCurrentBranch(projectRoot)
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
+		}
+	}
+
+	// Recreate the worktree+branch off the current base. The old commits on the
+	// deleted hydra/<id> branch are gone, so the file changes start over - only
+	// the conversation transcript (keyed off the worktree path) survives.
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("recreate worktree: %w", err))
+	}
+
+	// Un-archive the record so the resume paths (which skip soft-deleted rows)
+	// see a live head with a worktree. Roll back the worktree on failure.
+	if err := store.UnarchiveAgent(id); err != nil {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		if git.IsAgentBranch(branchName) {
+			_ = git.DeleteBranch(projectRoot, branchName)
+		}
+		return nil, errtrace.Wrap(fmt.Errorf("unarchive agent: %w", err))
+	}
+
+	// Build a live head from the archived metadata (prompt, pre-prompt, type,
+	// base branch, chat mode) and point it at the recreated worktree/branch.
+	head := archivedHead(a)
+	head.Worktree = &worktreePath
+	head.Branch = &branchName
+	head.Archived = false
+	head.EndState = ""
+
+	if err := ResumeHead(reg, store, projectRoot, head, rows, cols); err != nil {
+		// The record is now un-archived with a worktree but no live session - the
+		// same state a daemon restart leaves a stopped head in, which the terminal
+		// lazy-resume path recovers on attach. Surface the error to the caller.
+		return nil, errtrace.Wrap(err)
+	}
+
+	return errtrace.Wrap2(GetHeadByID(ctx, reg, store, projectRoot, id))
 }
 
 // shouldNudgeResumedAgent reports whether a just-resumed agent should be sent a
@@ -1312,6 +1429,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 	// single bwrap owning the writable COW overlay is no longer needed. Unconditional
 	// so a failed kill still reclaims it.
 	removeNamespaceHost(head.ID)
+
+	// The head is gone; its auto-restart history has nothing left to guard.
+	autoRestarts.forget(head.ID)
 
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {

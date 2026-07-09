@@ -277,8 +277,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	resp := api.ListAgents200JSONResponse{
 		{
 			// Markdown-rendering demo agent. Its live-activity line carries inline
-			// markdown (code + bold + italic) so the sidebar shows the rendered
-			// activity; see agent-3 for the $-command override.
+			// markdown (code + bold + italic) plus a backslash-escaped file name
+			// (the shape the backend emits for a file like _LAYOUT_.tsx, which must
+			// show verbatim - not "LAYOUT" in italics) so the sidebar shows the
+			// rendered activity; see agent-3 for the $-command override.
 			Id:            "agent-md",
 			Title:         ptr("Add inline markdown rendering"),
 			AgentType:     "claude",
@@ -291,7 +293,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
 				Timestamp: simNow().Format(time.RFC3339),
-				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+				Activity:  ptr("Editing \\_LAYOUT\\_.tsx - `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 		},
 		{
@@ -532,7 +534,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
-				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+				Activity:  ptr("Editing \\_LAYOUT\\_.tsx - `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 			Tests:          simTestSummary("agent-md"),
 			MergeWhenGreen: ptr(true),
@@ -657,6 +659,10 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 }
 
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
+func (s *SimulationServer) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
@@ -2760,9 +2766,23 @@ var simChatEvents = []string{
 	// $ figure on turn footers; model + slash_commands feed the composer's
 	// model dropdown and / autocomplete.
 	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
-	`{"type":"user","uuid":"sim-real-0","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
+	// Consecutive timestamps here let the replayed thought show "Thought for Xs"
+	// (item 7): the chat estimates the thinking duration from the gap between the
+	// triggering user turn and the assistant message that carried the thought.
+	`{"type":"user","uuid":"sim-real-0","timestamp":"2026-07-09T18:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"` + simAgentChatPrompt + `"}]}}`,
+	`{"type":"assistant","timestamp":"2026-07-09T18:00:03.000Z","message":{"id":"msg_sim_1","content":[{"type":"thinking","thinking":"The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_1","content":[{"type":"text","text":"I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the ` + "`PUT`" + ` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."}]}}`,
+	// A /model switch early in the chat: the durable transcript records it as a
+	// caveat + /model command echo + a "Set model to ..." stdout sibling, each
+	// carrying a uuid, at this (correct, non-bottom) chronological position. On
+	// reconnect the backfill replays these three lines here, while the scrollback
+	// ring SEPARATELY replays a bare, uuid-less "Set model to ..." echo AFTER
+	// replay_done (see handleSimChatWS). The chat must render only THIS copy and
+	// drop the bare ring echo - otherwise the confirmation duplicates at the
+	// bottom of the conversation after navigating away and back.
+	`{"type":"user","uuid":"sim-model-caveat","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>"}}`,
+	`{"type":"user","uuid":"sim-model-cmd","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}}`,
+	`{"type":"user","uuid":"sim-model-out","message":{"role":"user","content":"<local-command-stdout>Set model to opus (claude-opus-4-8)</local-command-stdout>"}}`,
 	// A TodoWrite: feeds the floating plan panel (item 17) instead of a card.
 	`{"type":"assistant","message":{"id":"msg_sim_todo","content":[{"type":"tool_use","id":"toolu_sim_todo","name":"TodoWrite","input":{"todos":[{"content":"Read the current uploader","status":"completed","activeForm":"Reading the current uploader"},{"content":"Wire in the backoff retry loop","status":"in_progress","activeForm":"Wiring in the backoff retry loop"},{"content":"Add a test for the giving-up path","status":"pending","activeForm":"Adding a test for the giving-up path"},{"content":"Run go test and vet","status":"pending","activeForm":"Running go test and vet"}]}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_todo","content":"Todos updated"}]}}`,
@@ -2796,6 +2816,21 @@ var simChatEvents = []string{
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
+	// A second sub-agent marked the way CURRENT CLIs mark live stdout lines:
+	// parent_tool_use_id only (no isSidechain/agentId, and no meta frame). The
+	// chat must fold it into its Task card via the placeholder route instead of
+	// rendering the prompt echo as a user message.
+	`{"type":"assistant","message":{"id":"msg_sim_task2","content":[{"type":"tool_use","id":"toolu_sim_task2","name":"Task","input":{"description":"Check retry docs","subagent_type":"Explore","prompt":"Scan docs/ for retry/backoff guidance and summarize what it prescribes."}}]}}`,
+	`{"type":"user","parent_tool_use_id":"toolu_sim_task2","session_id":"sim-chat","message":{"role":"user","content":[{"type":"text","text":"Scan docs/ for retry/backoff guidance and summarize what it prescribes."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task2","content":"docs/retry.md prescribes jittered exponential backoff for client uploads; nothing documents the giving-up semantics."}]}}`,
+	// EnterPlanMode: a zero-argument tool call. Its empty `{}` input renders no
+	// input panel and no "Output" header - just the entered-plan-mode text.
+	`{"type":"assistant","message":{"id":"msg_sim_enterplan","content":[{"type":"tool_use","id":"toolu_sim_enterplan","name":"EnterPlanMode","input":{}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_enterplan","content":"Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\nIn plan mode, you should:\n1. Thoroughly explore the codebase to understand existing patterns\n2. Identify similar features and architectural approaches\n3. Consider multiple approaches and their trade-offs\n4. Use AskUserQuestion if you need to clarify the approach\n5. Design a concrete implementation strategy\n6. When ready, use ExitPlanMode to present your plan for approval\n\nRemember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase."}]}}`,
+	// ExitPlanMode: renders the plan markdown in a dedicated card headed by the
+	// plan file's basename (not its long absolute path).
+	`{"type":"assistant","message":{"id":"msg_sim_exitplan","content":[{"type":"tool_use","id":"toolu_sim_exitplan","name":"ExitPlanMode","input":{"plan":"# Plan: add jittered backoff to the uploader\n\n## Context\nThe uploader retries once and gives up. We want a bounded, jittered exponential backoff loop.\n\n## Approach\n1. Add a ` + "`sleepBackoff(attempt)`" + ` helper (base 100ms, doubled per attempt, +/- 50% jitter).\n2. Wrap ` + "`Put`" + ` in a ` + "`for attempt < maxAttempts`" + ` loop, returning early on success.\n3. Thread ` + "`MaxAttempts`" + ` through the uploader config so callers can tune the cap.\n\n## Verification\n- ` + "`TestPutRetry`" + ` covers succeed-after-one-failure.\n- Add a case asserting the **giving-up** path surfaces the last error.","planFilePath":"/home/callum/.claude/plans/compressed-sleeping-flame.md"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_exitplan","content":"User has approved your plan. You can now start coding."}]}}`,
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
@@ -2808,7 +2843,22 @@ var simChatEvents = []string{
 	// A turn-ending assistant message carrying usage + stop_reason: the chat
 	// synthesizes a per-turn footer from it (the transcript has no `result`
 	// event), showing "↓ N tokens" with the full input/cache breakdown on hover.
+	// Mirrors the real transcript shape: one assistant event PER CONTENT BLOCK
+	// (an empty silent-reasoning thinking block, then the text), each carrying
+	// the same envelope - id, usage and stop_reason even on the non-final block.
+	// The chat must count the usage once and render ONE footer at the turn
+	// boundary - not one per event, interleaved around the text.
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"thinking","thinking":""}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	// An interrupted turn: the user stops the reply mid-stream. The real CLI
+	// echoes the bracketed marker and ends the turn with an
+	// error_during_execution result, and fires NO Stop hook (spike-verified) -
+	// the chat renders the chip plus a QUIET footer, not an error box (the
+	// chip already tells the story).
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Hold on - could you also make the attempt cap configurable?"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_int","content":[{"type":"text","text":"Sure - I'll thread a MaxAttempts option through the uploader config and"}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+	`{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":4210,"session_id":"sim-chat"}`,
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
@@ -2856,6 +2906,14 @@ func handleSimChatWS(conn *safeConn) {
 	// reconnect, like the daemon's persisted queue).
 	sendSimQueueFrame(conn, "sim-chat")
 
+	// Simulate the scrollback ring re-delivering the CLI's transient set_model
+	// stdout confirmation on reconnect: a BARE echo (no /model command, no uuid)
+	// arriving AFTER the transcript backfill already placed the durable copy (see
+	// simChatEvents). The chat must recognize this as the duplicate it is and NOT
+	// append a second "Set model to ..." at the bottom of the conversation.
+	sendSimUserText(conn, "sim-chat", "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>")
+	sendSimUserText(conn, "sim-chat", "<local-command-stdout>Set model to opus (claude-opus-4-8)</local-command-stdout>")
+
 	turn := 0
 	// processTurn echoes one user turn and streams its reply (ending in a
 	// result). A slash command answers with local output instead.
@@ -2866,8 +2924,31 @@ func handleSimChatWS(conn *safeConn) {
 			"message": map[string]any{"role": "user", "content": content},
 		})
 		sendSimChatEvent(conn, string(userEv))
-		if text := firstTextBlock(content); strings.HasPrefix(text, "/") {
+		text := firstTextBlock(content)
+		if strings.HasPrefix(text, "/") {
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "subagent") {
+			// A LIVE sub-agent run: the Task tool_use, then the prompt echo marked
+			// the way current CLIs mark live stdout sidechain lines (only
+			// parent_tool_use_id), a working pause, then the tool_result and turn
+			// result - exercising the live placeholder route, the running states
+			// and the "finished" notice with its View link.
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_live_task","content":[{"type":"tool_use","id":"toolu_sim_live_task","name":"Task","input":{"description":"Live docs sweep","subagent_type":"Explore","prompt":"Sweep docs/ for retry guidance and report back."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","parent_tool_use_id":"toolu_sim_live_task","session_id":"sim-chat","message":{"role":"user","content":[{"type":"text","text":"Sweep docs/ for retry guidance and report back."}]}}`)
+			// An inner tool step that starts "running" and must clear live once its
+			// result lands (item: sub-agent step cards must not stay stuck running).
+			sendSimChatEvent(conn, `{"type":"assistant","parent_tool_use_id":"toolu_sim_live_task","message":{"id":"msg_sim_live_sub_1","content":[{"type":"tool_use","id":"toolu_sim_live_grep","name":"Grep","input":{"pattern":"backoff","path":"docs"}}]}}`)
+			time.Sleep(1500 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","parent_tool_use_id":"toolu_sim_live_task","session_id":"sim-chat","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_grep","content":"docs/retry.md:12: jittered exponential backoff"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","parent_tool_use_id":"toolu_sim_live_task","message":{"id":"msg_sim_live_sub_2","content":[{"type":"text","text":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff); the giving-up path is undocumented."}]}}`)
+			time.Sleep(800 * time.Millisecond)
+			// The parent tool_result echoes the sub's final message verbatim - the
+			// chat must not then show that message twice (once as a step, once as
+			// the report).
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_task","content":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff); the giving-up path is undocumented."}]}}`)
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":1600,"session_id":"sim-chat"}`)
 			return
 		}
 		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
@@ -2887,7 +2968,16 @@ func handleSimChatWS(conn *safeConn) {
 			sendSimUserText(conn, "sim-chat", "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>")
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Set model to %s (claude-%s-5)</local-command-stdout>", msg.Model, msg.Model))
 		case "interrupt":
+			// What the real CLI prints when interrupted (spike-verified): the
+			// echoed marker, then a result line ending the turn as
+			// error_during_execution (and no Stop hook).
 			sendSimUserText(conn, "sim-chat", "[Request interrupted by user]")
+			sendSimChatEvent(conn, `{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":2650,"session_id":"sim-chat"}`)
+			// The daemon treats that result as a turn end, so held messages
+			// auto-send instead of staying queued (one turn each).
+			for _, qm := range simQueuePopAll("sim-chat") {
+				processTurn(qm.Content)
+			}
 		case "dequeue":
 			simQueueRemove("sim-chat", msg.ID)
 		case "load_before":
@@ -3187,6 +3277,7 @@ func handleSimAskWS(conn *safeConn) {
 			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
 		case "interrupt":
 			sendSimUserText(conn, "sim-ask", "[Request interrupted by user]")
+			sendSimChatEvent(conn, `{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":2650,"session_id":"sim-ask"}`)
 		case "user_message":
 			turn++
 			userEv, _ := json.Marshal(map[string]any{

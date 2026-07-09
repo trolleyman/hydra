@@ -13,7 +13,9 @@ import {
   Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
+  FileDiff as FileDiffIcon, FlaskConical, MonitorPlay,
 } from 'lucide-react'
+import { TestVerdictChip } from './components/TestVerdict'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
@@ -1958,6 +1960,45 @@ const SettingsPopup = memo(function SettingsPopup({ fileView, onFileViewChange, 
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
+export type InspectorView = 'diff' | 'tests' | 'previews'
+
+// The inspector pane's Diff | Tests | Previews view selector (new split layout).
+// A segmented control; a segment hides when its view has no data (Tests when the
+// project configures no runners, Previews when no server scripts). Diff is always
+// present. The Tests segment carries the verdict chip inline.
+function ViewTabs({ view, onChange, testsAvailable, previewsAvailable, tests }: {
+  view: InspectorView
+  onChange: (v: InspectorView) => void
+  testsAvailable: boolean
+  previewsAvailable: boolean
+  tests?: AgentResponse['tests']
+}) {
+  const seg = (active: boolean) =>
+    `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+      active
+        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
+        : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+    }`
+  return (
+    <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+      <button type="button" className={seg(view === 'diff')} onClick={() => onChange('diff')}>
+        <FileDiffIcon className="w-3.5 h-3.5" /> Diff
+      </button>
+      {testsAvailable && (
+        <button type="button" className={seg(view === 'tests')} onClick={() => onChange('tests')}>
+          <FlaskConical className="w-3.5 h-3.5" /> Tests
+          {tests && tests.status !== 'none' && <TestVerdictChip tests={tests} variant="sm" />}
+        </button>
+      )}
+      {previewsAvailable && (
+        <button type="button" className={seg(view === 'previews')} onClick={() => onChange('previews')}>
+          <MonitorPlay className="w-3.5 h-3.5" /> Previews
+        </button>
+      )}
+    </div>
+  )
+}
+
 // DiffViewer only reads a handful of the agent's fields (listed in the memo
 // comparator below). The parent AgentDetail re-renders on EVERY live tick of
 // the agent - activity-line changes, streamed test counts - and each of those
@@ -1968,13 +2009,22 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.projectId === next.projectId &&
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
+  prev.inspector === next.inspector &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
   prev.agent.worktree_path === next.agent.worktree_path &&
+  prev.agent.tests?.status === next.agent.tests?.status &&
+  prev.agent.tests?.passed === next.agent.tests?.passed &&
+  prev.agent.tests?.failed === next.agent.tests?.failed &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
 
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
+// inspector: renders in the new two-pane layout's right pane - the target
+// selector + a Diff | Tests | Previews view selector on top, with only the
+// selected view mounted below (the diff owning the base selector + its toolbar,
+// artifacts folded into it). Omitted -> the classic single-column stacked layout
+// (everything below the Changes bar at once), kept for the flag-off fallback.
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1982,6 +2032,28 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+
+  // Inspector-pane view selector (new split layout only): which of Diff / Tests
+  // / Previews is showing. Persisted per agent so the pane restores its last
+  // view. The target selector (rightSel) is shared across all three views.
+  const [inspectorView, setInspectorView] = useState<InspectorView>(
+    () => loadAgentViewPrefs(projectId, agent.id).inspectorView ?? 'diff',
+  )
+  useEffect(() => {
+    if (inspector) patchAgentViewPrefs(projectId, agent.id, { inspectorView })
+  }, [inspector, inspectorView, projectId, agent.id])
+  // Whether the project configures any server previews - reported up by
+  // PreviewPanel so the Previews segment can hide when there is nothing to show.
+  const [previewsAvailable, setPreviewsAvailable] = useState(false)
+  // Tests availability comes straight off the agent (no extra fetch): the
+  // verdict is 'none' when the project configures no runners.
+  const testsAvailable = !!agent.tests && agent.tests.status !== 'none'
+  // Fall back to the Diff view if the active segment vanishes (e.g. tests
+  // disappear). Diff is always available.
+  useEffect(() => {
+    if (inspectorView === 'tests' && !testsAvailable) setInspectorView('diff')
+    if (inspectorView === 'previews' && !previewsAvailable) setInspectorView('diff')
+  }, [inspectorView, testsAvailable, previewsAvailable])
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
@@ -2553,6 +2625,305 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   if (!agent.branch_name) return null
 
+  // ── Shared render fragments ────────────────────────────────────────────────
+  // Assembled one way by the classic single-column stacked layout and another by
+  // the new inspector layout (Diff / Tests / Previews behind a view selector).
+  const statsEl = diff && (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
+      <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
+      <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+    </div>
+  )
+  const resetBtn = !(leftSel.type === 'base' && rightSel.type === 'latest') && (
+    <Tooltip content="Reset to base -> latest">
+      <button
+        onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
+        className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+      >
+        <RotateCcw className="w-3.5 h-3.5" />
+      </button>
+    </Tooltip>
+  )
+  const warningButtons = (
+    <>
+      <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
+      <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
+      <BehindBaseButton diff={diff} agent={agent} projectId={projectId} onUpdated={() => setRefreshKey((k) => k + 1)} />
+    </>
+  )
+  const refreshBtn = (
+    <Tooltip content="Refresh">
+      <button
+        onClick={() => setRefreshKey((k) => k + 1)}
+        disabled={loadingDiff}
+        className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
+      >
+        <RefreshCw className="w-3.5 h-3.5" />
+      </button>
+    </Tooltip>
+  )
+  const loadingSpinner = loadingDiff && hasExistingDiff && (
+    <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
+  )
+  const settingsCog = (
+    <SettingsPopup
+      fileView={fileView} onFileViewChange={setFileView}
+      sideBySide={sideBySide} onSideBySideChange={setSideBySide}
+      ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
+      singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
+      imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
+      artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
+      testGroupResult={testGroupResult} onTestGroupResultChange={setTestGroupResult}
+      testUseScope={testUseScope} onTestUseScopeChange={setTestUseScope}
+      testScopeAvailable={testsHaveScope}
+    />
+  )
+
+  const testsPanelEl = agent.branch_name && projectId && (
+    <TestsPanel
+      projectId={projectId}
+      agentId={agent.id}
+      repoRef={agent.branch_name ?? undefined}
+      headRef={artifactParams.headRef}
+      includeUncommitted={artifactParams.includeUncommitted}
+      refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
+      groupResult={testGroupResult}
+      useScope={testUseScope && testsHaveScope}
+      onScopeAvailable={setTestsHaveScope}
+    />
+  )
+  const previewPanelEl = agent.branch_name && projectId && (
+    <PreviewPanel
+      projectId={projectId}
+      agentId={agent.id}
+      headRef={artifactParams.headRef}
+      includeUncommitted={artifactParams.includeUncommitted}
+      refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
+      onAvailability={setPreviewsAvailable}
+    />
+  )
+  const artifactsPanelEl = agent.branch_name && (
+    <ArtifactsPanel
+      projectId={projectId}
+      agentId={agent.id}
+      baseRef={artifactParams.baseRef}
+      headRef={artifactParams.headRef}
+      includeUncommitted={artifactParams.includeUncommitted}
+      // Re-snapshot artifacts on the manual refresh button (refreshKey) AND
+      // when a commit is auto-detected (externalArtifactRefresh). Both only
+      // ever increment, so their sum strictly increases on either trigger,
+      // re-running ArtifactsPanel's effect to re-request - a cache hit when
+      // the resolved commit SHA is unchanged, a regen when it moved. The
+      // diff text itself updates silently via externalRefreshTrigger, so we
+      // deliberately keep this out of the diff-loading effects (which would
+      // flash a loading spinner and reset the user's selection).
+      refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
+      imageDiffMode={imageDiffMode}
+      artifactScale={artifactScale}
+      artifactView={artifactView}
+      onArtifactViewChange={setArtifactView}
+      artifactHighlight={artifactHighlight}
+      onArtifactHighlightChange={setArtifactHighlight}
+      artifactSpans={artifactSpans}
+      onArtifactSpanChange={setArtifactSpanOverride}
+    />
+  )
+  const diffErrorBanner = diffError && hasExistingDiff && (
+    <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+      Refresh failed: {diffError}
+    </div>
+  )
+  // The diff body (file-list column + file diffs), shared by both layouts.
+  const diffContentEl = !hasExistingDiff && loadingDiff ? (
+    <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
+      <LoaderCircle className="w-4 h-4 animate-spin mr-2" />
+      <span className="text-sm">Loading diff...</span>
+    </div>
+  ) : !hasExistingDiff && diffError ? (
+    <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+      {diffError}
+    </div>
+  ) : diff && diff.files.length === 0 ? (
+    <div className={`flex items-center justify-center py-8 text-gray-400 dark:text-gray-500 text-sm transition-opacity ${loadingDiff ? 'opacity-40' : ''}`}>
+      No changes
+    </div>
+  ) : diff ? (
+    <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
+      {/* File list sidebar (hidden on mobile - the diff content takes the full
+          width there; files are still all rendered below, or reachable via the
+          prev/next pager in single-file mode) */}
+      <div
+        ref={sidebarRef}
+        className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
+        style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
+      >
+        <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
+            Files · {diff.files.length}
+          </span>
+        </div>
+        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        {/* Resize handle */}
+        <div
+          onMouseDown={startResizing}
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
+        />
+      </div>
+
+      {/* Diff content */}
+      <div className="flex-1 min-w-0">
+        {singleFile ? (
+          <>
+            {/* Intentionally not sticky: the file header below now sticks at
+                FILE_STICKY_TOP, so a sticky pager here would dock at the same
+                Y and overlap it. The pager scrolls away; the file header stays. */}
+            <div className="flex items-center gap-2 mb-3 z-20">
+              <button
+                onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
+                disabled={singleFileIdx === 0}
+                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
+                {singleFileIdx + 1} / {diff.files.length}
+              </div>
+              <button
+                onClick={() => setSingleFileIdx(Math.min(diff.files.length - 1, singleFileIdx + 1))}
+                disabled={singleFileIdx === diff.files.length - 1}
+                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <FileDiff
+              key={diff.files[singleFileIdx]?.path}
+              file={diff.files[singleFileIdx]!}
+              sideBySide={sideBySide}
+              isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
+              onToggleCollapse={toggleFileCollapse}
+              onComment={handleComment}
+              onExpand={expandFileDiff}
+              isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
+              onShow={getShowCallback(diff.files[singleFileIdx].path)}
+              fileRef={getFileRef(diff.files[singleFileIdx].path)}
+              currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
+              imageDiffMode={imageDiffMode}
+              imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
+              imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
+            />
+          </>
+        ) : (
+          diff.files.map((f) => {
+            const img = imageUrlsFor(f)
+            return (
+            <FileDiff key={f.path} file={f} sideBySide={sideBySide}
+              isCollapsed={collapsedFiles.has(f.path)}
+              onToggleCollapse={toggleFileCollapse}
+              onComment={handleComment}
+              onExpand={expandFileDiff}
+              isHidden={hiddenFiles.has(f.path)}
+              onShow={getShowCallback(f.path)}
+              fileRef={getFileRef(f.path)}
+              currentContext={fileContexts.get(f.path) ?? 3}
+              imageDiffMode={imageDiffMode}
+              imageBefore={img.before}
+              imageAfter={img.after}
+            />
+            )
+          })
+        )}
+      </div>
+    </div>
+  ) : null
+
+  const dragOverlay = isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />
+  const commentToast = commentSent && (
+    <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
+      <Check className="w-3.5 h-3.5" />
+      Comment sent to agent
+    </div>
+  )
+
+  // ── New inspector layout ───────────────────────────────────────────────────
+  // Row 1: the global target selector + the Diff | Tests | Previews view tabs.
+  // Row 2: the selected view's own toolbar. Only the active view renders below;
+  // Tests/Previews are kept mounted-but-hidden so their availability guards drive
+  // the tabs and the (future) preview iframe doesn't tear down on every switch.
+  if (inspector) {
+    return (
+      <div ref={rootRef} style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
+        <div ref={changesBarRef} className="sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 -mx-1.5 sm:-mx-3 px-1.5 sm:px-3 py-2 mb-4 border-b border-gray-200 dark:border-gray-800 shadow-sm flex flex-col gap-2">
+          {/* Row 1: global target selector + view selector. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium text-gray-400 dark:text-gray-500 select-none">Target</span>
+            <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
+              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
+            <div className="flex-1 min-w-0" />
+            <ViewTabs
+              view={inspectorView}
+              onChange={setInspectorView}
+              testsAvailable={testsAvailable}
+              previewsAvailable={previewsAvailable}
+              tests={agent.tests}
+            />
+          </div>
+          {/* Row 2: the selected view's own toolbar. */}
+          {inspectorView === 'diff' && (
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
+                {statsEl}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 dark:text-gray-500 select-none">vs</span>
+                  <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
+                </div>
+                {resetBtn}
+                {warningButtons}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {loadingSpinner}
+                {refreshBtn}
+                {settingsCog}
+              </div>
+            </div>
+          )}
+          {inspectorView === 'tests' && testsAvailable && (
+            <div className="flex items-center gap-4">
+              {/* Group-by controls relocated from the diff settings cog so they
+                  stay reachable while Tests is the active view (gotcha #9). */}
+              <label className="inline-flex items-center gap-1.5 text-xs cursor-pointer text-gray-600 dark:text-gray-300">
+                <input type="checkbox" className="accent-blue-600" checked={testGroupResult} onChange={(e) => setTestGroupResult(e.target.checked)} />
+                Group by result
+              </label>
+              <label className={`inline-flex items-center gap-1.5 text-xs ${testsHaveScope ? 'cursor-pointer text-gray-600 dark:text-gray-300' : 'opacity-40 cursor-not-allowed text-gray-500'}`}>
+                <input type="checkbox" className="accent-blue-600" checked={testUseScope} disabled={!testsHaveScope} onChange={(e) => setTestUseScope(e.target.checked)} />
+                Group by scope
+              </label>
+              <div className="flex-1" />
+              {loadingSpinner}
+              {refreshBtn}
+            </div>
+          )}
+        </div>
+
+        {/* Body: only the active view (Tests/Previews stay mounted but hidden). */}
+        {inspectorView === 'diff' && (
+          <>
+            {diffErrorBanner}
+            {artifactsPanelEl}
+            {diffContentEl}
+          </>
+        )}
+        <div style={{ display: inspectorView === 'tests' ? 'block' : 'none' }}>{testsPanelEl}</div>
+        <div style={{ display: inspectorView === 'previews' ? 'block' : 'none' }}>{previewPanelEl}</div>
+        {dragOverlay}
+        {commentToast}
+      </div>
+    )
+  }
+
+  // ── Classic stacked layout (flag-off fallback) ─────────────────────────────
   return (
     // --sticky-changes-h (the measured Changes-toolbar height) is published here so
     // the artifacts filter bar and card headers below can dock flush beneath it even
@@ -2573,13 +2944,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
-          {diff && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
-              <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
-              <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
-            </div>
-          )}
+          {statsEl}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow
               never separates from its selectors - the whole "main → Latest commit"
@@ -2591,55 +2956,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
           </div>
 
-          {!(leftSel.type === 'base' && rightSel.type === 'latest') && (
-            <Tooltip content="Reset to base → latest">
-              <button
-                onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
-                className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-          )}
-
-          {/* Uncommitted changes warning button */}
-          <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
-
-          {/* Merge conflict button */}
-          <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
-
-          {/* Branch out-of-date (behind base) warning + update button */}
-          <BehindBaseButton diff={diff} agent={agent} projectId={projectId} onUpdated={() => setRefreshKey((k) => k + 1)} />
+          {resetBtn}
+          {warningButtons}
         </div>
 
         {/* Actions pinned to the top-right corner regardless of how many lines the
             content above wraps to (parent is items-start, this group is shrink-0). */}
         <div className="flex items-center gap-2 shrink-0">
-          {loadingDiff && hasExistingDiff && (
-            <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
-          )}
-
-          <Tooltip content="Refresh">
-            <button
-              onClick={() => setRefreshKey((k) => k + 1)}
-              disabled={loadingDiff}
-              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
-
-          <SettingsPopup
-            fileView={fileView} onFileViewChange={setFileView}
-            sideBySide={sideBySide} onSideBySideChange={setSideBySide}
-            ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
-            singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
-            imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
-            artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
-            testGroupResult={testGroupResult} onTestGroupResultChange={setTestGroupResult}
-            testUseScope={testUseScope} onTestUseScopeChange={setTestUseScope}
-            testScopeAvailable={testsHaveScope}
-          />
+          {loadingSpinner}
+          {refreshBtn}
+          {settingsCog}
         </div>
       </div>
 
@@ -2647,178 +2973,23 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           tracks the "after" commit (latest by default) like the artifacts below,
           and sits just under the Changes header. Renders nothing when the project
           configures no [[tests]] runners. */}
-      {agent.branch_name && projectId && (
-        <TestsPanel
-          projectId={projectId}
-          agentId={agent.id}
-          repoRef={agent.branch_name ?? undefined}
-          headRef={artifactParams.headRef}
-          includeUncommitted={artifactParams.includeUncommitted}
-          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
-          groupResult={testGroupResult}
-          useScope={testUseScope && testsHaveScope}
-          onScopeAvailable={setTestsHaveScope}
-        />
-      )}
+      {testsPanelEl}
 
       {/* Live server previews ([[artifacts]] type = "server") for the selected
           "after" version - single-sided like the tests above. Renders nothing
           when the project configures no server scripts. */}
-      {agent.branch_name && projectId && (
-        <PreviewPanel
-          projectId={projectId}
-          agentId={agent.id}
-          headRef={artifactParams.headRef}
-          includeUncommitted={artifactParams.includeUncommitted}
-          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
-        />
-      )}
+      {previewPanelEl}
 
       {/* Error banner on refresh failure */}
-      {diffError && hasExistingDiff && (
-        <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
-          Refresh failed: {diffError}
-        </div>
-      )}
+      {diffErrorBanner}
 
       {/* Visual artifacts (e.g. screenshots) for the selected versions */}
-      {agent.branch_name && (
-        <ArtifactsPanel
-          projectId={projectId}
-          agentId={agent.id}
-          baseRef={artifactParams.baseRef}
-          headRef={artifactParams.headRef}
-          includeUncommitted={artifactParams.includeUncommitted}
-          // Re-snapshot artifacts on the manual refresh button (refreshKey) AND
-          // when a commit is auto-detected (externalArtifactRefresh). Both only
-          // ever increment, so their sum strictly increases on either trigger,
-          // re-running ArtifactsPanel's effect to re-request - a cache hit when
-          // the resolved commit SHA is unchanged, a regen when it moved. The
-          // diff text itself updates silently via externalRefreshTrigger, so we
-          // deliberately keep this out of the diff-loading effects (which would
-          // flash a loading spinner and reset the user's selection).
-          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
-          imageDiffMode={imageDiffMode}
-          artifactScale={artifactScale}
-          artifactView={artifactView}
-          onArtifactViewChange={setArtifactView}
-          artifactHighlight={artifactHighlight}
-          onArtifactHighlightChange={setArtifactHighlight}
-          artifactSpans={artifactSpans}
-          onArtifactSpanChange={setArtifactSpanOverride}
-        />
-      )}
+      {artifactsPanelEl}
 
       {/* Content */}
-      {!hasExistingDiff && loadingDiff ? (
-        <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
-          <LoaderCircle className="w-4 h-4 animate-spin mr-2" />
-          <span className="text-sm">Loading diff...</span>
-        </div>
-      ) : !hasExistingDiff && diffError ? (
-        <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
-          {diffError}
-        </div>
-      ) : diff && diff.files.length === 0 ? (
-        <div className={`flex items-center justify-center py-8 text-gray-400 dark:text-gray-500 text-sm transition-opacity ${loadingDiff ? 'opacity-40' : ''}`}>
-          No changes
-        </div>
-      ) : diff ? (
-        <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
-          {/* File list sidebar (hidden on mobile - the diff content takes the full
-              width there; files are still all rendered below, or reachable via the
-              prev/next pager in single-file mode) */}
-          <div
-            ref={sidebarRef}
-            className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
-            style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
-          >
-            <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
-                Files · {diff.files.length}
-              </span>
-            </div>
-            <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-            {/* Resize handle */}
-            <div
-              onMouseDown={startResizing}
-              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
-            />
-          </div>
-
-          {/* Diff content */}
-          <div className="flex-1 min-w-0">
-            {singleFile ? (
-              <>
-                {/* Intentionally not sticky: the file header below now sticks at
-                    FILE_STICKY_TOP, so a sticky pager here would dock at the same
-                    Y and overlap it. The pager scrolls away; the file header stays. */}
-                <div className="flex items-center gap-2 mb-3 z-20">
-                  <button
-                    onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
-                    disabled={singleFileIdx === 0}
-                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
-                    {singleFileIdx + 1} / {diff.files.length}
-                  </div>
-                  <button
-                    onClick={() => setSingleFileIdx(Math.min(diff.files.length - 1, singleFileIdx + 1))}
-                    disabled={singleFileIdx === diff.files.length - 1}
-                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <FileDiff
-                  key={diff.files[singleFileIdx]?.path}
-                  file={diff.files[singleFileIdx]!}
-                  sideBySide={sideBySide}
-                  isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
-                  onToggleCollapse={toggleFileCollapse}
-                  onComment={handleComment}
-                  onExpand={expandFileDiff}
-                  isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
-                  onShow={getShowCallback(diff.files[singleFileIdx].path)}
-                  fileRef={getFileRef(diff.files[singleFileIdx].path)}
-                  currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
-                  imageDiffMode={imageDiffMode}
-                  imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
-                  imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
-                />
-              </>
-            ) : (
-              diff.files.map((f) => {
-                const img = imageUrlsFor(f)
-                return (
-                <FileDiff key={f.path} file={f} sideBySide={sideBySide}
-                  isCollapsed={collapsedFiles.has(f.path)}
-                  onToggleCollapse={toggleFileCollapse}
-                  onComment={handleComment}
-                  onExpand={expandFileDiff}
-                  isHidden={hiddenFiles.has(f.path)}
-                  onShow={getShowCallback(f.path)}
-                  fileRef={getFileRef(f.path)}
-                  currentContext={fileContexts.get(f.path) ?? 3}
-                  imageDiffMode={imageDiffMode}
-                  imageBefore={img.before}
-                  imageAfter={img.after}
-                />
-                )
-              })
-            )}
-          </div>
-        </div>
-      ) : null}
-      {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
-      {commentSent && (
-        <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
-          <Check className="w-3.5 h-3.5" />
-          Comment sent to agent
-        </div>
-      )}
+      {diffContentEl}
+      {dragOverlay}
+      {commentToast}
     </div>
   )
 }

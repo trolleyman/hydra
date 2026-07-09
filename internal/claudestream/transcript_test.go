@@ -217,6 +217,84 @@ func TestTailSubagentTranscripts(t *testing.T) {
 	}
 }
 
+func TestSubagentTailer(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "session-1"
+	if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), []byte(`{"type":"user","uuid":"u1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(dir, sessionID, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subPath := filepath.Join(subDir, "agent-a1f2.jsonl")
+	write := func(s string) {
+		f, err := os.OpenFile(subPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tail := NewSubagentTailer(dir, 0)
+	// Nothing yet: the subagents dir has no transcript files.
+	if g := tail.Poll(); len(g) != 0 {
+		t.Fatalf("Poll(empty) = %v, want none", g)
+	}
+
+	// First sight reads from the start; the trailing partial line stays put.
+	write(`{"type":"user","isSidechain":true,"agentId":"a1f2","uuid":"su1"}` + "\n" +
+		`{"type":"attachment","isSidechain":true,"agentId":"a1f2","uuid":"sat1"}` + "\n" +
+		`{"type":"assistant","isSidechain":true,"agentId":"a1f2","uuid":"sa1"`)
+	g := tail.Poll()
+	if len(g) != 1 || g[0].AgentID != "a1f2" || g[0].SessionID != sessionID {
+		t.Fatalf("Poll = %+v, want one growth for a1f2/%s", g, sessionID)
+	}
+	// user kept, attachment dropped, partial assistant not consumed yet.
+	if len(g[0].Lines) != 1 {
+		t.Fatalf("first Poll relayed %d lines, want 1 (user only): %s", len(g[0].Lines), g[0].Lines)
+	}
+
+	// Completing the partial line yields it (and only it) on the next Poll.
+	write("}\n")
+	g = tail.Poll()
+	if len(g) != 1 || len(g[0].Lines) != 1 {
+		t.Fatalf("second Poll = %+v, want the completed assistant line", g)
+	}
+	if ev, ok := ParseEvent(g[0].Lines[0]); !ok || ev.UUID != "sa1" {
+		t.Errorf("completed line = %s, want uuid sa1", g[0].Lines[0])
+	}
+
+	// No growth -> no entries.
+	if g := tail.Poll(); len(g) != 0 {
+		t.Errorf("Poll(no growth) = %v, want none", g)
+	}
+
+	// A new sub-agent file appearing mid-tail is picked up from its start.
+	if err := os.WriteFile(filepath.Join(subDir, "agent-b2.jsonl"),
+		[]byte(`{"type":"assistant","isSidechain":true,"agentId":"b2","uuid":"sb1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g = tail.Poll()
+	if len(g) != 1 || g[0].AgentID != "b2" || len(g[0].Lines) != 1 {
+		t.Fatalf("Poll(new file) = %+v, want one line for b2", g)
+	}
+
+	// A large file first seen is capped: the seek drops the fragment before
+	// the first newline, keeping only whole trailing lines.
+	capped := NewSubagentTailer(dir, 40)
+	for _, growth := range capped.Poll() {
+		for _, l := range growth.Lines {
+			if _, ok := ParseEvent(l); !ok {
+				t.Errorf("capped Poll returned a non-parseable line: %q", l)
+			}
+		}
+	}
+}
+
 func TestLatestSessionID(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite := func(name, content string, age time.Duration) {

@@ -5,6 +5,15 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Hydra</title>
+    <!-- Merriweather: the pinned serif for agent chat prose (see .chat-serif /
+         --font-serif in index.css). Loading a specific webfont keeps bold and
+         regular metrics identical on every OS instead of relying on whatever
+         serif the system substitutes. display=swap shows the fallback serif
+         until it arrives, so text is never invisible and degrades gracefully
+         offline. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&display=swap" rel="stylesheet">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">

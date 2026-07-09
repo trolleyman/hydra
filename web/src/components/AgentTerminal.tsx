@@ -664,6 +664,12 @@ interface Props {
   // chatMode renders the agent tab as a chat view (stream-json framing)
   // instead of an xterm. Bash tabs stay terminals either way.
   chatMode?: boolean
+  // fill: the new split layout drops the fixed-height drag window and lets the
+  // terminal/chat grow to fill its pane (the left working pane). The vertical
+  // resize handle, row-snap and the terminalHeight/chat-default-height prefs are
+  // all artifacts of being a window inside a scroll column, so they're inert
+  // here. Omitted -> the classic fixed-height dragged window.
+  fill?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
@@ -674,7 +680,7 @@ interface Props {
 // so those ticks skip the whole tab strip + xterm/chat subtree.
 export const AgentTerminal = memo(AgentTerminalImpl)
 
-function AgentTerminalImpl({ agentId, projectId, chatMode, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -848,12 +854,16 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, onRefresh, onStatusUp
   return (
     <div
       ref={rootRef}
-      className={`relative rounded-lg overflow-hidden border flex flex-col ${
+      className={`relative rounded-lg overflow-hidden border flex flex-col ${fill ? 'flex-1 min-h-0' : ''} ${
         chatActive
           ? 'border-stone-200 dark:border-stone-700/70 bg-[#faf9f5] dark:bg-[#262624]'
           : 'border-gray-700 dark:border-gray-600'
       }`}
-      style={{ ...(chatActive ? {} : { background: '#111827' }), height: `${height}px`, minHeight: '150px' }}
+      // fill: grow to the pane height (no fixed/dragged window). Otherwise the
+      // classic dragged window at the saved/default pixel height.
+      style={fill
+        ? (chatActive ? {} : { background: '#111827' })
+        : { ...(chatActive ? {} : { background: '#111827' }), height: `${height}px`, minHeight: '150px' }}
     >
       {/* Size indicator shown while dragging the resize handle; fades out when
           the drag stops. Snapping keeps rows whole, so this reads cleanly. Inset
@@ -1040,15 +1050,18 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, onRefresh, onStatusUp
 
       {/* Custom resize handle: a thin strip along the bottom edge. Dragging it
           snaps the height to whole rows (see onResizeMove), so the terminal
-          steps one character cell at a time rather than resizing smoothly. */}
-      <div
-        onPointerDown={onResizeStart}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeEnd}
-        className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
-      >
-        <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
-      </div>
+          steps one character cell at a time rather than resizing smoothly.
+          In fill mode the terminal grows to its pane, so there's nothing to drag. */}
+      {!fill && (
+        <div
+          onPointerDown={onResizeStart}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
+        >
+          <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
+        </div>
+      )}
     </div>
   )
 }

@@ -205,8 +205,25 @@ func isTurnBoundary(event string) bool {
 	}
 }
 
+// markdownEscaper backslash-escapes the inline-markdown metacharacters the web
+// UI's activity renderer styles (backtick, asterisk, underscore - plus
+// backslash itself, so a literal backslash can't be misread as an escape).
+var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", `*`, `\*`, `_`, `\_`)
+
+// escapeMarkdown escapes a literal value interpolated into an activity line (a
+// file name, a search pattern, a tool name) so the web UI shows it verbatim
+// instead of styling it - e.g. a _LAYOUT_.tsx file name would otherwise render
+// as "LAYOUT" in italics. The frontend inline renderer (web/src/lib/
+// markdown.tsx) understands these backslash escapes.
+func escapeMarkdown(s string) string {
+	return markdownEscaper.Replace(s)
+}
+
 // describeActivity renders a short, human-readable description of a tool call,
-// handling the common Claude and Gemini tool names.
+// handling the common Claude and Gemini tool names. Literal values pulled from
+// the tool input are markdown-escaped (see escapeMarkdown); shell commands are
+// not, because the "$ ..." form is rendered whole as a code span, never parsed
+// as markdown.
 func describeActivity(tool string, input map[string]interface{}) string {
 	get := func(keys ...string) string {
 		for _, k := range keys {
@@ -225,24 +242,24 @@ func describeActivity(tool string, input map[string]interface{}) string {
 		return "Running a command"
 	case "Edit", "MultiEdit", "Write", "Update", "NotebookEdit", "replace", "write_file":
 		if p := get("file_path", "path", "absolute_path"); p != "" {
-			return "Editing " + filepath.Base(p)
+			return "Editing " + escapeMarkdown(filepath.Base(p))
 		}
 		return "Editing files"
 	case "Read", "read_file", "read_many_files":
 		if p := get("file_path", "path", "absolute_path"); p != "" {
-			return "Reading " + filepath.Base(p)
+			return "Reading " + escapeMarkdown(filepath.Base(p))
 		}
 		return "Reading files"
 	case "Grep", "search_file_content":
 		if pat := get("pattern"); pat != "" {
-			return "Searching: " + truncate(pat, 40)
+			return "Searching: " + escapeMarkdown(truncate(pat, 40))
 		}
 		return "Searching"
 	case "Glob", "glob", "list_directory", "LS":
 		return "Exploring files"
 	case "Task":
 		if d := get("description"); d != "" {
-			return "Subagent: " + truncate(d, 40)
+			return "Subagent: " + escapeMarkdown(truncate(d, 40))
 		}
 		return "Running a subagent"
 	case "WebFetch", "web_fetch":
@@ -255,7 +272,9 @@ func describeActivity(tool string, input map[string]interface{}) string {
 		if tool == "" {
 			return ""
 		}
-		return "Using " + tool
+		// Tool names carry markdown metachars too - e.g. mcp__hydra__git_commit
+		// would render "hydra" in bold.
+		return "Using " + escapeMarkdown(tool)
 	}
 }
 
