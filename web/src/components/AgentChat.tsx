@@ -180,6 +180,12 @@ interface TokenUsage {
 interface ClaudeEvent {
   type: string
   subtype?: string
+  // ISO-8601 wall-clock time the entry was recorded. Only transcript lines
+  // carry it (the backfill/replay on reconnect); live stdout stream-json lines
+  // don't. Used to anchor the "working" indicator's elapsed clock to when the
+  // turn actually started, so a reconnect mid-turn shows the real duration
+  // rather than time-since-page-load (item 48).
+  timestamp?: string
   // The durable conversation-record id (transcript + stdout share it). Tracked
   // as the anchor for load-older history paging (item 25).
   uuid?: string
@@ -230,6 +236,14 @@ interface ClaudeEvent {
   // require user interaction.
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
+}
+
+// parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
+// null when absent/unparseable (live stdout lines have none).
+function parseEventTs(ev: ClaudeEvent): number | null {
+  if (typeof ev.timestamp !== 'string') return null
+  const t = Date.parse(ev.timestamp)
+  return Number.isFinite(t) ? t : null
 }
 
 // formatTokens abbreviates a token count (3900 -> "3.9k", 1_200_000 -> "1.2M").
@@ -1845,6 +1859,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // elapsed), the elapsed seconds, the running output-token count (completed
   // messages + the in-flight one), and the per-turn verb. Reset each turn.
   const turnStartRef = useRef<number | null>(null)
+  // The current turn's true wall-clock start (ms), parsed from the triggering
+  // user message's transcript timestamp when the reconnect backfill replays it.
+  // Null until a turn-starting user message with a timestamp is seen (a live
+  // turn we witnessed from the start has none, and correctly falls back to
+  // Date.now()). Consumed by the elapsed effect and corrected at replay_done.
+  const turnStartClockRef = useRef<number | null>(null)
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
   const turnCountRef = useRef(0)
@@ -2435,7 +2455,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string) => {
+    const routeUserText = (rawText: string, ts?: number | null) => {
       // Drop the CLI's local-command caveat wrapper; a message that is nothing
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
@@ -2444,9 +2464,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // synthesized footer (backfill only - live turns' pending footers are
       // discarded by their real result event before the next user turn).
       flushHistFooter()
+      // Record this turn's true start time (item 48): a genuine turn-starting
+      // message (a slash command, a prompt, a background-task continuation)
+      // anchors the "working" indicator's elapsed clock. Skipped for the
+      // non-turn-starting cases below (slash-command output, an interrupt).
+      const markTurnStart = () => {
+        if (ts != null) turnStartClockRef.current = ts
+      }
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+        markTurnStart()
         push({ kind: 'command', name: cmd[1].trim(), args })
         return
       }
@@ -2478,6 +2506,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // render a compact one-line notice instead of the raw XML (item 15).
       if (text.includes('<task-notification>')) {
         const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+        markTurnStart()
         push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
         return
       }
@@ -2487,6 +2516,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // it for placement would put the user message below its own reply.
       const oi = optimisticTextsRef.current.indexOf(text)
       if (oi >= 0) {
+        markTurnStart()
         optimisticTextsRef.current.splice(oi, 1)
         setItems((prev) => {
           let j = -1
@@ -2504,6 +2534,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         })
         return
       }
+      markTurnStart()
       settlePendingSend(text)
       interruptPending = false
       push({ kind: 'user', text })
@@ -2553,13 +2584,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
         case 'user': {
           const content = ev.message?.content
+          const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content)
+            if (content.trim()) routeUserText(content, userTs)
             return
           }
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text)
+              routeUserText(block.text, userTs)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
@@ -2786,6 +2818,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           endPendingTools()
           flush()
           flushSubagents()
+          // Anchor the "working" indicator to the running turn's real start
+          // (item 48): the backfill just replayed the triggering user message,
+          // so turnStartClockRef now holds when the turn actually began. The
+          // elapsed effect set turnStartRef to page-load time before the
+          // backfill arrived; correct it (and elapsed) here, before the
+          // indicator first renders (it's gated on replayDone).
+          {
+            const real = turnStartClockRef.current
+            if (real != null && real <= Date.now()) {
+              turnStartRef.current = real
+              setElapsed(Math.floor((Date.now() - real) / 1000))
+            }
+          }
           setLiveFromId(nextId)
           setReplayDone(true)
           return
@@ -2903,11 +2948,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => {
     if (!isTurnRunning) {
       turnStartRef.current = null
+      turnStartClockRef.current = null
       setElapsed(0)
       return
     }
     if (turnStartRef.current == null) {
-      turnStartRef.current = Date.now()
+      // Prefer the turn's real start (from a replayed user message's timestamp)
+      // over "now" so a reconnect mid-turn shows the true elapsed. A live turn
+      // we saw begin has no such timestamp yet and falls back to now; a later
+      // replay_done still corrects it. clamp: never a future time (clock skew).
+      const real = turnStartClockRef.current
+      turnStartRef.current = real != null && real <= Date.now() ? real : Date.now()
       turnTokensRef.current = 0
       curMsgTokensRef.current = 0
       turnStopReasonRef.current = null
