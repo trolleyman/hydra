@@ -2417,6 +2417,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       thinkingStart = null
       return ms
     }
+    // Persist each live-measured thought duration keyed by "<messageId>#<blockIndex>"
+    // so a reload/resume replays the exact "Thought for Xs" (and keeps empty
+    // silently-reasoned thoughts visible) instead of falling back to the coarse
+    // timestamp-gap estimate. The Claude transcript has no duration field, so this
+    // localStorage sidecar is the only durable home for it. Loaded once here; the
+    // thinking handler reads it back when the live timer is empty (replay).
+    const persistedThoughts: Record<string, number> = {
+      ...(loadAgentViewPrefs(projectId, agentId).thinkingDurations ?? {}),
+    }
+    const recordThoughtDuration = (key: string, ms: number) => {
+      if (persistedThoughts[key] === ms) return
+      persistedThoughts[key] = ms
+      patchAgentViewPrefs(projectId, agentId, { thinkingDurations: { ...persistedThoughts } })
+    }
     // The wall-clock timestamp of the previously handled transcript event, so a
     // replayed thought (which never streams, so the live timer above is empty)
     // can still show "Thought for Xs" - estimated as the gap from the event that
@@ -2983,7 +2997,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             seen = new Set()
             seenBlocks.set(msgId, seen)
           }
-          for (const block of content) {
+          for (let bi = 0; bi < content.length; bi++) {
+            const block = content[bi]
             const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
@@ -3001,11 +3016,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // 11). Replayed empty thoughts (no duration) stay hidden so history
               // isn't cluttered with contentless cards.
               let dur = takeThinkingDuration()
-              // Replayed thought (no live timing): estimate its duration from the
-              // gap since the triggering event so history still reads "Thought for
-              // Xs" (item 7). Only for thoughts with visible text, so a contentless
-              // replayed thinking block stays hidden rather than cluttering history.
-              if (dur == null && block.thinking?.trim() && prevTs != null && evTs != null) {
+              const thoughtKey = msgId ? `${msgId}#${bi}` : null
+              if (dur != null) {
+                // Timed live in this tab - persist it so a reload/resume replays
+                // this exact duration (below) instead of re-estimating it.
+                if (thoughtKey) recordThoughtDuration(thoughtKey, dur)
+              } else if (thoughtKey && persistedThoughts[thoughtKey] != null) {
+                // Replaying a thought we timed live in an earlier session: use the
+                // saved duration. This is exact, and (unlike the estimate below)
+                // also restores empty silently-reasoned thoughts, which carry no
+                // text to gate on.
+                dur = persistedThoughts[thoughtKey]
+              } else if (block.thinking?.trim() && prevTs != null && evTs != null) {
+                // Replayed thought we never timed (e.g. from before this ran, or a
+                // different browser): estimate its duration from the gap since the
+                // triggering event so history still reads "Thought for Xs" (item 7).
+                // Only for thoughts with visible text, so a contentless replayed
+                // thinking block stays hidden rather than cluttering history.
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {

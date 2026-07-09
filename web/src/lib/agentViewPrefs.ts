@@ -53,6 +53,13 @@ export type AgentViewPrefs = {
   // last open, and whether the working pane's prompt disclosure is collapsed.
   inspectorView?: 'diff' | 'tests' | 'previews'
   promptCollapsed?: boolean
+  // Live-measured thinking-block durations (ms), keyed by "<messageId>#<blockIndex>".
+  // The accurate duration is only known while a thought streams in this tab; the
+  // durable Claude transcript carries no duration field, so we stash it here and
+  // read it back on replay/resume - otherwise the "Thought for Xs" degrades to a
+  // coarse timestamp-gap estimate, and empty (silently-reasoned) thoughts vanish
+  // from history entirely. See ChatPane's thinking handler.
+  thinkingDurations?: Record<string, number>
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -81,6 +88,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatDraft: stored.chatDraft,
     inspectorView: stored.inspectorView,
     promptCollapsed: stored.promptCollapsed,
+    thinkingDurations: stored.thinkingDurations,
   }
 }
 
