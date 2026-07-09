@@ -1326,7 +1326,9 @@ const SubagentCard = memo(function SubagentCard({
   finishedBadge?: boolean
 }) {
   const running = isSubRunning(sub, tool)
-  const [open, setOpen] = useState(true)
+  // Collapsed by default so a sub-agent never dominates the main conversation
+  // (#62); the user expands the card to see its prompt, steps and report.
+  const [open, setOpen] = useState(false)
   // The step timeline is collapsed by default (prompt + report are the resting
   // view); the user expands it to inspect the sub-agent's inner work.
   const [stepsOpen, setStepsOpen] = useState(false)
