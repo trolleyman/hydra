@@ -1443,6 +1443,48 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
+// deriveAnswered reconstructs which options (and any free-text "Other") each
+// question resolved to, from the recorded tool_result text. On a resume the
+// card's local selection state is gone - all we have is the durable result,
+// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
+// shape the real CLI's AskUserQuestion result produces, mirrored by the
+// simulation). Matching those labels back to option indices lets a replayed
+// card highlight the chosen options just as it did right after answering.
+function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+  const selected = specs.map(() => new Set<number>())
+  const other = specs.map(() => '')
+  specs.forEach((q, qi) => {
+    const needle = `"${q.question}"="`
+    const start = answeredText.indexOf(needle)
+    if (start === -1) return
+    const from = start + needle.length
+    const end = answeredText.indexOf('"', from)
+    if (end === -1) return
+    // The labels were joined with ", " (see submit()). Consume the value left to
+    // right, matching whole option labels (longest first, so a label that itself
+    // contains ", " isn't mistaken for two) and dropping anything else into the
+    // free-text "Other" field.
+    let rest = answeredText.slice(from, end)
+    const extras: string[] = []
+    while (rest.length > 0) {
+      const match = q.options
+        .map((o) => o.label)
+        .filter((l) => rest === l || rest.startsWith(l + ', '))
+        .sort((a, b) => b.length - a.length)[0]
+      if (match != null) {
+        selected[qi].add(q.options.findIndex((o) => o.label === match))
+        rest = rest.slice(match.length).replace(/^, /, '')
+      } else {
+        const sep = rest.indexOf(', ')
+        extras.push(sep === -1 ? rest : rest.slice(0, sep))
+        rest = sep === -1 ? '' : rest.slice(sep + 2)
+      }
+    }
+    if (extras.length) other[qi] = extras.join(', ')
+  })
+  return { selected, other }
+}
+
 function QuestionCard({
   specs,
   disabled,
@@ -1461,6 +1503,19 @@ function QuestionCard({
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
+
+  // On a resume the card mounts already-answered with no local selection - and
+  // the same holds if it was answered in another tab. Recover the chosen
+  // options from the recorded result so the settled card highlights them just
+  // as it did right after answering. A live answer in this tab keeps its own
+  // local selection, so only fall back when nothing was picked here.
+  const derived = useMemo(
+    () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
+    [specs, answeredText],
+  )
+  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const showSelected = derived && localEmpty ? derived.selected : selected
+  const showOther = derived && localEmpty ? derived.other : other
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -1507,7 +1562,7 @@ function QuestionCard({
           </div>
           <div className="space-y-1">
             {q.options.map((o, oi) => {
-              const isSel = selected[qi].has(oi)
+              const isSel = showSelected[qi].has(oi)
               return (
                 <button
                   key={oi}
@@ -1539,7 +1594,7 @@ function QuestionCard({
             })}
             <input
               type="text"
-              value={other[qi]}
+              value={showOther[qi]}
               onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
               disabled={answered}
               placeholder="Other..."
