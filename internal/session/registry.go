@@ -41,6 +41,7 @@ type Registry struct {
 	onChatResult      func(id string)
 	onChatStep        func(id string)
 	onChatPlanApprove func(id, requestID string, input json.RawMessage)
+	onChatThinking    func(id, messageID string, durationMS int64)
 }
 
 // NewRegistry returns an empty registry.
@@ -96,6 +97,17 @@ func (r *Registry) SetOnChatStep(fn func(id string)) {
 func (r *Registry) SetOnChatPlanApproval(fn func(id, requestID string, input json.RawMessage)) {
 	r.mu.Lock()
 	r.onChatPlanApprove = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatThinking registers a callback invoked (off the read goroutine) each
+// time a chat-mode session's stream completes a thinking block, with the head
+// id, the block's Claude message id, and the wall-clock duration Hydra measured.
+// The daemon wires this to persist the duration to the head's sidecar so a
+// reload/resume can render "Thought for Xs" without the browser timing it.
+func (r *Registry) SetOnChatThinking(fn func(id, messageID string, durationMS int64)) {
+	r.mu.Lock()
+	r.onChatThinking = fn
 	r.mu.Unlock()
 }
 
@@ -205,6 +217,18 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, requestID, input)
+			}
+		}
+		// A completed thinking block: persist its measured duration to the head's
+		// sidecar (a small disk write), dispatched off the read goroutine like the
+		// others. Filter also injects a live hydra_thinking line for attached
+		// clients; this callback is only the durable half.
+		ringFilter.OnThinking = func(messageID string, durationMS int64) {
+			r.mu.RLock()
+			fn := r.onChatThinking
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, messageID, durationMS)
 			}
 		}
 	}

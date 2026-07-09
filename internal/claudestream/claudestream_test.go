@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseEvent(t *testing.T) {
@@ -206,7 +207,7 @@ func TestRingFilterOnPlanApproval(t *testing.T) {
 
 	// An ExitPlanMode can_use_tool control_request fires OnPlanApproval and is
 	// still persisted to the ring (the client renders the plan card from it).
-	kept := f.Filter([]byte(`{"type":"control_request","request_id":"req_1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"x"}}}` + "\n"))
+	kept, _ := f.Filter([]byte(`{"type":"control_request","request_id":"req_1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"x"}}}` + "\n"))
 	if len(kept) == 0 {
 		t.Error("control_request line should still be persisted to the ring")
 	}
@@ -244,7 +245,7 @@ func TestRingFilterOnAPIError(t *testing.T) {
 	// kept and does not fire; an api-error line fires exactly once with its text.
 	f.Filter([]byte(`{"type":"stream_event"}` + "\n"))
 	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}` + "\n"))
-	kept := f.Filter([]byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"API Error: boom"}]}}` + "\n"))
+	kept, _ := f.Filter([]byte(`{"type":"assistant","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"API Error: boom"}]}}` + "\n"))
 
 	if len(got) != 1 || got[0] != "API Error: boom" {
 		t.Fatalf("OnAPIError fired %v, want [\"API Error: boom\"]", got)
@@ -262,7 +263,7 @@ func TestRingFilterOnResult(t *testing.T) {
 	// other line types don't fire it.
 	f.Filter([]byte(`{"type":"stream_event"}` + "\n"))
 	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"))
-	kept := f.Filter([]byte(`{"type":"result","subtype":"success","duration_ms":1200}` + "\n"))
+	kept, _ := f.Filter([]byte(`{"type":"result","subtype":"success","duration_ms":1200}` + "\n"))
 	if results != 1 {
 		t.Fatalf("OnResult fired %d times, want 1", results)
 	}
@@ -296,6 +297,72 @@ func TestRingFilterOnStep(t *testing.T) {
 	f.Filter([]byte(`{"type":"result","subtype":"success"}` + "\n"))
 	if steps != 2 {
 		t.Fatalf("OnStep fired %d times after non-step lines, want still 2", steps)
+	}
+}
+
+func TestRingFilterOnThinking(t *testing.T) {
+	// Pin the clock so the measured duration is deterministic, advancing it
+	// between the thinking block's start and stop.
+	var clock time.Time
+	orig := nowFunc
+	nowFunc = func() time.Time { return clock }
+	defer func() { nowFunc = orig }()
+
+	var gotID string
+	var gotMS int64
+	var calls int
+	f := &RingFilter{OnThinking: func(id string, ms int64) { calls++; gotID, gotMS = id, ms }}
+
+	// message_start pins the id; content_block_start(thinking) stamps the start;
+	// content_block_stop 2.5s later reports the duration and injects a synthetic
+	// hydra_thinking line for live delivery.
+	f.Filter([]byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1"}}}` + "\n"))
+	f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}}` + "\n"))
+	clock = clock.Add(2500 * time.Millisecond)
+	_, injected := f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}` + "\n"))
+
+	if calls != 1 || gotID != "msg_1" || gotMS != 2500 {
+		t.Fatalf("OnThinking = (calls %d, id %q, ms %d), want (1, msg_1, 2500)", calls, gotID, gotMS)
+	}
+	var ev struct {
+		Type       string `json:"type"`
+		MessageID  string `json:"message_id"`
+		DurationMS int64  `json:"duration_ms"`
+	}
+	if err := json.Unmarshal(injected, &ev); err != nil {
+		t.Fatalf("injected line not JSON: %v (%q)", err, injected)
+	}
+	if ev.Type != "hydra_thinking" || ev.MessageID != "msg_1" || ev.DurationMS != 2500 {
+		t.Fatalf("injected = %+v, want hydra_thinking/msg_1/2500", ev)
+	}
+
+	// A non-thinking block's start/stop is ignored (no entry to key on).
+	calls = 0
+	f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text"}}}` + "\n"))
+	_, inj := f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}` + "\n"))
+	if calls != 0 || len(inj) != 0 {
+		t.Fatalf("text block fired OnThinking (%d) / injected %q, want neither", calls, inj)
+	}
+}
+
+func TestRingFilterThinkingBoundaryHold(t *testing.T) {
+	// The synthetic hydra_thinking line must not be handed to attachers while a
+	// partial line is still buffered - it would splice into the half-line. It is
+	// held until the chunk stream next lands on a line boundary.
+	f := &RingFilter{}
+	f.Filter([]byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"m"}}}` + "\n"))
+	f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}}` + "\n"))
+
+	// The thinking-stop line is complete, but the chunk continues into a partial
+	// next line (no trailing newline) - so the injection is HELD this chunk.
+	_, inj1 := f.Filter([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}` + "\n" + `{"type":"stream_event","even`))
+	if len(inj1) != 0 {
+		t.Fatalf("injected %q while a partial line was buffered, want held", inj1)
+	}
+	// Completing the partial reaches a boundary - the held line flushes now.
+	_, inj2 := f.Filter([]byte(`t":{"type":"message_stop"}}` + "\n"))
+	if len(inj2) == 0 {
+		t.Fatalf("held injection not flushed at the next line boundary")
 	}
 }
 

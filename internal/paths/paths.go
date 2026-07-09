@@ -209,6 +209,20 @@ func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetBuildLogDirFromProjectRoot(projectRoot), id+".log")
 }
 
+// GetChatThinkingDirFromProjectRoot holds the per-head sidecars recording each
+// thinking block's Hydra-measured duration (keyed by Claude message id), so a
+// reload/resume can show "Thought for Xs" without the browser timing it. Lives
+// at .hydra/local/thinking/.
+func GetChatThinkingDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "thinking")
+}
+
+// GetChatThinkingJsonFromProjectRoot returns a chat-mode head's thinking-duration
+// sidecar, at .hydra/local/thinking/<id>.json.
+func GetChatThinkingJsonFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatThinkingDirFromProjectRoot(projectRoot), id+".json")
+}
+
 // GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle
 // watcher writes (status + unresolved discussions) and the in-sandbox `hydra mcp`
 // server reads for get_review_status / get_review_comments (NON_LOCAL_INTEGRATION.md

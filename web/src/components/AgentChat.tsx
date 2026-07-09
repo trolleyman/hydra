@@ -90,9 +90,11 @@ type ChatItem =
   // re-animating it as it settles reads as a flicker (item 56), same rationale
   // as the queued-user-bubble case above.
   | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean }
-  // durationMs is set for a thought whose streaming we timed live (item 11);
-  // replayed history has no timing, so it renders as a plain "Thought".
-  | { kind: 'thinking'; id: number; text: string; durationMs?: number; noEntrance?: boolean }
+  // durationMs is the thinking time the daemon measured for this block (delivered
+  // as a hydra_thinking event keyed by msgId); absent for old history recorded
+  // before backend timing, which falls back to a transcript-gap estimate or a
+  // plain "Thought". msgId lets a late-arriving duration patch this item.
+  | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
   | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
@@ -262,6 +264,12 @@ interface ClaudeEvent {
   // require user interaction.
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
+  // hydra_thinking (a Hydra-synthesized event, not from Claude): the daemon
+  // measured a thinking block's duration from the live stream and reports it
+  // keyed by the assistant message id, so the client shows "Thought for Xs"
+  // without timing it in the browser. Replayed from the head's sidecar on
+  // reconnect (see internal/http emitThinkingDurations).
+  message_id?: string
 }
 
 // parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
@@ -1897,7 +1905,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
 // assistant text/thinking/tool_use/question blocks with tool_result patching,
 // and result footers. A TodoWrite is dropped (the plan panel already holds the
 // latest state, not this older one). allocId hands out ids for the batch.
-function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): ChatItem[] {
+function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durations?: Map<string, number>): ChatItem[] {
   const items: ChatItem[] = []
   const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
     items.push({ ...item, id: allocId() } as ChatItem)
@@ -2012,7 +2020,13 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
         if (msgId && seen.has(key)) continue
         if (msgId) seen.add(key)
         if (block.type === 'text' && block.text?.trim()) push({ kind: 'assistant', text: block.text })
-        else if (block.type === 'thinking' && block.thinking?.trim()) push({ kind: 'thinking', text: block.thinking })
+        else if (block.type === 'thinking') {
+          // Duration from the daemon's measurement (sent up-front on connect, so
+          // it's in hand even for a lazily-loaded older batch); show an empty
+          // silently-reasoned thought only when it carries one.
+          const dur = msgId ? durations?.get(msgId) : undefined
+          if (block.thinking?.trim() || dur != null) push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur })
+        }
         else if (block.type === 'tool_use' && block.id) {
           const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
@@ -2110,6 +2124,12 @@ const SettledMessages = memo(
 
 export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
+  // Thinking-block durations the daemon measured, keyed by assistant message id
+  // (delivered as hydra_thinking events - replayed from the head's sidecar on
+  // connect, then live). The reducer reads this when it builds a thinking item;
+  // a load-older batch reads it too (reduceHistoryEvents). A ref so both survive
+  // re-renders and the whole connection's worth of durations stays in hand.
+  const thoughtDurationsRef = useRef<Map<string, number>>(new Map())
   // The in-flight streamed content block (token streaming via stream_event
   // deltas), rendered live below the settled items and superseded by the
   // complete assistant event that follows it.
@@ -2289,6 +2309,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
+    // Durations are re-sent from the sidecar at the start of each connection.
+    thoughtDurationsRef.current = new Map()
     // The transcript replay + the daemon's queue frame are authoritative for
     // this new connection, so drop the optimistic copies (queued bubbles and
     // in-flight "sending" messages) that would otherwise double them.
@@ -2418,16 +2440,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         })
       }
     }
-    // When a thinking block starts streaming we stamp the start time; the settled
-    // thinking item picks it up (and clears it) to show "Thought for Xs" (item
-    // 11). Replayed history never streams, so it stays null -> a plain "Thought".
-    let thinkingStart: number | null = null
-    const takeThinkingDuration = (): number | undefined => {
-      if (thinkingStart == null) return undefined
-      const ms = Date.now() - thinkingStart
-      thinkingStart = null
-      return ms
-    }
+    // Thinking durations are measured on the daemon now (delivered as
+    // hydra_thinking events into thoughtDurationsRef, keyed by message id), not
+    // timed in the browser - so a reload/resume shows the same "Thought for Xs"
+    // for every client. The estimate below is only a fallback for old history
+    // recorded before backend timing existed.
+    //
     // The wall-clock timestamp of the previously handled transcript event, so a
     // replayed thought (which never streams, so the live timer above is empty)
     // can still show "Thought for Xs" - estimated as the gap from the event that
@@ -2791,7 +2809,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
-        const older = reduceHistoryEvents(events, () => historyIdRef.current--)
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current)
         // Advance the anchor to the oldest event of this batch.
         const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
         if (anchor) oldestUuidRef.current = anchor
@@ -3046,7 +3064,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             seen = new Set()
             seenBlocks.set(msgId, seen)
           }
-          for (const block of content) {
+          for (let bi = 0; bi < content.length; bi++) {
+            const block = content[bi]
             const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
@@ -3056,23 +3075,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // (item 56).
               push({ kind: 'assistant', text: block.text, noEntrance: streamBuf?.kind === 'assistant' })
             } else if (block.type === 'thinking') {
-              // Always consume the live timer (resets thinkingStart). Push a
-              // settled thought when it has visible text, OR when it was a
-              // silently-reasoned turn we timed live (Opus/Fable stream an empty
-              // thinking block): a timed empty thought still shows "Thought for
-              // Xs" instead of the "Thinking..." indicator just vanishing (item
-              // 11). Replayed empty thoughts (no duration) stay hidden so history
-              // isn't cluttered with contentless cards.
-              let dur = takeThinkingDuration()
-              // Replayed thought (no live timing): estimate its duration from the
-              // gap since the triggering event so history still reads "Thought for
-              // Xs" (item 7). Only for thoughts with visible text, so a contentless
-              // replayed thinking block stays hidden rather than cluttering history.
+              // Duration comes from the daemon (a hydra_thinking event keyed by
+              // this message id, already in hand - sent before the backfill and
+              // live at the block's end). A settled thought is shown when it has
+              // visible text OR carries a measured duration: a duration means it
+              // was a real (possibly silently-reasoned, empty) thought, so an
+              // empty timed thought still reads "Thought for Xs" instead of
+              // vanishing (item 11). Old history with no backend duration falls
+              // back to the transcript-gap estimate (visible-text thoughts only,
+              // so a contentless untimed block stays hidden).
+              let dur = msgId ? thoughtDurationsRef.current.get(msgId) : undefined
               if (dur == null && block.thinking?.trim() && prevTs != null && evTs != null) {
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
-                push({ kind: 'thinking', text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
+                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
               }
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
@@ -3117,6 +3134,33 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           clearStream()
           return
         }
+        case 'hydra_thinking': {
+          // The daemon measured a thinking block's duration and reports it here
+          // keyed by message id (replayed from the sidecar on connect, then live
+          // at the block's end). Stash it for the thinking item this reducer
+          // builds; if that item already exists (the duration arrived after it),
+          // patch it in place - both the not-yet-flushed pending batch and the
+          // committed state.
+          const mid = ev.message_id
+          const ms = ev.duration_ms
+          if (!mid || typeof ms !== 'number') return
+          thoughtDurationsRef.current.set(mid, ms)
+          for (const it of pending) {
+            if (it.kind === 'thinking' && it.msgId === mid && it.durationMs == null) it.durationMs = ms
+          }
+          setItems((prev) => {
+            let changed = false
+            const next = prev.map((it) => {
+              if (it.kind === 'thinking' && it.msgId === mid && it.durationMs == null) {
+                changed = true
+                return { ...it, durationMs: ms }
+              }
+              return it
+            })
+            return changed ? next : prev
+          })
+          return
+        }
         case 'stream_event': {
           const e = ev.event
           if (!e) return
@@ -3127,7 +3171,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
-            if (bt === 'thinking') thinkingStart = Date.now()
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta

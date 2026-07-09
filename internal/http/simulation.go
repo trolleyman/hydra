@@ -2897,12 +2897,31 @@ func sendSimChatEvent(conn *safeConn, line string) {
 	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
+// sendSimThinking emits the synthetic hydra_thinking event the daemon produces
+// for a measured thinking block (see claudestream + chat_ws), so the sim
+// exercises the client's backend-timed "Thought for Xs" path.
+func sendSimThinking(conn *safeConn, messageID string, durationMS int64) {
+	line, _ := json.Marshal(map[string]any{
+		"type":        "hydra_thinking",
+		"message_id":  messageID,
+		"duration_ms": durationMS,
+	})
+	sendSimChatEvent(conn, string(line))
+}
+
 // handleSimChatWS speaks the chat framing (see chat_ws.go) for the simulated
 // chat-mode agent: replay the canned conversation, mark replay_done, then
 // answer each user_message with an echoed user turn and a scripted assistant
 // reply, so the input path can be exercised end to end.
 func handleSimChatWS(conn *safeConn) {
 	sendStatusUpdate(conn, "running")
+	// Replay the measured thinking durations first (mirrors the daemon's
+	// emitThinkingDurations, which reads the head's sidecar before the transcript
+	// backfill): msg_sim_1's visible thought and msg_sim_4's EMPTY silently
+	// -reasoned thought both carry a duration, so the empty card stays visible as
+	// "Thought for Xs" on replay instead of vanishing.
+	sendSimThinking(conn, "msg_sim_1", 5000)
+	sendSimThinking(conn, "msg_sim_4", 3000)
 	for _, line := range simChatEvents {
 		sendSimChatEvent(conn, line)
 	}
@@ -3220,6 +3239,21 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	// message_start carries the initial usage; message_delta the running output
 	// token count - both feed the live "working" indicator (item 48).
 	streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1200, "output_tokens": 1}}})
+	// A short live thinking block first: stream its start/stop, settle it as its
+	// own assistant event, then send the hydra_thinking duration the daemon would
+	// have measured - so the card flips "Thinking..." -> "Thought for Xs" live and
+	// the duration survives a reload (mirrors the real backend timing path).
+	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking"}})
+	streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": "Reading the request, then drafting the reply."}})
+	time.Sleep(1200 * time.Millisecond)
+	streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+	thought, _ := json.Marshal(map[string]any{
+		"type":       "assistant",
+		"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "thinking", "thinking": "Reading the request, then drafting the reply."}}},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(thought))
+	sendSimThinking(conn, msgID, 1200)
 	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
 	tokens := 1
 	for chunk := range strings.SplitSeq(replyText, " ") {

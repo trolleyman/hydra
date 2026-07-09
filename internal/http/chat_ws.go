@@ -244,13 +244,24 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 // already delivered by the transcript backfill. Relayed uuids are added to
 // skip so the sub-agent transcript tailer never re-delivers a line an (older)
 // CLI also put on stdout. Returns false once the socket write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver) bool {
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
 			if len(line) > 0 {
 				log.Printf("chat ws: skipping non-protocol line for %q (%d bytes)", agentID, len(line))
 			}
+			continue
+		}
+		// Drop `result` events during the scrollback-ring replay. The durable
+		// transcript carries none, so a past turn's result only exists in the ring
+		// - which replays AFTER the whole transcript backfill, landing a finished
+		// turn's "Crunched for Xs" footer at the very bottom of the conversation,
+		// right above the live "working" indicator (it reads as "this running turn
+		// already finished"). Each backfilled turn already gets an in-place footer
+		// synthesized from its assistant usage, so the ring copy is just misplaced
+		// noise. Live results (dropResults=false) stream in order and are kept.
+		if dropResults && ev.Type == "result" {
 			continue
 		}
 		if ev.UUID != "" {
@@ -328,6 +339,32 @@ func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
 			case <-stop:
 				return
 			}
+		}
+	}
+}
+
+// emitThinkingDurations replays the head's measured thinking-block durations
+// (from its .hydra/local/thinking/<id>.json sidecar) as synthetic hydra_thinking
+// claude_event frames. Sent BEFORE the transcript backfill so the client has
+// every duration in hand by the time it builds the matching thinking items -
+// letting a reload/resume render "Thought for Xs" (and keep empty
+// silently-reasoned thoughts visible) without the browser having timed them.
+// Best-effort: no sidecar (a head that never produced a thought) sends nothing.
+func emitThinkingDurations(conn *safeConn, projectRoot, agentID string) {
+	if projectRoot == "" || agentID == "" {
+		return
+	}
+	for messageID, durationMS := range heads.LoadThinkingDurations(projectRoot, agentID) {
+		line, err := json.Marshal(map[string]any{
+			"type":        "hydra_thinking",
+			"message_id":  messageID,
+			"duration_ms": durationMS,
+		})
+		if err != nil {
+			continue
+		}
+		if !sendChatEventLine(conn, line, agentID) {
+			return
 		}
 	}
 }
@@ -447,6 +484,9 @@ func claudeProjectDir(worktree string) string {
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
 	dir := claudeProjectDir(worktree)
 	subs := newSubagentResolver(dir)
+	// Replay measured thinking durations first, so the client has them before it
+	// builds the thinking items the transcript backfill is about to produce.
+	emitThinkingDurations(conn, projectRoot, agentID)
 	skip := backfillChatHistory(conn, agentID, dir, subs)
 	if skip == nil {
 		skip = map[string]struct{}{}
@@ -459,7 +499,9 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	// stream starts.
 	select {
 	case data, ok := <-att.Output:
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
+		// before Attach returned) - drop its misplaced past-turn result footers.
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true) {
 			return
 		}
 	default:
@@ -540,7 +582,8 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			if !ok {
 				return
 			}
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+			// Live stream (post replay_done): results arrive in order, so keep them.
+			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false) {
 				return
 			}
 		}

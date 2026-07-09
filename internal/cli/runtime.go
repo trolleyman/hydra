@@ -142,6 +142,16 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	chatQueues := heads.NewChatQueueManager(reg, store)
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
 	reg.SetOnChatStep(chatQueues.OnTurnStep)
+	// Persist each thinking block's measured duration to the head's sidecar, so a
+	// reload/resume can show "Thought for Xs" for it (and keep empty
+	// silently-reasoned thoughts visible) without the browser having timed it.
+	reg.SetOnChatThinking(func(id, messageID string, durationMS int64) {
+		agent, err := store.GetAgent(id)
+		if err != nil || agent == nil {
+			return // unknown or archived head - nothing to record.
+		}
+		heads.RecordThinkingDuration(agent.ProjectPath, id, messageID, durationMS)
+	})
 	// Auto-approve the ExitPlanMode plan gate for chat heads: with
 	// --permission-prompt-tool stdio it arrives as a can_use_tool control_request
 	// nothing answers, so the head would hang leaving plan mode. Answer it
