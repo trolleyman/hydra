@@ -34,6 +34,7 @@ import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
@@ -1997,6 +1998,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
   })
+  // Explicit composer height (px), driven by the per-line auto-grow effect. The
+  // markdown-highlight textarea is absolutely positioned inside its wrapper, so
+  // it can't size the box itself - the wrapper carries the height instead. Seed
+  // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
+  // so the composer opens at the right height before the effect measures.
+  const [composerHeight, setComposerHeight] = useState<number>(() => {
+    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
+    return rows * 20 + 14
+  })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -3187,11 +3198,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const cs = getComputedStyle(ta)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    ta.style.height = 'auto'
+    // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
+    // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
+    // is empty but the content overflows, so scrollHeight reports the true content
+    // height. Restore to '' afterwards to hand sizing back to the wrapper.
+    ta.style.height = '0px'
     const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
+    ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.height = `${rows * lineHeight + pad}px`
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    setComposerHeight(rows * lineHeight + pad)
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -3847,7 +3863,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               onRemove={removeAttachment}
               onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
             />
-            <textarea
+            <HighlightedTextarea
               ref={textareaRef}
               value={input}
               onChange={(e) => {
@@ -3859,7 +3875,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
-              className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-[13px] leading-5 text-stone-800 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-50"
+              wrapperClassName="w-full"
+              wrapperStyle={{ height: composerHeight }}
+              textColorClassName="text-stone-800 dark:text-stone-100"
+              caretClassName="caret-stone-800 dark:caret-stone-100"
+              textClassName="px-3.5 pt-2.5 pb-1 text-[13px] leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
