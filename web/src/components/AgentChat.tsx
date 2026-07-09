@@ -2707,6 +2707,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // genuinely-failed turn.
     let interruptPending = false
 
+    // True once a `/model` command echo was just routed, so the very next
+    // routed entry (its `<local-command-stdout>Set model to ...` sibling) knows
+    // it belongs to a durable command record. A bare "Set model to ..." echo
+    // with no preceding command is the CLI's transient stdout confirmation
+    // (replayed from the scrollback ring on reconnect) - see the set_model
+    // handling below.
+    let pendingModelCmd = false
+
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
@@ -2715,6 +2723,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
       if (!text) return
+      // Consume the "a /model command just routed" flag: it only survives to the
+      // immediately-following entry (the command's own stdout sibling).
+      const afterModelCmd = pendingModelCmd
+      pendingModelCmd = false
       // A user turn starting is the boundary that settles the previous turn's
       // synthesized footer (backfill only - live turns' pending footers are
       // discarded by their real result event before the next user turn).
@@ -2728,9 +2740,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       const cmd = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)
       if (cmd) {
+        const name = cmd[1].trim()
         const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
         markTurnStart()
-        push({ kind: 'command', name: cmd[1].trim(), args })
+        push({ kind: 'command', name, args })
+        // The durable transcript records a /model change as this command echo
+        // immediately followed by a "Set model to ..." stdout sibling; flag it
+        // so that sibling renders (and the bare ring echo doesn't).
+        pendingModelCmd = name === '/model'
         return
       }
       const stdout = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)
@@ -2744,8 +2761,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           setModel(m[1])
           const oid = optimisticModelIdRef.current
           if (oid != null) {
+            // Live echo of a change THIS client just made: swap our optimistic
+            // confirmation for the CLI's (which carries the full model id).
             optimisticModelIdRef.current = null
             setItems((prev) => prev.filter((it) => it.id !== oid))
+          } else if (!afterModelCmd) {
+            // A bare "Set model to ..." echo with no preceding /model command:
+            // the CLI's transient stdout confirmation, replayed from the
+            // scrollback ring on reconnect. It carries no uuid, so the backend's
+            // uuid dedup can't drop it, and pushing it here appends a DUPLICATE
+            // at the bottom of the conversation - even though the durable
+            // transcript copy (the one that DOES follow a /model command) already
+            // rendered at its correct position. Sync the dropdown only, so the
+            // confirmation no longer jumps to the bottom after navigating away
+            // and back.
+            return
           }
         }
         if (body) push({ kind: 'cmdout', text: body })
