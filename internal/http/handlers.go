@@ -20,6 +20,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/events"
@@ -36,6 +37,10 @@ import (
 )
 
 const version = "0.1.0"
+
+// agentInputSeq numbers REST-injected chat messages (diff comments, "Fix with
+// agent") so each queued message carries a unique id across the daemon's life.
+var agentInputSeq atomic.Uint64
 
 // gitConfigVal reads a single git config value for the repo at dir.
 func gitConfigVal(dir, key string) string {
@@ -2608,6 +2613,24 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	text := request.Body.Text
+
+	// Chat-mode heads are driven over the Claude stream-json interface, not an
+	// interactive TUI: their stdin expects JSON user_message lines, so the
+	// bracketed-paste keystroke burst below never registers as a turn (the text
+	// just vanishes). Deliver it as a chat user turn instead, so diff comments
+	// and "Fix with agent" reach a chat agent the same way they reach a terminal
+	// one. Submitted un-queued: the message goes to the CLI now (started as the
+	// next turn when idle, steered in at the next step boundary when a turn is
+	// running) rather than being held pending a status-driven drain.
+	if head.ChatMode && s.ChatQueues != nil {
+		id := fmt.Sprintf("hydra-input-%d", agentInputSeq.Add(1))
+		s.ChatQueues.Submit(projectRoot, head.ID, heads.QueuedMessage{
+			ID:      id,
+			Content: claudestream.TextUserContent(text),
+		}, false)
+		return api.SendAgentInput200Response{}, nil
+	}
+
 	if head.AgentType != sandbox.AgentTypeBash {
 		// Deliver the message as a bracketed paste so multi-line input lands in
 		// the prompt verbatim. Without the explicit markers the agent TUIs detect

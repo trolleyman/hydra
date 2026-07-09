@@ -139,6 +139,14 @@ func TextUserMessageLine(text string) []byte {
 	return line
 }
 
+// TextUserContent builds the content-block array (a single text block) for a
+// plain-text user turn - the shape QueuedMessage.Content / a chat user_message
+// frame carries, ready to hand to heads.ChatQueueManager.Submit.
+func TextUserContent(text string) json.RawMessage {
+	content, _ := json.Marshal([]textBlock{{Type: "text", Text: text}})
+	return content
+}
+
 // InterruptLine builds the control_request line that cancels the in-flight
 // turn without killing the process. This mirrors what the Agent SDK sends; a
 // CLI version that doesn't understand it ignores the line.
