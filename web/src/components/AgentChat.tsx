@@ -122,9 +122,16 @@ type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 
 // isSubRunning reports whether a sub-agent is still working: the parent Task
 // card's tool_result (or its turn ending, `ended`) is the precise done signal
-// for a linked sub; an unlinked one falls back to its own status.
+// for a linked sub. A background/async agent is the exception - its tool_result
+// is only the launch boilerplate, arriving at spawn time, NOT a completion - so
+// that result is ignored and we defer to the sub's own status (settled when its
+// sidechain result finally lands), keeping the "working" marker up meanwhile.
 function isSubRunning(sub: SubagentView, tool?: ToolItem): boolean {
-  return tool ? tool.result === undefined && !tool.ended : sub.status === 'running'
+  if (tool) {
+    if (tool.result !== undefined && !isLaunchBoilerplate(tool.result)) return false
+    if (tool.ended) return false
+  }
+  return sub.status === 'running'
 }
 
 // subLabels derives a sub-agent's display label + description, preferring the
@@ -1004,11 +1011,23 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
 
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
-function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktree: string | null; serif: boolean }) {
+// skipId drops one inner item (the assistant message shown separately as the
+// Report) so it does not appear twice.
+function SubagentTimeline({
+  sub,
+  worktree,
+  serif,
+  skipId,
+}: {
+  sub: SubagentView
+  worktree: string | null
+  serif: boolean
+  skipId?: number
+}) {
   return (
     <>
       {sub.items.map((it) =>
-        it.kind === 'thinking' ? (
+        it.id === skipId ? null : it.kind === 'thinking' ? (
           <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
         ) : it.kind === 'tool' ? (
           <ToolCard key={it.id} item={it} worktree={worktree} />
@@ -1022,35 +1041,145 @@ function SubagentTimeline({ sub, worktree, serif }: { sub: SubagentView; worktre
   )
 }
 
-// SubagentReport renders the parent Task tool_result as the sub-agent's final
-// report (an error result as an error panel).
-function SubagentReport({ tool, serif }: { tool: ToolItem; serif: boolean }) {
-  if (tool.result === undefined || tool.result === '') return null
+// The resolved final report of a sub-agent: `text` rendered as the report body,
+// `itemId` set only when it came from an inner assistant message (so the timeline
+// can skip it).
+interface SubReport {
+  text: string
+  isError: boolean
+  itemId?: number
+}
+
+// isLaunchBoilerplate spots the async/background-agent launch acknowledgement
+// ("Async agent launched successfully ... internal metadata ...") - that is NOT
+// the real report, just the handle returned to the parent at spawn time.
+function isLaunchBoilerplate(s: string): boolean {
+  return /Async agent launched successfully|internal metadata/i.test(s)
+}
+
+// subReport resolves what a sub-agent reported back. Normally that is the Task
+// tool_result; but for a background/async agent the tool_result is only the
+// launch boilerplate, so the sub-agent's own final assistant message is the real
+// report (#62). itemId is set only in that latter case, letting the timeline skip
+// the message so it is not shown twice.
+function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
+  const res = tool?.result?.trim()
+  if (tool?.isError && res) return { text: tool!.result!, isError: true }
+  if (res && !isLaunchBoilerplate(res)) return { text: tool!.result!, isError: false }
+  for (let i = sub.items.length - 1; i >= 0; i--) {
+    const it = sub.items[i]
+    if (it.kind === 'assistant' && it.text.trim()) return { text: it.text, isError: false, itemId: it.id }
+  }
+  return null
+}
+
+// SubagentReport renders a sub-agent's final report (an error result as an error
+// panel), under a small "Report" heading.
+function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
   return (
     <div>
       <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
         Report
       </div>
-      {tool.isError ? (
-        <OutputPanel text={tool.result} lang="" isError />
+      {report.isError ? (
+        <OutputPanel text={report.text} lang="" isError />
       ) : (
         <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-          <Markdown text={tool.result} />
+          <Markdown text={report.text} />
         </div>
       )}
     </div>
   )
 }
 
-// SubagentCard renders one sub-agent (Task tool) run: its inner timeline
-// (thinking / tool calls / replies), folded into a single collapsible card so a
-// sub-agent's steps - and especially its opening prompt - never leak into the
-// main conversation as stray user/assistant messages. When a Task tool card
-// spawned it (`tool` set), the card upgrades that tool card in place and shows
-// the tool_result as the sub-agent's final report; an unlinked sub-agent
-// renders standalone. Auto-expanded while running, then collapses once done
-// (unless the user pinned it open). onOpenChat opens the sub-agent's own chat
-// view (the pane's top-left selector switches back).
+// parseTaskOutput pulls the fields out of a TaskOutput tool_result - the XML-ish
+// envelope the harness returns when the parent agent explicitly retrieves a
+// background task's result (`<status>`, `<output>`). A completed output becomes a
+// report card instead of leaking the raw envelope into the chat (#62).
+function parseTaskOutput(result?: string): { taskId?: string; status?: string; output?: string } | null {
+  if (!result) return null
+  const grab = (re: RegExp) => result.match(re)?.[1]?.trim()
+  const output = result.match(/<output>\s*([\s\S]*?)\s*<\/output>/)?.[1]?.trim()
+  if (!output) return null
+  return {
+    taskId: grab(/<task_id>([\s\S]*?)<\/task_id>/),
+    status: grab(/<status>([\s\S]*?)<\/status>/),
+    output,
+  }
+}
+
+// FinishedReportCard surfaces a completed sub-agent's report inline: a compact
+// header (label, description, optional link to the full run) over the report body
+// rendered as markdown (or an error panel). Shared by the live "sub-agent
+// finished" card (dropped at completion time) and the TaskOutput retrieval card
+// (#62), so the user sees what the agent reported back without scrolling up to
+// the launch card.
+function FinishedReportCard({
+  label,
+  desc,
+  report,
+  serif,
+  onOpenChat,
+  openLabel,
+}: {
+  label: string
+  desc?: string
+  report: SubReport | null
+  serif: boolean
+  onOpenChat?: () => void
+  openLabel?: string
+}) {
+  const isError = !!report?.isError
+  return (
+    <div
+      className={`rounded-lg border text-xs overflow-hidden ${
+        isError
+          ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+      }`}
+    >
+      <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-stone-600 dark:text-stone-300">
+        <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+        <span className="font-medium shrink-0">{label}</span>
+        <span className="shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+          <Check className="w-3 h-3" />
+          finished
+        </span>
+        {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
+        {onOpenChat && (
+          <button
+            onClick={onOpenChat}
+            className="ml-auto shrink-0 font-medium text-[#c96442] hover:underline cursor-pointer"
+          >
+            {openLabel || 'View steps'}
+          </button>
+        )}
+      </div>
+      <div className="border-t border-stone-200/70 dark:border-white/[0.05] px-2.5 pb-2.5 pt-2">
+        {report ? (
+          report.isError ? (
+            <OutputPanel text={report.text} lang="" isError />
+          ) : (
+            <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <Markdown text={report.text} />
+            </div>
+          )
+        ) : (
+          <div className="text-[11px] italic text-stone-400 dark:text-stone-500">No report returned.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// SubagentCard renders one sub-agent (Task tool) run: its opening prompt and,
+// once done, its final report, with the inner step timeline (thinking / tool
+// calls / replies) tucked behind a "N steps" toggle so it never dominates the
+// main conversation (#62). While running, steps are shown live; when it finishes
+// they auto-collapse, leaving prompt + report on show. When a Task tool card
+// spawned it (`tool` set), the card upgrades that tool card in place; an unlinked
+// sub-agent renders standalone. onOpenChat opens the sub-agent's own chat view
+// (the pane's top-left selector switches back).
 const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
@@ -1065,49 +1194,58 @@ const SubagentCard = memo(function SubagentCard({
   onOpenChat?: () => void
 }) {
   const running = isSubRunning(sub, tool)
-  const [open, setOpen] = useState(running)
-  const [userToggled, setUserToggled] = useState(false)
-  // Auto-collapse when the run finishes (unless the user pinned it open), via
+  const [open, setOpen] = useState(true)
+  // The step timeline starts open while running (watch it live) and auto-collapses
+  // once done (prompt + report are the resting view), unless the user pinned it -
   // the render-phase state-adjustment pattern React endorses over an effect.
+  const [stepsOpen, setStepsOpen] = useState(running)
+  const [stepsToggled, setStepsToggled] = useState(false)
   const [prevRunning, setPrevRunning] = useState(running)
   if (prevRunning !== running) {
     setPrevRunning(running)
-    if (!running && !userToggled) setOpen(false)
+    if (!running && !stepsToggled) setStepsOpen(false)
   }
 
   const { label, desc } = subLabels(sub, tool)
   const steps = sub.items.length
+  const report = running ? null : subReport(sub, tool)
 
   return (
     <div
       className={`rounded-lg border text-xs overflow-hidden ${
         tool?.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+          : running
+            ? 'border-violet-300/70 bg-violet-50/40 dark:border-violet-500/30 dark:bg-violet-500/[0.05]'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <div className="flex w-full items-baseline gap-1.5 pl-2.5 pr-1 text-stone-600 dark:text-stone-300">
+      <div className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300">
         <button
-          onClick={() => {
-            setUserToggled(true)
-            setOpen((o) => !o)
-          }}
-          className="flex min-w-0 flex-1 items-baseline gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+          onClick={() => setOpen((o) => !o)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
         >
           <ChevronRight
-            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+            className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          <Bot className="w-3 h-3 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
+          {running ? (
+            <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-violet-400/60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
+            </span>
+          ) : (
+            <Bot className="w-3 h-3 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+          )}
           <span className="font-medium shrink-0">{label}</span>
           {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
           {running ? (
-            <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400/90">
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
           ) : (
             steps > 0 && (
-              <span className="ml-auto shrink-0 self-center text-[10px] text-stone-400 dark:text-stone-500">
+              <span className="ml-auto shrink-0 text-[10px] text-stone-400 dark:text-stone-500">
                 {steps} step{steps === 1 ? '' : 's'}
               </span>
             )
@@ -1118,7 +1256,7 @@ const SubagentCard = memo(function SubagentCard({
             <button
               onClick={onOpenChat}
               aria-label="Open sub-agent chat"
-              className="shrink-0 self-center rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
+              className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
               <MessageSquare className="w-3.5 h-3.5" />
             </button>
@@ -1137,12 +1275,28 @@ const SubagentCard = memo(function SubagentCard({
               </div>
             </div>
           )}
-          {sub.items.length > 0 && (
-            <div className="space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-              <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
+          {report && <SubagentReport report={report} serif={serif} />}
+          {steps > 0 && (
+            <div>
+              <button
+                onClick={() => {
+                  setStepsToggled(true)
+                  setStepsOpen((o) => !o)
+                }}
+                className="flex items-center gap-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
+              >
+                <ChevronRight
+                  className={`w-3 h-3 transition-transform duration-200 ${stepsOpen ? 'rotate-90' : ''}`}
+                />
+                {steps} step{steps === 1 ? '' : 's'}
+              </button>
+              <Expandable open={stepsOpen}>
+                <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
+                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
+                </div>
+              </Expandable>
             </div>
           )}
-          {tool && <SubagentReport tool={tool} serif={serif} />}
         </div>
       </Expandable>
     </div>
@@ -1166,6 +1320,7 @@ function SubagentChatView({
 }) {
   const running = isSubRunning(sub, tool)
   const { label, desc } = subLabels(sub, tool)
+  const report = running ? null : subReport(sub, tool)
   return (
     <>
       <div className="flex items-baseline gap-2 pt-8 text-stone-600 dark:text-stone-300">
@@ -1195,9 +1350,9 @@ function SubagentChatView({
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={report?.itemId} />
       </div>
-      {tool && <SubagentReport tool={tool} serif={serif} />}
+      {report && <SubagentReport report={report} serif={serif} />}
       {running && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
           <span className="text-[#c96442]">✳</span>
@@ -2144,8 +2299,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
     // settleSubagentByToolUse marks the sub-agent spawned by a Task tool_use as
     // done - the parent tool_result arriving is the authoritative live end
-    // signal (current CLIs never put the sub's own result line on stdout).
-    const settleSubagentByToolUse = (toolUseId: string) => {
+    // signal (current CLIs never put the sub's own result line on stdout). A
+    // background/async agent's result is only the launch boilerplate, though, so
+    // it settles nothing - that sub stays running until its sidechain result.
+    const settleSubagentByToolUse = (toolUseId: string, result: string) => {
+      if (isLaunchBoilerplate(result)) return
       for (const key in subLocal) {
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
@@ -2477,7 +2635,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
-              settleSubagentByToolUse(block.tool_use_id)
+              settleSubagentByToolUse(block.tool_use_id, parsed.text)
             }
           }
           return
@@ -3360,20 +3518,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </pre>
         )
       case 'notice': {
-        // A "sub-agent finished" notice links to that sub-agent's chat view.
-        const target = item.subagentKey && subagents[item.subagentKey] ? item.subagentKey : null
+        // A "sub-agent finished" notice: when it links to a sub-agent we have,
+        // surface what it reported back as a card (#62), dropped at completion
+        // time so the user needn't scroll up to the launch card. Other notices
+        // (background-task completions etc.) stay as a compact pill.
+        const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
+        if (sub) {
+          const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
+          const { label, desc } = subLabels(sub, tool)
+          return (
+            <FinishedReportCard
+              label={label}
+              desc={desc}
+              report={subReport(sub, tool)}
+              serif={serif}
+              onOpenChat={() => openSubView(sub.agentId)}
+            />
+          )
+        }
         return (
           <div className="flex justify-center">
             <div className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
               <span className="truncate">{item.text}</span>
-              {target && (
-                <button
-                  onClick={() => openSubView(target)}
-                  className="shrink-0 font-medium text-[#c96442] hover:underline cursor-pointer"
-                >
-                  View
-                </button>
-              )}
             </div>
           </div>
         )
@@ -3398,6 +3564,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return (
             <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
           )
+        // A TaskOutput retrieval whose result has landed: render the reported
+        // output as a finished card (linking to the sub-agent's steps when the
+        // task_id matches one we're tracking) rather than the raw XML envelope.
+        if (item.name === 'TaskOutput') {
+          const parsed = parseTaskOutput(item.result)
+          if (parsed) {
+            const linked = parsed.taskId ? subagents[parsed.taskId] : undefined
+            const linkedTool = linked?.toolUseId ? taskToolByUse[linked.toolUseId] : undefined
+            const label = linked ? subLabels(linked, linkedTool).label : 'Agent'
+            const desc = linked ? subLabels(linked, linkedTool).desc : undefined
+            return (
+              <FinishedReportCard
+                label={label}
+                desc={desc}
+                report={{ text: parsed.output!, isError: parsed.status !== undefined && parsed.status !== 'completed' }}
+                serif={serif}
+                onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
+              />
+            )
+          }
+        }
         return <ToolCard item={item} worktree={worktreePath} />
       }
       case 'subagent': {
@@ -3435,11 +3622,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           const out = item.usage?.output_tokens
           const cost = apiKeyReal && item.costUsd ? formatCost(item.costUsd) : null
           const stopNote = item.stopReason ? STOP_REASON_LABEL[item.stopReason] : undefined
-          if (item.durationMs == null && !out && !cost && !stopNote) return null
+          // The "↓ N tokens" count is only useful for the current (latest) turn -
+          // a wall of per-turn counts up the scrollback is just noise (#60). Show
+          // it on the last turn's footer only; earlier footers keep just their
+          // duration/cost, dropping to nothing for historical (timing-less) turns.
+          const isLast = visibleItems[visibleItems.length - 1]?.id === item.id
+          const showTokens = !!out && isLast
+          if (item.durationMs == null && !showTokens && !cost && !stopNote) return null
           const segs: ReactNode[] = []
           if (item.durationMs != null) segs.push(`Crunched for ${formatDuration(item.durationMs)}`)
           if (cost) segs.push(cost)
-          if (out) segs.push(
+          if (showTokens) segs.push(
             <span key="tok" title={item.usage ? usageBreakdown(item.usage) : undefined}>
               ↓ {formatTokens(out)} tokens
             </span>,
