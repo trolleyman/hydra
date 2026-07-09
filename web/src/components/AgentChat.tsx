@@ -85,10 +85,14 @@ type ChatItem =
   // the pill can offer a View button.
   | { kind: 'notice'; id: number; text: string; subagentKey?: string }
   | { kind: 'interrupted'; id: number }
-  | { kind: 'assistant'; id: number; text: string }
+  // noEntrance suppresses the fade/slide entrance when this settled block simply
+  // replaces the in-flight streamed copy already on screen - it was visible, so
+  // re-animating it as it settles reads as a flicker (item 56), same rationale
+  // as the queued-user-bubble case above.
+  | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean }
   // durationMs is set for a thought whose streaming we timed live (item 11);
   // replayed history has no timing, so it renders as a plain "Thought".
-  | { kind: 'thinking'; id: number; text: string; durationMs?: number }
+  | { kind: 'thinking'; id: number; text: string; durationMs?: number; noEntrance?: boolean }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
   | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
@@ -1023,9 +1027,10 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
     setOpen((o) => !o)
   }
 
-  // A settled empty thought renders nothing (only the transient streaming
-  // indicator is worth showing).
-  if (empty && !streaming) return null
+  // A settled empty thought renders nothing UNLESS we timed it live (item 11):
+  // a silently-reasoned turn then still shows "Thought for Xs" (just the label,
+  // no snippet or disclosure) rather than the "Thinking..." indicator vanishing.
+  if (empty && !streaming && durationMs == null) return null
 
   return (
     <div className="text-xs">
@@ -2050,7 +2055,7 @@ const SettledMessages = memo(
           <div
             key={item.id}
             className={
-              liveFromId != null && item.id >= liveFromId && !(item.kind === 'user' && item.noEntrance)
+              liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)
                 ? 'animate-chat-item-in'
                 : undefined
             }
@@ -2208,6 +2213,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // The inner content wrapper inside the scroll container; observed so we can
+  // follow the bottom smoothly while a card expands (item 55) - the height
+  // grows across the 0.22s disclosure animation, not in one step.
+  const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // Pin-to-bottom: keep auto-scrolling while the user is at (or near) the
   // bottom; stop once they scroll up to read history. The ref is the live
@@ -2884,9 +2893,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
             if (block.type === 'text' && block.text?.trim()) {
-              push({ kind: 'assistant', text: block.text })
-            } else if (block.type === 'thinking' && block.thinking?.trim()) {
-              push({ kind: 'thinking', text: block.thinking, durationMs: takeThinkingDuration() })
+              // noEntrance when this settles the block we've been streaming live:
+              // the text is already on screen, so a fade-in on swap flickers
+              // (item 56).
+              push({ kind: 'assistant', text: block.text, noEntrance: streamBuf?.kind === 'assistant' })
+            } else if (block.type === 'thinking') {
+              // Always consume the live timer (resets thinkingStart). Push a
+              // settled thought when it has visible text, OR when it was a
+              // silently-reasoned turn we timed live (Opus/Fable stream an empty
+              // thinking block): a timed empty thought still shows "Thought for
+              // Xs" instead of the "Thinking..." indicator just vanishing (item
+              // 11). Replayed empty thoughts (no duration) stay hidden so history
+              // isn't cluttered with contentless cards.
+              const dur = takeThinkingDuration()
+              if (block.thinking?.trim() || dur != null) {
+                push({ kind: 'thinking', text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
+              }
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
               // tool card; its answer channel arrives with the paired
@@ -3229,6 +3251,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const el = scrollRef.current
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
   }, [items, stream, replayDone, pendingSends, subagents])
+
+  // Follow the bottom continuously while pinned as the content height changes
+  // between renders - notably during a card's 0.22s expand/collapse animation,
+  // which grows the height frame-by-frame. Without this the disclosure glides
+  // open and then the view snaps to the bottom in one jump once React next
+  // re-renders (item 55). A no-op when the user has scrolled up (not pinned),
+  // so load-older prepends and the restored offset are left alone.
+  useEffect(() => {
+    const el = scrollRef.current
+    const content = contentRef.current
+    if (!el || !content) return
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
 
   // Track the pane width so the plan panel (item 17) can collapse when there's
   // no room to float it alongside the centered transcript.
@@ -3983,7 +4022,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           />
         )}
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
+          <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />
           ) : (
@@ -4016,15 +4055,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             subagents={subagents}
           />
           {/* The in-flight streamed block: markdown-rendered live (with a
-              virtual closing fence while inside a code block) plus a pulsing
-              caret; streamed thinking uses the same collapsed card as settled
-              thoughts, its preview auto-updating as tokens arrive. It's the
-              current turn's response, so it sits ABOVE any queued (held-for-
-              later) messages (item 33). */}
+              virtual closing fence while inside a code block); streamed thinking
+              uses the same collapsed card as settled thoughts, its preview
+              auto-updating as tokens arrive. It's the current turn's response,
+              so it sits ABOVE any queued (held-for-later) messages (item 33).
+              The "working" indicator below already signals the turn is live, so
+              no blinking caret is appended here - it reflowed as text wrapped
+              and read as visual jitter (item 56). */}
           {stream && stream.kind === 'assistant' && (
             <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
               <Markdown text={closeOpenFence(stream.text)} />
-              <span className="ml-0.5 inline-block h-3.5 w-2 translate-y-0.5 animate-pulse rounded-sm bg-[#c96442]/80" />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
