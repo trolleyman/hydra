@@ -123,7 +123,7 @@ mode = "hard"
 ##     codex: api.openai.com, *.openai.com, chatgpt.com
 ##     gemini: *.googleapis.com
 ##     copilot: *.githubcopilot.com
-allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com", "cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com"]
+allowed_hosts = ["http-intake.logs.us5.datadoghq.com", "chatgpt.com", "platform.claude.com", "calendarmcp.googleapis.com", "drivemcp.googleapis.com", "www.googleapis.com", "cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []
