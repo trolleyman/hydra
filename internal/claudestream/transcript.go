@@ -294,6 +294,86 @@ func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
 	return lines, true
 }
 
+// taskNotificationMarker is the substring every <task-notification> record
+// carries, used to pick them out of the main transcript. A background/async
+// sub-agent (and a background bash task) reports completion ONLY through one of
+// these records.
+var taskNotificationMarker = []byte("<task-notification>")
+
+// NotificationTailer incrementally tails the newest session's MAIN transcript
+// for <task-notification> records. A background/async sub-agent reports its
+// completion only through one of these, which the CLI writes into the main
+// transcript - as a queue-operation entry and an attachment entry - while the
+// parent turn sits idle. Those entries never reach the parent process stdout
+// (so the live stdout relay never sees them), and the main transcript is
+// otherwise read only by the attach-time backfill, which keeps just
+// user/assistant lines (see tailTranscript). Without this tail a finished
+// background sub-agent's card would keep reading "working" until the next turn
+// consumed the notification (or a reconnect settled it via the replay_done
+// fallback). Only the notification-bearing lines are returned; every other main
+// line already arrives via stdout + backfill.
+type NotificationTailer struct {
+	claudeProjectDir string
+	path             string
+	offset           int64
+}
+
+// NewNotificationTailer starts tailing at the current end of the newest
+// transcript, so only notifications appended AFTER it is created are returned -
+// anything already recorded came through the attach-time backfill / replay.
+func NewNotificationTailer(claudeProjectDir string) *NotificationTailer {
+	t := &NotificationTailer{claudeProjectDir: claudeProjectDir}
+	if p := LatestTranscript(claudeProjectDir); p != "" {
+		t.path = p
+		if info, err := os.Stat(p); err == nil {
+			t.offset = info.Size()
+		}
+	}
+	return t
+}
+
+// Poll returns every complete main-transcript line gained since the last Poll
+// that carries a task-notification. A session change (newer transcript file)
+// restarts the tail at the new file's start. Best-effort: an unreadable file is
+// retried next Poll with the offset unchanged; a trailing partial line waits for
+// its newline.
+func (t *NotificationTailer) Poll() [][]byte {
+	transcript := LatestTranscript(t.claudeProjectDir)
+	if transcript == "" {
+		return nil
+	}
+	if transcript != t.path {
+		t.path, t.offset = transcript, 0
+	}
+	f, err := os.Open(transcript)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	end := bytes.LastIndexByte(data, '\n')
+	if end < 0 {
+		return nil
+	}
+	t.offset += int64(end + 1)
+	var lines [][]byte
+	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
+		if len(line) == 0 || !bytes.Contains(line, taskNotificationMarker) {
+			continue
+		}
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		lines = append(lines, cp)
+	}
+	return lines
+}
+
 // HistoryBatchBytes is how much older conversation one load-older request pulls.
 const HistoryBatchBytes = 512 * 1024
 

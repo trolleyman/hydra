@@ -2951,6 +2951,41 @@ func handleSimChatWS(conn *safeConn) {
 			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":1600,"session_id":"sim-chat"}`)
 			return
 		}
+		if strings.Contains(strings.ToLower(text), "background") {
+			// A LIVE background/async sub-agent (the Agent tool's default): the Task
+			// tool_use, then a tool_result that is ONLY the launch boilerplate
+			// (isLaunchBoilerplate - so nothing settles the card there), the main
+			// turn's result (it ends after launching), then - while idle - the sub's
+			// own sidechain steps and finally its completion <task-notification> off
+			// the MAIN transcript, delivered as the CLI's real bookkeeping shapes: a
+			// queue-operation (no uuid) AND an attachment (uuid), both carrying the
+			// same XML. The card must flip "working" -> "finished" off those and show
+			// ONE notice - not stay stuck "working" (the point of the notification relay).
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_bg_task","content":[{"type":"tool_use","id":"toolu_sim_bg_task","name":"Task","input":{"description":"Background docs sweep","subagent_type":"Explore","prompt":"Sweep docs/ in the background and report the retry guidance you find."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bg_task","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_bg (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_bg", &claudestream.SubagentMeta{
+				AgentType:   "Explore",
+				Description: "Background docs sweep",
+				ToolUseID:   "toolu_sim_bg_task",
+			})
+			// The launching turn stays open (the parent keeps working) while the
+			// background agent runs - so NO turn `result` settles the card here; only
+			// the completion <task-notification> does.
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_bg","message":{"role":"user","content":[{"type":"text","text":"Sweep **docs/** in the background and report:\n\n1. Which files mention `+"`backoff`"+`\n2. Whether the *giving-up* path is documented\n\nReturn file paths with line numbers."}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_bg","message":{"id":"msg_sim_bg_1","content":[{"type":"tool_use","id":"toolu_sim_bg_grep","name":"Grep","input":{"pattern":"backoff","path":"docs"}}]}}`)
+			time.Sleep(1200 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bg_grep","content":"docs/retry.md:12: jittered exponential backoff"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_bg","message":{"id":"msg_sim_bg_2","content":[{"type":"text","text":"Background sweep done: docs/retry.md prescribes jittered exponential backoff; the giving-up path is undocumented."}]}}`)
+			// The completion, off the main transcript, while the parent is idle - the
+			// queue-operation copy then the attachment copy (deduped to a single notice).
+			time.Sleep(1500 * time.Millisecond)
+			bgNotif := `<task-notification>\n<task-id>sim_sub_bg</task-id>\n<tool-use-id>toolu_sim_bg_task</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Background docs sweep\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+bgNotif+`"}`)
+			sendSimChatEvent(conn, `{"type":"attachment","uuid":"sim-notif-bg","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"`+bgNotif+`"}}`)
+			// Only now does the parent's turn end.
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":4200,"session_id":"sim-chat"}`)
+			return
+		}
 		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
 		streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
 	}

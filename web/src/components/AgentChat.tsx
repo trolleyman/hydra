@@ -235,6 +235,13 @@ interface ClaudeEvent {
   isSidechain?: boolean
   agentId?: string
   parent_tool_use_id?: string | null
+  // A background/async sub-agent's completion <task-notification> is written to
+  // the main transcript not as a user turn but as bookkeeping records the chat
+  // socket relays live: a queue-operation (XML on top-level `content`) and an
+  // attachment (XML on `attachment.prompt`). handleClaudeEvent settles the sub
+  // off whichever carries it (see handleTaskNotification).
+  content?: string
+  attachment?: { prompt?: string; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -2548,6 +2555,40 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
       }
     }
+    // Distinct task-notifications already surfaced this connection: the notice +
+    // settle fire once even though the CLI writes each notification more than
+    // once (a queue-operation and an attachment, both relayed live off the main
+    // transcript) and a later real user turn may consume it again.
+    const seenNotif = new Set<string>()
+    // handleTaskNotification folds one <task-notification> record into the flow:
+    // a compact notice, plus - for a background/async sub-agent whose completion
+    // this is (its Task tool_result was only launch boilerplate, so nothing else
+    // settles it) - marking the matching still-"working" card done by task-id /
+    // tool-use-id. Reached both from a user turn that consumed the notification
+    // and from the live main-transcript relay, so it dedups its own copies.
+    const handleTaskNotification = (text: string, ts?: number | null) => {
+      const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+      const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+      const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
+      if (seenNotif.has(dedupKey)) return
+      seenNotif.add(dedupKey)
+      const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
+      if (!stillRunning && (taskId || noticeToolUse)) {
+        for (const key in subLocal) {
+          const sub = subLocal[key]
+          const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
+          if (matches && sub.status === 'running') {
+            sub.status = 'done'
+            scheduleSubFlush()
+          }
+        }
+      }
+      // A genuine turn-starting continuation anchors the "working" clock (item 48).
+      if (ts != null) turnStartClockRef.current = ts
+      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+    }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
     // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
@@ -2826,31 +2867,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         endPendingTools()
         return
       }
-      // A harness-injected background-task notification (<task-notification>):
-      // render a compact one-line notice instead of the raw XML (item 15).
+      // A harness-injected background-task notification (<task-notification>)
+      // consumed as a user turn: fold it into a notice (and settle a background
+      // sub-agent) via the shared handler, which dedups against the live
+      // main-transcript relay of the same notification (item 8/15).
       if (text.includes('<task-notification>')) {
-        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
-        // A background/async sub-agent's completion arrives as this notification,
-        // not a tool_result we settle on (its tool_result was only the launch
-        // boilerplate), so a still-"working" sub would never clear otherwise
-        // (item 8). Match the notification's task-id / tool-use-id to the sub and
-        // mark it done unless the status says it is still going.
-        const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
-        const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
-        const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
-        const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
-        if (!stillRunning && (taskId || noticeToolUse)) {
-          for (const key in subLocal) {
-            const sub = subLocal[key]
-            const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
-            if (matches && sub.status === 'running') {
-              sub.status = 'done'
-              scheduleSubFlush()
-            }
-          }
-        }
-        markTurnStart()
-        push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+        handleTaskNotification(text, ts)
         return
       }
       // The echo of a message we already showed optimistically (item 26): just
@@ -2888,6 +2910,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
+      // A background/async sub-agent's completion arrives NOT as a user turn but
+      // as a <task-notification> bookkeeping record the chat socket relays live
+      // off the main transcript: a queue-operation (XML on `content`) or an
+      // attachment (XML on `attachment.prompt`). Settle off it up front, whatever
+      // the event type, so a finished background sub-agent's card stops reading
+      // "working" the moment it ends. A notification later consumed by a real
+      // user turn routes through routeUserText instead, and dedups there.
+      const notifText =
+        (typeof ev.content === 'string' && ev.content.includes('<task-notification>') && ev.content) ||
+        (typeof ev.attachment?.prompt === 'string' &&
+          ev.attachment.prompt.includes('<task-notification>') &&
+          ev.attachment.prompt) ||
+        ''
+      if (notifText) {
+        handleTaskNotification(notifText, parseEventTs(ev))
+        return
+      }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
       // main flow. This is the fix for sub-agent prompts showing as user
       // messages (they arrive as sidechain `user` events - live ones marked

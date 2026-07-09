@@ -1,6 +1,7 @@
 package claudestream
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,6 +293,55 @@ func TestSubagentTailer(t *testing.T) {
 				t.Errorf("capped Poll returned a non-parseable line: %q", l)
 			}
 		}
+	}
+}
+
+func TestNotificationTailer(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "session-1"
+	path := filepath.Join(dir, sessionID+".jsonl")
+	// Seed a couple of ordinary lines that already exist at attach time - the
+	// tailer starts at end-of-file, so these must NOT be returned.
+	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"u1"}`+"\n"+`{"type":"assistant","uuid":"a1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(s string) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tail := NewNotificationTailer(dir)
+	// Nothing appended since construction.
+	if lines := tail.Poll(); len(lines) != 0 {
+		t.Fatalf("Poll(no growth) = %v, want none", lines)
+	}
+
+	// Append a normal assistant line (no notification) then the queue-operation
+	// and attachment copies of a completion notification, plus a trailing partial.
+	write(`{"type":"assistant","uuid":"a2"}` + "\n" +
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}` + "\n" +
+		`{"type":"attachment","uuid":"nat1","attachment":{"commandMode":"task-notification","prompt":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}}` + "\n" +
+		`{"type":"attachment","uuid":"partial"`)
+	lines := tail.Poll()
+	// Only the two notification-bearing lines are returned; the assistant line is
+	// skipped (it arrives via stdout+backfill) and the partial waits for a newline.
+	if len(lines) != 2 {
+		t.Fatalf("Poll relayed %d lines, want 2 (the two notification copies): %q", len(lines), lines)
+	}
+	if !bytes.Contains(lines[0], []byte(`"queue-operation"`)) || !bytes.Contains(lines[1], []byte(`"attachment"`)) {
+		t.Fatalf("Poll returned unexpected lines: %q", lines)
+	}
+
+	// Completing the partial (a non-notification line) yields nothing.
+	write("}\n")
+	if lines := tail.Poll(); len(lines) != 0 {
+		t.Fatalf("Poll(partial completed, no notif) = %q, want none", lines)
 	}
 }
 
