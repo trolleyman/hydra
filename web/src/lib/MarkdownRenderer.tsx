@@ -103,7 +103,7 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
 interface Style {
   h1: string; h2: string; h3: string; h4: string; h5: string; h6: string
   p: string; ul: string; ol: string; li: string; blockquote: string; hr: string
-  tableWrap: string; table: string; th: string; td: string
+  tableWrap: string; table: string; th: string; td: string; tbody: string
   codeInline: string; codeBlock: string
 }
 
@@ -123,10 +123,15 @@ const STYLES: Record<Variant, Style> = {
     li: 'break-words',
     blockquote: 'border-l-2 border-gray-400 dark:border-gray-500 pl-2 my-1 opacity-80 break-words',
     hr: 'my-2 border-gray-300 dark:border-gray-600',
-    tableWrap: 'my-1 overflow-x-auto',
-    table: 'border-collapse text-sm',
-    th: 'border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold bg-gray-100 dark:bg-gray-700/50 text-left',
-    td: 'border border-gray-300 dark:border-gray-600 px-2 py-1',
+    // Clean framed table: one rounded outer border (no per-cell gridlines), a
+    // tinted header row, horizontal row rules only, and subtle zebra striping.
+    // Warm stone tones (not cool gray) so it doesn't read blue against the chat
+    // view's warm palette (#faf9f5 / #262624, stone borders, white/opacity tints).
+    tableWrap: 'my-2 max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
+    table: 'w-full border-collapse text-sm',
+    th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
+    td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
+    tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
     // Claude-app-style code (chat items 1/10): bordered terracotta chips for
     // inline code, a bordered near-black warm panel for blocks in dark mode.
     // Kept in sync with CODE_CLASS/CODEBLOCK_CLASS in ./markdown (the inline
@@ -151,10 +156,12 @@ const STYLES: Record<Variant, Style> = {
     li: 'break-words',
     blockquote: 'border-l-4 border-gray-300 dark:border-gray-600 pl-4 my-3 opacity-90',
     hr: 'my-4 border-gray-200 dark:border-gray-700',
-    tableWrap: 'my-3 overflow-x-auto',
-    table: 'border-collapse text-sm',
-    th: 'border border-gray-300 dark:border-gray-600 px-3 py-1.5 font-semibold bg-gray-50 dark:bg-gray-800/60',
-    td: 'border border-gray-300 dark:border-gray-600 px-3 py-1.5',
+    // Same framed look as chat, roomier cell padding for document density.
+    tableWrap: 'my-4 max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700',
+    table: 'w-full border-collapse text-sm',
+    th: 'px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
+    td: 'px-4 py-2 border-b border-gray-100 dark:border-gray-800 align-top',
+    tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-gray-500/[0.035] dark:[&>tr:nth-child(even)]:bg-white/[0.03]',
     // Doc code stays neutral (a README isn't a chat bubble) but picks up the
     // same readability fix: a border and a darker dark-mode panel.
     codeInline:
@@ -208,6 +215,7 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
         <table className={s.table}>{children}</table>
       </div>
     ),
+    tbody: ({ children }) => <tbody className={s.tbody}>{children}</tbody>,
     th: ({ children, style }) => <th className={s.th} style={alignStyle(style?.textAlign)}>{children}</th>,
     td: ({ children, style }) => <td className={s.td} style={alignStyle(style?.textAlign)}>{children}</td>,
     // react-markdown wraps fenced blocks in <pre>; we style the inner <code> as a
