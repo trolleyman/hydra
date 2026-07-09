@@ -3136,22 +3136,26 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               bubbles reads as one group, so they sit tighter (gap-1) than the
               gap-3 between distinct turns (item 51). */}
           {pendingSends.length > 0 && (
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-col gap-1">
               {pendingSends.map((p) => (
-                <div key={`pending-${p.id}`} className="group flex items-center gap-1.5 animate-chat-item-in">
+                <div key={`pending-${p.id}`} className="group relative flex justify-end animate-chat-item-in">
+                  {/* Flush right, exactly where the message will land once it
+                      is sent (a real user bubble). */}
                   <div className={`${USER_BUBBLE_CLASS} opacity-75`}>
                     <Markdown text={p.text} />
                   </div>
                   {/* Discard button (item 52): drops the queued message from the
-                      server queue. Sits to the right of the bubble, revealed on
-                      hover so the resting stack stays clean. */}
+                      server queue. A floating chip overhanging the bubble's
+                      top-right corner (revealed on hover so the resting stack
+                      stays clean); the 8px overhang stays inside the column's
+                      px-4 padding, so it never leaves the chat view. */}
                   <Tooltip content="Discard queued message" side="top">
                     <button
                       onClick={() => discardQueued(p)}
                       aria-label="Discard queued message"
-                      className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition cursor-pointer"
+                      className="absolute -top-2 -right-2 z-10 rounded-full border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-sm p-1 text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-[#3a3937] transition cursor-pointer"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-3 h-3" />
                     </button>
                   </Tooltip>
                 </div>
