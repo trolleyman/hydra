@@ -3811,6 +3811,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )
         }
+      default: {
+        // Exhaustiveness guard: with every kind above handled, `item` narrows to
+        // `never` here, so a newly-added ChatItem kind that isn't given a case
+        // fails to compile. A kind that only shows up at runtime (something off
+        // the wire we don't model) still surfaces a visible notice rather than
+        // silently rendering nothing.
+        const exhaustive: never = item
+        return (
+          <div className="flex justify-center">
+            <div className="rounded-full border border-amber-300/70 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 px-2.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400 select-none">
+              Unknown event kind: {(exhaustive as { kind?: string }).kind ?? 'unknown'}
+            </div>
+          </div>
+        )
+      }
     }
   }
 
