@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  type CSSProperties,
   type TextareaHTMLAttributes,
 } from 'react'
 import { renderMarkdownSource } from '../lib/markdown'
@@ -15,6 +16,15 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
   textClassName?: string
   // Layout classes for the positioned wrapper (sizing, drag-over ring, etc).
   wrapperClassName?: string
+  // Inline styles for the positioned wrapper. Useful when a consumer drives the
+  // control's height imperatively (e.g. the chat composer's per-line auto-grow),
+  // since the textarea itself is absolutely positioned and can't size the box.
+  wrapperStyle?: CSSProperties
+  // Text color for the highlight backdrop, and caret color for the (transparent)
+  // textarea. Defaults match the neutral gray used by the spawn form; override to
+  // blend into a differently-tinted surface (e.g. the stone-toned chat composer).
+  textColorClassName?: string
+  caretClassName?: string
 }
 
 // HighlightedTextarea is a drop-in textarea that renders live inline-markdown
@@ -23,7 +33,20 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
 // keeps a visible caret but transparent text so only the highlighted backdrop
 // shows through.
 export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTextareaProps>(
-  function HighlightedTextarea({ value, textClassName = '', wrapperClassName = '', onScroll, style, ...rest }, ref) {
+  function HighlightedTextarea(
+    {
+      value,
+      textClassName = '',
+      wrapperClassName = '',
+      wrapperStyle,
+      textColorClassName = 'text-gray-800 dark:text-gray-100',
+      caretClassName = 'caret-gray-800 dark:caret-gray-100',
+      onScroll,
+      style,
+      ...rest
+    },
+    ref,
+  ) {
     const innerRef = useRef<HTMLTextAreaElement>(null)
     const backdropRef = useRef<HTMLDivElement>(null)
     useImperativeHandle(ref, () => innerRef.current as HTMLTextAreaElement)
@@ -46,7 +69,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
     })
 
     return (
-      <div className={`relative ${wrapperClassName}`}>
+      <div className={`relative ${wrapperClassName}`} style={wrapperStyle}>
         <div
           ref={backdropRef}
           aria-hidden="true"
@@ -56,7 +79,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // wrap text at different widths, and the mismatch drifts the visible
           // (highlighted) text away from the real (selectable) text.
           style={{ scrollbarGutter: 'stable' }}
-          className={`absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words text-gray-800 dark:text-gray-100 ${textClassName}`}
+          className={`absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
         >
           {renderMarkdownSource(value)}
           {/* Trailing newline keeps the backdrop's height matching the textarea
@@ -73,7 +96,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // Match the backdrop's reserved scrollbar gutter so both layers wrap
           // text at the same width (see the backdrop above).
           style={{ scrollbarGutter: 'stable', ...style }}
-          className={`absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 focus:outline-none ${textClassName}`}
+          className={`absolute inset-0 w-full h-full resize-none bg-transparent text-transparent ${caretClassName} focus:outline-none ${textClassName}`}
           {...rest}
         />
       </div>
