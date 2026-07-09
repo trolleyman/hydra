@@ -2796,6 +2796,13 @@ var simChatEvents = []string{
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
+	// A second sub-agent marked the way CURRENT CLIs mark live stdout lines:
+	// parent_tool_use_id only (no isSidechain/agentId, and no meta frame). The
+	// chat must fold it into its Task card via the placeholder route instead of
+	// rendering the prompt echo as a user message.
+	`{"type":"assistant","message":{"id":"msg_sim_task2","content":[{"type":"tool_use","id":"toolu_sim_task2","name":"Task","input":{"description":"Check retry docs","subagent_type":"Explore","prompt":"Scan docs/ for retry/backoff guidance and summarize what it prescribes."}}]}}`,
+	`{"type":"user","parent_tool_use_id":"toolu_sim_task2","session_id":"sim-chat","message":{"role":"user","content":[{"type":"text","text":"Scan docs/ for retry/backoff guidance and summarize what it prescribes."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task2","content":"docs/retry.md prescribes jittered exponential backoff for client uploads; nothing documents the giving-up semantics."}]}}`,
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
@@ -2866,8 +2873,22 @@ func handleSimChatWS(conn *safeConn) {
 			"message": map[string]any{"role": "user", "content": content},
 		})
 		sendSimChatEvent(conn, string(userEv))
-		if text := firstTextBlock(content); strings.HasPrefix(text, "/") {
+		text := firstTextBlock(content)
+		if strings.HasPrefix(text, "/") {
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "subagent") {
+			// A LIVE sub-agent run: the Task tool_use, then the prompt echo marked
+			// the way current CLIs mark live stdout sidechain lines (only
+			// parent_tool_use_id), a working pause, then the tool_result and turn
+			// result - exercising the live placeholder route, the running states
+			// and the "finished" notice with its View link.
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_live_task","content":[{"type":"tool_use","id":"toolu_sim_live_task","name":"Task","input":{"description":"Live docs sweep","subagent_type":"Explore","prompt":"Sweep docs/ for retry guidance and report back."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","parent_tool_use_id":"toolu_sim_live_task","session_id":"sim-chat","message":{"role":"user","content":[{"type":"text","text":"Sweep docs/ for retry guidance and report back."}]}}`)
+			time.Sleep(1500 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_task","content":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff)."}]}}`)
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":1600,"session_id":"sim-chat"}`)
 			return
 		}
 		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
