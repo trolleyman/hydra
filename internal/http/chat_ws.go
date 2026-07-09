@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/claudestream"
@@ -228,8 +229,9 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 // relays each complete stream-json line as a claude_event frame. Non-protocol
 // lines (pre-spawn-script output sharing the stdout pipe, a mid-line ring-wrap
 // fragment at the start of a replay) are skipped, as are lines whose uuid was
-// already delivered by the transcript backfill. Returns false once the socket
-// write fails.
+// already delivered by the transcript backfill. Relayed uuids are added to
+// skip so the sub-agent transcript tailer never re-delivers a line an (older)
+// CLI also put on stdout. Returns false once the socket write fails.
 func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
@@ -243,6 +245,7 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 			if _, dup := skip[ev.UUID]; dup {
 				continue
 			}
+			skip[ev.UUID] = struct{}{}
 		}
 		// A sub-agent line: emit its Task-tool linkage (once) ahead of the event
 		// so the client can fold it into the right card as it renders.
@@ -258,6 +261,37 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 	return true
 }
 
+// subagentPollInterval is how often a chat connection scans the session's
+// subagents/ dir for transcript growth. Current CLIs don't put a sub-agent's
+// inner steps on the main stdout (see claudestream.SubagentTailer), so this
+// tail is the only live source of sub-agent activity.
+const subagentPollInterval = 700 * time.Millisecond
+
+// tailSubagentGrowth polls the sub-agent transcripts of dir's newest session
+// and sends each Poll's growth on out until stop closes. Runs as a goroutine
+// per chat connection; the pump goroutine owns all socket writes and dedup.
+func tailSubagentGrowth(dir string, stop <-chan struct{}, out chan<- []claudestream.SubagentGrowth) {
+	tail := claudestream.NewSubagentTailer(dir, claudestream.DefaultBackfillBytes)
+	ticker := time.NewTicker(subagentPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			growth := tail.Poll()
+			if len(growth) == 0 {
+				continue
+			}
+			select {
+			case out <- growth:
+			case <-stop:
+				return
+			}
+		}
+	}
+}
+
 // backfillChatHistory relays the head's conversation history from its Claude
 // transcript file (~/.claude/projects/<cwd-slug>/<session>.jsonl) as
 // claude_event frames. The scrollback ring only covers the current process
@@ -270,15 +304,7 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 // It also backfills each sub-agent (Task tool) transcript recorded for the
 // session (the subagents/*.jsonl siblings, not the main transcript, carry
 // sub-agent activity), each preceded by its subagent_meta frame.
-func backfillChatHistory(conn *safeConn, agentID, worktree string, subs *subagentResolver) map[string]struct{} {
-	home, err := os.UserHomeDir()
-	if err != nil || worktree == "" {
-		return nil
-	}
-	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
-	if subs != nil {
-		subs.claudeProjectDir = dir
-	}
+func backfillChatHistory(conn *safeConn, agentID, dir string, subs *subagentResolver) map[string]struct{} {
 	transcript := claudestream.LatestTranscript(dir)
 	if transcript == "" {
 		return nil
@@ -319,11 +345,7 @@ func backfillChatHistory(conn *safeConn, agentID, worktree string, subs *subagen
 // chatTranscriptPath resolves the head's newest Claude transcript file, or ""
 // when there's no worktree/dir/file yet.
 func chatTranscriptPath(worktree string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || worktree == "" {
-		return ""
-	}
-	return claudestream.LatestTranscript(filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree)))
+	return claudestream.LatestTranscript(claudeProjectDir(worktree))
 }
 
 // chatHistoryFrame answers a load_before: a batch of older conversation lines
@@ -360,14 +382,30 @@ func sendChatHistoryBefore(conn *safeConn, worktree, agentID, beforeUUID string)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// claudeProjectDir resolves the Claude project directory recording a
+// worktree's transcripts (~/.claude/projects/<worktree-slug>), or "" when it
+// can't be determined.
+func claudeProjectDir(worktree string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || worktree == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+}
+
 // pumpChatOutput relays a chat session's output to the socket until the
 // session exits or the socket dies: transcript backfill first (durable
 // history), then the scrollback-ring replay (recent events the transcript may
 // not carry, deduped by uuid), then replay_done, then the queued-message
-// snapshot, then live events.
+// snapshot, then live events - merged with live sub-agent transcript growth
+// (the tail goroutine; current CLIs keep sub-agent steps off the main stdout).
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
-	subs := newSubagentResolver("")
-	skip := backfillChatHistory(conn, agentID, worktree, subs)
+	dir := claudeProjectDir(worktree)
+	subs := newSubagentResolver(dir)
+	skip := backfillChatHistory(conn, agentID, dir, subs)
+	if skip == nil {
+		skip = map[string]struct{}{}
+	}
 
 	lb := &claudestream.LineBuffer{}
 	// Attach queues the ring snapshot synchronously before returning, so a
@@ -396,10 +434,42 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		s.ChatQueues.OnAttach(projectRoot, agentID)
 	}
 
+	// Live sub-agent activity: tail the session's subagents/*.jsonl growth in
+	// a goroutine and relay it here, so all socket writes and uuid dedup stay
+	// on this goroutine.
+	var subGrowth chan []claudestream.SubagentGrowth
+	if dir != "" {
+		subGrowth = make(chan []claudestream.SubagentGrowth, 1)
+		stop := make(chan struct{})
+		defer close(stop)
+		go tailSubagentGrowth(dir, stop, subGrowth)
+	}
+
 	for {
 		select {
 		case <-att.Done:
 			return
+		case growth := <-subGrowth:
+			for _, g := range growth {
+				for _, line := range g.Lines {
+					ev, ok := claudestream.ParseEvent(line)
+					if !ok {
+						continue
+					}
+					if ev.UUID != "" {
+						if _, dup := skip[ev.UUID]; dup {
+							continue
+						}
+						skip[ev.UUID] = struct{}{}
+					}
+					if !subs.resolve(conn, g.AgentID, g.SessionID) {
+						return
+					}
+					if !sendChatEventLine(conn, line, agentID) {
+						return
+					}
+				}
+			}
 		case data, ok := <-att.Output:
 			if !ok {
 				return
