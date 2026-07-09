@@ -129,11 +129,11 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	})
 
 	// Holds chat-mode heads' queued (not-yet-sent) user messages, daemon-side and
-	// disk-persisted, draining one per observed step of the running turn (the
-	// CLI injects mid-turn stdin messages at its next step boundary, like the
-	// interactive terminal) and one at each turn end. Wired to the registry's
-	// stdout hooks so the queue drains even with no client attached (the agent
-	// keeps working through the queue).
+	// disk-persisted, dumping the whole queue at the next observed step of the
+	// running turn (the CLI injects mid-turn stdin messages at its next step
+	// boundary, like the interactive terminal) or at the turn's end. Wired to
+	// the registry's stdout hooks so the queue drains even with no client
+	// attached (the agent keeps working through the queue).
 	chatQueues := heads.NewChatQueueManager(reg, store)
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
 	reg.SetOnChatStep(chatQueues.OnTurnStep)

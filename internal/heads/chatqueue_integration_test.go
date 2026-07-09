@@ -100,8 +100,8 @@ func waitUntil(t *testing.T, cond func() bool, msg string) {
 	t.Fatal(msg)
 }
 
-// An idle send goes straight to stdin; queued sends are held and drain one per
-// turn end, in order, writing to the session's stdin.
+// An idle send goes straight to stdin; queued sends are held and the whole
+// queue dumps, in order, at the next turn end.
 func TestChatQueueManagerDrainsToStdin(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 
@@ -116,15 +116,14 @@ func TestChatQueueManagerDrainsToStdin(t *testing.T) {
 		t.Fatal("a queued message was written before its turn")
 	}
 
-	mgr.OnTurnEnd("agent-x") // drains SECOND
-	mgr.OnTurnEnd("agent-x") // drains THIRD
+	mgr.OnTurnEnd("agent-x") // dumps SECOND and THIRD together
 	w := pty.written()
 	iF, iS, iT := strings.Index(w, "FIRST"), strings.Index(w, "SECOND"), strings.Index(w, "THIRD")
 	if iS < 0 || iT < 0 {
-		t.Fatalf("queued drains missing from stdin: %q", w)
+		t.Fatalf("queued dump missing from stdin: %q", w)
 	}
 	if !(iF < iS && iS < iT) {
-		t.Fatalf("drain order wrong: FIRST@%d SECOND@%d THIRD@%d", iF, iS, iT)
+		t.Fatalf("dump order wrong: FIRST@%d SECOND@%d THIRD@%d", iF, iS, iT)
 	}
 
 	before := len(pty.written())
@@ -204,11 +203,11 @@ func TestChatResultDrainsViaRegistry(t *testing.T) {
 		"result line did not drain the queued message to stdin")
 }
 
-// Mid-turn drain (terminal-style steering): each completed main-conversation
-// assistant line on stdout is a step boundary that drains one queued message,
-// so a queued message reaches the CLI within a step instead of waiting for
-// the turn to end. Sidechain (sub-agent) assistant lines don't count. Order
-// is preserved across the concurrently-dispatched drains.
+// Mid-turn drain (terminal-style steering): the first completed
+// main-conversation assistant line on stdout is a step boundary that dumps
+// the WHOLE queue, in order, so queued messages reach the CLI within a step
+// instead of waiting for the turn to end. Sidechain (sub-agent) assistant
+// lines don't count.
 func TestChatStepDrainsViaRegistry(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 	reg := mgr.reg
@@ -226,25 +225,15 @@ func TestChatStepDrainsViaRegistry(t *testing.T) {
 		t.Fatalf("a sidechain line drained the queue: %q", w)
 	}
 
-	// One main-turn step drains exactly the front message.
+	// One main-turn step dumps the whole queue, in order.
 	pty.feed([]byte(`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"}]}}` + "\n"))
-	waitUntil(t, func() bool { return strings.Contains(pty.written(), "STEP-ONE") },
-		"a step boundary did not drain the queued message")
-	if w := pty.written(); strings.Contains(w, "STEP-TWO") {
-		t.Fatalf("one step drained more than one message: %q", w)
-	}
-
-	// Two more steps in ONE chunk (two concurrent dispatches) drain the rest,
-	// in order.
-	pty.feed([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash"}]}}` + "\n" +
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}` + "\n"))
 	waitUntil(t, func() bool {
 		w := pty.written()
-		return strings.Contains(w, "STEP-TWO") && strings.Contains(w, "STEP-THREE")
-	}, "later steps did not drain the remaining messages")
+		return strings.Contains(w, "STEP-ONE") && strings.Contains(w, "STEP-TWO") && strings.Contains(w, "STEP-THREE")
+	}, "a step boundary did not dump the queue")
 	w := pty.written()
 	if i1, i2, i3 := strings.Index(w, "STEP-ONE"), strings.Index(w, "STEP-TWO"), strings.Index(w, "STEP-THREE"); !(i1 < i2 && i2 < i3) {
-		t.Fatalf("step drains out of order: ONE@%d TWO@%d THREE@%d", i1, i2, i3)
+		t.Fatalf("queue dump out of order: ONE@%d TWO@%d THREE@%d", i1, i2, i3)
 	}
 }
 

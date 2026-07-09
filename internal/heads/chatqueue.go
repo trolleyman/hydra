@@ -18,21 +18,22 @@ import (
 // Chat-mode message queue (server-authoritative, disk-persisted).
 //
 // A message the user sends while a turn is running is HELD here - in the
-// daemon, not written to the CLI's stdin yet - and drained one message per
-// observed step of the running turn (each completed assistant line: a thinking
-// block, a tool_use, a text block) plus at the turn's end (`result`). The CLI
-// injects a mid-turn stdin message into the running turn at its next step
-// boundary, exactly like typing into the interactive terminal (spike-verified),
-// so a queued message reaches the agent quickly instead of waiting out the
-// whole turn. Holding queued messages daemon-side (rather than client-side)
-// means they survive closing the browser, navigating away, and a WS reconnect;
-// persisting them to disk means they also survive a daemon restart. On
-// (re)attach the daemon replays the queue so the client renders the pending
-// bubbles, and the client can recall a still-queued message to edit it
-// (dequeue) for as long as it hasn't drained.
+// daemon, not written to the CLI's stdin yet - and the WHOLE queue dumps at
+// the next observed step of the running turn (a completed assistant line: a
+// thinking block, a tool_use, a text block) or at the turn's end (`result`).
+// The CLI injects mid-turn stdin messages into the running turn at its next
+// step boundary, exactly like typing into the interactive terminal
+// (spike-verified), so queued messages reach the agent quickly - in order, as
+// one consecutive block - instead of waiting out the whole turn. Holding
+// queued messages daemon-side (rather than client-side) means they survive
+// closing the browser, navigating away, and a WS reconnect; persisting them to
+// disk means they also survive a daemon restart. On (re)attach the daemon
+// replays the queue so the client renders the pending bubbles, and the client
+// can recall a still-queued message to edit it (dequeue) for as long as it
+// hasn't drained.
 //
 // The store is just a persisted FIFO: it holds ONLY queued (not-yet-sent)
-// messages, and the daemon pops the front on each step/turn-end it observes.
+// messages, and the daemon empties it at the first step/turn-end it observes.
 // Whether a fresh message is queued vs sent immediately is decided by the client
 // (which knows, and shows, whether a turn is running) and passed in the frame -
 // so the daemon needs no fragile turn-state seeding, only the stdout-driven
@@ -53,7 +54,7 @@ type ChatQueue struct {
 	mu   sync.Mutex
 	path string
 	msgs []QueuedMessage
-	// sendMu serializes a drain's pop+write pair: step/turn-end drains are
+	// sendMu serializes a drain's pops+writes: step/turn-end drains are
 	// dispatched on their own goroutines (one per stdout line), so without it
 	// two drains could pop in order but write to stdin out of order.
 	sendMu sync.Mutex
@@ -254,7 +255,7 @@ func (m *ChatQueueManager) settleIdleInterrupt(id string, at time.Time) {
 		log.Printf("warn: settle idle interrupt for %s: %v", id, err)
 		return
 	}
-	m.drainFront(root, id)
+	m.drainAll(root, id)
 }
 
 // takeInterrupted consumes a pending-interrupt mark for id, reporting whether a
@@ -322,7 +323,7 @@ func (m *ChatQueueManager) List(projectRoot, id string) []QueuedMessage {
 }
 
 // OnTurnEnd is the registry's turn-end (`result` event) hook: the current turn
-// finished, so drain the next queued message to the CLI (one per whole turn).
+// finished, so dump the queued messages to the CLI.
 //
 // A turn ended by a user interrupt fires no Stop hook (unlike a normal turn
 // end), so nothing in-sandbox updates status.json and the head would sit in
@@ -345,7 +346,7 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 			log.Printf("warn: write post-interrupt status for %s: %v", id, err)
 		}
 	}
-	m.drainFront(root, id)
+	m.drainAll(root, id)
 }
 
 // OnAttach handles a client (re)connecting: if the head is sitting idle with a
@@ -367,34 +368,38 @@ func (m *ChatQueueManager) kickIfResting(projectRoot, id string) {
 	}
 	switch info.Status {
 	case api.Finished, api.Waiting, api.Errored:
-		m.drainFront(projectRoot, id)
+		m.drainAll(projectRoot, id)
 	}
 }
 
-// drainFront pops the front message and writes it to stdin, if any. The pop and
-// the write happen under the queue's sendMu so concurrently-dispatched drains
-// deliver messages in queue order.
-func (m *ChatQueueManager) drainFront(projectRoot, id string) {
+// drainAll pops every queued message and writes them to stdin in queue order -
+// the whole queue dumps at once, so a burst of typed-ahead messages arrives as
+// one consecutive block instead of scattering across later steps/turns. The
+// pops and writes happen under the queue's sendMu so concurrently-dispatched
+// drains cannot interleave.
+func (m *ChatQueueManager) drainAll(projectRoot, id string) {
 	q := m.queue(projectRoot, id)
 	q.sendMu.Lock()
 	defer q.sendMu.Unlock()
-	msg, ok := q.PopFront()
-	if !ok {
-		return
+	for {
+		msg, ok := q.PopFront()
+		if !ok {
+			return
+		}
+		m.writeToStdin(id, msg.Content)
 	}
-	m.writeToStdin(id, msg.Content)
 }
 
 // OnTurnStep is the registry's mid-turn step-boundary hook (a completed
-// assistant line: a thinking block, a tool_use, a text block): drain the next
-// queued message NOW rather than waiting for the turn to end. The CLI injects
-// a mid-turn stdin user message into the running turn at its next step
-// boundary - the same steering the interactive terminal does (spike-verified)
-// - so a queued message reaches the agent within a step or two of being typed.
+// assistant line: a thinking block, a tool_use, a text block): drain the
+// queue NOW rather than waiting for the turn to end. The CLI injects mid-turn
+// stdin user messages into the running turn at its next step boundary - the
+// same steering the interactive terminal does (spike-verified) - so queued
+// messages reach the agent within a step or two of being typed.
 func (m *ChatQueueManager) OnTurnStep(id string) {
 	root, ok := m.resolveRoot(id)
 	if !ok {
 		return
 	}
-	m.drainFront(root, id)
+	m.drainAll(root, id)
 }

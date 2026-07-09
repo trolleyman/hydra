@@ -242,15 +242,16 @@ type RingFilter struct {
 	OnResult func()
 	// OnStep, if set, is called once per completed main-conversation assistant
 	// line - the end of a thinking block, a tool_use being issued, a text block.
-	// The chat message queue uses it to drain queued messages at step
+	// The chat message queue uses it to dump queued messages at step
 	// boundaries instead of waiting for the turn to end: the CLI injects a
 	// mid-turn stdin user message into the running turn at its next step
 	// boundary, exactly like typing in the interactive terminal
 	// (spike-verified). Sidechain (sub-agent) and isApiErrorMessage lines
 	// don't count - only the main turn making progress does. Deliberately NOT
-	// fired on `user` lines: those include the CLI's echo of a drained
-	// message, which would chain-drain the whole queue at one boundary. Same
-	// under-the-session-lock cheapness rule as the other hooks.
+	// fired on `user` lines: those include the interrupt echo, whose drain
+	// would eat the pending-interrupt mark before its own result consumed it,
+	// and the CLI's echoes of drained messages. Same under-the-session-lock
+	// cheapness rule as the other hooks.
 	OnStep func()
 }
 
