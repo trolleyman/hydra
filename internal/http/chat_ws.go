@@ -216,6 +216,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 // sendChatEventLine relays one stream-json line as a claude_event frame.
 // Returns false once the socket write fails.
 func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
+	// Drop the CLI's internal resume placeholders (the injected "Continue from
+	// where you left off." / "No response requested." pair); its own UI hides
+	// them and they'd otherwise render as spurious chat bubbles.
+	if claudestream.IsHiddenChatMessage(line) {
+		return true
+	}
 	frame, err := json.Marshal(chatEventFrame{
 		terminalEvent: terminalEvent{Type: "claude_event"},
 		Event:         json.RawMessage(line),
@@ -405,6 +411,11 @@ func sendChatHistoryBefore(conn *safeConn, worktree, agentID, beforeUUID string)
 		} else {
 			frame.Done = done
 			for _, line := range lines {
+				// Same resume-placeholder filter as the live/backfill relay
+				// (sendChatEventLine); this scroll-older path builds frames directly.
+				if claudestream.IsHiddenChatMessage(line) {
+					continue
+				}
 				frame.Events = append(frame.Events, json.RawMessage(line))
 			}
 		}

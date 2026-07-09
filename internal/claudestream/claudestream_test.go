@@ -323,3 +323,54 @@ func TestLineBufferReassembly(t *testing.T) {
 		}
 	}
 }
+
+func TestIsHiddenChatMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		// The exact shapes claude 2.1.204 writes to the transcript on resuming an
+		// interrupted turn (captured in a spike).
+		{
+			"injected resume prompt (isMeta user)",
+			`{"parentUuid":"a0","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]},"isMeta":true,"uuid":"9e"}`,
+			true,
+		},
+		{
+			"synthetic no-response reply",
+			`{"parentUuid":"9e","isSidechain":false,"type":"assistant","uuid":"40","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}`,
+			true,
+		},
+		{
+			"any synthetic-model assistant is hidden",
+			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"(no content)"}]}}`,
+			true,
+		},
+		// Must NOT hide.
+		{
+			"same text but NOT isMeta (a real user turn) stays",
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]}}`,
+			false,
+		},
+		{
+			"isMeta user with different text stays (e.g. injected context)",
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"some other injected context"}]},"isMeta":true}`,
+			false,
+		},
+		{
+			"real assistant turn stays",
+			`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"hi"}]}}`,
+			false,
+		},
+		{"the Hydra continue nudge stays", string(TextUserMessageLine("Continue")), false},
+		{"non-json line", `not json`, false},
+		{"empty line", ``, false},
+		{"result envelope stays", `{"type":"result","subtype":"success"}`, false},
+	}
+	for _, c := range cases {
+		if got := IsHiddenChatMessage([]byte(c.line)); got != c.want {
+			t.Errorf("%s: IsHiddenChatMessage = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -93,6 +93,95 @@ func ParseEvent(line []byte) (Event, bool) {
 	return ev, true
 }
 
+// ResumeContinuePrompt is the synthetic user turn Claude injects into a resumed
+// conversation whose last turn was INTERRUPTED (the process was killed
+// mid-response, e.g. a daemon restart mid-turn): an isMeta
+// "Continue from where you left off." message. Because the CLI runs headless
+// (replyOnResume defaults false in -p mode), it pairs this with a
+// synthetic-model "No response requested." assistant reply that marks the
+// prompt as deliberately unanswered - so the agent does NOT actually continue.
+// The pair is written to the transcript (spike-verified against claude 2.1.204:
+// getResumePrompt() = CLAUDE_CODE_RESUME_PROMPT || this string), and Claude's
+// own UI hides both as internal placeholders. See IsHiddenChatMessage.
+const ResumeContinuePrompt = "Continue from where you left off."
+
+// syntheticModel is the model value the CLI stamps on placeholder assistant
+// messages it fabricates locally ("No response requested.", "(no content)", ...)
+// rather than receiving from the API.
+const syntheticModel = "<synthetic>"
+
+// hiddenMsgProbe is the minimal decode used by IsHiddenChatMessage.
+type hiddenMsgProbe struct {
+	Type    string `json:"type"`
+	IsMeta  bool   `json:"isMeta"`
+	Message struct {
+		Model   string          `json:"model"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+// IsHiddenChatMessage reports whether a stream-json / transcript line is one of
+// the CLI's internal resume placeholders that its own UI hides, and which the
+// chat view therefore must not render:
+//
+//   - any assistant message stamped with the synthetic model (the local
+//     "No response requested." / "(no content)" placeholders), and
+//   - the isMeta ResumeContinuePrompt user turn the CLI injects when resuming an
+//     interrupted turn.
+//
+// Without this these two surface as a spurious "Continue from where you left
+// off." user bubble answered by "No response requested." - noise the user can't
+// act on (the agent is separately nudged to continue for real, see
+// heads.nudgeResumedChatAgent). They appear only in transcript backfill (a
+// resumed process replays nothing on stdout), but the predicate is cheap and
+// applied on every relay path for safety. A line that isn't a JSON object
+// returns false (relayed unchanged).
+func IsHiddenChatMessage(line []byte) bool {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || line[0] != '{' {
+		return false
+	}
+	var p hiddenMsgProbe
+	if err := json.Unmarshal(line, &p); err != nil {
+		return false
+	}
+	switch p.Type {
+	case "assistant":
+		return p.Message.Model == syntheticModel
+	case "user":
+		return p.IsMeta && messageContentText(p.Message.Content) == ResumeContinuePrompt
+	}
+	return false
+}
+
+// messageContentText extracts the plain text of a user/assistant message's
+// content, which is either a JSON string or an array of content blocks (only
+// text blocks contribute). Returns "" for anything else.
+func messageContentText(content json.RawMessage) string {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 {
+		return ""
+	}
+	if content[0] == '"' {
+		var s string
+		if json.Unmarshal(content, &s) != nil {
+			return ""
+		}
+		return strings.TrimSpace(s)
+	}
+	var blocks []textBlock
+	if json.Unmarshal(content, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
 // controlRequest is the minimal decode of a control_request stdout line the CLI
 // emits when --permission-prompt-tool stdio routes a tool call through the client
 // for approval. Only the can_use_tool subtype is modeled; note the subtype lives
