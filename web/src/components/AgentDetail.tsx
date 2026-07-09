@@ -18,7 +18,9 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { InspectorPane } from './InspectorPane'
+import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -105,6 +107,46 @@ const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: s
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
+      )}
+    </div>
+  )
+})
+
+// CollapsiblePrompt wraps the read-only prompt in a disclosure for the split
+// layout's working pane, where vertical space is scarce (the terminal/chat wants
+// the height). Collapsed by default, showing a one-line truncated preview;
+// clicking expands the full PromptBlock. The open/closed state persists per agent
+// (agentViewPrefs.promptCollapsed). Only used in terminal mode - chat-mode heads
+// have no prompt block (the task is replayed as the first chat message).
+const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, agentId }: { prompt: string; projectId: string | null; agentId: string }) {
+  // Default collapsed: open only when the stored flag explicitly says so.
+  const [open, setOpen] = useState(() => loadAgentViewPrefs(projectId, agentId).promptCollapsed === false)
+  const toggle = useCallback(() => {
+    setOpen((o) => {
+      const next = !o
+      patchAgentViewPrefs(projectId, agentId, { promptCollapsed: !next })
+      return next
+    })
+  }, [projectId, agentId])
+  const preview = useMemo(() => parsePrompt(prompt, projectId).text.replace(/\s+/g, ' ').trim(), [prompt, projectId])
+  return (
+    <div className="shrink-0 mb-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 overflow-hidden">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-gray-100/70 dark:hover:bg-gray-700/40 transition-colors"
+      >
+        {open ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 shrink-0">Prompt</span>
+        {!open && <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{preview}</span>}
+      </button>
+      {open && (
+        // PromptBlock carries its own -mt-2/mb-6 chrome; the negative bottom margin
+        // pulls the disclosure closed around it so it doesn't leave a fat gap.
+        <div className="px-3 -mb-4">
+          <PromptBlock prompt={prompt} projectId={projectId} />
+        </div>
       )}
     </div>
   )
@@ -558,6 +600,49 @@ export function AgentDetail({
     if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
   }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // ── New two-pane split layout ──────────────────────────────────────────────
+  // Gated behind the split-layout flag AND a lg+ viewport; below lg (or with the
+  // flag off) the page falls back to the classic single-column stacked layout,
+  // which is already responsive. The pane-collapse store gives the divider its
+  // three states (split / terminal-only / inspector-only).
+  const splitEnabled = useSplitLayoutStore((s) => s.enabled)
+  const isWide = useMediaQuery(SPLIT_QUERY)
+  const paneCollapse = usePaneCollapseStore((s) => s.collapse)
+  const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
+  const splitActive = splitEnabled && isWide && !agent.archived
+  // Left (working) pane's share of the split, persisted like sidebarWidth.
+  const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
+  const splitRatioRef = useRef(splitRatio)
+  splitRatioRef.current = splitRatio
+  const [splitResizing, setSplitResizing] = useState(false)
+  const panesRef = useRef<HTMLDivElement>(null)
+  // Hand-rolled divider drag, mirroring handleSidebarResizeStart in __root.tsx.
+  const handleSplitResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const cont = panesRef.current
+    if (!cont) return
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    setSplitResizing(true)
+    function onMove(ev: PointerEvent) {
+      const rect = cont!.getBoundingClientRect()
+      if (rect.width <= 0) return
+      const ratio = Math.max(SPLIT_RATIO_MIN, Math.min(SPLIT_RATIO_MAX, (ev.clientX - rect.left) / rect.width))
+      splitRatioRef.current = ratio
+      setSplitRatio(ratio)
+    }
+    function onUp() {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setSplitResizing(false)
+      saveSplitRatio(splitRatioRef.current)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }, [])
 
   // The relative "created Xs ago" labels update via their own <RelativeTime>
   // leaves (see LiveTime / useNowTick) - each re-renders only itself once a
@@ -1399,54 +1484,119 @@ export function AgentDetail({
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
+          // Inspector-pane hide/show toggle (mirrors the show-sidebar button), only
+          // in the split layout. Collapsing the inspector gives the terminal/chat
+          // the full width.
+          ...(splitActive
+            ? [{
+                label: paneCollapse === 'inspector' ? 'Show inspector' : 'Hide inspector',
+                icon: paneCollapse === 'inspector' ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />,
+                onClick: toggleInspector,
+                variant: 'segment' as const,
+              }]
+            : []),
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
-      {/* pt-4 (16px) above the metadata row matches the effective gap below it
-          (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced. */}
-      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>
-        <div className="w-full">
-        {/* Header */}
-        <div className="mb-6">
-          {/* Metadata row - memoized so a running head's constant refreshes
-              (activity/tokens, none shown here) don't re-render it every tick. */}
-          <AgentMetaRow
-            agent={agent}
-            agentTypeClass={agentTypeClass}
-            branches={branches}
-            savingBase={savingBase}
-            savingChatMode={savingChatMode}
-            savingDownstream={savingDownstream}
-            onSaveBase={onSaveBase}
-            onRefreshBranches={refreshBranches}
-            onSaveChatMode={onSaveChatMode}
-            onSaveDownstream={onSaveDownstream}
-          />
-
+      {splitActive ? (
+        // ── Two-pane split ──────────────────────────────────────────────────
+        // Left: metadata + collapsible prompt + terminal/chat filling the height.
+        // Right: the inspector pane (diff / tests / previews). A hand-rolled
+        // divider between them, plus the three collapse states from paneCollapse.
+        <div ref={panesRef} className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
+          {paneCollapse !== 'working' && (
+            <div
+              className={`flex flex-col min-h-0 overflow-hidden ${paneCollapse === 'inspector' ? 'flex-1' : 'shrink-0'}`}
+              style={paneCollapse === 'inspector' ? undefined : { width: `${splitRatio * 100}%` }}
+            >
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
+                <div className="shrink-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
+                </div>
+                {/* Prompt collapsed by default (terminal mode only) - chat heads
+                    replay the task as the first chat message. */}
+                {agent.prompt && agent.chat_mode !== true && (
+                  <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+                )}
+                <AgentTerminal
+                  agentId={agent.id}
+                  projectId={projectId}
+                  isEphemeral={agent.ephemeral}
+                  chatMode={agent.chat_mode === true}
+                  fill
+                  onRefresh={onRefresh}
+                  onDiffRefresh={handleDiffRefresh}
+                />
+              </div>
+            </div>
+          )}
+          {/* Draggable divider (only in the full split). */}
+          {paneCollapse === 'none' && (
+            <div
+              onPointerDown={handleSplitResizeStart}
+              className="relative shrink-0 w-1.5 cursor-col-resize group touch-none self-stretch"
+            >
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-gray-200 dark:bg-gray-700 group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
+            </div>
+          )}
+          {paneCollapse !== 'inspector' && (
+            <div className="flex flex-col min-w-0 min-h-0 flex-1 overflow-hidden border-l border-gray-200 dark:border-gray-800">
+              <InspectorPane
+                agent={agent}
+                projectId={projectId}
+                externalRefreshTrigger={diffRefreshTrigger}
+                externalArtifactRefresh={artifactRefreshTrigger}
+              />
+            </div>
+          )}
+          {/* Transparent overlay during the divider drag so the pointer isn't
+              swallowed by the xterm/iframe (gotcha #5). */}
+          {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
         </div>
-
-        {/* Prompt. Chat-mode heads echo the task as the first message in the
-            chat pane below (--replay-user-messages), so the separate prompt box
-            is redundant there - the user can just scroll up to see it. */}
-        {agent.prompt && agent.chat_mode !== true && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
-
-        {/* Security-gate approvals are surfaced as global toasts (see
-            useAgentNotifications) rather than an inline card. */}
-
-        {/* Terminal */}
-        <AgentTerminal
-          agentId={agent.id}
-          projectId={projectId}
-          isEphemeral={agent.ephemeral}
-          chatMode={agent.chat_mode === true}
-          onRefresh={onRefresh}
-          onDiffRefresh={handleDiffRefresh}
-        />
-
-        {/* Diff viewer */}
-        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
+      ) : (
+        // ── Classic single-column stacked layout (flag off, or narrow) ───────
+        // pt-4 (16px) above the metadata row matches the effective gap below it
+        // (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced.
+        <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>
+          <div className="w-full">
+            <div className="mb-6">
+              <AgentMetaRow
+                agent={agent}
+                agentTypeClass={agentTypeClass}
+                branches={branches}
+                savingBase={savingBase}
+                savingChatMode={savingChatMode}
+                savingDownstream={savingDownstream}
+                onSaveBase={onSaveBase}
+                onRefreshBranches={refreshBranches}
+                onSaveChatMode={onSaveChatMode}
+                onSaveDownstream={onSaveDownstream}
+              />
+            </div>
+            {agent.prompt && agent.chat_mode !== true && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
+            <AgentTerminal
+              agentId={agent.id}
+              projectId={projectId}
+              isEphemeral={agent.ephemeral}
+              chatMode={agent.chat_mode === true}
+              onRefresh={onRefresh}
+              onDiffRefresh={handleDiffRefresh}
+            />
+            <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

@@ -49,6 +49,10 @@ export type AgentViewPrefs = {
   // Unsent chat composer text, so a draft survives switching agents and reloads
   // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
   chatDraft?: string
+  // New split layout: which inspector-pane view (Diff / Tests / Previews) was
+  // last open, and whether the working pane's prompt disclosure is collapsed.
+  inspectorView?: 'diff' | 'tests' | 'previews'
+  promptCollapsed?: boolean
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -75,6 +79,8 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
+    inspectorView: stored.inspectorView,
+    promptCollapsed: stored.promptCollapsed,
   }
 }
 

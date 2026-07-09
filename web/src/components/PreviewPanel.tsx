@@ -45,7 +45,7 @@ function StateChip({ state }: { state: PreviewStatus['state'] }) {
 // only a real ref/refresh change re-renders the panel.
 export const PreviewPanel = memo(PreviewPanelImpl)
 
-function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, refreshKey }: {
+function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, refreshKey, onAvailability }: {
   projectId: string
   agentId: string
   // The version to preview, mirrored from the diff viewer's right-hand selector.
@@ -55,6 +55,9 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
   includeUncommitted?: boolean
   // Bumped by the diff viewer's refresh control to force a fresh fetch.
   refreshKey?: number
+  // Reports whether the project configures any server previews, so the new
+  // inspector layout can hide its Previews segment when there is nothing to show.
+  onAvailability?: (available: boolean) => void
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [previews, setPreviews] = useState<PreviewStatus[] | null>(null)
@@ -133,6 +136,11 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
     } catch { /* the poll below re-syncs state either way */ }
     setNonce((n) => n + 1)
   }, [projectId, agentId, headRef, includeUncommitted])
+
+  // Report configured/absent to the inspector once loaded (null = not yet).
+  useEffect(() => {
+    if (previews !== null) onAvailability?.(previews.length > 0)
+  }, [previews, onAvailability])
 
   // Panel section header height, exported as the CSS var card headers stick under.
   const [headerRef, headerH] = useMeasuredHeight(41)

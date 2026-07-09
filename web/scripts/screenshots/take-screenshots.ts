@@ -589,6 +589,11 @@ try {
       // instead of being clipped by the sidebar's `overflow-hidden`. Capture-time
       // override only; the app's default width is unchanged.
       narrowSidebar?: boolean
+      // Opts this page into the new two-pane agent layout (terminal/chat left,
+      // inspector pane right). The screenshots default to the classic stacked
+      // layout so the existing agent-page shots are unaffected; only pages that
+      // set this render the split. Needs a lg+ viewport (>= 1024px wide).
+      splitLayout?: boolean
       // Focuses the full-page spawn textarea and selects ALL of its text after the
       // page settles, so the capture overlays the browser's selection band (which
       // marks the REAL, selectable text positions) on top of the highlight backdrop
@@ -954,6 +959,15 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The new two-pane split layout: the terminal/chat + collapsed prompt in the
+      // left working pane, and the inspector pane (a Diff | Tests | Previews view
+      // selector under a shared target selector) on the right. splitLayout opts in
+      // (the shots otherwise default to the classic stacked layout); a wide
+      // viewport is required. Three shots: the default Diff view, the Tests view
+      // (clicking the Tests segment), and chat-as-pane.
+      { name: 'agent-split-diff', path: '/project/sim-project/agent/agent-1', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true },
+      { name: 'agent-split-tests', path: '/project/sim-project/agent/agent-2', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true, click: 'button:has-text("Tests")' },
+      { name: 'agent-split-chat', path: '/project/sim-project/agent/agent-chat', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true },
       // The tests panel (PLAN #68), now styled like the artifacts panel and living
       // in the diff viewer just below the "Changes" header. Pin Changes to the top,
       // then expand agent-2's single (failing) runner card by clicking its header -
@@ -1841,6 +1855,12 @@ try {
             // ignore storage failures
           }
         }, { key: StorageKeys.themeMode, mode: theme })
+        // Default every shot to the classic stacked agent layout (split flag off)
+        // so the existing agent-page shots are unchanged; pages opt into the new
+        // two-pane split with splitLayout: true.
+        await ctx.addInitScript(({ key, on }) => {
+          try { localStorage.setItem(key, on ? '1' : '0') } catch { /* ignore */ }
+        }, { key: StorageKeys.splitLayoutEnabled, on: pg.splitLayout === true })
         // Emulate a touch device's coarse pointer by forcing the fine-pointer
         // media query false, so keyboard-only chrome (shortcut hints) hides like it
         // does on a real phone. Delegates every other query to the real matchMedia

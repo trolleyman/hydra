@@ -1,4 +1,5 @@
 import { ThemeSection } from './ThemeSection'
+import { LayoutSection } from './LayoutSection'
 import { ChatSection } from './ChatSection'
 import { ChatHeightSection } from './ChatHeightSection'
 import { TerminalSection } from './TerminalSection'
@@ -11,6 +12,7 @@ export function BrowserSections() {
   return (
     <>
       <ThemeSection />
+      <LayoutSection />
       <ChatSection />
       <ChatHeightSection />
       <TerminalSection />
