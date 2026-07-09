@@ -2859,6 +2859,14 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_int","content":[{"type":"text","text":"Sure - I'll thread a MaxAttempts option through the uploader config and"}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
 	`{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":4210,"session_id":"sim-chat"}`,
+	// Resuming that interrupted turn: the CLI injects an isMeta "Continue from
+	// where you left off." user turn and answers it with a synthetic-model "No
+	// response requested." placeholder (spike-verified against claude 2.1.204).
+	// Its own UI hides both; claudestream.IsHiddenChatMessage drops them, so the
+	// chat must render NEITHER - they are here to exercise that filter (mirrored
+	// into sendSimChatEvent below).
+	`{"type":"user","uuid":"sim-resume-meta","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]},"isMeta":true}`,
+	`{"type":"assistant","uuid":"sim-resume-synthetic","message":{"id":"msg_sim_synthetic","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}`,
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
@@ -2877,6 +2885,11 @@ const simChatImageB64 = "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAKZ0lEQVR
 
 // sendSimChatEvent relays one canned stream-json line as a claude_event frame.
 func sendSimChatEvent(conn *safeConn, line string) {
+	// Mirror the real relay (sendChatEventLine): drop the CLI's hidden resume
+	// placeholders so the simulation exercises the same filtering.
+	if claudestream.IsHiddenChatMessage([]byte(line)) {
+		return
+	}
 	frame, _ := json.Marshal(chatEventFrame{
 		terminalEvent: terminalEvent{Type: "claude_event"},
 		Event:         json.RawMessage(line),
