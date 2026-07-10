@@ -356,14 +356,19 @@ export function renderMarkdownSource(text: string): ReactNode {
       )
     }
     if (s.kind === 'code') {
-      // Background chip only, NOT tinted - same as the read-only inline style, so
-      // it reads as the surrounding text wrapped in a chip. We must NOT switch to
-      // a monospace font here: the textarea underneath uses the inherited
-      // (proportional) font, so a font-mono run in the backdrop would be a
-      // different width and the visible caret would drift from the typed text.
-      // `box-decoration-clone` keeps the background tidy when a code span wraps.
+      // Mirror the read-only inline chip's look so typed code reads like its
+      // rendered result: terracotta text plus a hairline ring around the tinted
+      // background. Everything here is metric-neutral - we must NOT switch to a
+      // monospace font (the textarea uses the inherited proportional font, so a
+      // font-mono run in the backdrop would advance differently and drift the
+      // caret), and the ring is a box-shadow / the padding is inset, neither of
+      // which changes glyph advances the way a real border/padding would.
+      // `box-decoration-clone` keeps the chip tidy when a code span wraps.
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60">
+        <span
+          key={i}
+          className="rounded box-decoration-clone bg-gray-100/80 dark:bg-black/30 text-[#a8462d] dark:text-[#eab6a0] shadow-[inset_0_0_0_1px_rgba(120,120,120,0.35)]"
+        >
           {s.marker}
           {s.value}
           {s.marker}
@@ -394,7 +399,7 @@ export function renderMarkdownSource(text: string): ReactNode {
       return (
         <span
           key={i}
-          className="md-src-code inline-block w-full align-top rounded bg-gray-200/80 dark:bg-gray-700/70 break-words"
+          className="md-src-code inline-block w-full align-top rounded bg-gray-50/90 dark:bg-black/40 shadow-[inset_0_0_0_1px_rgba(120,120,120,0.35)] break-words"
         >
           <span className="opacity-50">{open}</span>
           {html != null ? (
