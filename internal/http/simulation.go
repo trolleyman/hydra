@@ -2876,6 +2876,14 @@ var simChatEvents = []string{
 	// showing "running" once the turn's result arrives / history replays (item 42).
 	`{"type":"assistant","message":{"id":"msg_sim_6","content":[{"type":"tool_use","id":"toolu_sim_stuck","name":"Read","input":{"file_path":"web/src/components/settings/NotificationsSection.tsx"}}]}}`,
 	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"usage":{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800},"session_id":"sim-chat"}`,
+	// A standalone assistant reply that is mostly an ordered list - exercises the
+	// block markdown renderer's <ol> styling (list-decimal, pl-5) so the demo
+	// proves 1./2./3. indent with hanging wrapped lines, and a trailing unordered
+	// list shows bullets indent the same way. (Before the react-markdown switch
+	// the old inline renderer left these as flat, flush-left literal text.)
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Recap what changed - numbered."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_list","content":[{"type":"text","text":"All three changes are in:\n\n1. **Retry loop** - wrapped ` + "`Put`" + ` in a bounded backoff loop that stops after 5 attempts and returns early on the first success, so a transient failure no longer sinks the whole upload.\n2. **Jitter** - each delay carries +/- 50% jitter, so a burst of clients that all failed at once don't retry in lockstep and stampede the server on the way back up.\n3. **Give-up path** - once the attempts are exhausted the loop surfaces the last error instead of swallowing it, now covered by ` + "`TestPutRetry`" + `.\n\nBullets indent the same way:\n\n- base delay doubles each attempt (100ms, 200ms, 400ms...)\n- the cap is configurable through ` + "`MaxAttempts`" + `\n\nAll green."}]}}`,
+	`{"type":"result","subtype":"success","duration_ms":5120,"total_cost_usd":0.021,"usage":{"input_tokens":180,"output_tokens":260,"cache_read_input_tokens":22100,"cache_creation_input_tokens":256},"session_id":"sim-chat"}`,
 }
 
 // simChatImageB64 is a tiny gradient PNG (base64) used by the simulated chat's
