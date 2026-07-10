@@ -83,11 +83,20 @@ describe('renderMarkdownSource', () => {
     }
   })
 
-  it('shows real strikethrough but never a slanted italic (metric safety)', () => {
+  it('shows real strikethrough and slants italic via the metric-safe slnt class', () => {
     const strike = render(<span>{renderMarkdownSource('a ~b~ c')}</span>)
     expect(strike.container.querySelector('.line-through')?.textContent).toBe('b')
+    // Italic slants through .md-src-italic (Roboto Flex slnt axis, advance-width
+    // preserving), NOT a real cursive <em>/.italic that would drift the caret.
     const italic = render(<span>{renderMarkdownSource('a *b* c')}</span>)
+    expect(italic.container.querySelector('.md-src-italic')?.textContent).toBe('*b*')
     expect(italic.container.querySelector('em')).toBeNull()
     expect(italic.container.querySelector('.italic')).toBeNull()
+  })
+
+  it('slants and bold-strokes bold-italic, keeping metrics neutral', () => {
+    const { container } = render(<span>{renderMarkdownSource('x ***y*** z')}</span>)
+    const span = container.querySelector('.md-src-bold.md-src-italic')
+    expect(span?.textContent).toBe('***y***')
   })
 })

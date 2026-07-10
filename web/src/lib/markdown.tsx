@@ -433,16 +433,19 @@ export function renderMarkdownSource(text: string): ReactNode {
         </span>
       )
     }
-    // Emphasis in the overlay must not change glyph metrics: a real
-    // font-weight/font-style swap renders different advance widths, so the
-    // visible backdrop text drifts from the invisible textarea text - the
-    // caret floats mid-word and spellcheck squiggles land offset under the
-    // wrong glyphs ("double text"). Bold (and the bold half of bold-italic) is
-    // faked with a text stroke (.md-src-bold, metric-neutral); italic has no
-    // metric-safe fake (an italic face has different advances), so its content
-    // stays upright and only the dimmed markers signal it. The read-only
-    // renderer above keeps real bold/italic - it has no textarea to align with.
-    const emphasis = s.kind === 'bold' || s.kind === 'bolditalic' ? 'md-src-bold' : ''
+    // Emphasis in the overlay must not change glyph ADVANCE widths, or the
+    // visible backdrop text drifts from the invisible textarea text - the caret
+    // floats mid-word and spellcheck squiggles land offset under the wrong
+    // glyphs ("double text"). Both fakes below are metric-neutral: bold (and the
+    // bold half of bold-italic) is a text stroke (.md-src-bold), and italic is
+    // the pinned Roboto Flex's `slnt` oblique (.md-src-italic) - a shear of the
+    // upright outlines that keeps advances, not a narrower cursive italic. The
+    // read-only renderer above uses real <strong>/<em> - it has no textarea to
+    // align with.
+    const emphasis = [
+      s.kind === 'bold' || s.kind === 'bolditalic' ? 'md-src-bold' : '',
+      s.kind === 'italic' || s.kind === 'bolditalic' ? 'md-src-italic' : '',
+    ].filter(Boolean).join(' ')
     return (
       <span key={i} className={emphasis}>
         <span className="opacity-40">{s.marker}</span>
