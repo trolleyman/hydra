@@ -11,9 +11,18 @@
          serif the system substitutes. display=swap shows the fallback serif
          until it arrives, so text is never invisible and degrades gracefully
          offline. -->
+    <!-- Roboto Flex: the pinned font for the prompt/chat input box
+         (HighlightedTextarea). Loaded with the `slnt` (slant) axis so the
+         highlight backdrop can slant *italic* runs while keeping the upright
+         glyph advance widths - a real cursive italic would be narrower and
+         drift the (upright) textarea caret. The `slnt` oblique is a shear of the
+         same outlines, so advances are preserved. Both the textarea and its
+         backdrop use it, so before it loads they share the same fallback and
+         stay aligned; display=swap avoids invisible text. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:slnt,wght@-10..0,100..1000&display=swap" rel="stylesheet">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
