@@ -6,6 +6,7 @@ import hljs from './lib/hljs'
 import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
+import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
@@ -1525,14 +1526,13 @@ function MergeConflictButton({ diff, agent, projectId }: {
 
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
-    try {
-      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
-      setOpen(false)
-    } catch {
-      // silently ignore
-    } finally {
-      setSending(false)
-    }
+    const res = await runWithToast(
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }),
+      { errorPrefix: 'Failed to send fix request to agent' },
+    )
+    setSending(false)
+    // Keep the panel open on failure so the user can retry; the toast explains why.
+    if (res.ok) setOpen(false)
   }, [projectId, agent.id, baseBranch])
 
   // Escape closes the panel; Enter confirms (Fix with agent), mirroring the
@@ -1709,6 +1709,19 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       type: note ? 'warning' : 'confirm',
       variant: 'updateBase',
       details: { fromBranch: baseBranch ?? '-', toBranch: agent.branch_name ?? '-', behind, note },
+      secondaryLabel: 'Fix with agent',
+      // Hand the update off to the agent session instead of merging server-side -
+      // mirrors the merge-conflict dialog's "Fix with agent". The primary Confirm
+      // stays a plain server-side update-from-base. Injects the request into the
+      // agent's input, the same channel the chat box uses.
+      onSecondary: async () => {
+        await runWithToast(
+          () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+            text: `Update this branch from its base by merging ${baseBranch} in, resolving any conflicts that arise.`,
+          }),
+          { errorPrefix: 'Failed to send update request to agent' },
+        )
+      },
       onConfirm: async () => {
         setUpdating(true)
         try {

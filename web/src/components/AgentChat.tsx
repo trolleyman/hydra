@@ -1891,12 +1891,9 @@ const ChatUserMessage = memo(function ChatUserMessage({
           />
         )}
       </div>
-      {sending && (
-        <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-          <LoaderCircle className="w-3 h-3 animate-spin" />
-          Sending...
-        </div>
-      )}
+      {/* No "Sending..." row: the dimmed (opacity-75) bubble already signals the
+          in-flight state, and a row that appears then vanishes on confirm shifted
+          the whole transcript below it. */}
       {lightboxIndex !== null && lightboxImages.length > 0 && (
         <ImageLightbox
           images={lightboxImages}
@@ -2417,6 +2414,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // in-flight block, which stays small.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let streamTimer: ReturnType<typeof setTimeout> | null = null
+    // Which block kinds this message streamed live. `message_stop` clears
+    // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
+    // event arrives, so streamBuf can't tell the settle "you were already on
+    // screen". This set outlives message_stop - reset per message (message_start),
+    // added on each streamed block - so the settle can suppress its entrance
+    // animation and the finished message doesn't re-fade over text already there.
+    let streamedKinds = new Set<'assistant' | 'thinking'>()
     // Turn-footer synthesis for backfilled history (the transcript has no
     // `result` events to carry usage). The transcript records one assistant
     // event PER CONTENT BLOCK, each carrying the same message envelope (id,
@@ -3083,8 +3087,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (block.type === 'text' && block.text?.trim()) {
               // noEntrance when this settles the block we've been streaming live:
               // the text is already on screen, so a fade-in on swap flickers
-              // (item 56).
-              push({ kind: 'assistant', text: block.text, noEntrance: streamBuf?.kind === 'assistant' })
+              // (item 56). streamedKinds (not streamBuf, which message_stop has
+              // already nulled) remembers we streamed this text.
+              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant') })
             } else if (block.type === 'thinking') {
               // Duration comes from the daemon (a hydra_thinking event keyed by
               // this message id, already in hand - sent before the backfill and
@@ -3100,7 +3105,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
-                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
+                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking') })
               }
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
@@ -3182,6 +3187,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
+            if (streamBuf) streamedKinds.add(streamBuf.kind)
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta
@@ -3193,7 +3199,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               scheduleStreamFlush()
             }
           } else if (e.type === 'message_start') {
-            // A new API message in this turn: seed the in-flight token count (item 48).
+            // A new API message in this turn: reset which kinds this message
+            // streamed (see streamedKinds), then seed the in-flight token count
+            // (item 48).
+            streamedKinds = new Set()
             curMsgTokensRef.current = e.message?.usage?.output_tokens ?? 0
             setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
           } else if (e.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
@@ -4309,7 +4318,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               and read as visual jitter (item 56). */}
           {stream && stream.kind === 'assistant' && (
             <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} />
+              <Markdown text={closeOpenFence(stream.text)} streamFade />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
