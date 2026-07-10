@@ -15,6 +15,17 @@
   --font-serif: 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
 }
 
+/* The prompt/chat input font (HighlightedTextarea). Pinned to Roboto Flex (loaded
+   in index.html) so the textarea and its highlight backdrop share exact metrics
+   on every OS, and so *italic* runs can be slanted via the font's `slnt` axis
+   (below) rather than a narrower cursive italic that would drift the caret. The
+   fallback stack matches Tailwind's font-sans so alignment holds before the font
+   loads. Applied to BOTH layers via .prompt-input-font. */
+.prompt-input-font {
+  font-family: 'Roboto Flex', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
 :root {
   color-scheme: light;
 }
@@ -283,7 +294,7 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    class + em sizing. */
 .chat-serif {
   font-family: var(--font-serif);
-  font-size: 0.9375rem; /* 15px */
+  font-size: 14px;
   line-height: 1.6;
 }
 .chat-serif strong,
@@ -458,10 +469,19 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    browser's spellcheck squiggles (drawn at the TEXTAREA's glyph positions)
    land offset under the visible words, reading as doubled text. A text stroke
    thickens the strokes without touching the advance widths, so it looks bold
-   while staying glyph-for-glyph aligned. (Italic gets no fake: an italic face
-   has different advances, and a skew transform needs inline-block which breaks
-   wrapping - so italic source shows only its dimmed markers.) */
+   while staying glyph-for-glyph aligned (Roboto Flex is not duplexed, so its
+   wght axis WOULD widen glyphs - hence the stroke, not a weight change). */
 .md-src-bold { -webkit-text-stroke: 0.035em currentColor; }
+
+/* Inline *italic* emphasis in that backdrop. Unlike bold, italic CAN be shown for
+   real: the input font is pinned to Roboto Flex (.prompt-input-font), whose `slnt`
+   axis is an oblique - a shear of the upright outlines that preserves each glyph's
+   advance width - so the slanted backdrop text stays glyph-for-glyph aligned with
+   the upright textarea caret underneath. (A cursive `ital` italic would be
+   narrower and drift; slnt is the metric-safe route.) If Roboto Flex hasn't loaded
+   yet, a fallback font without a slnt axis simply ignores this and stays upright -
+   no drift either way. */
+.md-src-italic { font-variation-settings: 'slnt' -10; }
 
 /* GFM task-list items (react-markdown + remark-gfm): the <ul> is styled
    list-none/pl-0 by the Markdown component, so give the disabled checkbox a

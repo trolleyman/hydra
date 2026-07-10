@@ -574,18 +574,24 @@ function parseExitPlan(input: unknown): { plan: string; fileName: string } | nul
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
 // too narrow to sit a card alongside the transcript.
 function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
-  const [open, setOpen] = useState(!narrow)
-  // Follow the narrow/wide flip (collapse when it gets tight, re-open when it
-  // widens) while still letting the user toggle in between - a render-phase sync
-  // like the settings fields use.
-  const [prevNarrow, setPrevNarrow] = useState(narrow)
-  if (prevNarrow !== narrow) {
-    setPrevNarrow(narrow)
-    setOpen(!narrow)
-  }
   const total = todos.length
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = total > 0 && done === total
+  // Default collapsed when the pane is too narrow to sit a card alongside the
+  // transcript, or when every item is checked off (a finished plan is just
+  // noise expanded).
+  const [open, setOpen] = useState(!narrow && !allDone)
+  // Follow the narrow/wide flip and the all-done flip (collapse when it gets
+  // tight or the plan completes, re-open when it widens or work resumes) while
+  // still letting the user toggle in between - a render-phase sync like the
+  // settings fields use.
+  const [prevNarrow, setPrevNarrow] = useState(narrow)
+  const [prevAllDone, setPrevAllDone] = useState(allDone)
+  if (prevNarrow !== narrow || prevAllDone !== allDone) {
+    setPrevNarrow(narrow)
+    setPrevAllDone(allDone)
+    setOpen(!narrow && !allDone)
+  }
 
   return (
     <div className="absolute top-3 right-3 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in">

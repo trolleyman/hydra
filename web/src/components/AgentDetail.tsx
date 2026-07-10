@@ -18,7 +18,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
@@ -28,6 +28,7 @@ import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { RelativeTime } from './LiveTime'
 import { deepEqual } from '../lib/deepEqual'
 import { Markdown } from '../lib/MarkdownRenderer'
+import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
@@ -75,11 +76,12 @@ function parsePrompt(prompt: string, projectId: string | null): { text: string; 
 
 // memo: AgentDetail re-renders on every live tick of its agent, but the prompt
 // never changes after spawn - no need to re-parse/re-render its markdown.
-const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string | null }) {
-  // A box that scrolls when the prompt is tall; short prompts show no scrollbar
-  // since the content fits under the max-height. The negative top margin tucks
-  // it a little closer to the metadata above, and the bottom gradient softens
-  // the cutoff as a long prompt scrolls out of view.
+// The inner rendering of a prompt: the markdown body plus the referenced upload
+// attachments as chips, with a lightbox for image thumbnails. The chrome
+// (border/background/scroll) lives in the wrappers below - PromptBlock's box and
+// CollapsiblePrompt's card - so this stays a bare content fragment, shared so the
+// two never drift.
+const PromptContent = memo(function PromptContent({ prompt, projectId }: { prompt: string; projectId: string | null }) {
   const { text, attachments } = useMemo(() => parsePrompt(prompt, projectId), [prompt, projectId])
   // Index into the image-only attachments while the lightbox is open; clicking a
   // thumbnail opens it here, mirroring the spawn form.
@@ -87,19 +89,14 @@ const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: s
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   return (
-    <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      {/* A taller max-height means most prompts (incl. a code block or two)
-          don't need to scroll at all. */}
-      <div className="overflow-y-auto max-h-96">
-        {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
-        <AttachmentChips
-          attachments={attachments}
-          size="md"
-          className={text ? 'mt-3' : ''}
-          onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
-        />
-      </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
+    <>
+      {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
+      <AttachmentChips
+        attachments={attachments}
+        size="md"
+        className={text ? 'mt-3' : ''}
+        onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+      />
       {lightboxIndex !== null && lightboxImages.length > 0 && (
         <ImageLightbox
           images={lightboxImages}
@@ -108,6 +105,23 @@ const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: s
           onClose={() => setLightboxIndex(null)}
         />
       )}
+    </>
+  )
+})
+
+const PromptBlock = memo(function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string | null }) {
+  // A box that scrolls when the prompt is tall; short prompts show no scrollbar
+  // since the content fits under the max-height. The negative top margin tucks
+  // it a little closer to the metadata above, and the bottom gradient softens
+  // the cutoff as a long prompt scrolls out of view.
+  return (
+    <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      {/* A taller max-height means most prompts (incl. a code block or two)
+          don't need to scroll at all. */}
+      <div className="overflow-y-auto max-h-96">
+        <PromptContent prompt={prompt} projectId={projectId} />
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
     </div>
   )
 })
@@ -137,17 +151,28 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
         aria-expanded={open}
         className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-gray-100/70 dark:hover:bg-gray-700/40 transition-colors"
       >
-        {open ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 shrink-0">Prompt</span>
-        {!open && <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{preview}</span>}
+        {!open && (
+          // Render the one-line preview through the inline markdown renderer (the
+          // same one the live-activity line uses) so `code`, *italic*, **bold**
+          // etc. show styled instead of as raw markers. singleLine collapses the
+          // newlines so it stays a single truncated row.
+          <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
+            {renderMarkdown(preview, { singleLine: true })}
+          </span>
+        )}
       </button>
-      {open && (
-        // PromptBlock carries its own -mt-2/mb-6 chrome; the negative bottom margin
-        // pulls the disclosure closed around it so it doesn't leave a fat gap.
-        <div className="px-3 -mb-4">
-          <PromptBlock prompt={prompt} projectId={projectId} />
+      {/* Animate the body open/closed with a 0fr->1fr grid row (height:auto can't
+          transition); the inner wrapper clips its overflow while collapsing. The
+          markdown renders straight into the card - no nested PromptBlock box. */}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden">
+          <div className="px-3 pb-3 max-h-96 overflow-y-auto">
+            <PromptContent prompt={prompt} projectId={projectId} />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 })
