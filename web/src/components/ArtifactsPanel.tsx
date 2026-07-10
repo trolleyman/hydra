@@ -7,6 +7,7 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
@@ -20,7 +21,7 @@ import { closeWebSocket } from '../lib/ws'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
-import { ABControlsContext } from './artifactDiffContext'
+import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { applyABShortcut } from '../lib/abShortcuts'
@@ -1196,7 +1197,7 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
 // only re-renders for its own WS/stream state or a deliberate prop change.
 export const ArtifactsPanel = memo(ArtifactsPanelImpl)
 
-function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactScale, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
+function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -1204,8 +1205,13 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   includeUncommitted?: boolean
   refreshKey: number
   imageDiffMode: ImageDiffMode
-  // Global tile-size multiplier (diff settings size slider), forwarded to every card.
+  // The image-diff mode (before/after, slider, side-by-side, onion) and the tile
+  // size multiplier - their controls live in this panel's own header cog (were in
+  // the diff-toolbar cog), so the state stays lifted in the diff viewer.
+  onImageDiffModeChange: (v: ImageDiffMode) => void
+  // Global tile-size multiplier (the size slider), forwarded to every card.
   artifactScale: number
+  onArtifactScaleChange: (v: number) => void
   // Global before/after view + "highlight" for A/B tiles, owned by the diff viewer so
   // they persist and so the header controls + B/H keyboard shortcuts drive every tile.
   artifactView: 'before' | 'after'
@@ -1554,6 +1560,30 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
             onSearchChange={setSearch}
             showChangeFilter
           />
+          {/* Artifact view options (were in the diff-toolbar cog): the image-diff
+              mode and the global tile-size multiplier. */}
+          <SettingsPopover label="Artifact options" width={208}>
+            <SettingsGroupLabel className="mb-2">Image Diff</SettingsGroupLabel>
+            <div className="flex flex-col gap-0.5">
+              {IMAGE_DIFF_MODES.map((opt) => (
+                <SettingsOptionRow key={opt.value} type="radio" name="hydra-image-diff-mode"
+                  checked={imageDiffMode === opt.value} onChange={() => onImageDiffModeChange(opt.value)} label={opt.label} />
+              ))}
+            </div>
+            {/* The grid auto-sizes each tile by aspect ratio; this scales every
+                tile up or down from there (drag a tile's edge to override one). */}
+            <div className="mt-3 flex items-center gap-2">
+              <SettingsGroupLabel className="shrink-0">Size</SettingsGroupLabel>
+              <input
+                type="range" min={0.5} max={2} step={0.25} value={artifactScale}
+                onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
+                className="flex-1 accent-blue-500 cursor-pointer"
+                title="Scale every artifact tile up or down"
+              />
+              <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
+          </SettingsPopover>
         </div>
       </div>
       <div className="flex flex-col gap-2">

@@ -10,7 +10,7 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
+  Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
@@ -25,7 +25,8 @@ import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
 import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
-import { IMAGE_DIFF_MODES } from './components/artifactDiffContext'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './components/SettingsPopover'
+import { InfoTooltip } from './components/InfoTooltip'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
@@ -1828,133 +1829,6 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
   )
 }
 
-// ── Settings popup ────────────────────────────────────────────────────────────
-
-// memo: pinned in the always-visible Changes toolbar; every prop is a
-// primitive or a stable setter, so diff refreshes skip it.
-const SettingsPopup = memo(function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
-  ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange,
-  testGroupResult, onTestGroupResultChange, testUseScope, onTestUseScopeChange, testScopeAvailable }: {
-    fileView: FileView; onFileViewChange: (v: FileView) => void
-    sideBySide: boolean; onSideBySideChange: (v: boolean) => void
-    ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
-    singleFile: boolean; onSingleFileChange: (v: boolean) => void
-    imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
-    artifactScale: number; onArtifactScaleChange: (v: number) => void
-    testGroupResult: boolean; onTestGroupResultChange: (v: boolean) => void
-    testUseScope: boolean; onTestUseScopeChange: (v: boolean) => void
-    // False when no loaded test case carries a logical scope - the "Group by
-    // scope" checkbox greys out rather than silently doing nothing.
-    testScopeAvailable: boolean
-  }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
-
-  const viewOptions: { value: FileView; label: string }[] = [
-    { value: 'tree', label: 'Tree' },
-    { value: 'flat', label: 'Flat list' },
-    { value: 'grouped', label: 'Grouped by folder' },
-  ]
-
-  return (
-    <div ref={ref} className="relative">
-      <Tooltip content="Settings">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-label="View settings"
-          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-        </button>
-      </Tooltip>
-
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">File List</p>
-          <div className="flex flex-col gap-0.5 mb-3">
-            {viewOptions.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="radio" name="hydra-file-view" checked={fileView === opt.value}
-                  onChange={() => onFileViewChange(opt.value)} className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">Options</p>
-          <div className="flex flex-col gap-0.5">
-            {[
-              { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
-              { checked: ignoreWhitespace, onChange: onIgnoreWhitespaceChange, label: 'Ignore whitespace' },
-              { checked: singleFile, onChange: onSingleFileChange, label: 'One file at a time' },
-            ].map(({ checked, onChange, label }) => (
-              <label key={label} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
-                  className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
-              </label>
-            ))}
-          </div>
-          {/* Test-results view modes - two orthogonal checkboxes (they compose):
-              per-status sections, and trees keyed by class/describe scope instead
-              of filesystem path. Scope greys out when no case carries one. */}
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Test Results</p>
-          <div className="flex flex-col gap-0.5">
-            <label className="flex items-center gap-2 py-0.5 cursor-pointer">
-              <input type="checkbox" checked={testGroupResult} onChange={(e) => onTestGroupResultChange(e.target.checked)}
-                className="w-3 h-3 accent-blue-500" />
-              <span className="text-xs text-gray-700 dark:text-gray-300">Group by result</span>
-            </label>
-            <label
-              className={`flex items-center gap-2 py-0.5 ${testScopeAvailable ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-              title={testScopeAvailable ? undefined : 'No test case carries a class/describe scope'}
-            >
-              <input type="checkbox" checked={testUseScope} disabled={!testScopeAvailable}
-                onChange={(e) => onTestUseScopeChange(e.target.checked)} className="w-3 h-3 accent-blue-500" />
-              <span className="text-xs text-gray-700 dark:text-gray-300">Group by scope</span>
-            </label>
-          </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Artifact Diff</p>
-          <div className="flex flex-col gap-0.5">
-            {IMAGE_DIFF_MODES.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="radio" name="hydra-image-diff-mode" checked={imageDiffMode === opt.value}
-                  onChange={() => onImageDiffModeChange(opt.value)} className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          {/* The artifact grid sizes each tile automatically by aspect ratio (a
-              wide desktop shot spans more columns than a tall phone shot); this
-              slider scales every tile up or down from there, drag a tile (or its
-              edge) to override one, double-click the edge to auto-size. */}
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Size</span>
-            <input
-              type="range" min={0.5} max={2} step={0.25} value={artifactScale}
-              onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
-              className="flex-1 accent-blue-500 cursor-pointer"
-              title="Scale every artifact tile up or down"
-            />
-            <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
-          </div>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
-        </div>
-      )}
-    </div>
-  )
-})
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
@@ -2599,18 +2473,29 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const loadingSpinner = loadingDiff && hasExistingDiff && (
     <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
   )
-  const settingsCog = (
-    <SettingsPopup
-      fileView={fileView} onFileViewChange={setFileView}
-      sideBySide={sideBySide} onSideBySideChange={setSideBySide}
-      ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
-      singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
-      imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
-      artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
-      testGroupResult={testGroupResult} onTestGroupResultChange={setTestGroupResult}
-      testUseScope={testUseScope} onTestUseScopeChange={setTestUseScope}
-      testScopeAvailable={testsHaveScope}
-    />
+  // The Files section's own settings (was the diff-toolbar cog): the file-list
+  // view mode plus the diff-rendering options. Lives in the Files header now, so
+  // Tests/Artifacts each carry only their own options in their own headers.
+  const filesSettingsBtn = (
+    <SettingsPopover label="File options" width={208}>
+      <SettingsGroupLabel className="mb-2">File List</SettingsGroupLabel>
+      <div className="flex flex-col gap-0.5 mb-3">
+        {([
+          { value: 'tree', label: 'Tree' },
+          { value: 'flat', label: 'Flat list' },
+          { value: 'grouped', label: 'Grouped by folder' },
+        ] as { value: FileView; label: string }[]).map((opt) => (
+          <SettingsOptionRow key={opt.value} type="radio" name="hydra-file-view"
+            checked={fileView === opt.value} onChange={() => setFileView(opt.value)} label={opt.label} />
+        ))}
+      </div>
+      <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
+      <div className="flex flex-col gap-0.5">
+        <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />
+        <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
+        <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
+      </div>
+    </SettingsPopover>
   )
 
   const testsPanelEl = agent.branch_name && projectId && (
@@ -2622,7 +2507,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       includeUncommitted={artifactParams.includeUncommitted}
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
       groupResult={testGroupResult}
+      onGroupResultChange={setTestGroupResult}
       useScope={testUseScope && testsHaveScope}
+      onUseScopeChange={setTestUseScope}
       onScopeAvailable={setTestsHaveScope}
     />
   )
@@ -2652,7 +2539,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // flash a loading spinner and reset the user's selection).
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
       imageDiffMode={imageDiffMode}
+      onImageDiffModeChange={setImageDiffMode}
       artifactScale={artifactScale}
+      onArtifactScaleChange={setArtifactScale}
       artifactView={artifactView}
       onArtifactViewChange={setArtifactView}
       artifactHighlight={artifactHighlight}
@@ -2775,6 +2664,29 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
   ) : null
 
+  // The "Files" section header - a peer to the Tests / Previews / Artifacts
+  // headers (same icon + title + info + right-aligned settings button), sitting
+  // above the file-list column and diffs. Deliberately NOT sticky: unlike those
+  // panels, the file section fills the rest of the scroll, and each file card
+  // already docks its own sticky header at FILE_STICKY_TOP - a sticky Files
+  // header would sit at the same offset and collide with them. Only shown once
+  // a diff with files has loaded. Its cog holds the file-list + diff options
+  // that used to live in the Changes-bar cog.
+  const filesHeaderEl = diff && diff.files.length > 0 && (
+    <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] py-1.5 border-b border-gray-200 dark:border-gray-800">
+      <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+      <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
+      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      <InfoTooltip title="Files" width={460}>
+        <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
+        <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
+      </InfoTooltip>
+      <div className="ml-auto flex items-center gap-1.5">
+        {filesSettingsBtn}
+      </div>
+    </div>
+  )
+
   const dragOverlay = isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />
   const commentToast = commentSent && (
     <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
@@ -2827,7 +2739,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <div className="flex items-center gap-2 shrink-0">
           {loadingSpinner}
           {refreshBtn}
-          {settingsCog}
         </div>
       </div>
 
@@ -2848,7 +2759,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {/* Visual artifacts (e.g. screenshots) for the selected versions */}
       {artifactsPanelEl}
 
-      {/* Content */}
+      {/* Files section header (its cog holds the file-list + diff options) then
+          the file-list column + diffs. */}
+      {filesHeaderEl}
       {diffContentEl}
       {dragOverlay}
       {commentToast}
