@@ -3283,6 +3283,149 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	sendSimChatEvent(conn, string(result))
 }
 
+// simAskImplMarkdown is the big markdown-heavy block agent-ask types out slowly
+// at the end of its implementation turn. It deliberately exercises a broad slice
+// of the chat markdown renderer so the demo doubles as a manual test surface:
+// h2/h3 headings, an ordered (1-4) list, an unordered list, bold/italic/
+// strikethrough + inline code, a GFM table (which also shows off the shrink-to-
+// content table width), a fenced code block, a blockquote and a link.
+var simAskImplMarkdown = strings.Join([]string{
+	"## Config override resolution",
+	"",
+	"The loader now merges three layers, **last wins**:",
+	"",
+	"1. `config.toml` - the committed base, checked in for everyone.",
+	"2. `config.<env>.toml` - per-environment overrides (e.g. `config.prod.toml`).",
+	"3. `HYDRA_*` environment variables - the final say, for secrets and one-offs.",
+	"4. The merged result is validated *once*, so an override can fill a base gap.",
+	"",
+	"Each key resolves top-down, so a value present in *all three* ends up taking",
+	"the environment variable. Keys only the base defines pass through untouched,",
+	"and ~~partial tables replace wholesale~~ tables now deep-merge field by field.",
+	"",
+	"### What ships in the first cut",
+	"",
+	"- **Schema validation** - unknown keys are rejected at load time.",
+	"- Friendly errors: `unknown key \"retry.attemps\" (did you mean \"attempts\"?)`.",
+	"- A single `Load(root, env)` entry point; callers pass the active environment.",
+	"",
+	"Worked example - resolving `retry.max_attempts` across the layers:",
+	"",
+	"| Layer | Source | Value | Effective |",
+	"| ----- | ------ | ----: | :-------: |",
+	"| Base | config.toml | 3 | |",
+	"| Env | config.prod.toml | 5 | " + "✓" + " |",
+	"| Var | HYDRA_RETRY_MAX_ATTEMPTS | (unset) | |",
+	"",
+	"The merge itself is a small recursive pass:",
+	"",
+	"```go",
+	"func merge(dst, src map[string]any) {",
+	"    for k, v := range src {",
+	"        if sub, ok := v.(map[string]any); ok {",
+	"            if d, ok := dst[k].(map[string]any); ok {",
+	"                merge(d, sub)",
+	"                continue",
+	"            }",
+	"        }",
+	"        dst[k] = v",
+	"    }",
+	"}",
+	"```",
+	"",
+	"> Note: validation runs on the *merged* result, not each layer - an override",
+	"> is allowed to fill in a key the base leaves out.",
+	"",
+	"Full details live in [the config docs](https://example.com/docs/config). Want",
+	"me to add hot-reload next, or wire up secrets interpolation first?",
+}, "\n")
+
+// streamSimAskImplementation streams the large, feature-rich turn agent-ask
+// produces once its AskUserQuestion is answered: an opening paragraph, two
+// interleaved tool steps with a thinking block between them, then the long
+// markdown-heavy block (simAskImplMarkdown) typed in slowly. It exercises the
+// live streaming path end to end - stream_event deltas feeding the working
+// indicator, and a thinking card flipping "Thinking..." -> "Thought for Xs".
+func streamSimAskImplementation(conn *safeConn, sessionID string) {
+	streamEv := func(event map[string]any) {
+		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": sessionID})
+		sendSimChatEvent(conn, string(line))
+	}
+	// streamText types one assistant text block out word by word (feeding the
+	// running output-token count), then settles the full assistant event.
+	streamText := func(msgID, text string, delay time.Duration) {
+		streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1400, "output_tokens": 1}}})
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+		tokens := 1
+		for chunk := range strings.SplitSeq(text, " ") {
+			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+			tokens += 2
+			streamEv(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": tokens}})
+			time.Sleep(delay)
+		}
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+		streamEv(map[string]any{"type": "message_stop"})
+		settle, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "text", "text": text}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(settle))
+	}
+	// streamThinking streams a live thinking block, settles it, then emits the
+	// backend-measured duration so the card lands on "Thought for Xs".
+	streamThinking := func(msgID, thinking string, dur time.Duration) {
+		streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1400, "output_tokens": 1}}})
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking"}})
+		streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": thinking}})
+		time.Sleep(dur)
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+		streamEv(map[string]any{"type": "message_stop"})
+		settle, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "thinking", "thinking": thinking}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(settle))
+		sendSimThinking(conn, msgID, dur.Milliseconds())
+	}
+	// toolStep emits a tool_use card, pauses as if it were running, then lands
+	// its tool_result so the card settles out of the running state.
+	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration) {
+		use, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "tool_use", "id": toolID, "name": name, "input": input}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(use))
+		time.Sleep(dur)
+		res, _ := json.Marshal(map[string]any{
+			"type":       "user",
+			"message":    map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": result}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(res))
+	}
+
+	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result. Let me read the current loader first.", 45*time.Millisecond)
+	toolStep("msg_ask_impl_2", "toolu_ask_read", "Read",
+		map[string]any{"file_path": "internal/config/load.go"},
+		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond)
+	streamThinking("msg_ask_impl_3", "Load reads a single file today. I'll overlay config.<env>.toml on top via a recursive merge, then validate the merged map against the known keys.", 1600*time.Millisecond)
+	toolStep("msg_ask_impl_4", "toolu_ask_edit", "Edit",
+		map[string]any{"file_path": "internal/config/load.go", "old_string": "return parseFile(filepath.Join(root, \"config.toml\"))", "new_string": "base, err := parseFile(filepath.Join(root, \"config.toml\"))\nif err != nil {\n\treturn nil, err\n}\nreturn applyEnvOverlay(base, root, env)"},
+		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond)
+	streamText("msg_ask_impl_5", "That's the merge wired in. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
+	streamText("msg_ask_impl_6", simAskImplMarkdown, 70*time.Millisecond)
+
+	result, _ := json.Marshal(map[string]any{
+		"type": "result", "subtype": "success", "duration_ms": 9200, "total_cost_usd": 0.0361,
+		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 1820, "cache_read_input_tokens": 22400, "cache_creation_input_tokens": 980},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(result))
+}
+
 // --- Simulated AskUserQuestion agent (agent-ask) ------------------------------
 
 // simAskQuestionInput is the AskUserQuestion input the simulated agent-ask
@@ -3353,7 +3496,10 @@ func handleSimAskWS(conn *safeConn) {
 				"session_id": "sim-ask",
 			})
 			sendSimChatEvent(conn, string(toolResult))
-			streamSimReply(conn, "sim-ask", "msg_ask_ack", "Great - going with those choices. This mock stops here; a real head would start implementing now.")
+			// Answering the question kicks off the big streamed implementation turn
+			// (interleaved tools + thinking, then a long markdown block typed in
+			// slowly) so the demo shows a large chat streaming in live.
+			streamSimAskImplementation(conn, "sim-ask")
 			sendStatusUpdate(conn, "waiting")
 		case "set_model":
 			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))

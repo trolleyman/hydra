@@ -127,8 +127,11 @@ const STYLES: Record<Variant, Style> = {
     // tinted header row, horizontal row rules only, and subtle zebra striping.
     // Warm stone tones (not cool gray) so it doesn't read blue against the chat
     // view's warm palette (#faf9f5 / #262624, stone borders, white/opacity tints).
-    tableWrap: 'my-2 max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
-    table: 'w-full border-collapse text-sm',
+    // `w-fit` (paired with the table dropping `w-full`) hugs the content instead
+    // of stretching to fill the chat column; `max-w-full` still caps it and
+    // `overflow-x-auto` scrolls a genuinely wide table.
+    tableWrap: 'my-2 w-fit max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
+    table: 'border-collapse text-sm',
     th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
