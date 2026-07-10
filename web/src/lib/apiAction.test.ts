@@ -47,5 +47,15 @@ describe('runWithToast', () => {
     const res = await runWithToast(() => Promise.reject(new Error('boom')), { errorPrefix: 'Failed to rename agent' })
     expect(res.ok).toBe(false)
     expect(useToastStore.getState().toasts[0].message).toBe('Failed to rename agent: boom')
+    expect(useToastStore.getState().toasts[0].code).toBeUndefined()
+  })
+
+  it('splits a code-like error detail into a code block under the prefix headline', async () => {
+    const err = new Error('Generic Error: status: 501; body: { "error": "Not implemented in simulation mode" }')
+    const res = await runWithToast(() => Promise.reject(err), { errorPrefix: 'Failed to switch mode' })
+    expect(res.ok).toBe(false)
+    const toast = useToastStore.getState().toasts[0]
+    expect(toast.message).toBe('Failed to switch mode')
+    expect(toast.code).toBe(err.message)
   })
 })
