@@ -1706,6 +1706,20 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       type: note ? 'warning' : 'confirm',
       variant: 'updateBase',
       details: { fromBranch: baseBranch ?? '-', toBranch: agent.branch_name ?? '-', behind, note },
+      secondaryLabel: 'Fix with agent',
+      // Hand the update off to the agent session instead of merging server-side -
+      // mirrors the merge-conflict dialog's "Fix with agent". The primary Confirm
+      // stays a plain server-side update-from-base. Injects the request into the
+      // agent's input, the same channel the chat box uses.
+      onSecondary: async () => {
+        try {
+          await api.default.sendAgentInput(projectId ?? '', agent.id, {
+            text: `Update this branch from its base by merging ${baseBranch} in, resolving any conflicts that arise.`,
+          })
+        } catch {
+          // silently ignore - mirrors the merge-conflict "Fix with agent" path
+        }
+      },
       onConfirm: async () => {
         setUpdating(true)
         try {
