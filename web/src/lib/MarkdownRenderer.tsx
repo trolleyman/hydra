@@ -250,6 +250,12 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
 // index key -> no remount -> their fade-in doesn't restart) and only the freshly
 // mounted trailing spans animate. Code/pre are skipped (splitting a highlighted
 // block would fight the syntax spans and re-fade on every keystroke of code).
+//
+// Only NON-whitespace text is wrapped: the real content lives in phrasing
+// contexts (p, li, td, headings...) that legally hold a <span>, while the text
+// nodes sitting DIRECTLY inside structural containers (table/thead/tbody/tr, ul/
+// ol) are just the insignificant whitespace between rows/items - wrapping those
+// would put a <span> where only <tr>/<td>/<li> may go and break DOM nesting.
 type HastNode = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HastNode[] }
 function rehypeWordFade() {
   const splitText = (value: string): HastNode[] =>
@@ -264,7 +270,7 @@ function rehypeWordFade() {
     if (!node.children) return
     const out: HastNode[] = []
     for (const child of node.children) {
-      if (child.type === 'text' && !inCode && child.value) {
+      if (child.type === 'text' && !inCode && child.value?.trim()) {
         out.push(...splitText(child.value))
       } else {
         if (child.type === 'element') {
