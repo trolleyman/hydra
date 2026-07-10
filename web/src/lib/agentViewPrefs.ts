@@ -49,10 +49,7 @@ export type AgentViewPrefs = {
   // Unsent chat composer text, so a draft survives switching agents and reloads
   // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
   chatDraft?: string
-  // Whether the diff body (file list + file diffs) is hidden via the Changes
-  // bar's eye toggle, and (split layout) whether the working pane's prompt
-  // disclosure is collapsed.
-  diffHidden?: boolean
+  // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
 }
 
@@ -80,7 +77,6 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
-    diffHidden: stored.diffHidden,
     promptCollapsed: stored.promptCollapsed,
   }
 }

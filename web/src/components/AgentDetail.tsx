@@ -18,7 +18,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
@@ -610,7 +610,17 @@ export function AgentDetail({
   const isWide = useMediaQuery(SPLIT_QUERY)
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
+  const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
   const splitActive = splitEnabled && isWide && !agent.archived
+  // "Diff only" focus mode: the working (terminal/chat) pane is hidden and the
+  // inspector gets the whole width. On a wide screen that's the split layout's
+  // `working` collapse state (handled below); on a narrow screen - where there
+  // is no split - it swaps the classic stacked page for a dedicated diff-only
+  // view (just the inspector, no metadata/prompt/terminal). Available whenever
+  // the split layout is enabled and the agent is live.
+  const diffFocusAvailable = splitEnabled && !agent.archived
+  const diffOnly = diffFocusAvailable && paneCollapse === 'working'
+  const workingPaneLabel = agent.chat_mode === true ? 'chat' : 'terminal'
   // Left (working) pane's share of the split, persisted like sidebarWidth.
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
   const splitRatioRef = useRef(splitRatio)
@@ -1495,6 +1505,19 @@ export function AgentDetail({
                 variant: 'segment' as const,
               }]
             : []),
+          // "Diff only" toggle - the mirror of Hide inspector: it hides the
+          // working (terminal/chat) pane so the diff gets the full width. Unlike
+          // Hide inspector it's also offered on narrow screens, where there is no
+          // split: there it swaps the stacked page for a diff-only view. Toggling
+          // it back reveals the working pane / returns to the full page.
+          ...(diffFocusAvailable
+            ? [{
+                label: diffOnly ? `Show ${workingPaneLabel}` : 'Diff only',
+                icon: diffOnly ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />,
+                onClick: toggleWorking,
+                variant: 'segment' as const,
+              }]
+            : []),
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
@@ -1564,6 +1587,20 @@ export function AgentDetail({
           {/* Transparent overlay during the divider drag so the pointer isn't
               swallowed by the xterm/iframe (gotcha #5). */}
           {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
+        </div>
+      ) : diffOnly ? (
+        // ── Diff-only view (narrow screen, "Diff only" toggled on) ───────────
+        // No split here (the viewport is too narrow), so instead of hiding a
+        // pane we render just the inspector full-bleed - the diff page the user
+        // asked for, no metadata/prompt/terminal. The top bar's toggle (now
+        // "Show <terminal|chat>") brings the stacked page back.
+        <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
+          <InspectorPane
+            agent={agent}
+            projectId={projectId}
+            externalRefreshTrigger={diffRefreshTrigger}
+            externalArtifactRefresh={artifactRefreshTrigger}
+          />
         </div>
       ) : (
         // ── Classic single-column stacked layout (flag off, or narrow) ───────

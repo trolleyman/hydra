@@ -13,7 +13,6 @@ import {
   Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
-  Eye, EyeOff,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -1989,16 +1988,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Whether the diff body (file-list column + file diffs) is hidden - the
-  // Changes bar's eye toggle. Tests/previews/artifacts keep rendering, so this
-  // is a "focus on the panels" mode. Persisted per agent like collapsedFiles.
-  const [diffHidden, setDiffHidden] = useState<boolean>(
-    () => !!loadAgentViewPrefs(projectId, agent.id).diffHidden,
-  )
-  useEffect(() => {
-    patchAgentViewPrefs(projectId, agent.id, { diffHidden })
-  }, [projectId, agent.id, diffHidden])
-
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
   const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
@@ -2607,20 +2596,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       </button>
     </Tooltip>
   )
-  // Hide/show the diff body (file list + file contents). Stays highlighted while
-  // hidden so it's obvious why the diff is gone; the panels above are unaffected.
-  const hideDiffBtn = (
-    <Tooltip content={diffHidden ? 'Show diff' : 'Hide diff'}>
-      <button
-        onClick={() => setDiffHidden((v) => !v)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${diffHidden
-          ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-      >
-        {diffHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-      </button>
-    </Tooltip>
-  )
   const loadingSpinner = loadingDiff && hasExistingDiff && (
     <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
   )
@@ -2851,7 +2826,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             content above wraps to (parent is items-start, this group is shrink-0). */}
         <div className="flex items-center gap-2 shrink-0">
           {loadingSpinner}
-          {hideDiffBtn}
           {refreshBtn}
           {settingsCog}
         </div>
@@ -2874,8 +2848,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {/* Visual artifacts (e.g. screenshots) for the selected versions */}
       {artifactsPanelEl}
 
-      {/* Content (hidden entirely by the Changes bar's eye toggle) */}
-      {!diffHidden && diffContentEl}
+      {/* Content */}
+      {diffContentEl}
       {dragOverlay}
       {commentToast}
     </div>
