@@ -13,9 +13,8 @@ import {
   Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
-  FileDiff as FileDiffIcon, FlaskConical, MonitorPlay,
+  Eye, EyeOff,
 } from 'lucide-react'
-import { TestVerdictChip } from './components/TestVerdict'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
@@ -1960,45 +1959,6 @@ const SettingsPopup = memo(function SettingsPopup({ fileView, onFileViewChange, 
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export type InspectorView = 'diff' | 'tests' | 'previews'
-
-// The inspector pane's Diff | Tests | Previews view selector (new split layout).
-// A segmented control; a segment hides when its view has no data (Tests when the
-// project configures no runners, Previews when no server scripts). Diff is always
-// present. The Tests segment carries the verdict chip inline.
-function ViewTabs({ view, onChange, testsAvailable, previewsAvailable, tests }: {
-  view: InspectorView
-  onChange: (v: InspectorView) => void
-  testsAvailable: boolean
-  previewsAvailable: boolean
-  tests?: AgentResponse['tests']
-}) {
-  const seg = (active: boolean) =>
-    `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-      active
-        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
-        : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-    }`
-  return (
-    <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-      <button type="button" className={seg(view === 'diff')} onClick={() => onChange('diff')}>
-        <FileDiffIcon className="w-3.5 h-3.5" /> Diff
-      </button>
-      {testsAvailable && (
-        <button type="button" className={seg(view === 'tests')} onClick={() => onChange('tests')}>
-          <FlaskConical className="w-3.5 h-3.5" /> Tests
-          {tests && tests.status !== 'none' && <TestVerdictChip tests={tests} variant="sm" />}
-        </button>
-      )}
-      {previewsAvailable && (
-        <button type="button" className={seg(view === 'previews')} onClick={() => onChange('previews')}>
-          <MonitorPlay className="w-3.5 h-3.5" /> Previews
-        </button>
-      )}
-    </div>
-  )
-}
-
 // DiffViewer only reads a handful of the agent's fields (listed in the memo
 // comparator below). The parent AgentDetail re-renders on EVERY live tick of
 // the agent - activity-line changes, streamed test counts - and each of those
@@ -2014,16 +1974,12 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
   prev.agent.worktree_path === next.agent.worktree_path &&
-  prev.agent.tests?.status === next.agent.tests?.status &&
-  prev.agent.tests?.passed === next.agent.tests?.passed &&
-  prev.agent.tests?.failed === next.agent.tests?.failed &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
 
-// inspector: renders in the new two-pane layout's right pane - the target
-// selector + a Diff | Tests | Previews view selector on top, with only the
-// selected view mounted below (the diff owning the base selector + its toolbar,
-// artifacts folded into it). Omitted -> the classic single-column stacked layout
-// (everything below the Changes bar at once), kept for the flag-off fallback.
+// inspector: renders in the new two-pane layout's right pane. Same stacked
+// layout as the classic single-column page (Changes bar with the base -> head
+// selectors, then tests, previews, artifacts, and the diff itself), just
+// without the top margin - the pane's own padding supplies it.
 function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
@@ -2033,27 +1989,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Inspector-pane view selector (new split layout only): which of Diff / Tests
-  // / Previews is showing. Persisted per agent so the pane restores its last
-  // view. The target selector (rightSel) is shared across all three views.
-  const [inspectorView, setInspectorView] = useState<InspectorView>(
-    () => loadAgentViewPrefs(projectId, agent.id).inspectorView ?? 'diff',
+  // Whether the diff body (file-list column + file diffs) is hidden - the
+  // Changes bar's eye toggle. Tests/previews/artifacts keep rendering, so this
+  // is a "focus on the panels" mode. Persisted per agent like collapsedFiles.
+  const [diffHidden, setDiffHidden] = useState<boolean>(
+    () => !!loadAgentViewPrefs(projectId, agent.id).diffHidden,
   )
   useEffect(() => {
-    if (inspector) patchAgentViewPrefs(projectId, agent.id, { inspectorView })
-  }, [inspector, inspectorView, projectId, agent.id])
-  // Whether the project configures any server previews - reported up by
-  // PreviewPanel so the Previews segment can hide when there is nothing to show.
-  const [previewsAvailable, setPreviewsAvailable] = useState(false)
-  // Tests availability comes straight off the agent (no extra fetch): the
-  // verdict is 'none' when the project configures no runners.
-  const testsAvailable = !!agent.tests && agent.tests.status !== 'none'
-  // Fall back to the Diff view if the active segment vanishes (e.g. tests
-  // disappear). Diff is always available.
-  useEffect(() => {
-    if (inspectorView === 'tests' && !testsAvailable) setInspectorView('diff')
-    if (inspectorView === 'previews' && !previewsAvailable) setInspectorView('diff')
-  }, [inspectorView, testsAvailable, previewsAvailable])
+    patchAgentViewPrefs(projectId, agent.id, { diffHidden })
+  }, [projectId, agent.id, diffHidden])
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
@@ -2663,6 +2607,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       </button>
     </Tooltip>
   )
+  // Hide/show the diff body (file list + file contents). Stays highlighted while
+  // hidden so it's obvious why the diff is gone; the panels above are unaffected.
+  const hideDiffBtn = (
+    <Tooltip content={diffHidden ? 'Show diff' : 'Hide diff'}>
+      <button
+        onClick={() => setDiffHidden((v) => !v)}
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${diffHidden
+          ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
+      >
+        {diffHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+      </button>
+    </Tooltip>
+  )
   const loadingSpinner = loadingDiff && hasExistingDiff && (
     <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
   )
@@ -2700,7 +2658,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       headRef={artifactParams.headRef}
       includeUncommitted={artifactParams.includeUncommitted}
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
-      onAvailability={setPreviewsAvailable}
     />
   )
   const artifactsPanelEl = agent.branch_name && (
@@ -2764,11 +2721,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           </span>
         </div>
         <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-        {/* Resize handle */}
+        {/* Width drag handle: a visible grabber pill (like the split divider's)
+            rather than a bare invisible strip, so the file list reads as
+            resizable at a glance. */}
         <div
           onMouseDown={startResizing}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
-        />
+          title="Drag to resize"
+          className="group/fl absolute right-0 top-0 bottom-0 w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors z-20"
+        >
+          <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
+        </div>
       </div>
 
       {/* Diff content */}
@@ -2846,89 +2808,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
   )
 
-  // ── New inspector layout ───────────────────────────────────────────────────
-  // Row 1: the global target selector + the Diff | Tests | Previews view tabs.
-  // Row 2: the selected view's own toolbar. Only the active view renders below;
-  // Tests/Previews are kept mounted-but-hidden so their availability guards drive
-  // the tabs and the (future) preview iframe doesn't tear down on every switch.
-  if (inspector) {
-    return (
-      <div ref={rootRef} style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
-        <div ref={changesBarRef} className="sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 -mx-1.5 sm:-mx-3 px-1.5 sm:px-3 py-2 mb-4 border-b border-gray-200 dark:border-gray-800 shadow-sm flex flex-col gap-2">
-          {/* Row 1: global target selector + view selector. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-gray-400 dark:text-gray-500 select-none">Target</span>
-            <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
-            <div className="flex-1 min-w-0" />
-            <ViewTabs
-              view={inspectorView}
-              onChange={setInspectorView}
-              testsAvailable={testsAvailable}
-              previewsAvailable={previewsAvailable}
-              tests={agent.tests}
-            />
-          </div>
-          {/* Row 2: the selected view's own toolbar. */}
-          {inspectorView === 'diff' && (
-            <div className="flex items-start gap-3">
-              <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-                {statsEl}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 dark:text-gray-500 select-none">vs</span>
-                  <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
-                </div>
-                {resetBtn}
-                {warningButtons}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {loadingSpinner}
-                {refreshBtn}
-                {settingsCog}
-              </div>
-            </div>
-          )}
-          {inspectorView === 'tests' && testsAvailable && (
-            <div className="flex items-center gap-4">
-              {/* Group-by controls relocated from the diff settings cog so they
-                  stay reachable while Tests is the active view (gotcha #9). */}
-              <label className="inline-flex items-center gap-1.5 text-xs cursor-pointer text-gray-600 dark:text-gray-300">
-                <input type="checkbox" className="accent-blue-600" checked={testGroupResult} onChange={(e) => setTestGroupResult(e.target.checked)} />
-                Group by result
-              </label>
-              <label className={`inline-flex items-center gap-1.5 text-xs ${testsHaveScope ? 'cursor-pointer text-gray-600 dark:text-gray-300' : 'opacity-40 cursor-not-allowed text-gray-500'}`}>
-                <input type="checkbox" className="accent-blue-600" checked={testUseScope} disabled={!testsHaveScope} onChange={(e) => setTestUseScope(e.target.checked)} />
-                Group by scope
-              </label>
-              <div className="flex-1" />
-              {loadingSpinner}
-              {refreshBtn}
-            </div>
-          )}
-        </div>
-
-        {/* Body: only the active view (Tests/Previews stay mounted but hidden). */}
-        {inspectorView === 'diff' && (
-          <>
-            {diffErrorBanner}
-            {artifactsPanelEl}
-            {diffContentEl}
-          </>
-        )}
-        <div style={{ display: inspectorView === 'tests' ? 'block' : 'none' }}>{testsPanelEl}</div>
-        <div style={{ display: inspectorView === 'previews' ? 'block' : 'none' }}>{previewPanelEl}</div>
-        {dragOverlay}
-        {commentToast}
-      </div>
-    )
-  }
-
-  // ── Classic stacked layout (flag-off fallback) ─────────────────────────────
+  // ── Stacked layout (single-column page AND the split layout's inspector pane) ─
   return (
     // --sticky-changes-h (the measured Changes-toolbar height) is published here so
     // the artifacts filter bar and card headers below can dock flush beneath it even
     // when the toolbar wraps. See the ResizeObserver above.
-    <div ref={rootRef} className="mt-4" style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
+    // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
+    // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
+    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no
@@ -2964,6 +2851,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             content above wraps to (parent is items-start, this group is shrink-0). */}
         <div className="flex items-center gap-2 shrink-0">
           {loadingSpinner}
+          {hideDiffBtn}
           {refreshBtn}
           {settingsCog}
         </div>
@@ -2986,8 +2874,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {/* Visual artifacts (e.g. screenshots) for the selected versions */}
       {artifactsPanelEl}
 
-      {/* Content */}
-      {diffContentEl}
+      {/* Content (hidden entirely by the Changes bar's eye toggle) */}
+      {!diffHidden && diffContentEl}
       {dragOverlay}
       {commentToast}
     </div>

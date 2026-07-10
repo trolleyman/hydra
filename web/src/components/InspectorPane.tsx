@@ -1,17 +1,18 @@
 import type { AgentResponse } from '../api'
 import { DiffViewer } from '../DiffViewer'
 
-// InspectorPane is the right-hand "inspector" pane of the new two-pane agent
+// InspectorPane is the right-hand "inspector" pane of the two-pane agent
 // layout. It owns its own scroll container (independent of the left working
-// pane), inside which DiffViewer renders in `inspector` mode: a target selector
-// plus a Diff | Tests | Previews view switcher on top, and the selected view
-// below (the diff owning the base selector, with artifacts folded into it).
+// pane), inside which DiffViewer renders the same stacked layout as the classic
+// single-column page: the Changes bar (base -> head selectors), then tests,
+// previews, artifacts, and the diff itself (`inspector` only drops DiffViewer's
+// top margin - the pane's padding supplies it).
 //
-// The pane is deliberately thin - the view selector, per-view toolbars and the
-// sticky-header coordination all live inside DiffViewer's inspector branch, which
-// already holds the diff/tests/preview state. This wrapper exists to give that a
-// dedicated scroll context (so sticky headers dock against THIS pane, not the
-// page) and a clean seam the split layout mounts.
+// The pane is deliberately thin - the toolbars and the sticky-header
+// coordination all live inside DiffViewer, which already holds the
+// diff/tests/preview state. This wrapper exists to give that a dedicated scroll
+// context (so sticky headers dock against THIS pane, not the page) and a clean
+// seam the split layout mounts.
 export function InspectorPane({
   agent,
   projectId,
