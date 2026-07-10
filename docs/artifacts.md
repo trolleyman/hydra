@@ -49,6 +49,29 @@ The command is given:
 Results are cached per commit under `.hydra/local/artifacts/out/<name>/<version-key>`
 (gitignored, never committed), so re-viewing a diff is free.
 
+## Streaming outputs (`::hydra:artifact::`)
+
+By default every output is collected when the command **exits**, so all the tiles
+appear (and get diffed) at once. A command can instead stream them **as they
+render**, like the tests panel's `::hydra:test:*::` markers: right after writing a
+file (and its `.meta` sidecar), print a line on stdout —
+
+```sh
+echo "::hydra:artifact:: home-dark.png"
+```
+
+— where the path is relative to `$HYDRA_ARTIFACT_OUTPUT`. Hydra scans just that one
+file (hash + pixel size + sidecar), diffs it against the other side the moment both
+sides know it (the counterpart has the file, or has already settled without it — so
+each tile is pixel-diffed exactly once), and streams the tile straight into the
+panel while the rest of the run continues.
+
+The marker is **optional and additive**: emit none and every output is still
+collected by the post-exit scan, which also reconciles anything the markers missed.
+Emit it only **once the file is fully written** — a marker for a not-yet-flushed
+file is ignored (the final scan catches it). Print `::hydra:progress:: <text>` to
+set the live progress header shown while the command runs.
+
 ## How files are compared
 
 Each output file is matched by name across the two sides and classified as

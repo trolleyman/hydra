@@ -29,6 +29,11 @@
 // stops treating ordinary stdout as progress, so the noisy subprocess output
 // (bun install, vite build) below can't hijack the header. Keep markers short and
 // human-readable; everything still lands in the full build log.
+//
+// Streaming: right after writing each "<name>.png" (and its .meta sidecar) we emit
+// a "::hydra:artifact:: <name>.png" marker, so Hydra scans + diffs that one tile
+// and streams it into the panel as it renders, rather than surfacing every image
+// at once when this command exits.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -1606,8 +1611,10 @@ try {
         imageDiffMode: 'side-by-side',
         searchArtifacts: 'zzzznomatch',
       },
-      // The in-flight artifact card expanded to reveal its live generation logs:
-      // the two sides (Before / After) build in parallel, each a scrollable,
+      // The in-flight artifact card expanded, documenting the per-file
+      // ::hydra:artifact:: streaming: the tiles that have finished so far render at
+      // the top (they trickle in live over the WS, see HandleArtifactsWS), above
+      // the two sides' (Before / After) live generation logs - each a scrollable,
       // monospaced stdout+stderr stream (stderr in red), with the header showing
       // both sides' progress joined by "·" and elapsed time. agent-1's
       // "components" set is the generating one (internal/http/simulation.go).
@@ -1615,7 +1622,7 @@ try {
         name: 'artifact-log',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
-        viewport: { width: 1280, height: 1280 },
+        viewport: { width: 1280, height: 1400 },
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
       },
@@ -2186,6 +2193,13 @@ try {
             const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
             btn?.click()
           }, pg.expandArtifact)
+          // The "components" set streams its tiles in over time (the sim's
+          // ::hydra:artifact:: demo, see HandleArtifactsWS). Wait for the LAST tile
+          // ("toast.png") so the shot always captures the full streamed grid rather
+          // than a racy mid-trickle subset.
+          if (pg.expandArtifact === 'components') {
+            await page.waitForFunction(() => document.body.textContent?.includes('toast.png'), undefined, { timeout: 15000 })
+          }
           await settle(page)
         }
         if (pg.searchArtifacts) {
@@ -2626,6 +2640,11 @@ try {
         // absent dpi as 1, so desktop sidecars stay byte-identical to before.
         writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
+        // Announce the finished file so Hydra scans + diffs just this tile and
+        // streams it into the panel now, instead of waiting for the whole run to
+        // exit. The path is relative to HYDRA_ARTIFACT_OUTPUT, and both the image
+        // and its .meta sidecar are already written above.
+        console.log(`::hydra:artifact:: ${pg.name}${suffix}.png`)
         await ctx.close()
         done++
         // Progress marker surfaced live by Hydra as the header, e.g.

@@ -1775,25 +1775,25 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}
+	leftProgress := "button.png 4/9"
 	rightProgress := "artifacts-ab-dark.png 7/12"
 	startedAt := simNow().Add(-8 * time.Second).Unix()
+	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
 		simReadyChangedSet(),
-		// In-flight generation where one side has already FAILED while the other is
-		// still building: the LEFT (before) side exited non-zero (empty live log +
-		// persisted log URL + left_error), the RIGHT (after) side is still rendering.
-		// The whole set stays "generating", but the failed side's live log gets the
-		// red error border immediately - it must NOT read as a clean (green) finish
-		// just because its live log drained. The still-generating side stays neutral.
+		// In-flight generation where BOTH sides are still building AND tiles are
+		// already streaming in: the HandleArtifactsWS handler pushes "file" messages
+		// (see simStreamedArtifactFiles) into this set, so an expanded card shows the
+		// finished tiles above both live build logs - the per-file ::hydra:artifact::
+		// streaming, before the run settles. Files start empty; the WS fills them.
 		{
 			Name:          "components",
 			Status:        api.ArtifactSetStatusGenerating,
+			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
-			LeftLog:       &[]api.ArtifactLogLine{},
-			LeftLogUrl:    ptr(simLogURL("components", "error/left")),
-			LeftError:     ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
+			LeftLog:       &leftLog,
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},
@@ -3454,10 +3454,20 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// simArtifactStreamInterval is the gap between the mock "components" tiles the
+// artifacts WS trickles in, so opening the agent page shows them pop in one at a
+// time (the ::hydra:artifact:: streaming) rather than all at once. Small enough
+// that the whole set has arrived within a second or two - the screenshot
+// generator waits for the last tile (see expandArtifact in take-screenshots.ts)
+// so it stays deterministic despite the timing.
+const simArtifactStreamInterval = 600 * time.Millisecond
+
 // HandleArtifactsWS streams the mock artifact sets over a WebSocket, mirroring
 // the real server's endpoint. It sends one snapshot (the simulated states,
-// including the in-flight set's live log) and then keeps the connection open,
-// ignoring client messages, until the peer closes it.
+// including the in-flight set's live log), then trickles the in-flight
+// "components" set's tiles in one at a time - a live demo of the per-file
+// ::hydra:artifact:: streaming - and finally keeps the connection open, ignoring
+// client messages, until the peer closes it.
 func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
@@ -3467,14 +3477,80 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	msg := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
-	data, _ := json.Marshal(msg)
+	snapshot := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
+	data, _ := json.Marshal(snapshot)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+	// Read (and discard) client frames in the background, closing done on any error
+	// so the trickle below stops the moment the peer disconnects.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Trickle each finished tile into the still-generating "components" set, one per
+	// interval, exactly as the real server pushes a "file" message per compared
+	// output. Each tile lands as a "file" frame the panel upserts into the card.
+	for _, f := range simStreamedArtifactFiles(id) {
+		select {
+		case <-done:
+			return
+		case <-time.After(simArtifactStreamInterval):
+		}
+		fdata, _ := json.Marshal(artifactWSMessage{Type: "file", Script: "components", File: &f})
+		if err := conn.WriteMessage(websocket.TextMessage, fdata); err != nil {
 			return
 		}
+	}
+
+	<-done
+}
+
+// simStreamedArtifactFiles is the ordered list of tiles the simulated in-flight
+// "components" generation finishes and streams over the WS as "file" messages
+// (see HandleArtifactsWS), one per ::hydra:artifact:: marker. A mix of freshly
+// added components (right-only) and modified ones (a "Draft" grey badge going
+// green "Live", so the pixel diff has something to reveal), so the streaming grid
+// documents both change kinds arriving mid-run. Ordered so the trickle reads like
+// a capture loop working through a page list.
+func simStreamedArtifactFiles(id string) []api.ArtifactFile {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ArtifactFile{
+		{
+			Name:        "button.png",
+			ChangeType:  api.ArtifactFileChangeTypeModified,
+			LeftUrl:     ptr(simSVGUI("Button", false, "#64748b", "Draft", 240, 120)),
+			RightUrl:    ptr(simSVGUI("Button", false, "#16a34a", "Live", 240, 120)),
+			ChangeRatio: ptr(0.04),
+			Width:       ptr(960), Height: ptr(480),
+		},
+		{
+			Name:       "card.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Card (after)", "#15803d", 320, 200)),
+			Width:      ptr(1280), Height: ptr(800),
+		},
+		{
+			Name:        "modal.png",
+			ChangeType:  api.ArtifactFileChangeTypeModified,
+			LeftUrl:     ptr(simSVGUI("Modal", false, "#64748b", "Draft", 300, 220)),
+			RightUrl:    ptr(simSVGUI("Modal", false, "#16a34a", "Live", 300, 220)),
+			ChangeRatio: ptr(0.07),
+			Width:       ptr(1200), Height: ptr(880),
+		},
+		{
+			Name:       "toast.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Toast (after)", "#15803d", 280, 100)),
+			Width:      ptr(1120), Height: ptr(400),
+		},
 	}
 }
 

@@ -11,14 +11,29 @@ import (
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/heads"
 )
+
+// metaHasFile reports whether a meta already carries a file of the given name.
+func metaHasFile(m artifacts.Meta, name string) bool {
+	for _, f := range m.Files {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 // artifactWSMessage is a server→client message on the artifacts WebSocket.
 //   - "snapshot": the full set list (sent on connect and after a reconnect).
 //   - "set":      one script's set changed (a generation settled or was refreshed).
 //   - "log":      one new captured log line for one side ("left"/"right") of a script.
 //   - "progress": the header progress line changed for one side of a script.
+//   - "file":     one output file finished and was compared (a FileMarker fired),
+//     carried in File - so the client can render/diff that tile before the run
+//     ends. The client upserts it into the set by name; the authoritative "set"
+//     at settle reconciles the full list.
 type artifactWSMessage struct {
 	Type     string               `json:"type"`
 	Scripts  []api.ArtifactSet    `json:"scripts,omitempty"`
@@ -27,6 +42,7 @@ type artifactWSMessage struct {
 	Side     string               `json:"side,omitempty"`
 	Line     *api.ArtifactLogLine `json:"line,omitempty"`
 	Progress *string              `json:"progress,omitempty"`
+	File     *api.ArtifactFile    `json:"file,omitempty"`
 }
 
 // artifactClientMessage is a client→server message. Only "refresh" (regenerate
@@ -206,6 +222,31 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			case "progress":
 				p := ev.Progress
 				if err := writeMsg(artifactWSMessage{Type: "progress", Script: ref.script, Side: ref.side, Progress: &p}); err != nil {
+					return
+				}
+			case "file":
+				// One output file finished on ref.side. Diff and stream just that tile
+				// - but only once its verdict is knowable: the OTHER side has the file
+				// too (a real modified/unchanged compare), or has already settled
+				// without it (a genuine added/removed). When the other side is still
+				// generating and hasn't produced this file yet we hold off; its own
+				// file event (or the authoritative "set" at settle) delivers the
+				// verdict later, so each file is compared and sent exactly once.
+				left, right := plan.metasFor(ref.script)
+				other := right
+				if ref.side == "right" {
+					other = left
+				}
+				name := ev.File.Name
+				if !metaHasFile(other, name) && other.Status == artifacts.StatusGenerating {
+					continue
+				}
+				delta, ok := plan.mgr.CompareFile(left, right, name)
+				if !ok {
+					continue
+				}
+				f := artifactFileFromDelta(projectID, ref.script, left.Key, right.Key, delta)
+				if err := writeMsg(artifactWSMessage{Type: "file", Script: ref.script, File: &f}); err != nil {
 					return
 				}
 			case "settled":
