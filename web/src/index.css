@@ -283,7 +283,7 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    class + em sizing. */
 .chat-serif {
   font-family: var(--font-serif);
-  font-size: 0.9375rem; /* 15px */
+  font-size: 14px;
   line-height: 1.6;
 }
 .chat-serif strong,
