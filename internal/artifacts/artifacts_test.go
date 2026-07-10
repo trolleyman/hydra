@@ -707,6 +707,129 @@ func TestManagerCompareVideoUnverified(t *testing.T) {
 	}
 }
 
+// TestStreamFileMarker verifies a generation that emits ::hydra:artifact:: markers
+// streams a "file" event per announced file (with a scanned FileMeta) BEFORE the
+// "settled" event, keeps the marker lines out of the build log, and still folds
+// every file into the final settled meta.
+func TestStreamFileMarker(t *testing.T) {
+	repo := initRepo(t)
+	m := NewManager(repo)
+	events, unsub := m.Subscribe()
+	defer unsub()
+
+	// Two files, each announced by a marker the moment it is written. b.png is
+	// written but never announced, to prove the final scan still collects it.
+	spec := config.ArtifactScript{
+		Name: "shots",
+		Command: `printf 'AAAA' > "$HYDRA_ARTIFACT_OUTPUT/a.png"; echo "::hydra:artifact:: a.png"; ` +
+			`printf 'CCCCCC' > "$HYDRA_ARTIFACT_OUTPUT/c.png"; echo "::hydra:artifact:: c.png"; ` +
+			`printf 'BB' > "$HYDRA_ARTIFACT_OUTPUT/b.png"`,
+		UnsafeHost: true,
+	}
+	v := Version{Ref: "HEAD"}
+	meta := waitReady(t, m, spec, v)
+	if meta.Status != StatusReady {
+		t.Fatalf("status = %s, error = %s", meta.Status, meta.Error)
+	}
+	// The final settled meta reconciles all three files (streamed a.png/c.png plus
+	// the un-announced b.png).
+	var names []string
+	for _, f := range meta.Files {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "a.png,b.png,c.png" {
+		t.Fatalf("settled files = %v, want a.png,b.png,c.png", names)
+	}
+
+	// Replay the buffered events in order: every "file" event must precede
+	// "settled", carry a valid scanned FileMeta, and only cover the announced files.
+	var streamed []string
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			switch ev.Kind {
+			case "file":
+				if ev.File.Hash == "" || ev.File.Size == 0 {
+					t.Errorf("streamed %q missing hash/size: %+v", ev.File.Name, ev.File)
+				}
+				streamed = append(streamed, ev.File.Name)
+			case "settled":
+				if strings.Join(streamed, ",") != "a.png,c.png" {
+					t.Fatalf("streamed before settle = %v, want a.png,c.png", streamed)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no settled event; streamed so far = %v", streamed)
+		}
+	}
+}
+
+// TestStreamFileMarkerRejectsTraversal verifies scanFile refuses a script-supplied
+// marker path that would escape the entry dir, so a hostile ::hydra:artifact::
+// can't make Hydra hash/serve an arbitrary file.
+func TestStreamFileMarkerRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ok.png"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := scanFile(dir, "ok.png"); !ok {
+		t.Fatal("expected in-tree png to scan")
+	}
+	for _, bad := range []string{"../secret.png", "/etc/passwd", "sub/../../x.png", ""} {
+		if _, ok := scanFile(dir, bad); ok {
+			t.Errorf("scanFile accepted escaping path %q", bad)
+		}
+	}
+}
+
+// TestCompareFile checks the single-file streaming compare mirrors the batch
+// Manager.Compare verdict for one named file (added / pixel-refined modified),
+// and reports ok=false for a name present on neither side.
+func TestCompareFile(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script = "shot"
+
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := range 8 {
+		for x := range 8 {
+			img.Set(x, y, color.RGBA{uint8(x * 32), uint8(y * 32), 64, 255})
+		}
+	}
+	defaultPNG := encodePNG(t, img, png.DefaultCompression)
+	fastPNG := encodePNG(t, img, png.BestSpeed) // same pixels, different bytes
+	other := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	otherPNG := encodePNG(t, other, png.DefaultCompression)
+
+	writeArtifact(t, m, script, "commit/left", "same.png", defaultPNG)
+	writeArtifact(t, m, script, "commit/left", "diff.png", defaultPNG)
+	writeArtifact(t, m, script, "commit/right", "same.png", fastPNG)
+	writeArtifact(t, m, script, "commit/right", "diff.png", otherPNG)
+	writeArtifact(t, m, script, "commit/right", "added.png", otherPNG)
+
+	left, right := scanPair(t, m, script)
+
+	cases := map[string]ChangeType{
+		"same.png":  ChangeUnchanged, // byte-different, pixel-identical (refined)
+		"diff.png":  ChangeModified,  // pixels differ
+		"added.png": ChangeAdded,     // only on the right
+	}
+	for name, want := range cases {
+		d, ok := m.CompareFile(left, right, name)
+		if !ok {
+			t.Errorf("%s: CompareFile ok = false", name)
+			continue
+		}
+		if d.Change != want {
+			t.Errorf("%s: got %s want %s", name, d.Change, want)
+		}
+	}
+	if _, ok := m.CompareFile(left, right, "ghost.png"); ok {
+		t.Error("CompareFile of an absent file returned ok = true")
+	}
+}
+
 // scanPair scans the cleft/cright entry dirs of script into a left/right Meta.
 func scanPair(t *testing.T, m *Manager, script string) (Meta, Meta) {
 	t.Helper()

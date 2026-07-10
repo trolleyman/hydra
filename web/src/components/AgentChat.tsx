@@ -1054,6 +1054,20 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   // no snippet or disclosure) rather than the "Thinking..." indicator vanishing.
   if (empty && !streaming && durationMs == null) return null
 
+  // While streaming, the "Thinking..." label now lives inside the live "working"
+  // indicator's brackets (see item 48), so this card surfaces only the live tail
+  // - the last couple of thought lines. A silent (empty) thought renders nothing
+  // here at all, avoiding a second "Thinking..." line whose appearing/vanishing
+  // shifted the layout.
+  if (streaming) {
+    if (!tail) return null
+    return (
+      <div className="text-xs mt-1 italic text-stone-400 dark:text-stone-500 whitespace-pre-wrap break-words line-clamp-2">
+        {tail}
+      </div>
+    )
+  }
+
   return (
     <div className="text-xs">
       <button
@@ -1061,14 +1075,10 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
         disabled={empty}
         className={`group flex w-full items-center gap-1.5 text-left ${empty ? 'cursor-default' : 'cursor-pointer'}`}
       >
-        {streaming ? (
-          <span className="chat-text-shimmer font-medium shrink-0 text-stone-500">Thinking...</span>
-        ) : (
-          <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
-            {settledLabel}
-          </span>
-        )}
-        {!streaming && !open && snippet && (
+        <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+          {settledLabel}
+        </span>
+        {!open && snippet && (
           <span className="truncate italic text-stone-400/80 dark:text-stone-500/80">{snippet}</span>
         )}
         {!empty && (
@@ -1077,11 +1087,6 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           />
         )}
       </button>
-      {streaming && !open && !empty && tail && (
-        <div className="mt-1 italic text-stone-400 dark:text-stone-500 whitespace-pre-wrap break-words line-clamp-2">
-          {tail}
-        </div>
-      )}
       <Expandable open={open}>
         <div className="pt-1.5">
           <div
@@ -1116,7 +1121,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           <div className="absolute inset-x-0 bottom-0 max-h-[75vh] flex flex-col rounded-t-2xl border-t border-stone-200 dark:border-white/10 bg-[#faf9f5] dark:bg-[#2b2b28] shadow-2xl animate-chat-sheet-up">
             <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
               <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
-                {streaming ? 'Thinking...' : settledLabel}
+                {settledLabel}
               </span>
               <button
                 onClick={() => setSheet(false)}
@@ -4312,14 +4317,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
-              and the running output-token count when the CLI reports it. */}
+              and the running output-token count when the CLI reports it. While a
+              thinking block streams, "Thinking..." rides inside the brackets here
+              (after the duration and tokens) rather than as a separate line above,
+              so the reasoning<->working transition doesn't shift the layout. */}
           {isTurnRunning && replayDone && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
               <span className="text-[#c96442]">✳</span>
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
               <span className="text-stone-400 dark:text-stone-500">
                 ({formatDuration(elapsed * 1000)}
-                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''})
+                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
+                {stream?.kind === 'thinking' ? ' · Thinking...' : ''})
               </span>
             </div>
           )}
