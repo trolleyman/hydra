@@ -148,7 +148,19 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
             <Icon className="w-[18px] h-[18px]" />
           </div>
-          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message)}</p>
+          <div className="min-w-0 flex-1 self-center">
+            <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message)}</p>
+            {toast.code && (
+              <div className="mt-2 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-900/60">
+                {toast.codeLang && (
+                  <div className="px-2.5 pt-1.5 text-[10px] font-mono uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    {toast.codeLang}
+                  </div>
+                )}
+                <pre className={`max-h-40 overflow-auto px-2.5 pb-2 text-[11px] leading-relaxed font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words ${toast.codeLang ? 'pt-1' : 'pt-2'}`}>{toast.code}</pre>
+              </div>
+            )}
+          </div>
           <IconButton onClick={onDismiss}>
             <X className="w-4 h-4" />
           </IconButton>

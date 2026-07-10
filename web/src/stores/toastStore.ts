@@ -88,6 +88,13 @@ export interface Toast {
   // The toast copy. `backtick` spans render as inline mono branch pills
   // ("Synced with `origin/main`"); unpaired backticks stay literal.
   message: string
+  // Optional raw technical detail (a JSON error body, a stack trace) rendered
+  // verbatim in a monospace code block under the message - so code-like error
+  // text reads as code instead of being run into the headline sentence.
+  code?: string
+  // Language tag for the `code` block (e.g. 'json'), shown as a small label and
+  // mirroring a fenced ```<lang> block. Omit for an untagged (plain) block.
+  codeLang?: string
   type: ToastType
   // Total lifetime in ms before the toast auto-dismisses. 0 = persistent (the
   // caller dismisses it manually). Kept on the toast so the renderer can drive
@@ -134,6 +141,8 @@ interface ToastState {
   // toast (duration: 0) can later dismiss() it - e.g. a "Merging..." indicator.
   show: (options: {
     message: string
+    code?: string
+    codeLang?: string
     type?: ToastType
     duration?: number
     actions?: ToastAction[]
@@ -192,7 +201,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition, projectContext }) => {
+  show: ({ message, code, codeLang, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -201,7 +210,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, type, duration, actions, onDismiss, approval, agentTransition, projectContext, createdAt: Date.now() }
+              ? { ...t, message, code, codeLang, type, duration, actions, onDismiss, approval, agentTransition, projectContext, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -213,7 +222,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition, projectContext },
+        { id, message, code, codeLang, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition, projectContext },
       ],
     }))
     if (duration > 0) {
