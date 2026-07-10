@@ -310,6 +310,13 @@ type AgentConfig struct {
 //   - HYDRA_ARTIFACT_OUTPUT: directory the script must write image files into
 //   - HYDRA_ARTIFACT_SOURCE: the checkout directory (same as cwd)
 //   - HYDRA_ARTIFACT_REF:    the resolved git ref/sha being rendered (best-effort)
+//
+// Streaming (optional): after writing a file (and its `<file>.meta` sidecar) the
+// command may print `::hydra:artifact:: <path>` (path relative to
+// HYDRA_ARTIFACT_OUTPUT) on stdout; Hydra then scans and diffs just that file and
+// streams the tile to the UI immediately, rather than surfacing every output at
+// once when the command exits. Emitting no markers still works - the final
+// post-exit scan collects everything (see artifacts.FileMarker).
 type ArtifactScript struct {
 	// Name uniquely identifies the script; used as the UI label and cache dir.
 	Name string `toml:"name"`

@@ -29,6 +29,11 @@
 // stops treating ordinary stdout as progress, so the noisy subprocess output
 // (bun install, vite build) below can't hijack the header. Keep markers short and
 // human-readable; everything still lands in the full build log.
+//
+// Streaming: right after writing each "<name>.png" (and its .meta sidecar) we emit
+// a "::hydra:artifact:: <name>.png" marker, so Hydra scans + diffs that one tile
+// and streams it into the panel as it renders, rather than surfacing every image
+// at once when this command exits.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -2626,6 +2631,11 @@ try {
         // absent dpi as 1, so desktop sidecars stay byte-identical to before.
         writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
+        // Announce the finished file so Hydra scans + diffs just this tile and
+        // streams it into the panel now, instead of waiting for the whole run to
+        // exit. The path is relative to HYDRA_ARTIFACT_OUTPUT, and both the image
+        // and its .meta sidecar are already written above.
+        console.log(`::hydra:artifact:: ${pg.name}${suffix}.png`)
         await ctx.close()
         done++
         // Progress marker surfaced live by Hydra as the header, e.g.

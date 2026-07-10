@@ -49,6 +49,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -101,6 +102,22 @@ const (
 // Documented in the artifacts panel's info tooltip (web ArtifactsPanel.tsx).
 const ProgressMarker = "::hydra:progress::"
 
+// FileMarker prefixes a stdout line a script emits the moment it has finished
+// writing one output file (and its optional `<file>.meta` sidecar), e.g.
+// `echo "::hydra:artifact:: home-dark.png"`. The path is relative to
+// $HYDRA_ARTIFACT_OUTPUT. On seeing it the manager scans just that one file
+// (hash + pixel size + sidecar) and streams it to the UI immediately - so tiles
+// trickle in as they render instead of appearing all at once when the whole
+// command exits (mirrors the tests panel's ::hydra:test:*:: streaming). Emitting
+// the marker is optional: a script that emits none still has all its outputs
+// collected by the final post-exit scan, so existing generators keep working.
+// A marker for a file that isn't yet on disk is ignored (the final scan catches
+// it), which is why a script must write the file BEFORE echoing the marker.
+// Like ProgressMarker, a marker line is protocol - kept out of the build log -
+// and doubles as the progress header. Documented in the artifacts panel's info
+// tooltip (web ArtifactsPanel.tsx).
+const FileMarker = "::hydra:artifact::"
+
 // LogLine is one captured output line of an in-flight generation, tagged with
 // the stream it came from so the UI can render stderr distinctly (in red).
 type LogLine struct {
@@ -113,12 +130,15 @@ type LogLine struct {
 // dir (the caller maps that back to a script + side). Kind is one of:
 //   - "log":      a new line landed, carried in Line.
 //   - "progress": the header progress changed, carried in Progress.
+//   - "file":     one output file finished (a FileMarker was seen), carried in
+//     File - so the UI can render/compare that tile before the run ends.
 //   - "settled":  generation finished - the caller should re-read the now-written meta.
 type Event struct {
 	Dir      string
 	Kind     string
 	Line     LogLine
 	Progress string
+	File     FileMeta
 }
 
 // mediaExts maps collectible output extensions to their content types. It covers
@@ -307,50 +327,58 @@ func Compare(left, right []FileMeta) []FileDelta {
 	for _, name := range ordered {
 		lf, inLeft := leftByName[name]
 		rf, inRight := rightByName[name]
-		d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
-		// Union the two sides' tags, with the head winning a shared scoped
-		// category. A file on only one side passes that side's tags through
-		// (the other is empty).
-		d.Tags = mergeTags(lf.Tags, rf.Tags)
-		// Frame rate: prefer the head's, fall back to the base's. A file present
-		// on only one side carries that side's value (the other is zero).
-		if rf.Fps > 0 {
-			d.Fps = rf.Fps
-		} else {
-			d.Fps = lf.Fps
-		}
-		// Pixel size: same head-preferred-then-base rule as fps. A removed file
-		// (right side empty) thus reports its base size, an added file its head one.
-		if rf.Width > 0 && rf.Height > 0 {
-			d.Width, d.Height = rf.Width, rf.Height
-		} else {
-			d.Width, d.Height = lf.Width, lf.Height
-		}
-		// Dpi: head-preferred, falling back to the base side.
-		if rf.Dpi > 0 {
-			d.Dpi = rf.Dpi
-		} else {
-			d.Dpi = lf.Dpi
-		}
-		// Byte size: head-preferred, falling back to the base side.
-		if rf.Size > 0 {
-			d.Size = rf.Size
-		} else {
-			d.Size = lf.Size
-		}
-		switch {
-		case inLeft && !inRight:
-			d.Change = ChangeRemoved
-		case !inLeft && inRight:
-			d.Change = ChangeAdded
-		case lf.Hash != rf.Hash:
-			d.Change = ChangeModified
-		default:
-			d.Change = ChangeUnchanged
-		}
-		out = append(out, d)
+		out = append(out, compareOne(name, lf, rf, inLeft, inRight))
 	}
 	return out
+}
+
+// compareOne classifies a single file across the two sides (present-flags say
+// which side actually has it) and merges its head-preferred metadata. This is
+// the per-name body shared by the batch [Compare] and the streaming
+// [Manager.CompareFile].
+func compareOne(name string, lf, rf FileMeta, inLeft, inRight bool) FileDelta {
+	d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
+	// Union the two sides' tags, with the head winning a shared scoped
+	// category. A file on only one side passes that side's tags through
+	// (the other is empty).
+	d.Tags = mergeTags(lf.Tags, rf.Tags)
+	// Frame rate: prefer the head's, fall back to the base's. A file present
+	// on only one side carries that side's value (the other is zero).
+	if rf.Fps > 0 {
+		d.Fps = rf.Fps
+	} else {
+		d.Fps = lf.Fps
+	}
+	// Pixel size: same head-preferred-then-base rule as fps. A removed file
+	// (right side empty) thus reports its base size, an added file its head one.
+	if rf.Width > 0 && rf.Height > 0 {
+		d.Width, d.Height = rf.Width, rf.Height
+	} else {
+		d.Width, d.Height = lf.Width, lf.Height
+	}
+	// Dpi: head-preferred, falling back to the base side.
+	if rf.Dpi > 0 {
+		d.Dpi = rf.Dpi
+	} else {
+		d.Dpi = lf.Dpi
+	}
+	// Byte size: head-preferred, falling back to the base side.
+	if rf.Size > 0 {
+		d.Size = rf.Size
+	} else {
+		d.Size = lf.Size
+	}
+	switch {
+	case inLeft && !inRight:
+		d.Change = ChangeRemoved
+	case !inLeft && inRight:
+		d.Change = ChangeAdded
+	case lf.Hash != rf.Hash:
+		d.Change = ChangeModified
+	default:
+		d.Change = ChangeUnchanged
+	}
+	return d
 }
 
 // AnyChanged reports whether any file differs between the two versions.
@@ -388,36 +416,74 @@ func AnyChanged(deltas []FileDelta) bool {
 func (m *Manager) Compare(left, right Meta) []FileDelta {
 	deltas := Compare(left.Files, right.Files)
 	for i := range deltas {
-		d := &deltas[i]
-		if d.Change != ChangeModified {
-			continue
-		}
-		if IsDownloadName(d.Name) {
-			continue // downloads (an .apk, a .zip) keep the byte-hash verdict
-		}
-		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
-		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
-		if isVideoFile(d.Name) {
-			ratio, err := videoFramesDiffRatio(lp, rp)
-			switch {
-			case err != nil:
-				d.Unverified = true
-			case ratio == 0:
-				d.Change = ChangeUnchanged
-			default:
-				d.ChangeRatio = ratio
-			}
-			continue
-		}
-		if ratio, err := imagesPixelDiffRatio(lp, rp); err == nil {
-			if ratio == 0 {
-				d.Change = ChangeUnchanged
-			} else {
-				d.ChangeRatio = ratio
-			}
-		}
+		m.refineDelta(left, right, &deltas[i])
 	}
 	return deltas
+}
+
+// CompareFile classifies and pixel/frame-refines a single named file across the
+// two entries, like [Manager.Compare] but for one file - the per-file path the
+// artifacts WebSocket uses to diff a tile the moment it streams in (a FileMarker
+// fired) instead of re-comparing the whole set on every file. ok is false when
+// the name is on neither side. Callers should only invoke it once the file's
+// verdict is knowable (the counterpart side has the file, or has settled without
+// it); a wholly authoritative pass still runs via Compare at settle.
+func (m *Manager) CompareFile(left, right Meta, name string) (FileDelta, bool) {
+	var lf, rf FileMeta
+	inLeft, inRight := false, false
+	for _, f := range left.Files {
+		if f.Name == name {
+			lf, inLeft = f, true
+			break
+		}
+	}
+	for _, f := range right.Files {
+		if f.Name == name {
+			rf, inRight = f, true
+			break
+		}
+	}
+	if !inLeft && !inRight {
+		return FileDelta{}, false
+	}
+	d := compareOne(name, lf, rf, inLeft, inRight)
+	m.refineDelta(left, right, &d)
+	return d, true
+}
+
+// refineDelta refines one ChangeModified delta with the pixel (image) or frame
+// (video) check, downgrading a byte-hash "modified" to unchanged when the decoded
+// media matches and recording the change ratio otherwise. A no-op for
+// added/removed/unchanged files and for download-class artifacts (kept on the
+// byte-hash verdict). See [Manager.Compare] for the full rationale.
+func (m *Manager) refineDelta(left, right Meta, d *FileDelta) {
+	if d.Change != ChangeModified {
+		return
+	}
+	if IsDownloadName(d.Name) {
+		return // downloads (an .apk, a .zip) keep the byte-hash verdict
+	}
+	lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
+	rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
+	if isVideoFile(d.Name) {
+		ratio, err := videoFramesDiffRatio(lp, rp)
+		switch {
+		case err != nil:
+			d.Unverified = true
+		case ratio == 0:
+			d.Change = ChangeUnchanged
+		default:
+			d.ChangeRatio = ratio
+		}
+		return
+	}
+	if ratio, err := imagesPixelDiffRatio(lp, rp); err == nil {
+		if ratio == 0 {
+			d.Change = ChangeUnchanged
+		} else {
+			d.ChangeRatio = ratio
+		}
+	}
 }
 
 // isVideoFile reports whether name's extension is one of the video media types
@@ -640,7 +706,8 @@ type Manager struct {
 	progress   map[string]string             // entry dir -> latest progress line of its in-flight gen
 	startedAt  map[string]int64              // entry dir -> Unix time its in-flight gen started
 	logs       map[string][]LogLine          // entry dir -> captured log of its in-flight gen
-	markerSeen map[string]bool               // entry dir -> a ProgressMarker line has been seen (stop stdout-as-progress)
+	live       map[string][]FileMeta         // entry dir -> files streamed so far via FileMarker (partial, in name order)
+	markerSeen map[string]bool               // entry dir -> a ProgressMarker/FileMarker line has been seen (stop stdout-as-progress)
 	cancel     map[string]context.CancelFunc // entry dir -> cancels its in-flight gen's command tree (for preemption)
 	fgWant     map[string]bool               // entry dir -> a foreground request wants it (exempt from background preemption)
 	subs       map[int]chan Event            // event subscribers (live progress streaming)
@@ -671,6 +738,7 @@ func NewManager(projectRoot string) *Manager {
 		progress:    map[string]string{},
 		startedAt:   map[string]int64{},
 		logs:        map[string][]LogLine{},
+		live:        map[string][]FileMeta{},
 		markerSeen:  map[string]bool{},
 		cancel:      map[string]context.CancelFunc{},
 		fgWant:      map[string]bool{},
@@ -881,11 +949,14 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		prog := m.progress[dir]
 		started := m.startedAt[dir]
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
+		// Include the files streamed so far (via FileMarker) so a late subscriber or
+		// the polling fallback sees the partial tiles instead of an empty card.
+		filesCopy := append([]FileMeta(nil), m.live[dir]...)
 		m.mu.Unlock()
 		if fg {
 			m.sched.promote(dir)
 		}
-		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy}, nil
+		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy, Files: filesCopy}, nil
 	}
 	started := time.Now().Unix()
 	// A cancellable context per generation so the prefetcher can preempt a stale
@@ -928,6 +999,7 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		delete(m.progress, dir)
 		delete(m.startedAt, dir)
 		delete(m.logs, dir)
+		delete(m.live, dir)
 		delete(m.markerSeen, dir)
 		delete(m.cancel, dir)
 		delete(m.fgWant, dir)
@@ -1026,6 +1098,45 @@ func (m *Manager) setProgressLocked(dir, text string) {
 	m.broadcastLocked(Event{Dir: dir, Kind: "progress", Progress: text})
 }
 
+// streamFile records one output file announced mid-run via a [FileMarker]: it
+// scans that single file (hash + pixel size + sidecar), accumulates it in the
+// in-flight partial list (replacing any prior entry of the same name, kept in
+// name order to match the settled scan), sets the header progress to the file's
+// name, and broadcasts a "file" event so the UI renders/compares the tile before
+// the run ends. A marker for a file that isn't on disk yet (or an unsupported
+// extension) is a silent no-op - the final scanOutputs is authoritative and will
+// pick up anything missed here. No-op once the entry is no longer in-flight.
+func (m *Manager) streamFile(dir, rel string) {
+	fm, ok := scanFile(dir, rel)
+	if !ok {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, inFlight := m.gens[dir]; !inFlight {
+		return
+	}
+	files := m.live[dir]
+	replaced := false
+	for i := range files {
+		if files[i].Name == fm.Name {
+			files[i] = fm
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		files = append(files, fm)
+		sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	}
+	m.live[dir] = files
+	// A file marker is more specific than a plain stdout line, so it owns the
+	// progress header (like an explicit ProgressMarker would).
+	m.markerSeen[dir] = true
+	m.setProgressLocked(dir, fm.Name)
+	m.broadcastLocked(Event{Dir: dir, Kind: "file", File: fm})
+}
+
 // generate runs the script for one version and returns the resulting Meta. The
 // parent ctx is cancellable (per generation): cancelling it kills the command -
 // and, because the sandbox's bwrap is the init of its own PID namespace, the
@@ -1120,9 +1231,20 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 				stderrBuf.WriteByte('\n')
 				stderrMu.Unlock()
 			}
-			// A stdout line tagged with the progress marker sets the header
-			// progress explicitly; strip the marker so the log shows a clean line.
 			if stream == StreamStdout {
+				// A file marker announces one finished output file: scan+stream just
+				// that tile now. It is protocol (like the progress marker), so it is
+				// kept out of the build log; streamFile sets the header progress to
+				// the file's name.
+				if rest, ok := strings.CutPrefix(strings.TrimSpace(line), FileMarker); ok {
+					if name := strings.TrimSpace(rest); name != "" {
+						setLastStdout(name)
+						m.streamFile(dir, name)
+					}
+					continue
+				}
+				// A stdout line tagged with the progress marker sets the header
+				// progress explicitly; strip the marker so the log shows a clean line.
 				if rest, ok := strings.CutPrefix(strings.TrimSpace(line), ProgressMarker); ok {
 					if text := strings.TrimSpace(rest); text != "" {
 						setLastStdout(text)
@@ -1599,31 +1721,16 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		if d.IsDir() || d.Name() == metaFile {
+		if d.IsDir() {
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
-		_, media := mediaExts[ext]
-		_, download := downloadExts[ext]
-		if !media && !download {
-			return nil // skips .meta sidecars too (not a known extension)
-		}
-		hash, size, err := hashFile(p)
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
 		rel, _ := filepath.Rel(dir, p)
-		name := filepath.ToSlash(rel)
-		tags, fps, dpi, warns := readSidecar(p)
-		for _, w := range warns {
-			warnings = append(warnings, name+": "+w)
+		fm, warns, ok := scanFileWarn(dir, filepath.ToSlash(rel))
+		if !ok {
+			return nil // skips meta.json, .meta sidecars, and unknown extensions
 		}
-		// Download-class files (an .apk, a .zip) have no pixel size to measure.
-		width, height := 0, 0
-		if media {
-			width, height = mediaPixelSize(p, name)
-		}
-		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height, Dpi: dpi})
+		warnings = append(warnings, warns...)
+		out = append(out, fm)
 		return nil
 	})
 	if err != nil {
@@ -1631,6 +1738,56 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, warnings, nil
+}
+
+// scanFile scans one collectible output file (given by its forward-slashed path
+// relative to the entry dir) into a FileMeta: it hashes the bytes, reads the
+// optional `<file>.meta` sidecar, and measures the pixel size for media types.
+// It returns ok=false for a path that isn't a known media/download extension (a
+// meta.json, a .meta sidecar, an unrelated file) or that can't be read - e.g. a
+// FileMarker fired before the file was flushed. Sidecar warnings are discarded
+// here (the streaming path has no report to attach them to); scanOutputs uses
+// scanFileWarn to keep them.
+func scanFile(dir, name string) (FileMeta, bool) {
+	fm, _, ok := scanFileWarn(dir, name)
+	return fm, ok
+}
+
+// scanFileWarn is scanFile plus the sidecar warnings (prefixed with the file
+// name), for the settled scan which surfaces them in the build log.
+func scanFileWarn(dir, name string) (FileMeta, []string, bool) {
+	if name == metaFile {
+		return FileMeta{}, nil, false
+	}
+	// The name reaches scanFile straight from a script-controlled FileMarker, so
+	// reject anything that would escape the entry dir (absolute, empty, or a `..`
+	// segment) before touching the filesystem. The settled scanOutputs walk only
+	// ever passes in-tree relative names, so this is a no-op there.
+	if name == "" || filepath.IsAbs(name) || name != path.Clean(name) || strings.HasPrefix(name, "../") {
+		return FileMeta{}, nil, false
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	_, media := mediaExts[ext]
+	_, download := downloadExts[ext]
+	if !media && !download {
+		return FileMeta{}, nil, false // skips .meta sidecars too (not a known extension)
+	}
+	p := filepath.Join(dir, filepath.FromSlash(name))
+	hash, size, err := hashFile(p)
+	if err != nil {
+		return FileMeta{}, nil, false
+	}
+	tags, fps, dpi, warns := readSidecar(p)
+	var warnings []string
+	for _, w := range warns {
+		warnings = append(warnings, name+": "+w)
+	}
+	// Download-class files (an .apk, a .zip) have no pixel size to measure.
+	width, height := 0, 0
+	if media {
+		width, height = mediaPixelSize(p, name)
+	}
+	return FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height, Dpi: dpi}, warnings, true
 }
 
 // readSidecar reads the optional metadata sidecar for an output file: a sibling

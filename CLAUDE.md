@@ -189,3 +189,21 @@ hashes via ffmpeg (see `internal/artifacts` `Manager.Compare`), so cosmetic
 encoder/metadata differences are ignored and only real visual changes surface.
 The script still pins the clock and freezes timers/animation (see its header) to
 keep diffs clean, but minor encoding nondeterminism is tolerated.
+
+### Streaming artifacts (`::hydra:artifact::`)
+
+Like the tests panel's `::hydra:test:*::` markers, an artifact command can stream
+its outputs **as they render** instead of having them all appear (and get pixel-
+diffed) at once when the command exits. After writing a file *and its `.meta`
+sidecar*, print `::hydra:artifact:: <path>` on stdout (`<path>` relative to
+`$HYDRA_ARTIFACT_OUTPUT`, e.g. `echo "::hydra:artifact:: home-dark.png"`). Hydra
+scans just that one file (hash + pixel size + sidecar), diffs it against the other
+side the moment both sides know it (the counterpart has the file, or has already
+settled without it — so each tile is pixel-diffed exactly once), and streams the
+tile to the panel over the artifacts WebSocket as a `file` message. The marker is
+**optional and additive**: a script that emits none still has every output
+collected by the authoritative post-exit scan (`scanOutputs`), which also
+reconciles the streamed set at settle. Emit the marker only once the file is fully
+flushed — a marker for a not-yet-written file is ignored. Defined in
+`internal/artifacts` (`FileMarker`, `Manager.streamFile`, `Manager.CompareFile`);
+`take-screenshots.ts` emits one per shot.

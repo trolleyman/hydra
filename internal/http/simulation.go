@@ -1775,25 +1775,25 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}
+	leftProgress := "button.png 4/9"
 	rightProgress := "artifacts-ab-dark.png 7/12"
 	startedAt := simNow().Add(-8 * time.Second).Unix()
+	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
 		simReadyChangedSet(),
-		// In-flight generation where one side has already FAILED while the other is
-		// still building: the LEFT (before) side exited non-zero (empty live log +
-		// persisted log URL + left_error), the RIGHT (after) side is still rendering.
-		// The whole set stays "generating", but the failed side's live log gets the
-		// red error border immediately - it must NOT read as a clean (green) finish
-		// just because its live log drained. The still-generating side stays neutral.
+		// In-flight generation where BOTH sides are still building AND tiles are
+		// already streaming in: the HandleArtifactsWS handler pushes "file" messages
+		// (see simStreamedArtifactFiles) into this set, so an expanded card shows the
+		// finished tiles above both live build logs - the per-file ::hydra:artifact::
+		// streaming, before the run settles. Files start empty; the WS fills them.
 		{
 			Name:          "components",
 			Status:        api.ArtifactSetStatusGenerating,
+			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
-			LeftLog:       &[]api.ArtifactLogLine{},
-			LeftLogUrl:    ptr(simLogURL("components", "error/left")),
-			LeftError:     ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
+			LeftLog:       &leftLog,
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},
@@ -3467,14 +3467,48 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	msg := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
-	data, _ := json.Marshal(msg)
+	snapshot := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
+	data, _ := json.Marshal(snapshot)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
+
+	// Stream a couple of tiles into the still-generating "components" set, mirroring
+	// the real server's per-file ::hydra:artifact:: streaming (each finished file is
+	// compared and pushed before the run settles). Sent synchronously after the
+	// snapshot so the state is deterministic for the screenshot generator.
+	for _, f := range simStreamedArtifactFiles(id) {
+		fdata, _ := json.Marshal(artifactWSMessage{Type: "file", Script: "components", File: &f})
+		_ = conn.WriteMessage(websocket.TextMessage, fdata)
+	}
 
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
 		}
+	}
+}
+
+// simStreamedArtifactFiles returns the tiles the simulated in-flight "components"
+// generation has finished so far, streamed over the WS as "file" messages. Only
+// the after (right) side has rendered them (the before side already failed), so
+// they surface as "added" - exactly what the real per-file compare produces when
+// one side is done and the other absent.
+func simStreamedArtifactFiles(id string) []api.ArtifactFile {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ArtifactFile{
+		{
+			Name:       "button.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Button (after)", "#15803d", 240, 120)),
+			Width:      ptr(960), Height: ptr(480),
+		},
+		{
+			Name:       "card.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Card (after)", "#15803d", 320, 200)),
+			Width:      ptr(1280), Height: ptr(800),
+		},
 	}
 }
 
