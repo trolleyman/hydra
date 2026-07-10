@@ -1102,18 +1102,20 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
       // new height rather than snapping.
       glideKey={buildLogVisible}
     >
-          {/* While generating, tiles stream in as each file finishes (a
-              ::hydra:artifact:: marker fired and both sides could be compared),
-              above both builds' live logs. Same filter/threshold as the settled
-              grid, so a screenshot identical to its base stays hidden by default -
-              only real changes surface as they render. The full authoritative grid
+          {/* While generating, both builds' live logs sit at the top, with tiles
+              streaming in below as each file finishes (a ::hydra:artifact:: marker
+              fired and both sides could be compared). Keeping the logs pinned above
+              means the live build output stays put as tiles are appended, rather
+              than getting pushed down. Same filter/threshold as the settled grid,
+              so a screenshot identical to its base stays hidden by default - only
+              real changes surface as they render. The full authoritative grid
               replaces this the moment the set settles. */}
           {status === 'generating' && (
             <>
+              <LiveLogPanes set={set} />
               {visibleFiles.length > 0 && (
                 <FileGrid files={visibleFiles} mode={mode} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
-              <LiveLogPanes set={set} />
             </>
           )}
           {status === 'error' && (
