@@ -28,6 +28,7 @@ import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { RelativeTime } from './LiveTime'
 import { deepEqual } from '../lib/deepEqual'
 import { Markdown } from '../lib/MarkdownRenderer'
+import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
@@ -152,7 +153,15 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
       >
         <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 shrink-0">Prompt</span>
-        {!open && <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{preview}</span>}
+        {!open && (
+          // Render the one-line preview through the inline markdown renderer (the
+          // same one the live-activity line uses) so `code`, *italic*, **bold**
+          // etc. show styled instead of as raw markers. singleLine collapses the
+          // newlines so it stays a single truncated row.
+          <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
+            {renderMarkdown(preview, { singleLine: true })}
+          </span>
+        )}
       </button>
       {/* Animate the body open/closed with a 0fr->1fr grid row (height:auto can't
           transition); the inner wrapper clips its overflow while collapsing. The

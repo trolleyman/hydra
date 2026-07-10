@@ -2,11 +2,12 @@ import { type ReactNode } from 'react'
 import hljs from './hljs'
 
 // Simple inline-markdown support. We deliberately do NOT pull in a full
-// markdown library (or handle block constructs like #headings): the only goal
-// is to highlight `code` spans and *italic* / **bold** emphasis in short bits
-// of user-facing text (prompts, agent activity lines). Everything else is left
+// markdown library: the goal is to highlight `code` spans, *italic* / **bold** /
+// ***bold-italic*** emphasis, ~strikethrough~ and #headings in short bits of
+// user-facing text (prompts, agent activity lines). Everything else is left
 // as-is, and all whitespace/newlines are preserved so callers can render inside
-// a `whitespace-pre-wrap` container.
+// a `whitespace-pre-wrap` container. Headings are the one block construct we
+// handle, and only as "make the line bold" - no CommonMark heading semantics.
 
 type Seg =
   | { kind: 'text'; value: string }
@@ -20,6 +21,14 @@ type Seg =
   | { kind: 'codeblock'; raw: string; lang: string; value: string }
   | { kind: 'bold'; marker: string; value: string }
   | { kind: 'italic'; marker: string; value: string }
+  | { kind: 'bolditalic'; marker: string; value: string }
+  | { kind: 'strike'; marker: string; value: string }
+  // A heading line: `marker` is the `#..###### ` prefix (hashes + spaces), `value`
+  // the rest of the line. Unlike the paired-marker spans above the marker sits
+  // only at the front, so marker + value === the source line (the trailing
+  // newline stays a separate text seg). Rendered bold; markers dropped (read-only)
+  // or dimmed (overlay).
+  | { kind: 'heading'; marker: string; value: string }
 
 // Fenced code block: an opening ``` (with an optional info string on the rest of
 // the line), then any number of lines, then a closing ``` at the start of a
@@ -38,23 +47,37 @@ type Seg =
 // overlay away from the textarea caret.)
 const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```[ \t]*(?=\n|$)/
 
-// Inline patterns, tried in order at each position. `**`/`__` must precede the
-// single-char `*`/`_` so the longer marker wins. Each pattern is anchored to
-// the current scan position and forbids newlines inside the span so an unclosed
-// marker doesn't swallow the rest of the text.
-const PATTERNS: { kind: 'code' | 'bold' | 'italic'; re: RegExp }[] = [
+type InlineKind = 'code' | 'bold' | 'italic' | 'bolditalic' | 'strike'
+
+// Inline patterns, tried in order at each position. The longer markers must
+// precede the shorter ones that prefix them so the longer marker wins: `***`/
+// `___` before `**`/`__` before `*`/`_`, and `~~` before `~`. Each pattern is
+// anchored to the current scan position and forbids newlines inside the span so
+// an unclosed marker doesn't swallow the rest of the text.
+const PATTERNS: { kind: InlineKind; re: RegExp }[] = [
   { kind: 'code', re: /^`([^`\n]+)`/ },
+  { kind: 'bolditalic', re: /^\*\*\*([^\n]+?)\*\*\*/ },
+  { kind: 'bolditalic', re: /^___([^\n]+?)___/ },
   { kind: 'bold', re: /^\*\*([^\n]+?)\*\*/ },
   { kind: 'bold', re: /^__([^\n]+?)__/ },
   { kind: 'italic', re: /^\*([^\n]+?)\*/ },
   { kind: 'italic', re: /^_([^\n]+?)_/ },
+  { kind: 'strike', re: /^~~([^\n]+?)~~/ },
+  { kind: 'strike', re: /^~([^\n]+?)~/ },
 ]
+
+// Heading: 1-6 `#` at the start of a line, at least one space/tab, then the rest
+// of the line (which may be empty). `marker` is the hashes+spaces, `value` the
+// remainder - no trailing newline is consumed. 7+ hashes fail the space
+// requirement and aren't a heading, and `#foo` (no space) stays plain so hashtags
+// / issue refs are untouched.
+const HEADING_RE = /^(#{1,6}[ \t]+)([^\n]*)/
 
 // The metacharacters a backslash can escape - exactly the ones this parser
 // styles (CommonMark escapes all ASCII punctuation; we stay minimal so e.g. a
 // Windows path `C:\Users` is untouched). Backslash itself is escapable so a
 // literal backslash before a metachar can be written unambiguously.
-const ESCAPABLE = new Set(['`', '*', '_', '\\'])
+const ESCAPABLE = new Set(['`', '*', '_', '~', '\\'])
 
 // parseInline splits text into styled/plain segments. The concatenation of all
 // segments' source (marker + value + marker, or '\' + value for an escape) is
@@ -93,8 +116,22 @@ function parseInline(text: string): Seg[] {
         i += fm[0].length
         continue
       }
+      // A heading is line-scoped: capture the `#..###### ` prefix and the rest of
+      // the line as one bold seg, so we don't parse inline markers inside it (the
+      // "simple bold" the whole line asks for). The trailing newline is left for
+      // the next iteration.
+      const hm = HEADING_RE.exec(rest)
+      if (hm) {
+        if (buf) {
+          segs.push({ kind: 'text', value: buf })
+          buf = ''
+        }
+        segs.push({ kind: 'heading', marker: hm[1], value: hm[2] })
+        i += hm[0].length
+        continue
+      }
     }
-    let hit: { kind: 'code' | 'bold' | 'italic'; m: RegExpExecArray } | null = null
+    let hit: { kind: InlineKind; m: RegExpExecArray } | null = null
     for (const p of PATTERNS) {
       const m = p.re.exec(rest)
       if (m) {
@@ -238,6 +275,27 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
             {s.value}
           </em>
         )
+      case 'bolditalic':
+        return (
+          <strong key={i} className="font-semibold">
+            <em className="italic">{s.value}</em>
+          </strong>
+        )
+      case 'strike':
+        return (
+          <del key={i} className="line-through opacity-80">
+            {s.value}
+          </del>
+        )
+      case 'heading':
+        // "Simple bold of headings" - the marker (`## `) is dropped, the line
+        // text rendered bold. No larger size: this renderer is used inline
+        // (activity line, one-line preview) where a bigger heading would jar.
+        return (
+          <strong key={i} className="font-semibold">
+            {s.value}
+          </strong>
+        )
       default:
         return <span key={i}>{s.value}</span>
     }
@@ -352,16 +410,39 @@ export function renderMarkdownSource(text: string): ReactNode {
         </span>
       )
     }
+    if (s.kind === 'heading') {
+      // A heading only has a leading marker (`## `), no trailing one. The line
+      // text is bold-stroked (metric-neutral, like inline bold) and the hashes
+      // dimmed like other markers. marker + value === the source line, so it
+      // stays glyph-aligned with the textarea.
+      return (
+        <span key={i} className="md-src-bold">
+          <span className="opacity-40">{s.marker}</span>
+          {s.value}
+        </span>
+      )
+    }
+    if (s.kind === 'strike') {
+      // line-through is a decoration, not a metric change, so it's safe to show
+      // the real strikethrough in the overlay (unlike italic).
+      return (
+        <span key={i}>
+          <span className="opacity-40">{s.marker}</span>
+          <span className="line-through">{s.value}</span>
+          <span className="opacity-40">{s.marker}</span>
+        </span>
+      )
+    }
     // Emphasis in the overlay must not change glyph metrics: a real
     // font-weight/font-style swap renders different advance widths, so the
     // visible backdrop text drifts from the invisible textarea text - the
     // caret floats mid-word and spellcheck squiggles land offset under the
-    // wrong glyphs ("double text"). Bold is faked with a text stroke
-    // (.md-src-bold, metric-neutral); italic has no metric-safe fake (an
-    // italic face has different advances), so its content stays upright and
-    // only the dimmed markers signal it. The read-only renderer above keeps
-    // real bold/italic - it has no textarea to align with.
-    const emphasis = s.kind === 'bold' ? 'md-src-bold' : ''
+    // wrong glyphs ("double text"). Bold (and the bold half of bold-italic) is
+    // faked with a text stroke (.md-src-bold, metric-neutral); italic has no
+    // metric-safe fake (an italic face has different advances), so its content
+    // stays upright and only the dimmed markers signal it. The read-only
+    // renderer above keeps real bold/italic - it has no textarea to align with.
+    const emphasis = s.kind === 'bold' || s.kind === 'bolditalic' ? 'md-src-bold' : ''
     return (
       <span key={i} className={emphasis}>
         <span className="opacity-40">{s.marker}</span>

@@ -206,9 +206,10 @@ func isTurnBoundary(event string) bool {
 }
 
 // markdownEscaper backslash-escapes the inline-markdown metacharacters the web
-// UI's activity renderer styles (backtick, asterisk, underscore - plus
-// backslash itself, so a literal backslash can't be misread as an escape).
-var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", `*`, `\*`, `_`, `\_`)
+// UI's activity renderer styles (backtick, asterisk, underscore, tilde - plus
+// backslash itself, so a literal backslash can't be misread as an escape). Tilde
+// matters for paths like ~/foo, which would otherwise open a ~strikethrough~ span.
+var markdownEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", `*`, `\*`, `_`, `\_`, `~`, `\~`)
 
 // escapeMarkdown escapes a literal value interpolated into an activity line (a
 // file name, a search pattern, a tool name) so the web UI shows it verbatim

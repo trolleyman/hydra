@@ -33,6 +33,39 @@ describe('renderMarkdown', () => {
     expect(container.querySelector('em')?.textContent).toBe('b')
     expect(container.querySelector('strong')?.textContent).toBe('c')
   })
+
+  it('renders ***/___ as bold-italic (strong > em)', () => {
+    const star = render(<span>{renderMarkdown('x ***y*** z')}</span>)
+    expect(star.container.querySelector('strong > em')?.textContent).toBe('y')
+    const under = render(<span>{renderMarkdown('x ___y___ z')}</span>)
+    expect(under.container.querySelector('strong > em')?.textContent).toBe('y')
+  })
+
+  it('renders ~single~ and ~~double~~ tilde as strikethrough', () => {
+    const one = render(<span>{renderMarkdown('a ~b~ c')}</span>)
+    expect(one.container.querySelector('del')?.textContent).toBe('b')
+    const two = render(<span>{renderMarkdown('a ~~b~~ c')}</span>)
+    expect(two.container.querySelector('del')?.textContent).toBe('b')
+  })
+
+  it('bolds a heading line and drops the # marker', () => {
+    const { container } = render(<span>{renderMarkdown('# Title\nbody')}</span>)
+    expect(container.querySelector('strong')?.textContent).toBe('Title')
+    // The `# ` marker is dropped; the newline + body stay as following text.
+    expect(container.textContent).toBe('Title\nbody')
+  })
+
+  it('leaves #hashtags and #foo (no space) untouched', () => {
+    const { container } = render(<span>{renderMarkdown('see #123 and #foo')}</span>)
+    expect(container.querySelector('strong')).toBeNull()
+    expect(container.textContent).toBe('see #123 and #foo')
+  })
+
+  it('leaves an escaped tilde literal, opening no strikethrough', () => {
+    const { container } = render(<span>{renderMarkdown('cd \\~/foo then \\~/bar')}</span>)
+    expect(container.querySelector('del')).toBeNull()
+    expect(container.textContent).toBe('cd ~/foo then ~/bar')
+  })
 })
 
 describe('renderMarkdownSource', () => {
@@ -40,5 +73,21 @@ describe('renderMarkdownSource', () => {
     const { container } = render(<span>{renderMarkdownSource('a \\_b\\_ c')}</span>)
     expect(container.textContent).toBe('a \\_b\\_ c')
     expect(container.querySelector('em')).toBeNull()
+  })
+
+  it('keeps every source character of headings, strike and bold-italic', () => {
+    // The overlay must stay glyph-for-glyph with the textarea: no marker dropped.
+    for (const src of ['## Heading here', 'a ~b~ c', 'a ~~b~~ c', 'x ***y*** z']) {
+      const { container } = render(<span>{renderMarkdownSource(src)}</span>)
+      expect(container.textContent).toBe(src)
+    }
+  })
+
+  it('shows real strikethrough but never a slanted italic (metric safety)', () => {
+    const strike = render(<span>{renderMarkdownSource('a ~b~ c')}</span>)
+    expect(strike.container.querySelector('.line-through')?.textContent).toBe('b')
+    const italic = render(<span>{renderMarkdownSource('a *b* c')}</span>)
+    expect(italic.container.querySelector('em')).toBeNull()
+    expect(italic.container.querySelector('.italic')).toBeNull()
   })
 })
