@@ -340,6 +340,17 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   background-image: linear-gradient(90deg, #78716c 35%, #e7e5e4 50%, #78716c 65%);
 }
 
+/* Soft trailing fade on the in-flight streamed reply: an alpha mask eases the
+   newest text at the bottom edge from faint to solid, so as tokens arrive and
+   the text scrolls up the reply "materializes" instead of snapping in. It rides
+   only on the live stream node - the settled block that replaces it on
+   completion is fully crisp, and the completion swap no longer re-animates
+   (noEntrance/streamedKinds), so the two together read as one smooth reveal. */
+.chat-stream-tail {
+  -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0) calc(100% - 1.3em), rgb(0 0 0 / 0.25));
+  mask-image: linear-gradient(to bottom, rgb(0 0 0) calc(100% - 1.3em), rgb(0 0 0 / 0.25));
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }
@@ -357,6 +368,11 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
     animation: none;
     background-image: none;
     color: inherit;
+  }
+  /* Drop the streaming tail fade too - show every token at full opacity. */
+  .chat-stream-tail {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 }
 
