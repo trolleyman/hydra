@@ -4306,8 +4306,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               no blinking caret is appended here - it reflowed as text wrapped
               and read as visual jitter (item 56). */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`chat-stream-tail max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} />
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
+              <Markdown text={closeOpenFence(stream.text)} streamFade />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}

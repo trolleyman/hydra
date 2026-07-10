@@ -243,6 +243,44 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
   }
 }
 
+// rehypeWordFade wraps every visible word in a `<span class="sfw">` so the CSS
+// `.chat-stream-fade .sfw` rule can fade each one in as it streams. It runs only
+// for the live streaming node (streamFade). Words append at the end of the text
+// as tokens arrive, so react-markdown reconciles the earlier spans in place (same
+// index key -> no remount -> their fade-in doesn't restart) and only the freshly
+// mounted trailing spans animate. Code/pre are skipped (splitting a highlighted
+// block would fight the syntax spans and re-fade on every keystroke of code).
+type HastNode = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HastNode[] }
+function rehypeWordFade() {
+  const splitText = (value: string): HastNode[] =>
+    // Keep each word glued to its trailing whitespace so spacing is preserved.
+    (value.match(/\s*\S+\s*|\s+/g) ?? [value]).map((word) => ({
+      type: 'element',
+      tagName: 'span',
+      properties: { className: ['sfw'] },
+      children: [{ type: 'text', value: word }],
+    }))
+  const walk = (node: HastNode, inCode: boolean) => {
+    if (!node.children) return
+    const out: HastNode[] = []
+    for (const child of node.children) {
+      if (child.type === 'text' && !inCode && child.value) {
+        out.push(...splitText(child.value))
+      } else {
+        if (child.type === 'element') {
+          walk(child, inCode || child.tagName === 'code' || child.tagName === 'pre')
+        }
+        out.push(child)
+      }
+    }
+    node.children = out
+  }
+  return (tree: HastNode) => walk(tree, false)
+}
+
+type RehypePlugins = React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']
+const WORD_FADE_PLUGINS: RehypePlugins = [rehypeWordFade]
+
 export interface MarkdownProps {
   // The markdown source to render.
   text: string
@@ -252,6 +290,8 @@ export interface MarkdownProps {
   linkCtx?: RepoLinkContext
   // Wrapper class (e.g. text colour / max-width) applied to the outer container.
   className?: string
+  // Fade each word in as it appears - for the in-flight streamed chat reply only.
+  streamFade?: boolean
 }
 
 // Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
@@ -261,14 +301,18 @@ export interface MarkdownProps {
 // memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
 // of these. Without memo, typing in the chat composer (a sibling state change)
 // re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className }: MarkdownProps): ReactNode {
+export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, streamFade }: MarkdownProps): ReactNode {
   const components = useMemo(
     () => buildComponents(STYLES[variant], linkCtx),
     [variant, linkCtx],
   )
   return (
-    <div className={className}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS[variant]} components={components}>
+    <div className={`${streamFade ? 'chat-stream-fade ' : ''}${className ?? ''}`}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS[variant]}
+        rehypePlugins={streamFade ? WORD_FADE_PLUGINS : undefined}
+        components={components}
+      >
         {text}
       </ReactMarkdown>
     </div>
