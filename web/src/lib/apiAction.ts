@@ -1,4 +1,5 @@
-import { formatError } from '../api/format_error'
+import { ApiError } from '../api'
+import { apiErrorBody, formatError } from '../api/format_error'
 import { useToastStore } from '../stores/toastStore'
 
 // Discriminated result so callers can branch on success even when the action
@@ -22,6 +23,39 @@ function looksLikeCode(detail: string): boolean {
   return detail.includes('{') || detail.includes('\n') || detail.length > 120
 }
 
+// Break an ApiError's HTTP status and response body out for a richer error
+// toast: a short status pill for the headline ("501 Not Implemented") and the
+// raw body as its own code block - pretty-printed and tagged 'json' when it is
+// (or parses as) a JSON object, otherwise shown verbatim and untagged. A
+// non-ApiError, or an empty body, yields no code.
+interface ErrorCodeParts {
+  status?: string
+  code?: string
+  lang?: string
+}
+function apiErrorCodeParts(error: unknown): ErrorCodeParts {
+  if (!(error instanceof ApiError)) return {}
+  const status = error.status
+    ? `${error.status}${error.statusText ? ` ${error.statusText}` : ''}`
+    : undefined
+  const body: unknown = error.body
+  if (body != null && typeof body === 'object') {
+    return { status, code: JSON.stringify(body, null, 2), lang: 'json' }
+  }
+  if (typeof body === 'string' && body.trim() !== '') {
+    try {
+      const parsed: unknown = JSON.parse(body)
+      if (parsed != null && typeof parsed === 'object') {
+        return { status, code: JSON.stringify(parsed, null, 2), lang: 'json' }
+      }
+    } catch {
+      // Body isn't JSON - fall through and show it verbatim.
+    }
+    return { status, code: body }
+  }
+  return { status }
+}
+
 // Run an async API action, surfacing failures as an error toast via formatError.
 // Centralizes the try/catch→toast shape so call sites stop hand-rolling it
 // (PLAN.md #61a). The caller keeps ownership of its busy flag and success path:
@@ -41,9 +75,18 @@ export async function runWithToast<T>(
     return { ok: true, value }
   } catch (error) {
     const detail = formatError(error)
-    // Code-like detail (a JSON body, a stack trace) goes in its own code block
-    // under the prefix headline; a short human sentence stays inline as prose.
-    if (opts.errorPrefix && looksLikeCode(detail)) {
+    // A human-readable `details` (the API's own error sentence) always wins and
+    // stays inline as prose - the raw body is only worth a code block when the
+    // failure gave us nothing friendlier to say.
+    const humanDetail = apiErrorBody(error)?.details?.trim()
+    const { status, code, lang } = apiErrorCodeParts(error)
+    if (opts.errorPrefix && code && !humanDetail) {
+      // Structured HTTP body: show it as a (JSON) code block and pin the status
+      // into the headline - "Failed to switch mode (`501 Not Implemented`)".
+      const message = status ? `${opts.errorPrefix} (\`${status}\`)` : opts.errorPrefix
+      useToastStore.getState().show({ message, code, codeLang: lang, type: 'error' })
+    } else if (opts.errorPrefix && !humanDetail && looksLikeCode(detail)) {
+      // No structured body, but the raw detail reads as code (e.g. a stack trace).
       useToastStore.getState().show({ message: opts.errorPrefix, code: detail, type: 'error' })
     } else {
       const message = opts.errorPrefix ? `${opts.errorPrefix}: ${detail}` : detail
