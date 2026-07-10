@@ -13,6 +13,7 @@ import {
   Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -712,8 +713,11 @@ function EdgeExpander({ seg, onStep, onAll }: {
 // measured height (published on the panel root); the -16px cancels the scroll
 // container's pt-4 so the header pins exactly at the toolbar's bottom edge. No gap:
 // any gap here lets scrolling diff content peek through above the sticky header.
-// Mirrors STICKY_CARD_TOP's approach.
-export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
+// --sticky-files-h is the sticky "Files" section header's height (also published on
+// the panel root, 0 when there are no files): the file rows/headers dock just below
+// it, the same way Tests/Artifacts cards dock below their section header via
+// --sticky-section-h. Mirrors STICKY_CARD_TOP's approach.
+export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(--sticky-files-h, 0px))'
 
 // How long the file-body collapse/expand height glide runs - kept in JS so the
 // deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
@@ -1875,6 +1879,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (stored) return parseInt(stored, 10)
     return 220
   })
+  // Whether the file-list column is hidden (the Files header's show/hide toggle).
+  // Persisted globally like the other diff view options.
+  const [filesListHidden, setFilesListHidden] = useState(() => readLocal(StorageKeys.diffFilesListHidden) === 'true')
+  useEffect(() => { writeLocal(StorageKeys.diffFilesListHidden, String(filesListHidden)) }, [filesListHidden])
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
     if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
@@ -2136,6 +2144,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     measure()
     return () => ro.disconnect()
   }, [])
+
+  // The sticky "Files" section header's height, published as --sticky-files-h so
+  // the file rows + each file's sticky header dock just below it (see
+  // FILE_STICKY_TOP) - the same mechanism the Tests/Artifacts panels use for
+  // their cards. Measured (it can wrap on narrow widths).
+  const [filesHeaderRef, filesHeaderH] = useMeasuredHeight(33)
 
   // True when the user currently has a non-collapsed text selection inside the diff.
   // Applying a background refresh in this state would replace the DOM nodes the
@@ -2573,29 +2587,29 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* File list sidebar (hidden on mobile - the diff content takes the full
           width there; files are still all rendered below, or reachable via the
-          prev/next pager in single-file mode) */}
-      <div
-        ref={sidebarRef}
-        className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
-        style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
-      >
-        <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
-            Files · {diff.files.length}
-          </span>
-        </div>
-        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-        {/* Width drag handle: a visible grabber pill (like the split divider's)
-            rather than a bare invisible strip, so the file list reads as
-            resizable at a glance. */}
+          prev/next pager in single-file mode - and hidden anywhere via the Files
+          header's toggle). The file count + section title now live in the sticky
+          Files header above, so the column has no cap header of its own; it docks
+          just below that header (FILE_STICKY_TOP includes its height). */}
+      {!filesListHidden && (
         <div
-          onMouseDown={startResizing}
-          title="Drag to resize"
-          className="group/fl absolute right-0 top-0 bottom-0 w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors z-20"
+          ref={sidebarRef}
+          className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
+          style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
         >
-          <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
+          <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+          {/* Width drag handle: a visible grabber pill (like the split divider's)
+              rather than a bare invisible strip, so the file list reads as
+              resizable at a glance. */}
+          <div
+            onMouseDown={startResizing}
+            title="Drag to resize"
+            className="group/fl absolute right-0 top-0 bottom-0 w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors z-20"
+          >
+            <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Diff content */}
       <div className="flex-1 min-w-0">
@@ -2665,15 +2679,19 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   ) : null
 
   // The "Files" section header - a peer to the Tests / Previews / Artifacts
-  // headers (same icon + title + info + right-aligned settings button), sitting
-  // above the file-list column and diffs. Deliberately NOT sticky: unlike those
-  // panels, the file section fills the rest of the scroll, and each file card
-  // already docks its own sticky header at FILE_STICKY_TOP - a sticky Files
-  // header would sit at the same offset and collide with them. Only shown once
-  // a diff with files has loaded. Its cog holds the file-list + diff options
-  // that used to live in the Changes-bar cog.
+  // headers (same icon + title + info + right-aligned controls), sitting above
+  // the file-list column and diffs. Sticky like the others: it docks flush below
+  // the Changes bar and publishes its height as --sticky-files-h (on the panel
+  // root) so the file rows + each file's own sticky header dock just beneath it
+  // (see FILE_STICKY_TOP). Only shown once a diff with files has loaded. Carries
+  // the file-list show/hide toggle and the options cog (file-list grouping + diff
+  // rendering) that used to live in the Changes-bar cog.
   const filesHeaderEl = diff && diff.files.length > 0 && (
-    <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] py-1.5 border-b border-gray-200 dark:border-gray-800">
+    <div
+      ref={filesHeaderRef}
+      style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
+      className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+    >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
       <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
@@ -2682,6 +2700,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>
       <div className="ml-auto flex items-center gap-1.5">
+        {/* Show/hide the file-list column (hidden on mobile anyway, where the
+            diffs take the full width - so the toggle only bites at md+). */}
+        <Tooltip content={filesListHidden ? 'Show file list' : 'Hide file list'}>
+          <button
+            onClick={() => setFilesListHidden((v) => !v)}
+            aria-label={filesListHidden ? 'Show file list' : 'Hide file list'}
+            className={`hidden md:flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${filesListHidden
+              ? 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              : 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+              }`}
+          >
+            {filesListHidden ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
+          </button>
+        </Tooltip>
         {filesSettingsBtn}
       </div>
     </div>
@@ -2702,7 +2734,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // when the toolbar wraps. See the ResizeObserver above.
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
-    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
+    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff && diff.files.length > 0 ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no

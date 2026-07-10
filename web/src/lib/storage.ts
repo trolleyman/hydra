@@ -58,6 +58,8 @@ export const StorageKeys = {
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
+  // Whether the diff's file-list column is hidden (the Files header's toggle).
+  diffFilesListHidden: 'hydra-diff-files-list-hidden',
   diffImageMode: 'hydra-diff-image-mode',
   // Artifact masonry layout: JSON map of file name → column span override, set by
   // dragging a tile's edge. Tiles without an entry auto-span by aspect ratio.
