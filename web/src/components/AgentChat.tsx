@@ -783,6 +783,59 @@ function OutputPanel({ text, lang, isError }: { text: string; lang: string; isEr
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
 
+// NumberedCodePanel renders code with a line-number gutter and syntax
+// highlighting - the shape a Read shows - used for a Write tool's file content.
+// Lines don't wrap (so the gutter stays aligned); long lines scroll sideways and
+// the gutter stays pinned at the left edge.
+function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
+  const body = code.replace(/\n$/, '')
+  const html = useMemo(() => highlightHtml(body, lang), [body, lang])
+  const gutter = useMemo(() => {
+    const n = body.length === 0 ? 1 : body.split('\n').length
+    return Array.from({ length: n }, (_, i) => i + 1).join('\n')
+  }, [body])
+  return (
+    <div className={`${PANEL_CLASS} max-h-64 overflow-auto`}>
+      <div className="flex min-w-max text-[11px] leading-4 font-mono">
+        <pre className="sticky left-0 shrink-0 select-none text-right px-2 py-1.5 text-stone-400 dark:text-stone-600 bg-[#fdfcf9] dark:bg-[#1d1c1a] border-r border-stone-200 dark:border-white/[0.06]">{gutter}</pre>
+        {html != null
+          ? <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: html }} />
+          : <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200">{body}</pre>}
+      </div>
+    </div>
+  )
+}
+
+// EditDiffPanel shows an Edit's old_string and new_string as two syntax-
+// highlighted blocks side by side (old left, new right; stacked on a narrow
+// pane), tinted red/green like a diff. No line numbers - the strings are
+// fragments, not whole files. A "replace all" chip surfaces the replace_all flag.
+function EditDiffPanel({ oldStr, newStr, lang, replaceAll }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean }) {
+  const oldHtml = useMemo(() => highlightHtml(oldStr, lang), [oldStr, lang])
+  const newHtml = useMemo(() => highlightHtml(newStr, lang), [newStr, lang])
+  const block = (label: string, str: string, html: string | null, tone: 'old' | 'new') => (
+    <div className="flex-1 min-w-0">
+      <div className={`mb-0.5 text-[10px] font-semibold tracking-wide select-none ${tone === 'old' ? 'text-red-500/80 dark:text-red-400/80' : 'text-emerald-600/80 dark:text-emerald-400/80'}`}>
+        {label}
+      </div>
+      {html != null
+        ? <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`} dangerouslySetInnerHTML={{ __html: html }} />
+        : <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`}>{str || ' '}</pre>}
+    </div>
+  )
+  return (
+    <div className="space-y-1">
+      {replaceAll && (
+        <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
+      )}
+      <div className="flex flex-col sm:flex-row gap-1.5">
+        {block('Old', oldStr, oldHtml, 'old')}
+        {block('New', newStr, newHtml, 'new')}
+      </div>
+    </div>
+  )
+}
+
 // Per-tool icons for the card header; anything unlisted gets the wrench.
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
@@ -825,6 +878,18 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
 
+  // Write / Edit specifics: render the payload richly rather than as raw JSON -
+  // a Write's whole file content as a numbered code block, an Edit's
+  // old_string/new_string side by side. Both syntax-highlight by the target
+  // file's extension.
+  const filePath = typeof input?.file_path === 'string' ? (input.file_path as string) : ''
+  const isWrite = item.name === 'Write' && typeof input?.content === 'string'
+  const isEdit = item.name === 'Edit' && typeof input?.old_string === 'string' && typeof input?.new_string === 'string'
+  const fileLang = isWrite || isEdit ? langFromPath(filePath) : ''
+
+  // Task tools carry a prose subject, not a path/command - shown in the header.
+  const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
+
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
@@ -834,10 +899,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
-  // description are prose (sans) already.
+  // description / task subject are prose (sans) already.
   const isPathSummary =
     !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryMono = !mem && !isPathSummary && !(isBash && description)
+  const summaryMono = !mem && !isPathSummary && !isTaskTool && !(isBash && description)
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -909,6 +974,15 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
             <>
               {isBash ? (
                 <CodePanel code={trimWorktreePaths(splitBashChains(command), worktree)} lang="bash" />
+              ) : isWrite ? (
+                <NumberedCodePanel code={trimWorktreePaths(input!.content as string, worktree)} lang={fileLang} />
+              ) : isEdit ? (
+                <EditDiffPanel
+                  oldStr={trimWorktreePaths(input!.old_string as string, worktree)}
+                  newStr={trimWorktreePaths(input!.new_string as string, worktree)}
+                  lang={fileLang}
+                  replaceAll={input!.replace_all === true}
+                />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}

@@ -2803,6 +2803,14 @@ var simChatEvents = []string{
 	// header).
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	// A Write tool call: its content renders as a numbered, syntax-highlighted
+	// code block (like a Read), not raw JSON.
+	`{"type":"assistant","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_write","content":"File created successfully at: internal/artifacts/backoff.go"}]}}`,
+	// A TaskCreate tool call: its subject shows in the header in the regular
+	// (sans) font, like a path - not monospace.
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when every attempt fails, Put surfaces the last error."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate","content":"Task #1 created successfully: Add a giving-up test for the uploader"}]}}`,
 	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
 	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
 	// call, its reply), then the Task tool_result. The chat folds the sidechain
