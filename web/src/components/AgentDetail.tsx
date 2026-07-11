@@ -18,9 +18,9 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightOpen, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
-import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
+import { useSplitLayoutStore, usePaneCollapseStore, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -627,24 +627,20 @@ export function AgentDetail({
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // ── New two-pane split layout ──────────────────────────────────────────────
-  // Gated behind the split-layout flag AND a lg+ viewport; below lg (or with the
-  // flag off) the page falls back to the classic single-column stacked layout,
-  // which is already responsive. The pane-collapse store gives the divider its
-  // three states (split / terminal-only / inspector-only).
+  // Gated behind the split-layout flag (on for live agents at every screen size -
+  // the divider collapses to a single pane on narrow viewports rather than the
+  // page falling back to a different layout). The pane-collapse store gives the
+  // divider its three states (split / terminal-only / inspector-only).
   const splitEnabled = useSplitLayoutStore((s) => s.enabled)
-  const isWide = useMediaQuery(SPLIT_QUERY)
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
-  const splitActive = splitEnabled && isWide && !agent.archived
+  const splitActive = splitEnabled && !agent.archived
   // "Diff only" focus mode: the working (terminal/chat) pane is hidden and the
-  // inspector gets the whole width. On a wide screen that's the split layout's
-  // `working` collapse state (handled below); on a narrow screen - where there
-  // is no split - it swaps the classic stacked page for a dedicated diff-only
-  // view (just the inspector, no metadata/prompt/terminal). Available whenever
-  // the split layout is enabled and the agent is live.
-  const diffFocusAvailable = splitEnabled && !agent.archived
-  const diffOnly = diffFocusAvailable && paneCollapse === 'working'
+  // inspector gets the whole width (the split's `working` collapse state).
+  const diffOnly = splitActive && paneCollapse === 'working'
+  // Inspector ("diff sidebar") hidden -> the working pane gets the full width.
+  const inspectorHidden = splitActive && paneCollapse === 'inspector'
   const workingPaneLabel = agent.chat_mode === true ? 'chat' : 'terminal'
   // Left (working) pane's share of the split, persisted like sidebarWidth.
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
@@ -1519,23 +1515,23 @@ export function AgentDetail({
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          // Inspector-pane hide/show toggle (mirrors the show-sidebar button), only
-          // in the split layout. Collapsing the inspector gives the terminal/chat
-          // the full width.
-          ...(splitActive
+          // "Show diff sidebar" - reveals the collapsed inspector pane. The HIDE
+          // side of this toggle lives inside the diff's own Changes bar (left of
+          // the "Changes" heading, see InspectorPane/DiffViewer), so once hidden
+          // there's nowhere in the diff to click - the show button surfaces here
+          // in the header instead. Only while the inspector is actually hidden.
+          ...(inspectorHidden
             ? [{
-                label: paneCollapse === 'inspector' ? 'Show inspector' : 'Hide inspector',
-                icon: paneCollapse === 'inspector' ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />,
+                label: 'Show diff sidebar',
+                icon: <PanelRightOpen className="w-4 h-4" />,
                 onClick: toggleInspector,
                 variant: 'segment' as const,
               }]
             : []),
-          // "Diff only" toggle - the mirror of Hide inspector: it hides the
-          // working (terminal/chat) pane so the diff gets the full width. Unlike
-          // Hide inspector it's also offered on narrow screens, where there is no
-          // split: there it swaps the stacked page for a diff-only view. Toggling
-          // it back reveals the working pane / returns to the full page.
-          ...(diffFocusAvailable
+          // "Diff only" toggle - the mirror: it hides the working (terminal/chat)
+          // pane so the diff gets the full width. Toggling it back reveals the
+          // working pane.
+          ...(splitActive
             ? [{
                 label: diffOnly ? `Show ${workingPaneLabel}` : 'Diff only',
                 icon: diffOnly ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />,
@@ -1551,11 +1547,19 @@ export function AgentDetail({
         // Left: metadata + collapsible prompt + terminal/chat filling the height.
         // Right: the inspector pane (diff / tests / previews). A hand-rolled
         // divider between them, plus the three collapse states from paneCollapse.
+        // The panes' widths animate (width transition) so collapsing/expanding the
+        // inspector glides; the transition is suppressed mid-drag so resizing stays
+        // snappy. The working pane stays mounted while the inspector collapses (so
+        // its terminal never hits a 0-width relayout); "Diff only" (working
+        // collapsed) unmounts it instead - that transition isn't animated.
         <div ref={panesRef} className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
           {paneCollapse !== 'working' && (
             <div
-              className={`flex flex-col min-h-0 overflow-hidden ${paneCollapse === 'inspector' ? 'flex-1' : 'shrink-0'}`}
-              style={paneCollapse === 'inspector' ? undefined : { width: `${splitRatio * 100}%` }}
+              className="flex flex-col min-h-0 overflow-hidden shrink-0"
+              style={{
+                width: paneCollapse === 'inspector' ? '100%' : `calc(${(splitRatio * 100).toFixed(4)}% - 6px)`,
+                transition: splitResizing ? undefined : 'width 240ms ease',
+              }}
             >
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
                 <div className="shrink-0">
@@ -1589,43 +1593,34 @@ export function AgentDetail({
               </div>
             </div>
           )}
-          {/* Draggable divider (only in the full split). */}
-          {paneCollapse === 'none' && (
-            <div
-              onPointerDown={handleSplitResizeStart}
-              className="group shrink-0 w-3 -ml-1.5 flex items-center justify-center cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800"
-              title="Drag to resize"
-            >
-              <div className="w-1 h-20 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
-            </div>
-          )}
-          {paneCollapse !== 'inspector' && (
-            <div className="flex flex-col min-w-0 min-h-0 flex-1 overflow-hidden">
-              <InspectorPane
-                agent={agent}
-                projectId={projectId}
-                externalRefreshTrigger={diffRefreshTrigger}
-                externalArtifactRefresh={artifactRefreshTrigger}
-              />
-            </div>
-          )}
+          {/* Draggable divider - kept mounted but width-collapsed off the full
+              split so the pane widths add up cleanly and animate. */}
+          <div
+            onPointerDown={paneCollapse === 'none' ? handleSplitResizeStart : undefined}
+            className={`group shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
+            style={{ width: paneCollapse === 'none' ? 12 : 0, transition: splitResizing ? undefined : 'width 240ms ease' }}
+            title={paneCollapse === 'none' ? 'Drag to resize' : undefined}
+          >
+            <div className="w-1 h-20 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+          </div>
+          <div
+            className="flex flex-col min-w-0 min-h-0 overflow-hidden shrink-0"
+            style={{
+              width: paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
+              transition: splitResizing ? undefined : 'width 240ms ease',
+            }}
+          >
+            <InspectorPane
+              agent={agent}
+              projectId={projectId}
+              externalRefreshTrigger={diffRefreshTrigger}
+              externalArtifactRefresh={artifactRefreshTrigger}
+              onHideInspector={toggleInspector}
+            />
+          </div>
           {/* Transparent overlay during the divider drag so the pointer isn't
               swallowed by the xterm/iframe (gotcha #5). */}
           {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
-        </div>
-      ) : diffOnly ? (
-        // ── Diff-only view (narrow screen, "Diff only" toggled on) ───────────
-        // No split here (the viewport is too narrow), so instead of hiding a
-        // pane we render just the inspector full-bleed - the diff page the user
-        // asked for, no metadata/prompt/terminal. The top bar's toggle (now
-        // "Show <terminal|chat>") brings the stacked page back.
-        <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
-          <InspectorPane
-            agent={agent}
-            projectId={projectId}
-            externalRefreshTrigger={diffRefreshTrigger}
-            externalArtifactRefresh={artifactRefreshTrigger}
-          />
         </div>
       ) : (
         // ── Classic single-column stacked layout (flag off, or narrow) ───────

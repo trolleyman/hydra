@@ -14,7 +14,7 @@ import {
   Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, PanelRightClose,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -1832,11 +1832,21 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
           <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
-        {isOpen && node.children.map((child) => (
-          <TreeNodeView key={child.path} node={child} depth={depth + 1}
-            collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-            onFileClick={onFileClick} activeFilePath={activeFilePath} />
-        ))}
+        {/* Children stay mounted and their height animates via the grid-rows
+            0fr<->1fr trick (the inner wrapper is overflow-hidden), so expand /
+            collapse glides open and shut without measuring heights. */}
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-out"
+          style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
+        >
+          <div className="overflow-hidden min-h-0">
+            {node.children.map((child) => (
+              <TreeNodeView key={child.path} node={child} depth={depth + 1}
+                collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+                onFileClick={onFileClick} activeFilePath={activeFilePath} />
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
@@ -1860,6 +1870,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
   prev.inspector === next.inspector &&
+  prev.onHideInspector === next.onHideInspector &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
@@ -1870,7 +1881,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, onHideInspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; onHideInspector?: () => void }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1954,7 +1965,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
-  const [testGroupResult, setTestGroupResult] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testGroupResult)
+  // Group-by-result defaults ON (undefined stored pref -> true); an explicit
+  // stored false is respected.
+  const [testGroupResult, setTestGroupResult] = useState<boolean>(() => loadAgentViewPrefs(projectId, agent.id).testGroupResult ?? true)
   const [testUseScope, setTestUseScope] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testUseScope)
   // Whether any loaded test case carries a logical scope (class/describe
   // chain) - reported up by the TestsPanel so the cog can grey the "Group by
@@ -2424,6 +2437,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const activeFilePath = singleFile && diff ? (diff.files[singleFileIdx]?.path ?? null) : null
   const hasExistingDiff = diff !== null
 
+  // The file order exactly as the sidebar lays it out for the current view, so
+  // the single-file pager (prev/next) walks files in the SAME order the list
+  // shows them, rather than diff.files' raw order (which groups differently and
+  // made the pager jump around - image6). Tree = depth-first leaf order,
+  // grouped = per-folder, flat = as-is.
+  const orderedFiles = useMemo(() => {
+    const files = diff?.files ?? []
+    if (fileView === 'grouped') return getGroupedFiles(files).flatMap(([, gf]) => gf)
+    if (fileView === 'tree') {
+      const out: DiffFile[] = []
+      const walk = (nodes: TreeNode[]) => nodes.forEach((n) => {
+        if (n.type === 'dir') walk(n.children)
+        else if (n.file) out.push(n.file)
+      })
+      walk(compactTree(buildFileTree(files)))
+      return out
+    }
+    return files
+  }, [diff, fileView])
+  // Position of the currently-shown single file within that display order, and a
+  // jump helper that maps an ordered position back to its diff.files index (which
+  // is what singleFileIdx / FileRow.isActive key off).
+  const singleOrderPos = diff ? orderedFiles.findIndex((f) => f.path === diff.files[singleFileIdx]?.path) : -1
+  const goToOrderPos = useCallback((pos: number) => {
+    const target = orderedFiles[pos]
+    if (!target) return
+    const idx = (diff?.files ?? []).findIndex((f) => f.path === target.path)
+    if (idx >= 0) setSingleFileIdx(idx)
+  }, [orderedFiles, diff])
+
   const renderSidebar = (files: DiffFile[]) => {
     if (fileView === 'tree') {
       const tree = compactTree(buildFileTree(files))
@@ -2597,23 +2640,32 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       No changes
     </div>
   ) : diff ? (
-    <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
+    <div className={`flex min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* File list sidebar (hidden on mobile - the diff content takes the full
           width there; files are still all rendered below, or reachable via the
           prev/next pager in single-file mode - and hidden anywhere via the Files
           header's toggle). The file count + section title now live in the sticky
           Files header above, so the column has no cap header of its own; it docks
-          just below that header (FILE_STICKY_TOP includes its height). */}
-      {!filesListHidden && (
-        <div
-          ref={sidebarRef}
-          className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
-          style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
-        >
-          <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-          {/* Width drag handle: a visible grabber pill (like the split divider's)
-              rather than a bare invisible strip, so the file list reads as
-              resizable at a glance. */}
+          just below that header (FILE_STICKY_TOP includes its height).
+          Hidden via the toggle it stays mounted and its width + right margin
+          animate to 0 (the gap-4 is folded into that margin so the whole thing
+          slides away cleanly); the transition is dropped mid width-drag. */}
+      <div
+        ref={sidebarRef}
+        className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
+        style={{
+          width: filesListHidden ? 0 : sidebarWidth,
+          marginRight: filesListHidden ? 0 : 16,
+          borderWidth: filesListHidden ? 0 : undefined,
+          top: FILE_STICKY_TOP,
+          transition: isResizing ? undefined : 'width 240ms ease, margin-right 240ms ease',
+        }}
+      >
+        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        {/* Width drag handle: a visible grabber pill (like the split divider's)
+            rather than a bare invisible strip, so the file list reads as
+            resizable at a glance. Hidden while the column is collapsed. */}
+        {!filesListHidden && (
           <div
             onMouseDown={startResizing}
             title="Drag to resize"
@@ -2621,8 +2673,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           >
             <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Diff content */}
       <div className="flex-1 min-w-0">
@@ -2633,18 +2685,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                 Y and overlap it. The pager scrolls away; the file header stays. */}
             <div className="flex items-center gap-2 mb-3 z-20">
               <button
-                onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
-                disabled={singleFileIdx === 0}
+                onClick={() => goToOrderPos(singleOrderPos - 1)}
+                disabled={singleOrderPos <= 0}
                 className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
-                {singleFileIdx + 1} / {diff.files.length}
+                {singleOrderPos + 1} / {diff.files.length}
               </div>
               <button
-                onClick={() => setSingleFileIdx(Math.min(diff.files.length - 1, singleFileIdx + 1))}
-                disabled={singleFileIdx === diff.files.length - 1}
+                onClick={() => goToOrderPos(singleOrderPos + 1)}
+                disabled={singleOrderPos >= diff.files.length - 1}
                 className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -2757,11 +2809,26 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           __root.tsx) - at equal z-index the later-DOM bar would paint over the
           scrim and stay bright when the off-canvas sidebar is open on
           tablet/phone. */}
-      <div ref={changesBarRef} className="flex items-start gap-3 mb-6 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+      <div ref={changesBarRef} className="flex items-start gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
+          {/* Hide the whole inspector ("diff sidebar") - only in the split
+              layout, where InspectorPane passes the collapse callback. The SHOW
+              side of this toggle lives in the agent header (there's no Changes bar
+              to click once hidden). */}
+          {onHideInspector && (
+            <Tooltip content="Hide diff sidebar">
+              <button
+                onClick={onHideInspector}
+                aria-label="Hide diff sidebar"
+                className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0"
+              >
+                <PanelRightClose className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )}
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
           {statsEl}
 

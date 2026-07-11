@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Settings2 } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
@@ -7,6 +8,12 @@ import { Tooltip } from './Tooltip'
 // Extracted from the old monolithic diff-toolbar cog so each section header
 // (Files, Tests, Artifacts) can own just its own options - see the callers in
 // DiffViewer / TestsPanel / ArtifactsPanel.
+//
+// The dropdown renders in a PORTAL with fixed positioning (anchored under the
+// button's right edge). The section headers are sticky with their own stacking
+// contexts and later-in-DOM sibling headers / file-card headers were painting
+// over an in-flow dropdown; a portalled, fixed, high-z panel escapes all of
+// that. Position is recomputed on scroll/resize while open.
 export function SettingsPopover({
   label = 'Settings',
   width = 208,
@@ -18,12 +25,39 @@ export function SettingsPopover({
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+
+  const reposition = useCallback(() => {
+    const el = anchorRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    // Anchor the dropdown's right edge to the button's right edge, just below it,
+    // clamped a few px off the viewport edges.
+    setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    reposition()
+    const onMove = () => reposition()
+    // Capture-phase scroll so we catch the inner scroll containers (the agent
+    // page / inspector pane scroll, not the window).
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    return () => {
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+    }
+  }, [open, reposition])
 
   useEffect(() => {
     if (!open) return
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (anchorRef.current?.contains(t) || popRef.current?.contains(t)) return
+      setOpen(false)
     }
     function onEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false)
@@ -37,7 +71,7 @@ export function SettingsPopover({
   }, [open])
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={anchorRef} className="relative inline-flex">
       <Tooltip content={label}>
         <button
           onClick={() => setOpen((o) => !o)}
@@ -52,13 +86,15 @@ export function SettingsPopover({
           <Settings2 className="w-3.5 h-3.5" />
         </button>
       </Tooltip>
-      {open && (
+      {open && pos && createPortal(
         <div
-          style={{ width }}
-          className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3"
+          ref={popRef}
+          style={{ position: 'fixed', top: pos.top, right: pos.right, width }}
+          className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >
           {children}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

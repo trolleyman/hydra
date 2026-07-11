@@ -864,14 +864,18 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      {/* Header row: the whole left side toggles open; a Raw button sits at the
-          right, only while expanded (item 32). Two sibling buttons (not nested)
-          so the Raw toggle doesn't also collapse the card. */}
-      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      {/* Header row: the WHOLE row toggles open (so when collapsed the entire
+          card is the click target); the Raw button stops propagation so it
+          doesn't also collapse. Body clicks (below) never toggle - only the
+          header does, which is what you want once expanded. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
@@ -879,13 +883,13 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           <span className="font-medium shrink-0">{item.name}</span>
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
-        </button>
+        </div>
         {pending && (
           <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
         {open && (
           <button
-            onClick={() => setShowRaw((r) => !r)}
+            onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
             className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
@@ -963,11 +967,14 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
 
   return (
     <div className="rounded-lg border border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03] text-xs overflow-hidden">
-      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
@@ -976,10 +983,10 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
           {parsed.fileName && (
             <span className="truncate font-mono text-stone-400 dark:text-stone-500">{parsed.fileName}</span>
           )}
-        </button>
+        </div>
         {open && (
           <button
-            onClick={() => setShowRaw((r) => !r)}
+            onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
             className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
@@ -1377,11 +1384,14 @@ const SubagentCard = memo(function SubagentCard({
             : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <div className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
@@ -1412,11 +1422,11 @@ const SubagentCard = memo(function SubagentCard({
               </span>
             )
           )}
-        </button>
+        </div>
         {onOpenChat && (
           <Tooltip content="Open sub-agent chat" side="top">
             <button
-              onClick={onOpenChat}
+              onClick={(e) => { e.stopPropagation(); onOpenChat() }}
               aria-label="Open sub-agent chat"
               className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
