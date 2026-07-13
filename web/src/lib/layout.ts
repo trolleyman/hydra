@@ -3,10 +3,11 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
-// The two-pane split only applies at lg+ (the sidebar's own breakpoint). Below
-// it the agent page degrades to the classic single-column stacked layout, which
-// is already responsive and reads well on a phone.
-export const SPLIT_QUERY = '(min-width: 1024px)'
+// The two-pane split only applies at md+ (the sidebar's own breakpoint, and
+// RepositoryView's). Below it the agent page becomes the narrow screen-stack
+// (chat <-> diff full-screen screens). Unified to 768px so every surface flips
+// to its mobile layout at the same width.
+export const SPLIT_QUERY = '(min-width: 768px)'
 
 // Small matchMedia hook (mirrors useFinePointer) - re-renders on breakpoint
 // crossings so the layout can swap between split and stacked live.

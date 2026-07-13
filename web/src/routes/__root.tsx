@@ -594,7 +594,7 @@ function RootLayout() {
         <div
           aria-hidden
           onClick={toggleSidebar}
-          className="lg:hidden fixed inset-0 z-30 bg-black/40"
+          className="md:hidden fixed inset-0 z-30 bg-black/40"
         />
       )}
       {/* Sidebar: a persistent, resizable column at lg+, an off-canvas overlay
@@ -608,7 +608,7 @@ function RootLayout() {
           The floating button over the content reveals it again. */}
       <aside
         style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-        className={`relative overflow-hidden max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:!w-[80vw] max-lg:!max-w-[20rem] max-lg:shadow-2xl bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform] duration-200'} ${sidebarCollapsed ? 'max-lg:-translate-x-full' : 'translate-x-0'}`}
+        className={`relative overflow-hidden max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-[80vw] max-md:!max-w-[20rem] max-md:shadow-2xl bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform] duration-200'} ${sidebarCollapsed ? 'max-md:-translate-x-full' : 'translate-x-0'}`}
       >
         {/* Inner content at a fixed width (the expanded sidebar width, or the full
             overlay width below lg) so the collapse width-tween clips it instead of
@@ -616,7 +616,7 @@ function RootLayout() {
             aside; the right border rides its trailing edge. */}
         <div
           style={{ width: sidebarWidth }}
-          className="flex flex-col h-full shrink-0 max-lg:!w-full border-r border-gray-200 dark:border-gray-700"
+          className="flex flex-col h-full shrink-0 max-md:!w-full border-r border-gray-200 dark:border-gray-700"
         >
         {/* Sidebar header - app icon, project selector, and the collapse button
             to its right. This is what replaced the global top bar. */}
@@ -929,7 +929,7 @@ function RootLayout() {
           {/* Resize handle (lg+ only - the overlay sidebar has a fixed width) */}
           <div
             onPointerDown={handleSidebarResizeStart}
-            className="hidden lg:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
+            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
           >
             <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
           </div>

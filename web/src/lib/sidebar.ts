@@ -8,8 +8,10 @@ import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storag
 // it without prop-drilling through the router.
 
 // Below this width the sidebar is an off-canvas overlay; at/above it it's the
-// usual in-flow column. Matches Tailwind's `lg` breakpoint (see __root.tsx).
-export const SIDEBAR_OVERLAY_QUERY = '(min-width: 1024px)'
+// usual in-flow column. Matches Tailwind's `md` breakpoint (see __root.tsx) -
+// unified with the agent-page split and RepositoryView so every surface flips
+// to its mobile layout at the same width.
+export const SIDEBAR_OVERLAY_QUERY = '(min-width: 768px)'
 
 // Default when the user has never made an explicit choice: collapsed on small
 // screens (an open overlay over the content is a poor default), expanded on wide
