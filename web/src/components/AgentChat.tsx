@@ -4643,6 +4643,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
     [items],
   )
+  // The turn's end-of-turn "Crunched for Xs" footer (a result item) has landed.
+  // The agent status flip that clears isTurnRunning can lag a frame behind it, so
+  // gate the live "working" indicator on this too - otherwise both the footer and
+  // the live "<verb>..." line flash together for a split second at turn end.
+  const lastIsResult = visibleItems.length > 0 && visibleItems[visibleItems.length - 1].kind === 'result'
 
   // toolUseId -> sub-agent, so a Task tool card upgrades into a SubagentCard in
   // place (correct position, live and on backfill) without any marker item.
@@ -4750,11 +4755,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               thinking block streams, "Thinking..." rides inside the brackets here
               (after the duration and tokens) rather than as a separate line above,
               so the reasoning<->working transition doesn't shift the layout. */}
-          {isTurnRunning && replayDone && (
+          {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
               <span className="text-[#c96442]">✳</span>
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
-              <span className="text-stone-400 dark:text-stone-500">
+              {/* tabular-nums so the ticking elapsed seconds / token count keep a
+                  fixed width and the line doesn't jitter horizontally as they change. */}
+              <span className="text-stone-400 dark:text-stone-500 tabular-nums">
                 ({formatDuration(elapsed * 1000)}
                 {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
                 {stream?.kind === 'thinking' ? ' · Thinking...' : ''})
