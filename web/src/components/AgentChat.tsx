@@ -43,7 +43,7 @@ import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/c
 import { loadPlan, savePlan, type PlanEntry } from '../lib/planStore'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatFontStore } from '../lib/chatPrefs'
+import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -2561,16 +2561,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
 
+  // Smooth (paced) streaming - a Browser setting. Read inside the WS reducer's
+  // per-frame flush via a ref so a mid-stream toggle takes effect on the next
+  // frame without re-running the reducer effect.
+  const smoothStream = useChatStreamStore((s) => s.smooth)
+
   const onStatusUpdateRef = useRef(onStatusUpdate)
   const onDiffRefreshRef = useRef(onDiffRefresh)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
   const isTurnRunningRef = useRef(isTurnRunning)
+  const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
+    smoothStreamRef.current = smoothStream
   })
 
   useEffect(() => {
@@ -2725,12 +2732,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
     }
 
-    // Token-streaming buffer. Deltas can arrive far faster than 60fps, so they
-    // accumulate here and the visible state is refreshed on a short timer;
+    // Token-streaming buffer. Deltas can arrive far faster than the display
+    // refreshes, so they accumulate here and the visible state is flushed once
+    // per animation frame (~16ms at 60Hz, faster on high-refresh displays);
     // each refresh re-renders (and re-parses the markdown of) only the one
     // in-flight block, which stays small.
+    //
+    // streamBuf.text is the full received text; `revealed` is how many of its
+    // chars are actually shown. With smooth streaming on (the default, a Browser
+    // setting) each frame advances `revealed` toward the full length by a bounded
+    // step, so a bursty upstream (the claude CLI flushes ~250-char deltas ~5x/sec)
+    // is drained as steady, continuous typing instead of landing in chunks. The
+    // step is proportional to the backlog (so it never falls arbitrarily behind)
+    // with a floor (so slow streams still finish) and a cap (so a big burst never
+    // dumps at once). Smooth off: reveal jumps straight to the full length.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
-    let streamTimer: ReturnType<typeof setTimeout> | null = null
+    let revealed = 0
+    let streamFrame: number | null = null
     // Which block kinds this message streamed live. `message_stop` clears
     // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
     // event arrives, so streamBuf can't tell the settle "you were already on
@@ -2784,18 +2802,40 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // triggered the turn to this assistant message (item 7). Live stdout lines
     // carry no timestamp, so this stays null there and the live timer is used.
     let prevEventTs: number | null = null
+    // Paced-reveal tuning (chars, per animation frame). See streamBuf's comment.
+    const REVEAL_FLOOR = 3 // min chars/frame so a slow stream still finishes
+    const REVEAL_RATE = 0.2 // drain this fraction of the backlog per frame
+    const REVEAL_CAP = 40 // max chars/frame so a big burst never dumps at once
+    const onStreamFrame = () => {
+      streamFrame = null
+      if (!streamBuf) {
+        setStream(null)
+        return
+      }
+      const full = streamBuf.text.length
+      if (smoothStreamRef.current) {
+        if (revealed < full) {
+          const backlog = full - revealed
+          const step = Math.min(REVEAL_CAP, Math.max(REVEAL_FLOOR, Math.ceil(backlog * REVEAL_RATE)))
+          revealed = Math.min(full, revealed + step)
+        }
+      } else {
+        revealed = full
+      }
+      setStream({ kind: streamBuf.kind, text: streamBuf.text.slice(0, revealed) })
+      // Keep animating until the reveal catches up, even after deltas stop.
+      if (revealed < full) scheduleStreamFlush()
+    }
     const scheduleStreamFlush = () => {
-      if (streamTimer != null) return
-      streamTimer = setTimeout(() => {
-        streamTimer = null
-        setStream(streamBuf ? { ...streamBuf } : null)
-      }, 40)
+      if (streamFrame != null) return
+      streamFrame = requestAnimationFrame(onStreamFrame)
     }
     const clearStream = () => {
       streamBuf = null
-      if (streamTimer != null) {
-        clearTimeout(streamTimer)
-        streamTimer = null
+      revealed = 0
+      if (streamFrame != null) {
+        cancelAnimationFrame(streamFrame)
+        streamFrame = null
       }
       setStream(null)
     }
@@ -2935,6 +2975,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // once (a queue-operation and an attachment, both relayed live off the main
     // transcript) and a later real user turn may consume it again.
     const seenNotif = new Set<string>()
+    // task-ids / tool-use-ids whose <task-notification> reported completion. A
+    // background sub-agent's card is rebuilt from its sidecar transcript, which
+    // the backfill relays AFTER the main transcript (where the notification
+    // lives) - so on a reconnect/resume the settle loop below can run before the
+    // sub even exists and match nothing. Record the completed ids here so a sub
+    // created or linked later still settles (mirrors backgroundToolUses, which
+    // exists for the same "signal arrives before the sub" reason).
+    const completedNotifs = new Set<string>()
     // handleTaskNotification folds one <task-notification> record into the flow:
     // a compact notice, plus - for a background/async sub-agent whose completion
     // this is (its Task tool_result was only launch boilerplate, so nothing else
@@ -2951,6 +2999,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       seenNotif.add(dedupKey)
       const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
       if (!stillRunning && (taskId || noticeToolUse)) {
+        // Remember the completion so a sub rebuilt later (backfill ordering)
+        // still settles, even though the loop below may match nothing now.
+        if (taskId) completedNotifs.add(taskId)
+        if (noticeToolUse) completedNotifs.add(noticeToolUse)
         for (const key in subLocal) {
           const sub = subLocal[key]
           const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
@@ -3505,6 +3557,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
+            revealed = 0
             if (streamBuf) streamedKinds.add(streamBuf.kind)
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {
@@ -3639,15 +3692,25 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
-          // Same for sub-agents (item 5): a sub still marked running after the
-          // whole transcript replayed only stays genuinely live if the head is
-          // mid-turn right now (a reconnect during an active turn). Otherwise -
-          // e.g. after a server restart - the run is long over and never emitted
-          // the settling result, so mark it done (and end its orphaned steps) so
-          // it doesn't read "working" forever. A BACKGROUND sub is the exception:
-          // it runs independently of any turn, and its completion notification is
-          // now backfilled (so a finished one already settled above) - a still-
-          // running one is genuinely live, so leave it be.
+          // A BACKGROUND sub-agent settles only off its <task-notification>. That
+          // record lives in the main transcript, which the backfill replays
+          // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification
+          // ran with no sub to match. Apply the recorded completion retroactively
+          // here (independent of the main turn's state); a background sub with no
+          // recorded completion is genuinely still live, so leave it be.
+          for (const key in subLocal) {
+            const sub = subLocal[key]
+            if (sub.status !== 'running' || !sub.background) continue
+            if (completedNotifs.has(sub.agentId) || (sub.toolUseId && completedNotifs.has(sub.toolUseId))) {
+              sub.status = 'done'
+            }
+          }
+          // Same for non-background sub-agents (item 5): a sub still marked running
+          // after the whole transcript replayed only stays genuinely live if the
+          // head is mid-turn right now (a reconnect during an active turn).
+          // Otherwise - e.g. after a server restart - the run is long over and
+          // never emitted the settling result, so mark it done (and end its
+          // orphaned steps) so it doesn't read "working" forever.
           if (!isTurnRunningRef.current) {
             for (const key in subLocal) {
               const sub = subLocal[key]
@@ -3710,7 +3773,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     return () => {
-      if (streamTimer != null) clearTimeout(streamTimer)
+      if (streamFrame != null) cancelAnimationFrame(streamFrame)
       if (retryTimer != null) clearTimeout(retryTimer)
       closeWebSocket(ws)
       wsRef.current = null

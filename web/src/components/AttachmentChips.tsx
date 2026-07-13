@@ -47,23 +47,23 @@ export const AttachmentChips = memo(function AttachmentChips({
             onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } } : undefined}
             role={isImage ? 'button' : undefined}
             tabIndex={isImage ? 0 : undefined}
-            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-stone-200 bg-stone-50 dark:border-stone-600 dark:bg-stone-700/60'}`}
             title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
             aria-label={isImage ? `View ${a.filename}` : undefined}
           >
             {a.previewUrl ? (
               <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover shrink-0`} />
             ) : (
-              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
+              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-stone-400 shrink-0`} />
             )}
-            <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
-            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
+            <span className="max-w-[120px] truncate text-stone-600 dark:text-stone-300">{a.filename}</span>
+            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-stone-400 shrink-0" />}
             {a.error && <span className="text-red-500 shrink-0">failed</span>}
             {onRemove && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onRemove(a.id) }}
-                className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
+                className="ml-0.5 rounded p-0.5 text-stone-400 hover:text-stone-700 hover:bg-stone-200 dark:hover:text-stone-100 dark:hover:bg-stone-600 cursor-pointer shrink-0"
                 aria-label={`Remove ${a.filename}`}
               >
                 <X className="w-3 h-3" />

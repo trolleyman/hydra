@@ -237,14 +237,51 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 	return true
 }
 
+// chatStreamDebug traces the arrival cadence of live token deltas (stream_event
+// lines) to the daemon log. Off by default; enable with HYDRA_CHAT_STREAM_DEBUG=1
+// (read once at start, so restart the daemon after setting it). It exists to
+// answer one question the code alone can't: does the `claude` CLI flush its token
+// deltas per line (smooth) or in bursts (chunky)? The whole Hydra relay is
+// already per-line-immediate (see relayChatChunk / session.readLoop), so any
+// remaining chunkiness lives in the CLI's own stdout buffering over its pipe -
+// this trace measures exactly that boundary. Mirrors HYDRA_EGRESS_DEBUG.
+var chatStreamDebug = os.Getenv("HYDRA_CHAT_STREAM_DEBUG") != ""
+
+// streamTimer accumulates per-connection token-delta timing for chatStreamDebug.
+// One per live chat connection (its inter-delta gaps must not interleave with
+// another connection's), created in pumpChatOutput.
+type streamTimer struct {
+	last  time.Time
+	count int
+}
+
+// note logs one live token-delta line's inter-arrival gap and byte size. No-op
+// unless chatStreamDebug is on; nil-safe so non-live callers pass nil. Consecutive
+// deltas at +0ms then a jump means the CLI block-buffered a burst into one read;
+// a steady small gap per delta means it flushes per line.
+func (t *streamTimer) note(agentID string, line []byte) {
+	if !chatStreamDebug || t == nil {
+		return
+	}
+	now := time.Now()
+	var gapMS int64
+	if !t.last.IsZero() {
+		gapMS = now.Sub(t.last).Milliseconds()
+	}
+	t.last = now
+	t.count++
+	log.Printf("chat stream[%s]: delta #%d +%dms %dB", agentID, t.count, gapMS, len(line))
+}
+
 // relayChatChunk feeds one output chunk through the line reassembler and
 // relays each complete stream-json line as a claude_event frame. Non-protocol
 // lines (pre-spawn-script output sharing the stdout pipe, a mid-line ring-wrap
 // fragment at the start of a replay) are skipped, as are lines whose uuid was
 // already delivered by the transcript backfill. Relayed uuids are added to
 // skip so the sub-agent transcript tailer never re-delivers a line an (older)
-// CLI also put on stdout. Returns false once the socket write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool) bool {
+// CLI also put on stdout. Returns false once the socket write fails. timer is
+// the chatStreamDebug tracer (nil on non-live paths, e.g. the ring replay).
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool, timer *streamTimer) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
@@ -252,6 +289,10 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 				log.Printf("chat ws: skipping non-protocol line for %q (%d bytes)", agentID, len(line))
 			}
 			continue
+		}
+		// A live token delta (partial-message stream_event): trace its cadence.
+		if ev.Type == "stream_event" {
+			timer.note(agentID, line)
 		}
 		// Drop `result` events during the scrollback-ring replay. The durable
 		// transcript carries none, so a past turn's result only exists in the ring
@@ -493,6 +534,9 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	}
 
 	lb := &claudestream.LineBuffer{}
+	// Per-connection token-delta cadence tracer (HYDRA_CHAT_STREAM_DEBUG); nil-safe
+	// and a no-op unless enabled.
+	streamDbg := &streamTimer{}
 	// Attach queues the ring snapshot synchronously before returning, so a
 	// non-blocking receive here reliably distinguishes "history exists" from
 	// "nothing yet" - the client needs replay_done to know when the live
@@ -501,7 +545,8 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	case data, ok := <-att.Output:
 		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
 		// before Attach returned) - drop its misplaced past-turn result footers.
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true) {
+		// nil timer: replayed history isn't live streaming, so don't trace it.
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil) {
 			return
 		}
 	default:
@@ -583,7 +628,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 				return
 			}
 			// Live stream (post replay_done): results arrive in order, so keep them.
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false) {
+			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
 				return
 			}
 		}
