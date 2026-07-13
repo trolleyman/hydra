@@ -326,22 +326,6 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   animation: chat-item-in 0.2s ease-out;
 }
 
-/* Height-animated disclosure for tool cards / thinking: the 0fr <-> 1fr
-   grid-row transition animates to the content's intrinsic height without
-   measuring it in JS. The single child must be allowed to shrink (min-height
-   0) and hide its overflow while mid-transition. */
-.chat-expandable {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.22s ease;
-}
-.chat-expandable.chat-expandable-open {
-  grid-template-rows: 1fr;
-}
-.chat-expandable > * {
-  overflow: hidden;
-  min-height: 0;
-}
 
 /* Shimmering "Thinking..." label while thought tokens stream: a gradient swept
    through the text itself (background-clip: text), light and dark variants. */
@@ -390,7 +374,6 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   .animate-chat-item-in,
   .animate-chat-sheet-up,
   .repo-file-in { animation: none; }
-  .chat-expandable { transition: none; }
   .chat-text-shimmer {
     animation: none;
     background-image: none;

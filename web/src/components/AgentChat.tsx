@@ -811,14 +811,57 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
   return open || mounted
 }
 
-// Expandable animates its child open/closed via the grid-rows 0fr/1fr trick
-// (see .chat-expandable in index.css) - height animates to the content's
-// intrinsic size without any JS measuring.
+// Expandable animates its child open/closed by transitioning a MEASURED
+// max-height (0 <-> content height). We moved off the grid-rows 0fr/1fr trick
+// because, with a nested scroll container inside (a CodePanel's max-h-64 <pre>),
+// the grid container's height ran ahead of the resolved fr track mid-transition,
+// leaving a transient empty gap below the content - the "weird" half-open frame.
+// Measuring clips exactly and reveals linearly. After opening we release
+// max-height to 'none' so later content growth (streamed output) isn't capped.
 function Expandable({ open, children }: { open: boolean; children: ReactNode }) {
   const mounted = useDelayedUnmount(open)
+  const ref = useRef<HTMLDivElement>(null)
+  const first = useRef(true)
+  // max-height is driven imperatively (not via React state / JSX style) so a
+  // re-render from streamed content can't clobber the animated value, and to
+  // avoid a synchronous setState in the layout effect.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // First commit: set the initial state without animating (before paint).
+    if (first.current) {
+      first.current = false
+      el.style.maxHeight = open ? 'none' : '0px'
+      return
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.style.transition = ''
+      el.style.maxHeight = open ? 'none' : '0px'
+      return
+    }
+    el.style.transition = 'max-height 0.22s ease'
+    // scrollHeight is the full content height regardless of the current clip.
+    const h = el.scrollHeight
+    if (open) {
+      el.style.maxHeight = '0px'
+      void el.offsetHeight // force reflow so the next change transitions
+      el.style.maxHeight = `${h}px`
+      const onEnd = (e: TransitionEvent) => {
+        if (e.propertyName !== 'max-height') return
+        el.style.maxHeight = 'none' // release the cap so later growth isn't clipped
+        el.removeEventListener('transitionend', onEnd)
+      }
+      el.addEventListener('transitionend', onEnd)
+      return () => el.removeEventListener('transitionend', onEnd)
+    }
+    // Collapsing: pin the current height, then animate to 0.
+    el.style.maxHeight = `${h}px`
+    void el.offsetHeight
+    el.style.maxHeight = '0px'
+  }, [open])
   return (
-    <div className={`chat-expandable ${open ? 'chat-expandable-open' : ''}`}>
-      <div>{mounted ? children : null}</div>
+    <div ref={ref} style={{ overflow: 'hidden' }}>
+      {mounted ? children : null}
     </div>
   )
 }
