@@ -2568,11 +2568,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // TodoWrite carries the whole to-do list in one call, so it can just replace
     // `todos`. The Task* family (TaskCreate/TaskUpdate) is incremental, so we
     // rebuild the list here and republish it to the same PlanPanel: TaskCreate
-    // appends a task (the harness numbers them in creation order - #1, #2, ... -
-    // which we mirror with taskSeq, since the assigned id lives in the tool
-    // *result*, not its input); TaskUpdate mutates one by id, or drops it on
-    // status "deleted". A session uses one planning tool or the other; if both
-    // ever appear, the most recent write wins.
+    // appends a task; TaskUpdate mutates one by id, or drops it on status
+    // "deleted". A session uses one planning tool or the other; if both ever
+    // appear, the most recent write wins.
+    //
+    // A TaskCreate's assigned id (#1, #2, ...) lives in its tool *result*, not
+    // its input - and it is that id, not creation order, that a later TaskUpdate
+    // references. So a created task is keyed PROVISIONALLY by its tool_use id
+    // (`use:<id>`) when the tool_use lands, then RE-KEYED to the real `#N` id
+    // once the result arrives (applyTaskResult). Keying by creation order broke
+    // once the replay window dropped early creates: the order restarted at 1
+    // while the real ids kept climbing, so every TaskUpdate missed and the panel
+    // showed 0/N.
     const taskItems = new Map<string, { content: string; status: TodoItem['status']; activeForm?: string; order: number }>()
     let taskSeq = 0
     const publishTasks = () => {
@@ -2581,17 +2588,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
       setTodos(list)
     }
-    // applyTaskTool folds one Task* tool_use into the plan panel (TaskCreate
-    // appends a pending task; TaskUpdate mutates one by id, or drops it on status
-    // "deleted"). Non-Task tools and malformed inputs are ignored. The block is
-    // still rendered as a normal tool card by the caller, so the task-list
-    // mutation stays visible in the conversation flow too.
-    const applyTaskTool = (name: string | undefined, input: unknown) => {
+    const applyTaskTool = (name: string | undefined, input: unknown, toolUseId: string) => {
       if (name === 'TaskCreate') {
         const t = parseTaskCreate(input)
         if (!t) return
         taskSeq += 1
-        taskItems.set(String(taskSeq), { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
+        // Provisional key until the result gives us the real id (see above).
+        taskItems.set(`use:${toolUseId}`, { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
         publishTasks()
       } else if (name === 'TaskUpdate') {
         const u = parseTaskUpdate(input)
@@ -2608,6 +2611,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }
         publishTasks()
       }
+    }
+    // applyTaskResult re-keys a just-created task from its provisional tool_use
+    // key to the real "#N" id parsed from the TaskCreate result ("Task #17
+    // created successfully: ..."), so later TaskUpdates for #17 find it.
+    const applyTaskResult = (toolUseId: string, resultText: string) => {
+      const provKey = `use:${toolUseId}`
+      const cur = taskItems.get(provKey)
+      if (!cur) return
+      const m = /#(\d+)/.exec(resultText)
+      const id = m ? m[1] : String(cur.order)
+      if (id === provKey || taskItems.has(id)) return
+      taskItems.delete(provKey)
+      taskItems.set(id, cur)
+      publishTasks()
     }
 
     const pending: ChatItem[] = []
@@ -3266,6 +3283,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
+              if (block.is_error !== true) applyTaskResult(block.tool_use_id, parsed.text)
             }
           }
           return
@@ -3339,7 +3357,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               } else if (todos) {
                 setTodos(todos)
               } else {
-                applyTaskTool(block.name, block.input)
+                applyTaskTool(block.name, block.input, block.id)
                 if (block.name === 'Task') {
                   const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
                   taskInputByUse.set(block.id, {
