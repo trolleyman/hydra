@@ -47,6 +47,12 @@ export const StorageKeys = {
   // messages (the default is serif, Claude-app style). User text stays sans
   // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
   chatSerif: 'hydra-chat-serif',
+  // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
+  // text. Default (absent) = on: incoming token bursts are revealed at a steady
+  // per-frame rate so the text reads as continuous typing rather than landing in
+  // ~quarter-second chunks (the claude CLI flushes deltas ~5x/sec). Client-only,
+  // global (localStorage, like Theme). See lib/chatPrefs.
+  chatSmoothStreaming: 'hydra-chat-smooth-streaming',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
