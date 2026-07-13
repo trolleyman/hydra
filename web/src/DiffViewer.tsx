@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
@@ -1904,6 +1905,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (stored) return parseInt(stored, 10)
     return 220
   })
+  // Mobile file-picker sheet (item 31): below md the side file-list column is
+  // hidden, so the "in N files" chip in the Changes bar opens this bottom sheet
+  // to jump between changed files. Ephemeral (no persistence).
+  const [fileSheetOpen, setFileSheetOpen] = useState(false)
   // Whether the file-list column is hidden (the Files header's show/hide toggle).
   // Persisted globally like the other diff view options.
   const [filesListHidden, setFilesListHidden] = useState(() => readLocal(StorageKeys.diffFilesListHidden) === 'true')
@@ -2510,7 +2515,21 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     <div className="flex items-center gap-1.5">
       <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
       <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
-      <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+      {/* Desktop: plain label (the side file list is visible). Mobile (< md, where
+          that list is hidden): a tappable chip that opens the file-picker sheet. */}
+      <span className="hidden md:inline text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+      {diff.files.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setFileSheetOpen(true)}
+          className="md:hidden inline-flex items-center gap-0.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dotted underline-offset-2 cursor-pointer"
+        >
+          in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      ) : (
+        <span className="md:hidden text-xs text-gray-400 dark:text-gray-500">in 0 files</span>
+      )}
     </div>
   )
   const resetBtn = !(leftSel.type === 'base' && rightSel.type === 'latest') && (
@@ -2877,6 +2896,41 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {diffContentEl}
       {dragOverlay}
       {commentToast}
+      {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
+          position:fixed is viewport-relative - the narrow screen-stack track has
+          a transform, which would otherwise be its containing block. md:hidden so
+          it can't linger if the viewport grows past the side-list breakpoint. */}
+      {fileSheetOpen && diff && createPortal(
+        <div className="md:hidden fixed inset-0 z-[60] flex flex-col justify-end" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setFileSheetOpen(false)} />
+          <div className="relative flex flex-col max-h-[70vh] bg-white dark:bg-gray-800 rounded-t-2xl border-t border-gray-200 dark:border-gray-700 shadow-2xl animate-in slide-in-from-bottom-4 duration-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Files <span className="text-gray-400 dark:text-gray-500 tabular-nums">{diff.files.length}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setFileSheetOpen(false)}
+                aria-label="Close file list"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto overflow-x-hidden py-1">
+              {diff.files.map((f, i) => (
+                <FileRow
+                  key={f.path}
+                  file={f}
+                  isActive={singleFile && i === singleFileIdx}
+                  onClick={() => { handleFileClick(f.path); setFileSheetOpen(false) }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
