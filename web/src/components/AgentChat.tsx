@@ -13,6 +13,7 @@ import {
   FilePen,
   FileText,
   Globe,
+  Info,
   ListChecks,
   ListEnd,
   ListPlus,
@@ -835,6 +836,64 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll }: { oldStr: string; n
   )
 }
 
+// parseMemory splits a memory Read's result into its point-in-time reminder,
+// its YAML frontmatter, and its markdown body - stripping the cat -n line-number
+// gutter the Read tool adds ("     1\t---" -> "---").
+function parseMemory(raw: string): { reminder: string | null; yaml: string; body: string } {
+  let text = raw
+  let reminder: string | null = null
+  const m = text.match(/<system-reminder>([\s\S]*?)<\/system-reminder>\s*/i)
+  if (m) {
+    reminder = m[1].trim()
+    text = (text.slice(0, m.index) + text.slice((m.index ?? 0) + m[0].length))
+  }
+  // Drop the line-number prefix ("<up to 6 spaces>N\t") each Read line carries.
+  text = text
+    .split('\n')
+    .map((l) => l.replace(/^\s{0,6}\d+\t/, ''))
+    .join('\n')
+    .trim()
+  let yaml = ''
+  let body = text
+  const fm = text.match(/^---\n([\s\S]*?)\n---\n?/)
+  if (fm) {
+    yaml = fm[1]
+    body = text.slice(fm[0].length).trim()
+  }
+  return { reminder, yaml, body }
+}
+
+// MemoryPanel renders a Claude auto-memory Read nicely (item: memory cards): the
+// point-in-time <system-reminder> as a callout under the header, the YAML
+// frontmatter as a highlighted code box, and the body as normal markdown prose -
+// no line-number gutter.
+function MemoryPanel({ text }: { text: string }) {
+  const serif = useChatFontStore((s) => s.serif)
+  const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
+  const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
+  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  return (
+    <div className="space-y-2">
+      {reminder && (
+        <div className="flex gap-1.5 rounded-md border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200/90">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>{reminder}</span>
+        </div>
+      )}
+      {yaml && (
+        yamlHtml != null
+          ? <pre className={codeCls} dangerouslySetInnerHTML={{ __html: yamlHtml }} />
+          : <pre className={codeCls}>{yaml}</pre>
+      )}
+      {body && (
+        <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={body} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Per-tool icons for the card header; anything unlisted gets the wrench.
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
@@ -1007,7 +1066,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                     </div>
                   )}
                   {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
-                    <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+                    mem && !item.isError
+                      ? <MemoryPanel text={item.result} />
+                      : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}
@@ -1581,12 +1642,12 @@ function SubagentChatView({
           </span>
         )}
       </div>
+      {/* The sub-agent's task is its "user" turn: render it as a user message
+          bubble (like the main conversation's), no "Prompt" heading. This is the
+          full view only - the folded SubagentCard keeps its labelled Prompt. */}
       {sub.prompt && (
-        <div>
-          <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-            Prompt
-          </div>
-          <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className="flex flex-col items-end gap-1">
+          <div className={`${USER_BUBBLE_CLASS} leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
