@@ -46,3 +46,24 @@ let nextId = 0
 export function nextAttachmentId(): number {
   return nextId++
 }
+
+// isGenericImageName is true for a pasted/nameless image (image.png, or no stem)
+// that should be auto-numbered image1.png, image2.png, ... A file the user named
+// keeps its own name.
+export function isGenericImageName(name: string): boolean {
+  const stem = name.replace(/\.[^.]*$/, '')
+  return stem === '' || stem.toLowerCase() === 'image'
+}
+
+// nextGenericImageNumber returns the next image<N> number for a generic image:
+// max of the numbers already on the current attachments, + 1. Derived from the
+// live attachment list (not an ever-growing counter) so it resets to 1 once the
+// list clears on send and fills the gap after a removal.
+export function nextGenericImageNumber(attachments: Attachment[]): number {
+  let max = 0
+  for (const a of attachments) {
+    const m = /^image(\d+)\.[^.]+$/i.exec(a.filename)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return max + 1
+}

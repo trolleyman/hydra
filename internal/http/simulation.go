@@ -3465,7 +3465,11 @@ var simAskEvents = []string{
 	`{"type":"system","subtype":"init","session_id":"sim-ask","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentAskPrompt + `"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"thinking","thinking":"The loader currently reads one config.toml. Layering strategy and scope of the first cut are product decisions - ask instead of guessing."}]}}`,
-	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area. First, a sketch of the override file so we have something concrete to talk about:"}]}}`,
+	// A Write tool call: its content renders as a numbered, syntax-highlighted
+	// code block (like a Read), not raw JSON.
+	`{"type":"assistant","message":{"id":"msg_ask_write","content":[{"type":"tool_use","id":"toolu_ask_write","name":"Write","input":{"file_path":"config.local.toml","content":"# Per-environment overrides, layered over config.toml.\n# Keys here win; anything omitted falls through to the base file.\n\n[network]\nmode = \"hard\"\nallowed_hosts = [\"api.internal.example.com\"]\n\n[claude.sandbox]\nwritable_paths = [\"./.cache/local\"]\n\n[tests.unit]\ncommand = \"go test ./... -short\"\n"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask_write","content":"File created successfully at: config.local.toml"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_2","content":[{"type":"tool_use","id":"toolu_ask_1","name":"AskUserQuestion","input":` + simAskQuestionInput + `}]}}`,
 	`{"type":"control_request","request_id":"sim-ask-req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":` + simAskQuestionInput + `,"tool_use_id":"toolu_ask_1","requires_user_interaction":true}}`,
 }

@@ -10,10 +10,10 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
-import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
-import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
+import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime } from '../lib/pastedText'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
@@ -236,9 +236,8 @@ export const SpawnForm = memo(function SpawnForm({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // Numbers generically-named pasted images (image.png, image.png, ...) as
   // image1.png, image2.png, ... so each can be referred to distinctly in the
-  // prompt. Per project + layout (persisted via imageCounterKey) so the count
-  // doesn't bleed across projects, and reset after a successful spawn.
-  const imageCounterRef = useRef(0)
+  // prompt (see addFiles - the number is max(current) + 1, so it resets when the
+  // box clears and fills gaps after a removal).
   // Numbers pasted-text attachments (pasted-text-1.txt, ...) so each large paste
   // gets a distinct, referenceable filename. Session-only, reset after a spawn.
   const pastedTextCounterRef = useRef(0)
@@ -441,7 +440,6 @@ export const SpawnForm = memo(function SpawnForm({
   // attachments live in an in-session module cache (their thumbnails are object
   // URLs that can't be persisted); the counter is mirrored to localStorage.
   const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
-  const counterKey = projectId ? imageCounterKey(projectId, compact) : null
   const prevStoreKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -454,15 +452,9 @@ export const SpawnForm = memo(function SpawnForm({
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
     const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
-    if (storeKey) {
-      resetHistory(makeSnapshot(loadedPrompt, loadAttachments(storeKey), 0, 0))
-      imageCounterRef.current = Number(readLocal(counterKey!)) || 0
-    } else {
-      resetHistory(makeSnapshot(loadedPrompt, [], 0, 0))
-      imageCounterRef.current = 0
-    }
+    resetHistory(makeSnapshot(loadedPrompt, storeKey ? loadAttachments(storeKey) : [], 0, 0))
     prevStoreKeyRef.current = storeKey
-  }, [storeKey, counterKey, draftKey, resetHistory])
+  }, [storeKey, draftKey, resetHistory])
 
   // Persist the current box's attachments to the cache on unmount (the
   // full-page form remounts when navigating between projects).
@@ -477,17 +469,6 @@ export const SpawnForm = memo(function SpawnForm({
   // ends up with several indistinguishable attachments. Rename those generic
   // (or unnamed) images to image1.png, image2.png, ... so the on-disk path - and
   // therefore the reference the user can type in the prompt - is unique. Files
-  // with a real name (e.g. a dragged "diagram.png") keep it.
-  function numberGenericImage(file: File): File {
-    if (!isImageFile(file)) return file
-    const stem = file.name.replace(/\.[^.]*$/, '')
-    if (stem !== '' && stem.toLowerCase() !== 'image') return file
-    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
-    const n = ++imageCounterRef.current
-    if (counterKey) writeLocal(counterKey, String(imageCounterRef.current))
-    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
-  }
-
   // Track one file as an uploading attachment chip, returning its id. The
   // uploaded path is appended to the prompt on submit (and so wired through to
   // the agent).
@@ -507,9 +488,19 @@ export const SpawnForm = memo(function SpawnForm({
     return id
   }
 
-  // Upload each file as an attachment chip.
+  // Upload each file as an attachment chip. Generically-named images are
+  // renamed image<N>.ext, N = max(current) + 1 (running within the batch).
   function addFiles(rawFiles: File[]) {
-    for (const file of rawFiles.map(numberGenericImage)) uploadAttachment(file)
+    let nextN = nextGenericImageNumber(attachments)
+    for (const raw of rawFiles) {
+      let file = raw
+      if (isImageFile(raw) && isGenericImageName(raw.name)) {
+        const ext = (raw.name.match(/\.([^.]+)$/)?.[1] || raw.type.split('/')[1] || 'png').toLowerCase()
+        file = new File([raw], `image${nextN}.${ext}`, { type: raw.type, lastModified: raw.lastModified })
+        nextN++
+      }
+      uploadAttachment(file)
+    }
   }
 
   // Attach a large text paste as a numbered file so it rides along like any
@@ -659,10 +650,8 @@ export const SpawnForm = memo(function SpawnForm({
       resetHistory(makeSnapshot('', [], 0, 0))
       if (storeKey) saveAttachments(storeKey, [])
       setLightboxIndex(null)
-      imageCounterRef.current = 0
       pastedTextCounterRef.current = 0
       lastPasteRef.current = null
-      if (counterKey) writeLocal(counterKey, null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))

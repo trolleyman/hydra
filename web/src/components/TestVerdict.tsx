@@ -25,12 +25,20 @@ function VerdictIcon({ status, className = 'w-3 h-3 shrink-0' }: { status: TestS
   }
 }
 
+// ChipSep is the interpunct that separates the passing count from the warning /
+// skipped segments riding on a passing chip (✓ 142 · ⚠ 4 · ▸| 3) - a thin dot
+// rather than a vertical rule.
+function ChipSep() {
+  return <span className="mx-0.5 text-gray-400 dark:text-gray-500" aria-hidden="true">·</span>
+}
+
 // SkippedCount renders the gray skip-forward marker that rides on a passing chip
-// after a divider (✓ 142 │ ▸| 3). Gray, never amber, never the ⊘ "no-entry" glyph.
+// after a separator (✓ 142 · ▸| 3). Gray, never amber, never the ⊘ "no-entry" glyph.
 function SkippedCount({ n }: { n: number }) {
   if (n <= 0) return null
   return (
-    <span className="inline-flex items-center gap-0.5 pl-1 ml-0.5 border-l border-current/30 text-gray-500 dark:text-gray-400">
+    <span className="inline-flex items-center gap-0.5 text-gray-500 dark:text-gray-400">
+      <ChipSep />
       <SkipForward className="w-2.5 h-2.5" />
       {n}
     </span>
@@ -38,13 +46,14 @@ function SkippedCount({ n }: { n: number }) {
 }
 
 // WarningCount renders the amber warning marker that rides on a passing chip after
-// a divider, before the skipped count (✓ 142 │ ⚠ 4 │ ▸| 3). Amber - a warning DOES
+// a separator, before the skipped count (✓ 142 · ⚠ 4 · ▸| 3). Amber - a warning DOES
 // warrant caution (unlike skipped) - but it stays an inline segment so the chip as
 // a whole remains green: warnings are informational and never fail the verdict.
 function WarningCount({ n }: { n: number }) {
   if (n <= 0) return null
   return (
-    <span className="inline-flex items-center gap-0.5 pl-1 ml-0.5 border-l border-current/30 text-amber-600 dark:text-amber-400">
+    <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+      <ChipSep />
       <AlertTriangle className="w-2.5 h-2.5" />
       {n}
     </span>

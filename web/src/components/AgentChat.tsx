@@ -37,9 +37,8 @@ import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
-import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
+import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { chatImageCounterKey, readLocal, writeLocal } from '../lib/storage'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
@@ -3725,23 +3724,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
   }
 
-  // numberGenericImage renames pasted / unnamed images to image1.png,
-  // image2.png, ... (per project+agent, persisted) so each gets a stable, unique
-  // on-disk name - like the spawn box (item 46). Named files keep their name.
-  function numberGenericImage(file: File): File {
-    if (!isImageFile(file)) return file
-    const stem = file.name.replace(/\.[^.]*$/, '')
-    if (stem !== '' && stem.toLowerCase() !== 'image') return file
-    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
-    const key = chatImageCounterKey(projectId, agentId)
-    const n = (Number(readLocal(key)) || 0) + 1
-    writeLocal(key, String(n))
-    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
-  }
-
+  // addFiles queues each dropped/pasted file as an attachment and uploads it.
+  // Generically-named images (image.png, or nameless pastes) are renamed
+  // image1.png, image2.png, ... so each gets a stable, unique on-disk name. The
+  // number is max(existing image<N> on the current attachments) + 1, computed
+  // fresh here rather than from an ever-growing counter: it resets to 1 once the
+  // attachments clear on send, and fills the gap after a removal (so removing #2
+  // and re-adding reuses 2, not 3).
   function addFiles(rawFiles: File[]) {
+    let nextN = nextGenericImageNumber(attachmentsRef.current)
     for (const raw of rawFiles) {
-      const file = numberGenericImage(raw)
+      let file = raw
+      if (isImageFile(raw) && isGenericImageName(raw.name)) {
+        const ext = (raw.name.match(/\.([^.]+)$/)?.[1] || raw.type.split('/')[1] || 'png').toLowerCase()
+        file = new File([raw], `image${nextN}.${ext}`, { type: raw.type, lastModified: raw.lastModified })
+        nextN++
+      }
       const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
       setAttachments((prev) => [
