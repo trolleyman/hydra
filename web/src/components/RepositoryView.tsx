@@ -1353,7 +1353,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             </IconButton>
           </Tooltip>
         )}
-        <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
+        <span className="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
         {branches !== null ? (
           // The base picker always sizes to its own content (it stays
           // shrink-0 + truncates at its own max width). Keeping it un-shrinkable

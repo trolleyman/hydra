@@ -16,7 +16,8 @@ import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, ExternalLink, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ProviderIcon } from '../components/ReviewControls'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { AgentSidebarItem } from '../components/AgentComponents'
@@ -720,7 +721,7 @@ function RootLayout() {
                           aria-label="Open repository on the forge"
                           className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                         >
-                          <ExternalLink className="w-4 h-4 shrink-0" />
+                          <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
                         </a>
                       </Tooltip>
                     )}

@@ -5,7 +5,7 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
-import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon } from './ReviewControls'
+import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
@@ -18,7 +18,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { IconButton } from './IconButton'
 import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -1466,7 +1466,7 @@ export function AgentDetail({
     : linked
       ? {
           label: 'View MR',
-          icon: <ExternalLink className="w-4 h-4" />,
+          icon: <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
           onClick: () => window.open(agent.review!.url, '_blank', 'noreferrer'),
           variant: 'segment',
           menu: [
