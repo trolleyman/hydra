@@ -2834,6 +2834,16 @@ var simChatEvents = []string{
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
+	// A RESUMED background/async sub-agent that finished before a daemon
+	// stop+resume. On reconnect the backfill relays the main transcript first -
+	// the Agent launch, its launch-boilerplate tool_result (marks the card
+	// background) and its completion <task-notification> - and only THEN rebuilds
+	// the sub from its sidecar (the meta + sidechain steps handleSimChatWS emits
+	// after this slice). So the notification is processed before the sub exists;
+	// the card must still settle to "finished", not hang on "working" forever.
+	`{"type":"assistant","message":{"id":"msg_sim_resumed_bg","content":[{"type":"tool_use","id":"toolu_sim_resumed_bg","name":"Task","input":{"description":"Find preview proxy code","subagent_type":"scout","prompt":"Find the preview reverse-proxy handler and where response headers are copied."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_bg","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_resumed_bg (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>sim_sub_resumed_bg</task-id>\n<tool-use-id>toolu_sim_resumed_bg</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Find preview proxy code\" finished</summary>\n</task-notification>"}}`,
 	// A chained command with a description: the collapsed card shows the
 	// description, the expanded card the ;/&&-split highlighted script.
 	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
@@ -2941,6 +2951,20 @@ func handleSimChatWS(conn *safeConn) {
 		Description: "Audit upload retry tests",
 		ToolUseID:   "toolu_sim_task",
 	})
+	// The resumed background sub-agent's sidecar, delivered AFTER the main
+	// transcript (which already carried its completion <task-notification>) -
+	// exactly the daemon backfill order. Its card was created 'running' here,
+	// after the notification was processed, so it settles only via the
+	// completion recorded on replay_done (regression guard for the stop+resume
+	// "stuck working" bug).
+	sendSubagentMeta(conn, "sim_sub_resumed_bg", &claudestream.SubagentMeta{
+		AgentType:   "scout",
+		Description: "Find preview proxy code",
+		ToolUseID:   "toolu_sim_resumed_bg",
+	})
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
+	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).
