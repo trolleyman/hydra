@@ -220,7 +220,9 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 			in.state = StateRunning
 			in.childPort = childPort
 			target := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", childPort))}
-			in.proxy = httputil.NewSingleHostReverseProxy(target)
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			proxy.ModifyResponse = forceRevalidate
+			in.proxy = proxy
 			close(readyCh)
 			in.readyCh = nil
 		}
