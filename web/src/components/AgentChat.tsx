@@ -13,6 +13,7 @@ import {
   FilePen,
   FileText,
   Globe,
+  History,
   Info,
   ListChecks,
   ListEnd,
@@ -85,6 +86,11 @@ type ChatItem =
   // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
   // the pill can offer a View button.
   | { kind: 'notice'; id: number; text: string; subagentKey?: string }
+  // The CLI-injected "session continued" preamble after a context compaction
+  // (auto/out-of-context or /compact): a bookkeeping summary, not a real user
+  // turn, so it collapses behind an expander (item 39). outOfContext labels the
+  // auto/ran-out-of-context case specifically.
+  | { kind: 'contextNote'; id: number; text: string; outOfContext: boolean }
   | { kind: 'interrupted'; id: number }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
@@ -379,6 +385,19 @@ function stripToolUseError(text: string): string {
 // otherwise render as a raw-XML bubble (item 31).
 function stripLocalCommandCaveat(text: string): string {
   return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
+}
+
+// detectContextNote recognises the CLI-injected "session continued" preamble that
+// leads a conversation after a context compaction (auto/ran-out-of-context or an
+// explicit /compact). It's a summary the CLI feeds the model to carry state over,
+// not a real user turn, so the chat collapses it behind an expander (item 39).
+// Returns null for any ordinary message. outOfContext flags the auto case.
+function detectContextNote(text: string): { outOfContext: boolean } | null {
+  const t = text.trimStart()
+  if (t.startsWith('This session is being continued from a previous conversation')) {
+    return { outOfContext: /ran out of context/i.test(t.slice(0, 200)) }
+  }
+  return null
 }
 
 // decodeEntities turns the handful of XML entities that appear in injected
@@ -2232,6 +2251,38 @@ const ChatUserMessage = memo(function ChatUserMessage({
   )
 })
 
+// ContextNoteCard renders a collapsed CLI-injected "session continued" preamble
+// (item 39): a compact pill naming what it is - a context compaction the model
+// was handed to carry state over - that expands to the full summary on click,
+// instead of dumping the whole block into the flow. outOfContext picks the label.
+const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { text: string; outOfContext: boolean }) {
+  const [open, setOpen] = useState(false)
+  const label = outOfContext
+    ? 'Continued from a previous conversation (ran out of context)'
+    : 'Continued from a previous conversation'
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <History className="w-3 h-3 shrink-0" />
+        <span className="truncate">{label}</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
 // reduceHistoryEvents reduces a batch of older (settled) conversation events -
 // the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
 // the live reducer's settled-event handling (no streaming, model or
@@ -2284,6 +2335,11 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
     if (text.includes('<task-notification>')) {
       const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
       push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      return
+    }
+    const ctxNote = detectContextNote(text)
+    if (ctxNote) {
+      push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
       return
     }
     push({ kind: 'user', text })
@@ -3395,6 +3451,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // main-transcript relay of the same notification (item 8/15).
       if (text.includes('<task-notification>')) {
         handleTaskNotification(text, ts)
+        return
+      }
+      // A context-compaction "session continued" preamble: collapse it behind an
+      // expander rather than dumping the whole summary inline (item 39). Not a
+      // real user turn, so it doesn't anchor the working-clock or dedup.
+      const ctxNote = detectContextNote(text)
+      if (ctxNote) {
+        push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
       // The echo of a message we already showed optimistically (item 26): just
@@ -4563,6 +4627,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>
         )
       }
+      case 'contextNote':
+        return <ContextNoteCard text={item.text} outOfContext={item.outOfContext} />
       case 'interrupted':
         return (
           <div className="flex justify-end">

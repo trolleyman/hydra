@@ -2804,6 +2804,9 @@ var simChatEvents = []string{
 	// $ figure on turn footers; model + slash_commands feed the composer's
 	// model dropdown and / autocomplete.
 	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
+	// A context-compaction "session continued" preamble (item 39): a CLI-injected
+	// summary, not a real user turn, so the chat collapses it behind an expander.
+	`{"type":"user","uuid":"sim-compaction","message":{"role":"user","content":[{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. The user asked to add a retry loop with exponential backoff to the artifacts uploader, plus a giving-up test.\n2. We located the uploader in internal/artifacts/upload.go and drafted a jittered backoff helper.\n3. Next step: wire the retry loop into Put and add TestPutRetry.\n\nContinue from where you left off."}]}}`,
 	// Consecutive timestamps here let the replayed thought show "Thought for Xs"
 	// (item 7): the chat estimates the thinking duration from the gap between the
 	// triggering user turn and the assistant message that carried the thought.
