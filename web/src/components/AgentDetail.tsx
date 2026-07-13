@@ -18,9 +18,10 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightOpen, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, ExternalLink, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
-import { useSplitLayoutStore, usePaneCollapseStore, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
+import { IconButton } from './IconButton'
+import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -35,7 +36,7 @@ import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
-import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
+import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -423,8 +424,8 @@ function metaRowSignature(a: AgentResponse) {
   return {
     agent_type: a.agent_type,
     archived: a.archived,
-    status: a.agent_status?.status,
-    tests: a.tests,
+    // status + tests moved to the header (AgentTopBar), so the row no longer
+    // depends on them.
     network_enforcement: a.network_enforcement,
     branch_name: a.branch_name,
     base_branch: a.base_branch,
@@ -476,16 +477,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
       >
         {agent.agent_type}
       </Badge>
-      {agent.agent_status && (
-        <Badge className={agentStatusBadge(agent.agent_status.status).className}>
-          {agentStatusBadge(agent.agent_status.status).label}
-        </Badge>
-      )}
-      {/* Test verdict chip (PLAN #68): an at-a-glance verdict. The full
-          tests panel lives in the diff viewer, below the Changes header. */}
-      {agent.tests && agent.tests.status !== 'none' && (
-        <TestVerdictChip tests={agent.tests} variant="sm" />
-      )}
+      {/* Status pill + test verdict now live in the header (AgentTopBar). */}
       {/* The armed "merges when tests pass" state is shown by the merge button
           itself now (the green pill), so no separate metadata-row badge. */}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
@@ -626,22 +618,32 @@ export function AgentDetail({
   }, [])
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // ── New two-pane split layout ──────────────────────────────────────────────
-  // Gated behind the split-layout flag (on for live agents at every screen size -
-  // the divider collapses to a single pane on narrow viewports rather than the
-  // page falling back to a different layout). The pane-collapse store gives the
-  // divider its three states (split / terminal-only / inspector-only).
+  // ── Two-pane split layout ──────────────────────────────────────────────────
+  // Gated behind the split-layout flag. On a WIDE viewport it's the real two-pane
+  // split (working pane + diff/inspector pane, divider between). On a NARROW
+  // viewport there's no room for two panes, so it degrades to a single pane that
+  // the diff-sidebar toggle flips between the working view and a full-screen diff.
+  // The pane-collapse store holds the shared state (none / inspector-hidden /
+  // working-hidden). With the flag off (or archived) the classic stacked layout
+  // renders instead.
   const splitEnabled = useSplitLayoutStore((s) => s.enabled)
+  const isWide = useMediaQuery(SPLIT_QUERY)
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
-  const splitActive = splitEnabled && !agent.archived
-  // "Diff only" focus mode: the working (terminal/chat) pane is hidden and the
-  // inspector gets the whole width (the split's `working` collapse state).
-  const diffOnly = splitActive && paneCollapse === 'working'
-  // Inspector ("diff sidebar") hidden -> the working pane gets the full width.
-  const inspectorHidden = splitActive && paneCollapse === 'inspector'
-  const workingPaneLabel = agent.chat_mode === true ? 'chat' : 'terminal'
+  const splitActive = splitEnabled && isWide && !agent.archived
+  const narrowSplit = splitEnabled && !isWide && !agent.archived
+  const paneActive = splitActive || narrowSplit
+  // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
+  // Narrow: the single pane is showing the full-screen diff (working collapsed).
+  const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
+  // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
+  // pane; narrow flips the single pane between working and full-screen diff.
+  const toggleDiffSidebar = useCallback(() => {
+    if (!paneActive) return
+    if (isWide) toggleInspector()
+    else toggleWorking()
+  }, [paneActive, isWide, toggleInspector, toggleWorking])
   // Left (working) pane's share of the split, persisted like sidebarWidth.
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
   const splitRatioRef = useRef(splitRatio)
@@ -1133,12 +1135,13 @@ export function AgentDetail({
   // never goes stale. It stays inert while typing (the terminal, a form field) or
   // while a dialog / help overlay is open, so it never steals a keystroke (Ctrl+M
   // is Enter in a terminal) or acts behind a modal.
-  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; kill: () => void; rename: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean; branch: string }>(null!)
+  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; kill: () => void; rename: () => void; toggleDiffSidebar: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean; branch: string }>(null!)
   shortcutRef.current = {
     merge: handleMerge,
     markUnread: handleMarkUnread,
     kill: handleKill,
     rename: startEditingTitle,
+    toggleDiffSidebar,
     agentId: agent.id,
     projectId,
     busy: merging || killing,
@@ -1166,6 +1169,14 @@ export function AgentDetail({
           if (dialogOpen || ctx.archived) return
           e.preventDefault()
           ctx.markUnread()
+          return
+        }
+        // Toggle the diff sidebar (Ctrl+,) - works with the terminal focused, like
+        // merge/mark-unread. A no-op when the split layout isn't active.
+        if (actionKey === ',') {
+          if (dialogOpen) return
+          e.preventDefault()
+          ctx.toggleDiffSidebar()
           return
         }
       }
@@ -1501,7 +1512,21 @@ export function AgentDetail({
           never collides with the diff's own sticky "Changes" header. */}
       <AgentTopBar
         title={agent.title || agent.id}
-        statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />}
+        // Status cluster next to the name: the dot, the status pill, and the test
+        // verdict - pulled out of the metadata row to declutter it (image 13/14).
+        statusDot={
+          <>
+            <span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />
+            {agent.agent_status && (
+              <Badge className={agentStatusBadge(agent.agent_status.status).className}>
+                {agentStatusBadge(agent.agent_status.status).label}
+              </Badge>
+            )}
+            {agent.tests && agent.tests.status !== 'none' && (
+              <TestVerdictChip tests={agent.tests} variant="sm" />
+            )}
+          </>
+        }
         rename={{
           editing: editingTitle,
           draft: titleDraft,
@@ -1511,34 +1536,25 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
+        // Far-right, mirroring the show-sidebar button on the far left: the diff
+        // ("inspector") sidebar toggle. Wide -> hide/show the diff pane; narrow ->
+        // flip to / from a full-screen diff. Ctrl+, does the same.
+        rightSlot={
+          paneActive ? (
+            <IconButton
+              variant="panel"
+              aria-label={diffShown ? 'Hide diff sidebar' : 'Show diff sidebar'}
+              title={`${diffShown ? 'Hide' : 'Show'} diff sidebar (${SHORTCUT_DIFF_SIDEBAR})`}
+              onClick={toggleDiffSidebar}
+            >
+              {diffShown ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
+            </IconButton>
+          ) : undefined
+        }
         actions={[
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          // "Show diff sidebar" - reveals the collapsed inspector pane. The HIDE
-          // side of this toggle lives inside the diff's own Changes bar (left of
-          // the "Changes" heading, see InspectorPane/DiffViewer), so once hidden
-          // there's nowhere in the diff to click - the show button surfaces here
-          // in the header instead. Only while the inspector is actually hidden.
-          ...(inspectorHidden
-            ? [{
-                label: 'Show diff sidebar',
-                icon: <PanelRightOpen className="w-4 h-4" />,
-                onClick: toggleInspector,
-                variant: 'segment' as const,
-              }]
-            : []),
-          // "Diff only" toggle - the mirror: it hides the working (terminal/chat)
-          // pane so the diff gets the full width. Toggling it back reveals the
-          // working pane.
-          ...(splitActive
-            ? [{
-                label: diffOnly ? `Show ${workingPaneLabel}` : 'Diff only',
-                icon: diffOnly ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />,
-                onClick: toggleWorking,
-                variant: 'segment' as const,
-              }]
-            : []),
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
@@ -1615,15 +1631,59 @@ export function AgentDetail({
               projectId={projectId}
               externalRefreshTrigger={diffRefreshTrigger}
               externalArtifactRefresh={artifactRefreshTrigger}
-              onHideInspector={toggleInspector}
             />
           </div>
           {/* Transparent overlay during the divider drag so the pointer isn't
               swallowed by the xterm/iframe (gotcha #5). */}
           {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
         </div>
+      ) : narrowSplit ? (
+        // ── Narrow single pane (split enabled, no room for two panes) ────────
+        // One pane at a time: the working view (metadata + prompt + terminal), or
+        // a full-screen diff when the diff-sidebar toggle collapses the working
+        // pane. No divider, no stacked diff-below - the toggle (or Ctrl+,) flips
+        // between them.
+        paneCollapse === 'working' ? (
+          <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
+            <InspectorPane
+              agent={agent}
+              projectId={projectId}
+              externalRefreshTrigger={diffRefreshTrigger}
+              externalArtifactRefresh={artifactRefreshTrigger}
+            />
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
+            <div className="shrink-0">
+              <AgentMetaRow
+                agent={agent}
+                agentTypeClass={agentTypeClass}
+                branches={branches}
+                savingBase={savingBase}
+                savingChatMode={savingChatMode}
+                savingDownstream={savingDownstream}
+                onSaveBase={onSaveBase}
+                onRefreshBranches={refreshBranches}
+                onSaveChatMode={onSaveChatMode}
+                onSaveDownstream={onSaveDownstream}
+              />
+            </div>
+            {agent.prompt && agent.chat_mode !== true && (
+              <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+            )}
+            <AgentTerminal
+              agentId={agent.id}
+              projectId={projectId}
+              isEphemeral={agent.ephemeral}
+              chatMode={agent.chat_mode === true}
+              fill
+              onRefresh={onRefresh}
+              onDiffRefresh={handleDiffRefresh}
+            />
+          </div>
+        )
       ) : (
-        // ── Classic single-column stacked layout (flag off, or narrow) ───────
+        // ── Classic single-column stacked layout (flag off, or archived) ─────
         // pt-4 (16px) above the metadata row matches the effective gap below it
         // (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced.
         <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>

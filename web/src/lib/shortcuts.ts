@@ -64,6 +64,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['Alt', '↓'], label: 'Next agent' },
       { keys: [modLabel, 'M'], label: 'Merge agent' },
       { keys: [modLabel, 'U'], label: 'Mark as unread' },
+      { keys: [modLabel, ','], label: 'Toggle diff sidebar' },
       { keys: ['F2'], label: 'Rename agent' },
       { keys: ['B'], label: 'Copy branch name' },
       { keys: [modLabel, 'K'], label: 'Kill agent' },
@@ -76,3 +77,4 @@ export const SHORTCUT_MERGE = `${modLabel}+M`
 export const SHORTCUT_MARK_UNREAD = `${modLabel}+U`
 export const SHORTCUT_KILL = `${modLabel}+K`
 export const SHORTCUT_RENAME = 'F2'
+export const SHORTCUT_DIFF_SIDEBAR = `${modLabel}+,`

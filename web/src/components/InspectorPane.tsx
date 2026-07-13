@@ -18,15 +18,11 @@ export function InspectorPane({
   projectId,
   externalRefreshTrigger,
   externalArtifactRefresh,
-  onHideInspector,
 }: {
   agent: AgentResponse
   projectId: string | null
   externalRefreshTrigger?: number
   externalArtifactRefresh?: number
-  // Collapses the inspector pane (the split layout's "diff sidebar" toggle). When
-  // provided, DiffViewer renders the hide button at the left of its Changes bar.
-  onHideInspector?: () => void
 }) {
   return (
     // pt-4 mirrors the classic scroll container so DiffViewer's `-top-4` sticky
@@ -43,7 +39,6 @@ export function InspectorPane({
         externalRefreshTrigger={externalRefreshTrigger}
         externalArtifactRefresh={externalArtifactRefresh}
         inspector
-        onHideInspector={onHideInspector}
       />
     </div>
   )

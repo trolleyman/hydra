@@ -505,11 +505,16 @@ export function AgentTopBar({
   statusDot,
   actions,
   rename,
+  rightSlot,
 }: {
   title: string
   statusDot?: ReactNode
   actions: AgentTopBarAction[]
   rename?: AgentTopBarRename
+  // Far-right control, mirroring the far-left show-sidebar button - the diff
+  // ("inspector") sidebar hide/show toggle. Rendered outside the measured
+  // title/actions row so AdaptiveActions' width budget stays correct.
+  rightSlot?: ReactNode
 }) {
   const collapsed = useSidebarStore((s) => s.collapsed)
   const toggle = useSidebarStore((s) => s.toggle)
@@ -537,24 +542,35 @@ export function AgentTopBar({
     // aligns with the sidebar header and never collides with the diff's own
     // sticky "Changes" header.
     <div className="shrink-0 h-12 px-3 sm:px-4 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-      {collapsed && (
-        <IconButton
-          variant="panel"
-          aria-label="Show sidebar"
-          title="Show sidebar (Ctrl+.)"
-          onClick={toggle}
-          className="shrink-0 -ml-1"
-        >
-          <PanelLeftOpen className="w-5 h-5" />
-        </IconButton>
-      )}
+      {/* Show-sidebar button (only while the app sidebar is collapsed): its width
+          animates open/shut via the grid-cols 0fr<->1fr trick + a fade, so it
+          eases in rather than popping into place. */}
+      <div
+        className={`shrink-0 grid transition-[grid-template-columns,opacity] duration-200 ${collapsed ? 'opacity-100 -ml-1' : 'opacity-0'}`}
+        style={{ gridTemplateColumns: collapsed ? '1fr' : '0fr' }}
+      >
+        <div className="overflow-hidden">
+          <IconButton
+            variant="panel"
+            aria-label="Show sidebar"
+            title="Show sidebar (Ctrl+.)"
+            onClick={toggle}
+            tabIndex={collapsed ? 0 : -1}
+          >
+            <PanelLeftOpen className="w-5 h-5" />
+          </IconButton>
+        </div>
+      </div>
+
+      {/* Status cluster (dot + status pill + test verdict) sits just before the
+          agent's name - kept OUTSIDE the measured title/actions row so its width
+          doesn't confuse AdaptiveActions' collapse budget. */}
+      {statusDot && <div className="shrink-0 flex items-center gap-2">{statusDot}</div>}
 
       {/* Title + adaptive actions share this row; the title flexes/truncates so
           the toolbar always has room to lay out. AdaptiveActions measures this
           row via its own parentElement, so the row needs no ref. */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
-        {/* Status dot sits just before the agent's name. */}
-        {statusDot && <div className="shrink-0">{statusDot}</div>}
         {rename ? (
           // A single always-mounted input (read-only until editing) so the box
           // keeps its full width, clicking places the caret where you click, and
@@ -604,6 +620,10 @@ export function AgentTopBar({
           <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} />
         )}
       </div>
+
+      {/* Far-right slot: the diff-sidebar toggle, mirroring the show-sidebar
+          button on the far left. */}
+      {rightSlot && <div className="shrink-0">{rightSlot}</div>}
     </div>
   )
 }

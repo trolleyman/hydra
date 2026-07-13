@@ -14,7 +14,7 @@ import {
   Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -1870,7 +1870,6 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
   prev.inspector === next.inspector &&
-  prev.onHideInspector === next.onHideInspector &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
@@ -1881,7 +1880,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, onHideInspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; onHideInspector?: () => void }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -2814,21 +2813,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          {/* Hide the whole inspector ("diff sidebar") - only in the split
-              layout, where InspectorPane passes the collapse callback. The SHOW
-              side of this toggle lives in the agent header (there's no Changes bar
-              to click once hidden). */}
-          {onHideInspector && (
-            <Tooltip content="Hide diff sidebar">
-              <button
-                onClick={onHideInspector}
-                aria-label="Hide diff sidebar"
-                className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0"
-              >
-                <PanelRightClose className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-          )}
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
           {statsEl}
 
