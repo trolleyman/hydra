@@ -712,7 +712,10 @@ function RootLayout() {
                     {reviewConfig?.browse_url && (
                       <Tooltip
                         content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
-                        className="shrink-0"
+                        // ml-1/-mr-1 shifts the forge glyph rightward within the
+                        // uniform gap-1.5 row: a touch more air after "Repository",
+                        // a touch less before the status chips.
+                        className="shrink-0 ml-1 -mr-1"
                       >
                         <a
                           href={reviewConfig.browse_url}
