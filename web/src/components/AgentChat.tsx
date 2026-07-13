@@ -2408,12 +2408,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
     }
 
-    // Token-streaming buffer. Deltas can arrive far faster than 60fps, so they
-    // accumulate here and the visible state is refreshed on a short timer;
+    // Token-streaming buffer. Deltas can arrive far faster than the display
+    // refreshes, so they accumulate here and the visible state is flushed once
+    // per animation frame (~16ms at 60Hz, faster on high-refresh displays);
     // each refresh re-renders (and re-parses the markdown of) only the one
-    // in-flight block, which stays small.
+    // in-flight block, which stays small. Frame-aligned flushing keeps the text
+    // growing in small, smooth increments instead of chunky fixed-interval dumps.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
-    let streamTimer: ReturnType<typeof setTimeout> | null = null
+    let streamFrame: number | null = null
     // Which block kinds this message streamed live. `message_stop` clears
     // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
     // event arrives, so streamBuf can't tell the settle "you were already on
@@ -2468,17 +2470,17 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // carry no timestamp, so this stays null there and the live timer is used.
     let prevEventTs: number | null = null
     const scheduleStreamFlush = () => {
-      if (streamTimer != null) return
-      streamTimer = setTimeout(() => {
-        streamTimer = null
+      if (streamFrame != null) return
+      streamFrame = requestAnimationFrame(() => {
+        streamFrame = null
         setStream(streamBuf ? { ...streamBuf } : null)
-      }, 40)
+      })
     }
     const clearStream = () => {
       streamBuf = null
-      if (streamTimer != null) {
-        clearTimeout(streamTimer)
-        streamTimer = null
+      if (streamFrame != null) {
+        cancelAnimationFrame(streamFrame)
+        streamFrame = null
       }
       setStream(null)
     }
@@ -3414,7 +3416,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     return () => {
-      if (streamTimer != null) clearTimeout(streamTimer)
+      if (streamFrame != null) cancelAnimationFrame(streamFrame)
       if (retryTimer != null) clearTimeout(retryTimer)
       closeWebSocket(ws)
       wsRef.current = null
