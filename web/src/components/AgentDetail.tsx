@@ -1612,25 +1612,26 @@ export function AgentDetail({
                 transition: splitResizing ? undefined : 'width 240ms ease',
               }}
             >
+              {/* Top header bar mirroring the inspector's Changes bar (same py-2 +
+                  border + bg, flush at the pane top) so the hide-chat button lines
+                  up with hide-diff across the divider - same size, same Y. */}
+              <div className="shrink-0 flex items-center justify-end px-3 sm:px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {workingTopButton}
+              </div>
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-                <div className="shrink-0 flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <AgentMetaRow
-                      agent={agent}
-                      agentTypeClass={agentTypeClass}
-                      branches={branches}
-                      savingBase={savingBase}
-                      savingChatMode={savingChatMode}
-                      savingDownstream={savingDownstream}
-                      onSaveBase={onSaveBase}
-                      onRefreshBranches={refreshBranches}
-                      onSaveChatMode={onSaveChatMode}
-                      onSaveDownstream={onSaveDownstream}
-                    />
-                  </div>
-                  {/* Left of the divider: hide the chat pane (or show the diff
-                      once it's collapsed). */}
-                  {workingTopButton}
+                <div className="shrink-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
                 </div>
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
                     replay the task as the first chat message. */}

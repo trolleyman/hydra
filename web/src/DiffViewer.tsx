@@ -2811,8 +2811,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           tablet/phone. */}
       {/* Styled like the app top bar (white/gray-800 bg + matching border) so the
           inspector reads as its own panel with a real header - and the collapse
-          toggle (changesLeading) sits at its left edge, flanking the divider. */}
-      <div ref={changesBarRef} className="flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+          toggle (changesLeading) sits at its left edge, flanking the divider.
+          In the inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6
+          fully cancels the scroll container's px-3/px-6 (was half), and -mt-4
+          cancels its pt-4 so the bar sits flush at the top at rest too (not just
+          when stuck). The classic layout keeps its narrower bleed. */}
+      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-6' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
         {changesLeading && <div className="shrink-0 self-center">{changesLeading}</div>}
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
