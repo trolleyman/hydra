@@ -42,7 +42,7 @@ import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/c
 import { chatImageCounterKey, readLocal, writeLocal } from '../lib/storage'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatFontStore } from '../lib/chatPrefs'
+import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -2298,16 +2298,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
 
+  // Smooth (paced) streaming - a Browser setting. Read inside the WS reducer's
+  // per-frame flush via a ref so a mid-stream toggle takes effect on the next
+  // frame without re-running the reducer effect.
+  const smoothStream = useChatStreamStore((s) => s.smooth)
+
   const onStatusUpdateRef = useRef(onStatusUpdate)
   const onDiffRefreshRef = useRef(onDiffRefresh)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
   const isTurnRunningRef = useRef(isTurnRunning)
+  const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
+    smoothStreamRef.current = smoothStream
   })
 
   useEffect(() => {
@@ -2412,9 +2419,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // refreshes, so they accumulate here and the visible state is flushed once
     // per animation frame (~16ms at 60Hz, faster on high-refresh displays);
     // each refresh re-renders (and re-parses the markdown of) only the one
-    // in-flight block, which stays small. Frame-aligned flushing keeps the text
-    // growing in small, smooth increments instead of chunky fixed-interval dumps.
+    // in-flight block, which stays small.
+    //
+    // streamBuf.text is the full received text; `revealed` is how many of its
+    // chars are actually shown. With smooth streaming on (the default, a Browser
+    // setting) each frame advances `revealed` toward the full length by a bounded
+    // step, so a bursty upstream (the claude CLI flushes ~250-char deltas ~5x/sec)
+    // is drained as steady, continuous typing instead of landing in chunks. The
+    // step is proportional to the backlog (so it never falls arbitrarily behind)
+    // with a floor (so slow streams still finish) and a cap (so a big burst never
+    // dumps at once). Smooth off: reveal jumps straight to the full length.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
+    let revealed = 0
     let streamFrame: number | null = null
     // Which block kinds this message streamed live. `message_stop` clears
     // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
@@ -2469,15 +2485,37 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // triggered the turn to this assistant message (item 7). Live stdout lines
     // carry no timestamp, so this stays null there and the live timer is used.
     let prevEventTs: number | null = null
+    // Paced-reveal tuning (chars, per animation frame). See streamBuf's comment.
+    const REVEAL_FLOOR = 3 // min chars/frame so a slow stream still finishes
+    const REVEAL_RATE = 0.2 // drain this fraction of the backlog per frame
+    const REVEAL_CAP = 40 // max chars/frame so a big burst never dumps at once
+    const onStreamFrame = () => {
+      streamFrame = null
+      if (!streamBuf) {
+        setStream(null)
+        return
+      }
+      const full = streamBuf.text.length
+      if (smoothStreamRef.current) {
+        if (revealed < full) {
+          const backlog = full - revealed
+          const step = Math.min(REVEAL_CAP, Math.max(REVEAL_FLOOR, Math.ceil(backlog * REVEAL_RATE)))
+          revealed = Math.min(full, revealed + step)
+        }
+      } else {
+        revealed = full
+      }
+      setStream({ kind: streamBuf.kind, text: streamBuf.text.slice(0, revealed) })
+      // Keep animating until the reveal catches up, even after deltas stop.
+      if (revealed < full) scheduleStreamFlush()
+    }
     const scheduleStreamFlush = () => {
       if (streamFrame != null) return
-      streamFrame = requestAnimationFrame(() => {
-        streamFrame = null
-        setStream(streamBuf ? { ...streamBuf } : null)
-      })
+      streamFrame = requestAnimationFrame(onStreamFrame)
     }
     const clearStream = () => {
       streamBuf = null
+      revealed = 0
       if (streamFrame != null) {
         cancelAnimationFrame(streamFrame)
         streamFrame = null
@@ -3201,6 +3239,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
+            revealed = 0
             if (streamBuf) streamedKinds.add(streamBuf.kind)
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {

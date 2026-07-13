@@ -77,6 +77,36 @@ export function useChatDefaultHeight(): [number | null, (height: number | null) 
   return [height, setHeight]
 }
 
+// Reads the persisted smooth-streaming preference. Absent (or anything but
+// 'off') = on, the default. Exported for non-React callers / unit testing.
+export function loadChatSmooth(): boolean {
+  return readLocal(StorageKeys.chatSmoothStreaming) !== 'off'
+}
+
+interface ChatSmoothState {
+  smooth: boolean
+  setSmooth: (smooth: boolean) => void
+}
+
+// Smooth (paced) streaming toggle. Like the serif store: singleFieldStorage
+// keeps the stored value as the bare 'off' marker (only written when turned off)
+// so loadChatSmooth can read it directly at mount and the key stays readable.
+export const useChatStreamStore = create<ChatSmoothState>()(
+  persist(
+    (set) => ({
+      smooth: loadChatSmooth(),
+      setSmooth: (smooth) => set({ smooth }),
+    }),
+    {
+      name: StorageKeys.chatSmoothStreaming,
+      storage: singleFieldStorage('smooth', loadChatSmooth, (smooth) =>
+        writeLocal(StorageKeys.chatSmoothStreaming, smooth ? null : 'off'),
+      ),
+      partialize: (s) => ({ smooth: s.smooth }),
+    },
+  ),
+)
+
 interface ChatFontState {
   serif: boolean
   setSerif: (serif: boolean) => void
