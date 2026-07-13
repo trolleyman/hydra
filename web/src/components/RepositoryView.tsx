@@ -1671,7 +1671,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <LoaderCircle className="w-5 h-5 animate-spin" />
             </div>
           ) : file ? (
-            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightRange={selRange} onSelectLine={selectLine} />
+            // Keyed by path so a new file re-mounts + re-runs the fade-in.
+            <div key={viewPath} className="repo-file-in flex-1 flex flex-col min-h-0">
+              <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightRange={selRange} onSelectLine={selectLine} />
+            </div>
           ) : null}
         </div>
       </div>

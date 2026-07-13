@@ -33,7 +33,10 @@ export const AttachmentChips = memo(function AttachmentChips({
   // Two rows of image chips: 2 * (thumb + py-1 + border) + one gap-1.5.
   const maxH = size === 'sm' ? 'max-h-[74px]' : 'max-h-[90px]'
   return (
-    <div className={`flex flex-wrap gap-1.5 overflow-y-auto ${maxH} ${className ?? ''}`}>
+    // overflow-x-hidden is explicit: an overflow-y-auto box promotes the other
+    // axis from visible to auto, which showed a phantom horizontal scrollbar on
+    // the (wrapped) chip row inside a queued message bubble.
+    <div className={`flex flex-wrap gap-1.5 overflow-y-auto overflow-x-hidden ${maxH} ${className ?? ''}`}>
       {attachments.map((a) => {
         const isImage = !!a.previewUrl
         const open = isImage ? () => onOpenImage(a.id) : undefined
