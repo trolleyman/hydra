@@ -731,6 +731,21 @@ const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable' },
 ]
 
+// Effective context window (tokens) used to turn a turn's prompt size into a
+// "context left" percentage. All current Claude chat models expose a 200k
+// window; a 1M-context variant would read low here but never wrong-direction,
+// so the simple constant is a safe default (item 40).
+const CONTEXT_WINDOW_TOKENS = 200_000
+
+// contextInputTokens sums the prompt-side tokens of a usage sample (everything
+// the model had to read: fresh input + cache reads + cache writes), which is the
+// size of the context the last message was sent with. Output tokens are excluded
+// - they land in the NEXT turn's input, not this one's prompt.
+function contextInputTokens(u: TokenUsage | undefined): number {
+  if (!u) return 0
+  return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+}
+
 // modelDisplayLabel shortens a full model id ("claude-fable-5") to its alias
 // label ("Fable") for the dropdown trigger.
 function modelDisplayLabel(model: string): string {
@@ -2567,6 +2582,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // commands the CLI advertises, both fed by the event stream.
   const [model, setModel] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  // Prompt-side tokens of the most recent message, i.e. how much context the
+  // conversation currently occupies. Drives the "context left" chip beside the
+  // model selector (item 40). Seeded to 0 and repopulated from replay on
+  // reconnect (the latest message's usage wins).
+  const [contextTokens, setContextTokens] = useState(0)
   const [slashCommands, setSlashCommands] = useState<string[]>([])
   const [slashSel, setSlashSel] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
@@ -2661,6 +2681,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
+    // The replay re-emits the conversation's usage; the latest message wins.
+    setContextTokens(0)
     // Durations are re-sent from the sidecar at the start of each connection.
     thoughtDurationsRef.current = new Map()
     // The transcript replay + the daemon's queue frame are authoritative for
@@ -3584,6 +3606,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             histTurnOut += u.output_tokens
             histLastUsage = u
           }
+          // Track how full the context is (item 40): the prompt-side tokens of
+          // the latest message. Runs for replay (assistant events) and live
+          // finals alike; message_start covers the live streaming case.
+          const ctx = contextInputTokens(u)
+          if (ctx > 0) setContextTokens(ctx)
           const sr = ev.message?.stop_reason
           if (sr && sr !== 'tool_use') histStopReason = sr
           // The complete event supersedes any in-flight streamed block (finals
@@ -3648,6 +3675,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             streamedKinds = new Set()
             curMsgTokensRef.current = e.message?.usage?.output_tokens ?? 0
             setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
+            // The prompt this message was sent with = current context fill (item 40).
+            const ctx = contextInputTokens(e.message?.usage)
+            if (ctx > 0) setContextTokens(ctx)
           } else if (e.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
             // Running (cumulative-for-this-message) output token count.
             curMsgTokensRef.current = e.usage.output_tokens
@@ -4662,6 +4692,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   }
 
   const modelLabel = modelDisplayLabel(model)
+  // "Context left" percentage for the composer chip (item 40): null until the
+  // first usage sample lands. Clamped to 0-100.
+  const contextPct =
+    contextTokens > 0
+      ? Math.max(0, Math.min(100, Math.round(100 * (1 - contextTokens / CONTEXT_WINDOW_TOKENS))))
+      : null
 
   // A turn's result footer (duration/cost) should show once. On a resume the
   // transcript backfill and the live stream can each end with their own result
@@ -4954,6 +4990,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                   <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
                     Enter to queue
                   </span>
+                )}
+                {/* Context-left chip (item 40): how much of the model's window
+                    the conversation still has free, left of the model selector.
+                    Amber under 20%, red under 10% - a quiet nudge that a compact
+                    is near. */}
+                {contextPct !== null && (
+                  <Tooltip
+                    content={`~${contextPct}% context left (${formatTokens(contextTokens)} of ${formatTokens(CONTEXT_WINDOW_TOKENS)} used)`}
+                    side="top"
+                  >
+                    <span
+                      className={`hidden sm:inline text-[11px] tabular-nums select-none ${
+                        contextPct < 10
+                          ? 'text-red-500 dark:text-red-400'
+                          : contextPct < 20
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-stone-400 dark:text-stone-500'
+                      }`}
+                    >
+                      {contextPct}%
+                    </span>
+                  </Tooltip>
                 )}
                 <div className="relative">
                   <button
