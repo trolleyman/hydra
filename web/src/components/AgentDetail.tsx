@@ -18,7 +18,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { IconButton } from './IconButton'
 import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -41,6 +41,9 @@ import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
 // by uniqueUploadName, so the run stops cleanly at trailing punctuation).
+// Shared style for the split layout's divider-flanking pane-collapse toggles.
+const PANE_TOGGLE_CLS = 'flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0'
+
 const UPLOAD_PATH_RE = /\S*\.hydra\/local\/uploads\/[A-Za-z0-9._-]+/g
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?)$/i
 
@@ -644,6 +647,37 @@ export function AgentDetail({
     if (isWide) toggleInspector()
     else toggleWorking()
   }, [paneActive, isWide, toggleInspector, toggleWorking])
+  // Divider-flanking collapse toggles (wide split). The same two spots host both
+  // hide and show, keyed off the OTHER pane's state:
+  //  - workingTopButton (working pane's top-right, left of the divider): "Hide
+  //    chat" normally; "Show diff" once the inspector is collapsed (working is
+  //    then full-width).
+  //  - changesLeadingButton (left edge of the diff's Changes bar, right of the
+  //    divider): "Hide diff" normally; "Show chat" once the working pane is
+  //    collapsed. memoized so a new node each agent tick doesn't defeat
+  //    DiffViewer's memo.
+  const workingTopButton = useMemo(() => (
+    <Tooltip content={paneCollapse === 'inspector' ? `Show diff (${SHORTCUT_DIFF_SIDEBAR})` : 'Hide chat'}>
+      <button
+        className={PANE_TOGGLE_CLS}
+        aria-label={paneCollapse === 'inspector' ? 'Show diff' : 'Hide chat'}
+        onClick={paneCollapse === 'inspector' ? toggleInspector : toggleWorking}
+      >
+        {paneCollapse === 'inspector' ? <PanelRightOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+      </button>
+    </Tooltip>
+  ), [paneCollapse, toggleInspector, toggleWorking])
+  const changesLeadingButton = useMemo(() => (
+    <Tooltip content={paneCollapse === 'working' ? 'Show chat' : `Hide diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+      <button
+        className={PANE_TOGGLE_CLS}
+        aria-label={paneCollapse === 'working' ? 'Show chat' : 'Hide diff'}
+        onClick={paneCollapse === 'working' ? toggleWorking : toggleInspector}
+      >
+        {paneCollapse === 'working' ? <PanelLeftOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+      </button>
+    </Tooltip>
+  ), [paneCollapse, toggleWorking, toggleInspector])
   // Left (working) pane's share of the split, persisted like sidebarWidth.
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
   const splitRatioRef = useRef(splitRatio)
@@ -1536,15 +1570,16 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
-        // Far-right, mirroring the show-sidebar button on the far left: the diff
-        // ("inspector") sidebar toggle. Wide -> hide/show the diff pane; narrow ->
-        // flip to / from a full-screen diff. Ctrl+, does the same.
+        // Narrow only: the single pane flips between the working view and a
+        // full-screen diff (Ctrl+, does the same). On a wide split this toggle
+        // moves to the two buttons flanking the divider (see workingTopButton /
+        // changesLeadingButton below).
         rightSlot={
-          paneActive ? (
+          narrowSplit ? (
             <IconButton
               variant="panel"
-              aria-label={diffShown ? 'Hide diff sidebar' : 'Show diff sidebar'}
-              title={`${diffShown ? 'Hide' : 'Show'} diff sidebar (${SHORTCUT_DIFF_SIDEBAR})`}
+              aria-label={diffShown ? 'Show chat' : 'Show diff'}
+              title={`${diffShown ? 'Show chat' : 'Show diff'} (${SHORTCUT_DIFF_SIDEBAR})`}
               onClick={toggleDiffSidebar}
             >
               {diffShown ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
@@ -1578,19 +1613,24 @@ export function AgentDetail({
               }}
             >
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-                <div className="shrink-0">
-                  <AgentMetaRow
-                    agent={agent}
-                    agentTypeClass={agentTypeClass}
-                    branches={branches}
-                    savingBase={savingBase}
-                    savingChatMode={savingChatMode}
-                    savingDownstream={savingDownstream}
-                    onSaveBase={onSaveBase}
-                    onRefreshBranches={refreshBranches}
-                    onSaveChatMode={onSaveChatMode}
-                    onSaveDownstream={onSaveDownstream}
-                  />
+                <div className="shrink-0 flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <AgentMetaRow
+                      agent={agent}
+                      agentTypeClass={agentTypeClass}
+                      branches={branches}
+                      savingBase={savingBase}
+                      savingChatMode={savingChatMode}
+                      savingDownstream={savingDownstream}
+                      onSaveBase={onSaveBase}
+                      onRefreshBranches={refreshBranches}
+                      onSaveChatMode={onSaveChatMode}
+                      onSaveDownstream={onSaveDownstream}
+                    />
+                  </div>
+                  {/* Left of the divider: hide the chat pane (or show the diff
+                      once it's collapsed). */}
+                  {workingTopButton}
                 </div>
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
                     replay the task as the first chat message. */}
@@ -1631,6 +1671,7 @@ export function AgentDetail({
               projectId={projectId}
               externalRefreshTrigger={diffRefreshTrigger}
               externalArtifactRefresh={artifactRefreshTrigger}
+              changesLeading={changesLeadingButton}
             />
           </div>
           {/* Transparent overlay during the divider drag so the pointer isn't

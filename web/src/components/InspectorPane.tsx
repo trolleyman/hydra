@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { AgentResponse } from '../api'
 import { DiffViewer } from '../DiffViewer'
 
@@ -18,11 +19,15 @@ export function InspectorPane({
   projectId,
   externalRefreshTrigger,
   externalArtifactRefresh,
+  changesLeading,
 }: {
   agent: AgentResponse
   projectId: string | null
   externalRefreshTrigger?: number
   externalArtifactRefresh?: number
+  // A control rendered at the left edge of the diff's Changes bar (the split
+  // layout's collapse toggle, flanking the divider).
+  changesLeading?: ReactNode
 }) {
   return (
     // pt-4 mirrors the classic scroll container so DiffViewer's `-top-4` sticky
@@ -39,6 +44,7 @@ export function InspectorPane({
         externalRefreshTrigger={externalRefreshTrigger}
         externalArtifactRefresh={externalArtifactRefresh}
         inspector
+        changesLeading={changesLeading}
       />
     </div>
   )

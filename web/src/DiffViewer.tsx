@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
@@ -1870,6 +1870,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
   prev.inspector === next.inspector &&
+  prev.changesLeading === next.changesLeading &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
@@ -1880,7 +1881,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, changesLeading }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; changesLeading?: ReactNode }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -2808,7 +2809,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           __root.tsx) - at equal z-index the later-DOM bar would paint over the
           scrim and stay bright when the off-canvas sidebar is open on
           tablet/phone. */}
-      <div ref={changesBarRef} className="flex items-start gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+      {/* Styled like the app top bar (white/gray-800 bg + matching border) so the
+          inspector reads as its own panel with a real header - and the collapse
+          toggle (changesLeading) sits at its left edge, flanking the divider. */}
+      <div ref={changesBarRef} className="flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+        {changesLeading && <div className="shrink-0 self-center">{changesLeading}</div>}
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
