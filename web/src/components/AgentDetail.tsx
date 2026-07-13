@@ -1536,26 +1536,16 @@ export function AgentDetail({
   // the View-MR button, still first.
   const mrFirst = true
 
-  return (
-    <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {showCreateMR && (
-        <CreateMRDialog
-          agent={agent}
-          config={reviewConfig}
-          remotes={remotes}
-          submitting={publishing}
-          error={publishError}
-          onConfirm={(body) => void doPublish(body)}
-          onCancel={() => setShowCreateMR(false)}
-        />
-      )}
-      {/* The agent header is a single header bar (no separate H1): the name with
-          an actions dropdown (Rename / Merge / Kill - clicking the name also
-          renames it inline) and a status dot. While the sidebar is collapsed it
-          also hosts the show-sidebar toggle. It sits above the scroll area so it
-          never collides with the diff's own sticky "Changes" header. */}
-      <AgentTopBar
-        title={agent.title || agent.id}
+  // The agent header is a single header bar (no separate H1): the name with an
+  // actions dropdown (Rename / Merge / Kill - clicking the name also renames it
+  // inline) and a status dot. While the sidebar is collapsed it also hosts the
+  // show-sidebar toggle. It sits above the scroll area so it never collides with
+  // the diff's own sticky "Changes" header. On the narrow screen-stack it rides
+  // INSIDE the chat screen (not above the whole track), so the diff screen's own
+  // Changes bar is its top-level header - back button top-left, no agent status.
+  const agentTopBar = (
+    <AgentTopBar
+      title={agent.title || agent.id}
         // Status cluster next to the name: the dot, the status pill, and the test
         // verdict - pulled out of the metadata row to declutter it (image 13/14).
         statusDot={
@@ -1603,6 +1593,24 @@ export function AgentDetail({
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
+  )
+
+  return (
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {showCreateMR && (
+        <CreateMRDialog
+          agent={agent}
+          config={reviewConfig}
+          remotes={remotes}
+          submitting={publishing}
+          error={publishError}
+          onConfirm={(body) => void doPublish(body)}
+          onCancel={() => setShowCreateMR(false)}
+        />
+      )}
+      {/* Narrow (screen-stack) hosts the top bar inside the chat screen instead,
+          so the diff screen's Changes bar is its own top-level header. */}
+      {!narrowSplit && agentTopBar}
       {splitActive ? (
         // ── Two-pane split ──────────────────────────────────────────────────
         // Left: metadata + collapsible prompt + terminal/chat filling the height.
@@ -1704,7 +1712,9 @@ export function AgentDetail({
               transition: 'transform 300ms ease',
             }}
           >
-            <div className="w-1/2 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
+            <div className="w-1/2 flex flex-col min-h-0 overflow-hidden">
+              {agentTopBar}
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
               <div className="shrink-0">
                 <AgentMetaRow
                   agent={agent}
@@ -1731,6 +1741,7 @@ export function AgentDetail({
                 onRefresh={onRefresh}
                 onDiffRefresh={handleDiffRefresh}
               />
+              </div>
             </div>
             <div className="w-1/2 flex flex-col min-w-0 min-h-0 overflow-hidden">
               <InspectorPane
