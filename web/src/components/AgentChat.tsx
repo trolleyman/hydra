@@ -1066,6 +1066,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
 const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const [imgLightbox, setImgLightbox] = useState<number | null>(null)
   const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -1213,7 +1214,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                           key={i}
                           src={src}
                           alt="Tool output image"
-                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08]"
+                          onClick={() => setImgLightbox(i)}
+                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in"
                         />
                       ))}
                     </div>
@@ -1231,6 +1233,16 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           )}
         </div>
       </Expandable>
+      {/* Read of an image returns image blocks (item 4); clicking one opens it
+          full-size in the shared lightbox, like an attachment image. */}
+      {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
+        <ImageLightbox
+          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0 }))}
+          index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          onIndexChange={setImgLightbox}
+          onClose={() => setImgLightbox(null)}
+        />
+      )}
     </div>
   )
 })
