@@ -573,10 +573,42 @@ function parseExitPlan(input: unknown): { plan: string; fileName: string } | nul
 // chat's top-right corner (item 17): a compact card that expands to the checklist
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
 // too narrow to sit a card alongside the transcript.
+// TodoLi is one checklist row (icon + text), styled by status.
+function TodoLi({ t }: { t: TodoItem }) {
+  return (
+    <li className="flex items-start gap-1.5">
+      {t.status === 'completed' ? (
+        <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
+      ) : t.status === 'in_progress' ? (
+        <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
+      ) : (
+        <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
+      )}
+      <span
+        className={
+          t.status === 'completed'
+            ? 'line-through text-stone-400 dark:text-stone-500'
+            : t.status === 'in_progress'
+              ? 'font-medium text-stone-700 dark:text-stone-200'
+              : 'text-stone-500 dark:text-stone-400'
+        }
+      >
+        {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
+      </span>
+    </li>
+  )
+}
+
 function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
   const total = todos.length
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = total > 0 && done === total
+  // Completed items fold behind a "(N completed)" toggle so the in-progress /
+  // pending work sits in view without scrolling past the done ones. Collapsed by
+  // default; irrelevant when everything's done (the whole panel is collapsed then).
+  const completed = todos.filter((t) => t.status === 'completed')
+  const active = todos.filter((t) => t.status !== 'completed')
+  const [showDone, setShowDone] = useState(false)
   // Default collapsed when the pane is too narrow to sit a card alongside the
   // transcript, or when every item is checked off (a finished plan is just
   // noise expanded).
@@ -609,30 +641,29 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
         />
       </button>
       <Expandable open={open}>
-        <ul className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
-          {todos.map((t, i) => (
-            <li key={i} className="flex items-start gap-1.5">
-              {t.status === 'completed' ? (
-                <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
-              ) : t.status === 'in_progress' ? (
-                <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
-              ) : (
-                <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
-              )}
-              <span
-                className={
-                  t.status === 'completed'
-                    ? 'line-through text-stone-400 dark:text-stone-500'
-                    : t.status === 'in_progress'
-                      ? 'font-medium text-stone-700 dark:text-stone-200'
-                      : 'text-stone-500 dark:text-stone-400'
-                }
+        <div className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+          {completed.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowDone((v) => !v)}
+                className="flex w-full items-center gap-1 text-left text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
               >
-                {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <ChevronRight className={`w-3 h-3 shrink-0 transition-transform duration-200 ${showDone ? 'rotate-90' : ''}`} />
+                <span>{completed.length} completed</span>
+              </button>
+              <Expandable open={showDone}>
+                <ul className="space-y-1 pt-1">
+                  {completed.map((t, i) => <TodoLi key={`c${i}`} t={t} />)}
+                </ul>
+              </Expandable>
+            </>
+          )}
+          {active.length > 0 && (
+            <ul className="space-y-1">
+              {active.map((t, i) => <TodoLi key={`a${i}`} t={t} />)}
+            </ul>
+          )}
+        </div>
       </Expandable>
     </div>
   )
@@ -894,6 +925,44 @@ function MemoryPanel({ text }: { text: string }) {
   )
 }
 
+// LabeledField is a small uppercase label over a value block - the shape the
+// Output panel header uses, reused for the Task tool's subject/description/output.
+function LabeledField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">{label}</div>
+      {children}
+    </div>
+  )
+}
+
+// TaskToolFields renders a TaskCreate / TaskUpdate input as labeled fields -
+// subject and description as markdown prose - instead of raw JSON. A TaskUpdate's
+// id/status ride on a compact line above.
+function TaskToolFields({ input, serif }: { input: Record<string, unknown>; serif: boolean }) {
+  const taskId = typeof input.taskId === 'string' || typeof input.taskId === 'number' ? String(input.taskId) : ''
+  const status = typeof input.status === 'string' ? (input.status as string) : ''
+  const subject = typeof input.subject === 'string' ? (input.subject as string) : ''
+  const description = typeof input.description === 'string' ? (input.description as string) : ''
+  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  return (
+    <div className="space-y-1.5">
+      {(taskId || status) && (
+        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+          {taskId && <span className="font-medium">#{taskId}</span>}
+          {status && <span>{taskId ? ' -> ' : ''}{status}</span>}
+        </div>
+      )}
+      {subject && (
+        <LabeledField label="Subject"><div className={proseCls}><Markdown text={subject} /></div></LabeledField>
+      )}
+      {description && (
+        <LabeledField label="Description"><div className={proseCls}><Markdown text={description} /></div></LabeledField>
+      )}
+    </div>
+  )
+}
+
 // Per-tool icons for the card header; anything unlisted gets the wrench.
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
@@ -916,6 +985,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
 const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
@@ -1041,6 +1111,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   lang={fileLang}
                   replaceAll={input!.replace_all === true}
                 />
+              ) : isTaskTool && input ? (
+                <TaskToolFields input={input} serif={serif} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
@@ -1068,7 +1140,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
                     mem && !item.isError
                       ? <MemoryPanel text={item.result} />
-                      : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+                      : isTaskTool && !item.isError
+                        ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={item.result} /></div>
+                        : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}

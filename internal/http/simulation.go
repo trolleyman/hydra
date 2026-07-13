@@ -2809,8 +2809,16 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_write","content":"File created successfully at: internal/artifacts/backoff.go"}]}}`,
 	// A TaskCreate tool call: its subject shows in the header in the regular
 	// (sans) font, like a path - not monospace.
-	`{"type":"assistant","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when every attempt fails, Put surfaces the last error."}}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when **every** attempt fails, ` + "`Put`" + ` surfaces the last error - a fake server that fails more times than the attempt cap."}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate","content":"Task #1 created successfully: Add a giving-up test for the uploader"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate2","content":[{"type":"tool_use","id":"toolu_sim_taskcreate2","name":"TaskCreate","input":{"subject":"Thread MaxAttempts through the uploader config","description":"So callers can tune the retry cap without recompiling."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate2","content":"Task #2 created successfully: Thread MaxAttempts through the uploader config"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate3","content":[{"type":"tool_use","id":"toolu_sim_taskcreate3","name":"TaskCreate","input":{"subject":"Run go test and vet","description":"Confirm the retry + giving-up paths pass and nothing else regressed."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate3","content":"Task #3 created successfully: Run go test and vet"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskupd1","content":[{"type":"tool_use","id":"toolu_sim_taskupd1","name":"TaskUpdate","input":{"taskId":"1","status":"completed"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd1","content":"Updated task #1 status"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskupd2","content":[{"type":"tool_use","id":"toolu_sim_taskupd2","name":"TaskUpdate","input":{"taskId":"2","status":"in_progress"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd2","content":"Updated task #2 status"}]}}`,
 	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
 	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
 	// call, its reply), then the Task tool_result. The chat folds the sidechain
