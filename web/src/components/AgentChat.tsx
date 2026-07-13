@@ -40,6 +40,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
+import { loadPlan, savePlan, type PlanEntry } from '../lib/planStore'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore } from '../lib/chatPrefs'
@@ -502,6 +503,9 @@ interface TodoItem {
   content: string
   status: 'pending' | 'in_progress' | 'completed'
   activeForm?: string
+  // TaskCreate's description (TodoWrite items carry none), shown in the plan
+  // panel behind a per-row expander.
+  description?: string
 }
 
 // parseTodos validates a TodoWrite tool input ({todos: [...]}), returning null
@@ -521,15 +525,27 @@ function parseTodos(input: unknown): TodoItem[] | null {
   return out.length ? out : null
 }
 
+// restoredPlan reads the persisted plan for an agent as display TodoItems, so
+// the panel can seed from it on mount / reconnect (see planStore).
+function restoredPlan(projectId: string | null, agentId: string): TodoItem[] {
+  return loadPlan(projectId, agentId)
+    .sort((a, b) => a.order - b.order)
+    .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description }))
+}
+
 // The Task* tool family (TaskCreate/TaskUpdate) is the incremental cousin of
 // TodoWrite: instead of one call carrying the whole list, each call mutates a
 // single task. parseTaskCreate reads a TaskCreate input ({subject, ...}); a new
 // task always starts `pending` (the harness assigns its id in creation order).
-function parseTaskCreate(input: unknown): { content: string; activeForm?: string } | null {
+function parseTaskCreate(input: unknown): { content: string; activeForm?: string; description?: string } | null {
   if (!input || typeof input !== 'object') return null
   const o = input as Record<string, unknown>
   if (typeof o.subject !== 'string' || !o.subject) return null
-  return { content: o.subject, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined }
+  return {
+    content: o.subject,
+    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
+    description: typeof o.description === 'string' && o.description ? o.description : undefined,
+  }
 }
 
 // parseTaskUpdate reads a TaskUpdate input ({taskId, status?, subject?, ...}),
@@ -538,7 +554,7 @@ function parseTaskCreate(input: unknown): { content: string; activeForm?: string
 // to a normal tool card.
 function parseTaskUpdate(
   input: unknown,
-): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string } | null {
+): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string; description?: string } | null {
   if (!input || typeof input !== 'object') return null
   const o = input as Record<string, unknown>
   const taskId = typeof o.taskId === 'string' ? o.taskId : typeof o.taskId === 'number' ? String(o.taskId) : ''
@@ -552,6 +568,7 @@ function parseTaskUpdate(
     status,
     content: typeof o.subject === 'string' && o.subject ? o.subject : undefined,
     activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
+    description: typeof o.description === 'string' && o.description ? o.description : undefined,
   }
 }
 
@@ -573,28 +590,49 @@ function parseExitPlan(input: unknown): { plan: string; fileName: string } | nul
 // chat's top-right corner (item 17): a compact card that expands to the checklist
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
 // too narrow to sit a card alongside the transcript.
-// TodoLi is one checklist row (icon + text), styled by status.
+// TodoLi is one checklist row (icon + text), styled by status. When the task
+// carries a description, the row is clickable: a hover-revealed chevron expands
+// an animated description block beneath it.
 function TodoLi({ t }: { t: TodoItem }) {
+  const [open, setOpen] = useState(false)
+  const hasDesc = !!t.description
   return (
-    <li className="flex items-start gap-1.5">
-      {t.status === 'completed' ? (
-        <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
-      ) : t.status === 'in_progress' ? (
-        <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
-      ) : (
-        <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
-      )}
-      <span
-        className={
-          t.status === 'completed'
-            ? 'line-through text-stone-400 dark:text-stone-500'
-            : t.status === 'in_progress'
-              ? 'font-medium text-stone-700 dark:text-stone-200'
-              : 'text-stone-500 dark:text-stone-400'
-        }
+    <li>
+      <div
+        className={`group flex items-start gap-1.5 ${hasDesc ? 'cursor-pointer' : ''}`}
+        onClick={hasDesc ? () => setOpen((o) => !o) : undefined}
       >
-        {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
-      </span>
+        {t.status === 'completed' ? (
+          <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
+        ) : t.status === 'in_progress' ? (
+          <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
+        ) : (
+          <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
+        )}
+        <span
+          className={`flex-1 min-w-0 ${
+            t.status === 'completed'
+              ? 'line-through text-stone-400 dark:text-stone-500'
+              : t.status === 'in_progress'
+                ? 'font-medium text-stone-700 dark:text-stone-200'
+                : 'text-stone-500 dark:text-stone-400'
+          }`}
+        >
+          {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
+        </span>
+        {hasDesc && (
+          <ChevronRight
+            className={`mt-0.5 w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-[transform,opacity] duration-200 ${open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover:opacity-70'}`}
+          />
+        )}
+      </div>
+      {hasDesc && (
+        <Expandable open={open}>
+          <div className="pl-5 pr-1 pt-0.5 pb-0.5 text-[11px] leading-snug text-stone-500 dark:text-stone-400 whitespace-pre-wrap break-words">
+            {t.description}
+          </div>
+        </Expandable>
+      )}
     </li>
   )
 }
@@ -2362,7 +2400,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
-  const [todos, setTodos] = useState<TodoItem[]>([])
+  // Seeded from the persisted plan (planStore) so navigating away and back shows
+  // the last known plan even when the replay window no longer includes the
+  // TaskCreate events. Live events reconcile on top (see the reducer).
+  const [todos, setTodos] = useState<TodoItem[]>(() =>
+    loadPlan(projectId, agentId)
+      .sort((a, b) => a.order - b.order)
+      .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })),
+  )
   // Live "working" indicator (item 48): the turn's start time (for the ticking
   // elapsed), the elapsed seconds, the running output-token count (completed
   // messages + the in-flight one), and the per-turn verb. Reset each turn.
@@ -2531,7 +2576,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => {
     setItems([])
     setStream(null)
-    setTodos([])
+    // Restore the persisted plan (not []) so a reconnect / re-navigation shows
+    // the last known plan before the replay reconstructs it (planStore).
+    setTodos(restoredPlan(projectId, agentId))
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
@@ -2580,21 +2627,42 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // once the replay window dropped early creates: the order restarted at 1
     // while the real ids kept climbing, so every TaskUpdate missed and the panel
     // showed 0/N.
-    const taskItems = new Map<string, { content: string; status: TodoItem['status']; activeForm?: string; order: number }>()
+    type TaskEntry = { content: string; status: TodoItem['status']; activeForm?: string; description?: string; order: number }
+    const taskItems = new Map<string, TaskEntry>()
     let taskSeq = 0
+    // Seed from the persisted plan (keyed by real id where known), so a
+    // TaskUpdate whose create has scrolled out of the replay window still finds
+    // its target and the panel isn't wiped to empty on reconnect.
+    for (const e of loadPlan(projectId, agentId)) {
+      taskItems.set(e.key, { content: e.content, status: e.status, activeForm: e.activeForm, description: e.description, order: e.order })
+      taskSeq = Math.max(taskSeq, e.order)
+    }
+    // A session uses ONE planning tool - TodoWrite (whole-list) or Task*
+    // (incremental) - so the most recent tool wins: switching from one to the
+    // other clears the old list. Inferred from the seeded keys on restore.
+    let planMode: 'todo' | 'task' | null = taskItems.size
+      ? ([...taskItems.keys()].some((k) => k.startsWith('todo:')) ? 'todo' : 'task')
+      : null
     const publishTasks = () => {
-      const list = [...taskItems.values()]
+      const entries: PlanEntry[] = [...taskItems.entries()]
+        .map(([key, v]) => ({ key, ...v }))
         .sort((a, b) => a.order - b.order)
-        .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
-      setTodos(list)
+      savePlan(projectId, agentId, entries)
+      setTodos(entries.map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })))
     }
     const applyTaskTool = (name: string | undefined, input: unknown, toolUseId: string) => {
       if (name === 'TaskCreate') {
         const t = parseTaskCreate(input)
         if (!t) return
+        // Switching from a TodoWrite plan to Task* replaces it (latest tool wins).
+        if (planMode === 'todo') {
+          taskItems.clear()
+          taskSeq = 0
+        }
+        planMode = 'task'
         taskSeq += 1
         // Provisional key until the result gives us the real id (see above).
-        taskItems.set(`use:${toolUseId}`, { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
+        taskItems.set(`use:${toolUseId}`, { content: t.content, status: 'pending', activeForm: t.activeForm, description: t.description, order: taskSeq })
         publishTasks()
       } else if (name === 'TaskUpdate') {
         const u = parseTaskUpdate(input)
@@ -2608,6 +2676,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           if (u.status) cur.status = u.status
           if (u.content) cur.content = u.content
           if (u.activeForm !== undefined) cur.activeForm = u.activeForm
+          if (u.description !== undefined) cur.description = u.description
         }
         publishTasks()
       }
@@ -2624,6 +2693,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (id === provKey || taskItems.has(id)) return
       taskItems.delete(provKey)
       taskItems.set(id, cur)
+      publishTasks()
+    }
+    // applyTodoWrite replaces the whole plan from a TodoWrite (the whole-list
+    // cousin of Task*). Routed through taskItems so it persists + restores the
+    // same way; keys are synthetic since TodoWrite carries no per-task id.
+    const applyTodoWrite = (list: TodoItem[]) => {
+      planMode = 'todo'
+      taskItems.clear()
+      taskSeq = 0
+      list.forEach((t, i) => {
+        taskSeq = i + 1
+        taskItems.set(`todo:${i}`, { content: t.content, status: t.status, activeForm: t.activeForm, description: t.description, order: taskSeq })
+      })
       publishTasks()
     }
 
@@ -3355,7 +3437,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               if (specs) {
                 push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
               } else if (todos) {
-                setTodos(todos)
+                applyTodoWrite(todos)
               } else {
                 applyTaskTool(block.name, block.input, block.id)
                 if (block.name === 'Task') {
