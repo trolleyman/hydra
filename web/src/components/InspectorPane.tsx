@@ -20,6 +20,7 @@ export function InspectorPane({
   externalRefreshTrigger,
   externalArtifactRefresh,
   changesLeading,
+  leadingInline,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -28,6 +29,10 @@ export function InspectorPane({
   // A control rendered at the left edge of the diff's Changes bar (the split
   // layout's collapse toggle, flanking the divider).
   changesLeading?: ReactNode
+  // Flow changesLeading inline on the Changes bar's top row (beside "Changes")
+  // instead of as a vertically-centered left-edge sibling - used by the narrow
+  // screen-stack so the base->head selector row below gets the full width.
+  leadingInline?: boolean
 }) {
   return (
     // pt-4 mirrors the classic scroll container so DiffViewer's `-top-4` sticky
@@ -45,6 +50,7 @@ export function InspectorPane({
         externalArtifactRefresh={externalArtifactRefresh}
         inspector
         changesLeading={changesLeading}
+        leadingInline={leadingInline}
       />
     </div>
   )

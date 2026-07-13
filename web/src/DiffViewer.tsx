@@ -1871,6 +1871,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
   prev.inspector === next.inspector &&
   prev.changesLeading === next.changesLeading &&
+  prev.leadingInline === next.leadingInline &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
@@ -1881,7 +1882,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, changesLeading }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; changesLeading?: ReactNode }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, changesLeading, leadingInline }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -2817,11 +2818,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           cancels its pt-4 so the bar sits flush at the top at rest too (not just
           when stuck). The classic layout keeps its narrower bleed. */}
       <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-6' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
-        {changesLeading && <div className="shrink-0 self-center">{changesLeading}</div>}
+        {/* Wide split: the collapse toggle flanks the divider at the bar's left
+            edge, vertically centered across however many lines the content wraps
+            to. Narrow screen-stack (leadingInline) instead flows the back button
+            INLINE as the first item of the top row (beside "Changes"), so the
+            ref-selector row below gets the full width - no self-center indent. */}
+        {changesLeading && !leadingInline && <div className="shrink-0 self-center">{changesLeading}</div>}
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
+          {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
           {statsEl}
 

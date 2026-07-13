@@ -1750,9 +1750,10 @@ export function AgentDetail({
               <InspectorPane
                 agent={agent}
                 projectId={projectId}
+                changesLeading={narrowBackButton}
+                leadingInline
                 externalRefreshTrigger={diffRefreshTrigger}
                 externalArtifactRefresh={artifactRefreshTrigger}
-                changesLeading={narrowBackButton}
               />
             </div>
           </div>
