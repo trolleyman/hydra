@@ -704,7 +704,10 @@ function RootLayout() {
                       }
                     >
                       <FolderGit2 className="w-4 h-4 shrink-0" />
-                      Repository
+                      {/* truncate (not a raw text node) so a cramped sidebar
+                          ellipsises the label instead of overflowing it under
+                          the forge logo / status chips (image35). */}
+                      <span className="truncate">Repository</span>
                     </Link>
                     {/* Forge web link, derived from the remote URL (read-only, no
                         auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is

@@ -480,7 +480,13 @@ const AgentMetaRow = memo(function AgentMetaRow({
       >
         {agent.agent_type}
       </Badge>
-      {/* Status pill + test verdict now live in the header (AgentTopBar). */}
+      {/* Status pill sits right after the agent-type chip (moved back out of the
+          header). The test verdict stays in the header. */}
+      {agent.agent_status && (
+        <Badge className={agentStatusBadge(agent.agent_status.status).className}>
+          {agentStatusBadge(agent.agent_status.status).label}
+        </Badge>
+      )}
       {/* The armed "merges when tests pass" state is shown by the merge button
           itself now (the green pill), so no separate metadata-row badge. */}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
@@ -1551,11 +1557,8 @@ export function AgentDetail({
         statusDot={
           <>
             <span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />
-            {agent.agent_status && (
-              <Badge className={agentStatusBadge(agent.agent_status.status).className}>
-                {agentStatusBadge(agent.agent_status.status).label}
-              </Badge>
-            )}
+            {/* Status pill moved back to the metadata row (after the agent-type
+                chip); the header keeps just the dot + test verdict. */}
             {agent.tests && agent.tests.status !== 'none' && (
               <TestVerdictChip tests={agent.tests} variant="sm" />
             )}
