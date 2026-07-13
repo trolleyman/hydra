@@ -387,6 +387,15 @@ function stripLocalCommandCaveat(text: string): string {
   return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
 }
 
+// isTaskNotification reports whether a message IS a harness <task-notification>
+// bookkeeping record (which always leads with the tag) rather than a real message
+// that merely mentions one in its prose - so quoting "<task-notification>" in a
+// chat message no longer gets it swallowed as a notice. trimStart covers the raw
+// relay channels (ev.content / attachment.prompt) that aren't pre-trimmed.
+function isTaskNotification(text: string): boolean {
+  return text.trimStart().startsWith('<task-notification>')
+}
+
 // detectContextNote recognises the CLI-injected "session continued" preamble that
 // leads a conversation after a context compaction (auto/ran-out-of-context or an
 // explicit /compact). It's a summary the CLI feeds the model to carry state over,
@@ -2332,7 +2341,7 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       push({ kind: 'interrupted' })
       return
     }
-    if (text.includes('<task-notification>')) {
+    if (isTaskNotification(text)) {
       const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
       push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
       return
@@ -3449,7 +3458,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // consumed as a user turn: fold it into a notice (and settle a background
       // sub-agent) via the shared handler, which dedups against the live
       // main-transcript relay of the same notification (item 8/15).
-      if (text.includes('<task-notification>')) {
+      if (isTaskNotification(text)) {
         handleTaskNotification(text, ts)
         return
       }
@@ -3504,9 +3513,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // "working" the moment it ends. A notification later consumed by a real
       // user turn routes through routeUserText instead, and dedups there.
       const notifText =
-        (typeof ev.content === 'string' && ev.content.includes('<task-notification>') && ev.content) ||
+        (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
         (typeof ev.attachment?.prompt === 'string' &&
-          ev.attachment.prompt.includes('<task-notification>') &&
+          isTaskNotification(ev.attachment.prompt) &&
           ev.attachment.prompt) ||
         ''
       if (notifText) {
