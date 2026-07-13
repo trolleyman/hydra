@@ -40,7 +40,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { loadPlan, savePlan, type PlanEntry } from '../lib/planStore'
+import { loadPlan, savePlan, seedLocalPlan, type PlanEntry } from '../lib/planStore'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
@@ -2615,6 +2615,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const worktreePath = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
+  // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
+  // the only copy of the plan; seed it into localStorage (only when local is
+  // empty) so the reconnect effect's loadPlan restores it. Runs when the value
+  // arrives (the agent-list poll can land after mount).
+  const serverPlan = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan,
+  )
+  useEffect(() => {
+    const seeded = seedLocalPlan(projectId, agentId, serverPlan)
+    if (seeded.length) {
+      setTodos(
+        seeded
+          .sort((a, b) => a.order - b.order)
+          .map(({ content, status: st, activeForm, description }) => ({ content, status: st, activeForm, description })),
+      )
+    }
+  }, [serverPlan, projectId, agentId])
 
   // Smooth (paced) streaming - a Browser setting. Read inside the WS reducer's
   // per-frame flush via a ref so a mid-stream toggle takes effect on the next

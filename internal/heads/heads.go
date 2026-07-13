@@ -34,6 +34,7 @@ import (
 type Head struct {
 	ID          string
 	Title       string  // mutable, user-facing display name (empty falls back to ID)
+	Plan        string  // client-owned chat plan/to-do JSON, opaque to the server
 	Branch      *string // "hydra/<id>", nil if the git branch does not exist
 	Worktree    *string // path to the worktree directory, nil if it does not exist
 	ProjectPath string
@@ -119,6 +120,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		h := Head{
 			ID:               a.ID,
 			Title:            a.Title,
+			Plan:             a.Plan,
 			Branch:           branch,
 			Worktree:         worktree,
 			ProjectPath:      a.ProjectPath,
@@ -298,6 +300,7 @@ func archivedHead(a *db.Agent) Head {
 	return Head{
 		ID:          a.ID,
 		Title:       a.Title,
+		Plan:        a.Plan,
 		Branch:      branch,
 		Worktree:    nil,
 		ProjectPath: a.ProjectPath,

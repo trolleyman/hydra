@@ -296,6 +296,13 @@ func (s *Store) UpdateAgentTitle(id, title string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateAgentPlan stores the chat plan/to-do JSON for an agent (client-owned,
+// opaque). Empty clears it.
+func (s *Store) UpdateAgentPlan(id, plan string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("plan", plan)
+	return errtrace.Wrap(result.Error)
+}
+
 // UpdateAgentBaseBranch updates the base branch an agent is considered based on.
 // Metadata only: it does not touch the agent's branch, worktree or commits.
 func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {

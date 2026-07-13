@@ -731,6 +731,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/plan:
+    put:
+      summary: Persist a head's reconstructed chat plan (to-do list) JSON
+      description: >
+        Stores the plan/to-do list the chat view reconstructs from the head's
+        Task*/TodoWrite events, so it survives navigation and is available in a
+        new browser. Opaque JSON blob; the server does not interpret it.
+      operationId: setAgentPlan
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  description: The plan as a JSON string (empty clears it).
+      responses:
+        '204':
+          description: Stored.
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)
@@ -2758,6 +2796,9 @@ components:
         title:
           type: string
           description: Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+        plan:
+          type: string
+          description: The chat plan/to-do list JSON the chat view persisted (empty if none). Opaque to the server.
         branch_name:
           type: string
           nullable: true

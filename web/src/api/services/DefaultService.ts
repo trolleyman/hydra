@@ -505,6 +505,40 @@ export class DefaultService {
         });
     }
     /**
+     * Persist a head's reconstructed chat plan (to-do list) JSON
+     * Stores the plan/to-do list the chat view reconstructs from the head's Task*TodoWrite events, so it survives navigation and is available in a new browser. Opaque JSON blob; the server does not interpret it.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public setAgentPlan(
+        projectId: string,
+        id: string,
+        requestBody: {
+            /**
+             * The plan as a JSON string (empty clears it).
+             */
+            plan: string;
+        },
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'PUT',
+            url: '/api/projects/{project_id}/agents/{id}/plan',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
      * Set a head's downstream branch name (the name it is pushed AS)
      * @param projectId
      * @param id

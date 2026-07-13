@@ -11,6 +11,10 @@ export type AgentResponse = {
      * Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
      */
     title?: string;
+    /**
+     * The chat plan/to-do list JSON the chat view persisted (empty if none). Opaque to the server.
+     */
+    plan?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
     project_path: string;
