@@ -2836,7 +2836,7 @@ var simChatEvents = []string{
 	// A Read with offset+limit: the range shows after the filename in the header
 	// (item 1); its .go output is syntax highlighted (item 3).
 	`{"type":"assistant","message":{"id":"msg_sim_off","content":[{"type":"tool_use","id":"toolu_sim_off","name":"Read","input":{"file_path":"internal/artifacts/upload.go","offset":100,"limit":40}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_off","content":"func sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_off","content":"   100\tfunc sleepBackoff(attempt int) {\n   101\t\tbase := 100 * time.Millisecond\n   102\t\td := base << attempt\n   103\t\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n   104\t\ttime.Sleep(d + jitter)\n   105\t}"}]}}`,
 	// An image Read: the decoded image shows in the Output section (item 4).
 	`{"type":"assistant","message":{"id":"msg_sim_img","content":[{"type":"tool_use","id":"toolu_sim_img","name":"Read","input":{"file_path":"web/scripts/screenshots/out/agent-dark.png"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_img","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + simChatImageB64 + `"}}]}]}}`,

@@ -961,6 +961,40 @@ function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
   )
 }
 
+// ReadOutputPanel renders a Read's `cat -n` output (each line prefixed with its
+// file line number + a tab) as a proper neutral line-number gutter plus syntax-
+// highlighted code. The numbers are split OUT of the code before highlighting, so
+// the highlighter can't colour them as numeric literals (item 43: the file line
+// numbers rendered in the "number" token colour instead of a plain gutter). The
+// gutter shows the file's REAL line numbers (honouring a Read offset), not 1..N.
+// Falls back to the plain OutputPanel when the text isn't the cat -n shape.
+function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
+  const parsed = useMemo(() => {
+    const lines = text.replace(/\n$/, '').split('\n')
+    const nums: string[] = []
+    const code: string[] = []
+    let matched = 0
+    for (const l of lines) {
+      const m = /^\s{0,6}(\d+)\t(.*)$/.exec(l)
+      if (m) { nums.push(m[1]); code.push(m[2]); matched++ } else { nums.push(''); code.push(l) }
+    }
+    return { nums, code, ok: lines.length > 0 && matched > lines.length / 2 }
+  }, [text])
+  const body = parsed.code.join('\n')
+  const html = useMemo(() => highlightHtml(body, lang), [body, lang])
+  if (!parsed.ok) return <OutputPanel text={text} lang={lang} />
+  return (
+    <div className={`${PANEL_CLASS} max-h-64 overflow-auto`}>
+      <div className="flex min-w-max text-[11px] leading-4 font-mono">
+        <pre className="sticky left-0 shrink-0 select-none text-right px-2 py-1.5 text-stone-400 dark:text-stone-600 bg-[#fdfcf9] dark:bg-[#1d1c1a] border-r border-stone-200 dark:border-white/[0.06]">{parsed.nums.join('\n')}</pre>
+        {html != null
+          ? <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: html }} />
+          : <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200">{body}</pre>}
+      </div>
+    </div>
+  )
+}
+
 // EditDiffPanel shows an Edit's old_string and new_string as two syntax-
 // highlighted blocks side by side (old left, new right; stacked on a narrow
 // pane), tinted red/green like a diff. No line numbers - the strings are
@@ -1268,7 +1302,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                       ? <MemoryPanel text={item.result} />
                       : isTaskTool && !item.isError
                         ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={item.result} /></div>
-                        : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+                        : isRead && !item.isError
+                          ? <ReadOutputPanel text={item.result} lang={outputLang} />
+                          : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}
