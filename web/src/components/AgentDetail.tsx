@@ -18,7 +18,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { IconButton } from './IconButton'
 import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -678,6 +678,16 @@ export function AgentDetail({
       </button>
     </Tooltip>
   ), [paneCollapse, toggleWorking, toggleInspector])
+  // Narrow (single-pane) back button: the diff screen slides in over the chat,
+  // so its Changes bar leads with a back chevron that slides back to the chat
+  // (toggleWorking reveals the working pane). memoized for DiffViewer's memo.
+  const narrowBackButton = useMemo(() => (
+    <Tooltip content={`Back to chat (${SHORTCUT_DIFF_SIDEBAR})`}>
+      <button className={PANE_TOGGLE_CLS} aria-label="Back to chat" onClick={toggleWorking}>
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+    </Tooltip>
+  ), [toggleWorking])
   // Left (working) pane's share of the split, persisted like sidebarWidth.
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio())
   const splitRatioRef = useRef(splitRatio)
@@ -1679,50 +1689,60 @@ export function AgentDetail({
           {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
         </div>
       ) : narrowSplit ? (
-        // ── Narrow single pane (split enabled, no room for two panes) ────────
-        // One pane at a time: the working view (metadata + prompt + terminal), or
-        // a full-screen diff when the diff-sidebar toggle collapses the working
-        // pane. No divider, no stacked diff-below - the toggle (or Ctrl+,) flips
-        // between them.
-        paneCollapse === 'working' ? (
-          <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
-            <InspectorPane
-              agent={agent}
-              projectId={projectId}
-              externalRefreshTrigger={diffRefreshTrigger}
-              externalArtifactRefresh={artifactRefreshTrigger}
-            />
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-            <div className="shrink-0">
-              <AgentMetaRow
-                agent={agent}
-                agentTypeClass={agentTypeClass}
-                branches={branches}
-                savingBase={savingBase}
-                savingChatMode={savingChatMode}
-                savingDownstream={savingDownstream}
-                onSaveBase={onSaveBase}
-                onRefreshBranches={refreshBranches}
-                onSaveChatMode={onSaveChatMode}
-                onSaveDownstream={onSaveDownstream}
+        // ── Narrow single-pane "screen stack" (split on, no room for two) ────
+        // The chat and the diff are two full-screen screens on a horizontal
+        // track: the diff slides in over the chat when diffShown (the top-bar
+        // toggle / Ctrl+, / the diff's own back chevron flip paneCollapse
+        // between 'none'/'working'). Both stay mounted so the swap is a real
+        // slide - no remount, so the terminal/chat never resets - and the diff's
+        // Changes bar leads with a back button (narrowBackButton).
+        <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
+          <div
+            className="flex h-full w-[200%]"
+            style={{
+              transform: diffShown ? 'translateX(-50%)' : 'translateX(0)',
+              transition: 'transform 300ms ease',
+            }}
+          >
+            <div className="w-1/2 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
+              <div className="shrink-0">
+                <AgentMetaRow
+                  agent={agent}
+                  agentTypeClass={agentTypeClass}
+                  branches={branches}
+                  savingBase={savingBase}
+                  savingChatMode={savingChatMode}
+                  savingDownstream={savingDownstream}
+                  onSaveBase={onSaveBase}
+                  onRefreshBranches={refreshBranches}
+                  onSaveChatMode={onSaveChatMode}
+                  onSaveDownstream={onSaveDownstream}
+                />
+              </div>
+              {agent.prompt && agent.chat_mode !== true && (
+                <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+              )}
+              <AgentTerminal
+                agentId={agent.id}
+                projectId={projectId}
+                isEphemeral={agent.ephemeral}
+                chatMode={agent.chat_mode === true}
+                fill
+                onRefresh={onRefresh}
+                onDiffRefresh={handleDiffRefresh}
               />
             </div>
-            {agent.prompt && agent.chat_mode !== true && (
-              <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
-            )}
-            <AgentTerminal
-              agentId={agent.id}
-              projectId={projectId}
-              isEphemeral={agent.ephemeral}
-              chatMode={agent.chat_mode === true}
-              fill
-              onRefresh={onRefresh}
-              onDiffRefresh={handleDiffRefresh}
-            />
+            <div className="w-1/2 flex flex-col min-w-0 min-h-0 overflow-hidden">
+              <InspectorPane
+                agent={agent}
+                projectId={projectId}
+                externalRefreshTrigger={diffRefreshTrigger}
+                externalArtifactRefresh={artifactRefreshTrigger}
+                changesLeading={narrowBackButton}
+              />
+            </div>
           </div>
-        )
+        </div>
       ) : (
         // ── Classic single-column stacked layout (flag off, or archived) ─────
         // pt-4 (16px) above the metadata row matches the effective gap below it
