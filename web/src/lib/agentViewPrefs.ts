@@ -49,6 +49,11 @@ export type AgentViewPrefs = {
   // Unsent chat composer text, so a draft survives switching agents and reloads
   // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
   chatDraft?: string
+  // Last-known model alias/id for the chat selector, so the label shows the
+  // right model immediately on remount instead of the "Model" placeholder while
+  // waiting for a system:init that may not replay on resume. The live stream
+  // (system:init / "Set model to ...") remains authoritative and corrects it.
+  chatModel?: string
   // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
 }
@@ -77,6 +82,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
+    chatModel: stored.chatModel,
     promptCollapsed: stored.promptCollapsed,
   }
 }

@@ -759,11 +759,16 @@ const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable' },
 ]
 
-// Effective context window (tokens) used to turn a turn's prompt size into a
-// "context left" percentage. All current Claude chat models expose a 200k
-// window; a 1M-context variant would read low here but never wrong-direction,
-// so the simple constant is a safe default (item 40).
-const CONTEXT_WINDOW_TOKENS = 200_000
+// Effective context window (tokens) for a model, used to turn a turn's prompt
+// size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
+// expose a 1M window; only Haiku is 200k. A flat 200k constant (the old value)
+// read >100% used on the 1M models once a conversation passed 200k tokens, so
+// the window has to follow the model. An unknown model (before the first
+// system:init lands) defaults to 1M, since every offered model except Haiku is
+// 1M - the model is also persisted per-agent now, so this is rarely hit.
+function contextWindowTokens(model: string): number {
+  return model.toLowerCase().includes('haiku') ? 200_000 : 1_000_000
+}
 
 // contextInputTokens sums the prompt-side tokens of a usage sample (everything
 // the model had to read: fresh input + cache reads + cache writes), which is the
@@ -2680,8 +2685,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Current model (from system:init / set_model confirmations) and the slash
-  // commands the CLI advertises, both fed by the event stream.
-  const [model, setModel] = useState('')
+  // commands the CLI advertises, both fed by the event stream. Seeded from the
+  // per-agent persisted value so the selector shows the last-known model on
+  // remount rather than the "Model" placeholder, then corrected by the live
+  // stream once it lands.
+  const [model, setModel] = useState(() => loadAgentViewPrefs(projectId, agentId).chatModel ?? '')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   // Prompt-side tokens of the most recent message, i.e. how much context the
   // conversation currently occupies. Drives the "context left" chip beside the
@@ -4210,6 +4218,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return () => clearTimeout(t)
   }, [input, projectId, agentId])
 
+  // Persist the current model so the selector shows it immediately on remount
+  // (before the live stream re-confirms it). Only write once we actually know it
+  // - never clobber a good stored value with the empty placeholder.
+  useEffect(() => {
+    if (model) patchAgentViewPrefs(projectId, agentId, { chatModel: model })
+  }, [model, projectId, agentId])
+
   // --- Composer: attachments ------------------------------------------------
 
   const attachmentsRef = useRef<Attachment[]>([])
@@ -4803,11 +4818,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   }
 
   const modelLabel = modelDisplayLabel(model)
+  const contextWindow = contextWindowTokens(model)
   // "Context left" percentage for the composer chip (item 40): null until the
   // first usage sample lands. Clamped to 0-100.
   const contextPct =
     contextTokens > 0
-      ? Math.max(0, Math.min(100, Math.round(100 * (1 - contextTokens / CONTEXT_WINDOW_TOKENS))))
+      ? Math.max(0, Math.min(100, Math.round(100 * (1 - contextTokens / contextWindow))))
       : null
 
   // A turn's result footer (duration/cost) should show once. On a resume the
@@ -5108,7 +5124,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                     is near. */}
                 {contextPct !== null && (
                   <Tooltip
-                    content={`~${contextPct}% context left (${formatTokens(contextTokens)} of ${formatTokens(CONTEXT_WINDOW_TOKENS)} used)`}
+                    content={`~${contextPct}% context left (${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} used)`}
                     side="top"
                   >
                     <span
