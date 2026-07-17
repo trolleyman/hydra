@@ -34,6 +34,8 @@ import hljs from '../lib/hljs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { pasteMarkerText } from '../lib/pastedText'
+import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
@@ -323,12 +325,25 @@ const STOP_REASON_LABEL: Record<string, string> = {
   model_context_window_exceeded: 'response cut off (context full)',
 }
 
-// Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
-// one is picked per turn so it stays stable while the turn runs.
+// Playful gerunds for the live "working" indicator (item 48), Claude-Code
+// style: a broad grab-bag picked at RANDOM per turn (not round-robin, which
+// made the same few words - Flambeing, Crunching - feel like fixtures). The
+// pick stays stable while the turn runs.
 const WORKING_VERBS = [
-  'Flambéing', 'Percolating', 'Simmering', 'Noodling', 'Conjuring', 'Marinating',
-  'Whisking', 'Churning', 'Brewing', 'Pondering', 'Tinkering', 'Finagling',
-  'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
+  'Accomplishing', 'Actualizing', 'Baking', 'Brewing', 'Cerebrating',
+  'Churning', 'Coalescing', 'Cogitating', 'Combobulating', 'Computing',
+  'Concocting', 'Conjuring', 'Considering', 'Cooking', 'Crafting',
+  'Crunching', 'Deciphering', 'Deliberating', 'Distilling', 'Divining',
+  'Effecting', 'Elucidating', 'Envisioning', 'Finagling', 'Flambeing',
+  'Forging', 'Frolicking', 'Germinating', 'Hatching', 'Herding',
+  'Hustling', 'Ideating', 'Incubating', 'Inferring', 'Manifesting',
+  'Marinating', 'Moseying', 'Mulling', 'Musing', 'Mustering',
+  'Noodling', 'Percolating', 'Perusing', 'Pondering', 'Pontificating',
+  'Puttering', 'Puzzling', 'Reticulating', 'Ruminating', 'Scheming',
+  'Schlepping', 'Simmering', 'Smooshing', 'Spelunking', 'Stewing',
+  'Sussing', 'Synthesizing', 'Thinking', 'Tinkering', 'Transmuting',
+  'Unfurling', 'Unravelling', 'Vibing', 'Wandering', 'Whirring',
+  'Whisking', 'Wibbling', 'Wizarding', 'Working', 'Wrangling',
 ]
 
 // Auto-reconnect tuning: a connection that stayed open this long counts as
@@ -2658,7 +2673,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const turnStartClockRef = useRef<number | null>(null)
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
-  const turnCountRef = useRef(0)
   // The latest assistant message's stop_reason this turn, so the footer can flag
   // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
   const turnStopReasonRef = useRef<string | null>(null)
@@ -2798,6 +2812,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
+  // Whether pasting an attachment also inserts its "[filename]" marker into the
+  // composer (a Browser setting, default on).
+  const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
@@ -4010,12 +4027,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // elapsed effect set turnStartRef to page-load time before the
           // backfill arrived; correct it (and elapsed) here, before the
           // indicator first renders (it's gated on replayDone).
-          {
+          if (isTurnRunningRef.current) {
             const real = turnStartClockRef.current
             if (real != null && real <= Date.now()) {
               turnStartRef.current = real
               setElapsed(Math.floor((Date.now() - real) / 1000))
             }
+          } else {
+            // Idle chat: the backfill's historical user messages also passed
+            // through markTurnStart, so the anchor now holds the LAST turn's
+            // start. Clear it, or the next live turn would show its elapsed
+            // time as "since that old message" instead of starting from 0.
+            turnStartClockRef.current = null
           }
           setLiveFromId(nextId)
           setReplayDone(true)
@@ -4149,7 +4172,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       curMsgTokensRef.current = 0
       turnStopReasonRef.current = null
       setTurnTokens(0)
-      setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
+      setTurnVerb(WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)])
     }
     const tick = () => setElapsed(Math.floor((Date.now() - (turnStartRef.current ?? Date.now())) / 1000))
     tick()
@@ -4164,12 +4187,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
   }, [items, stream, replayDone, pendingSends, subagents])
 
-  // Follow the bottom continuously while pinned as the content height changes
+  // Follow the bottom continuously while pinned as the geometry changes
   // between renders - notably during a card's 0.22s expand/collapse animation,
   // which grows the height frame-by-frame. Without this the disclosure glides
   // open and then the view snaps to the bottom in one jump once React next
-  // re-renders (item 55). A no-op when the user has scrolled up (not pinned),
-  // so load-older prepends and the restored offset are left alone.
+  // re-renders (item 55). The VIEWPORT is observed too: the composer sits
+  // below the scroll pane, so a growing textarea (a wrapped line) shrinks the
+  // pane without touching the content height - re-pin then as well. A no-op
+  // when the user has scrolled up (not pinned), so load-older prepends and the
+  // restored offset are left alone.
   useEffect(() => {
     const el = scrollRef.current
     const content = contentRef.current
@@ -4178,6 +4204,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (pinnedRef.current) el.scrollTop = el.scrollHeight
     })
     ro.observe(content)
+    ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
@@ -4307,8 +4334,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // fresh here rather than from an ever-growing counter: it resets to 1 once the
   // attachments clear on send, and fills the gap after a removal (so removing #2
   // and re-adding reuses 2, not 3).
-  function addFiles(rawFiles: File[]) {
+  function addFiles(rawFiles: File[]): string[] {
     let nextN = nextGenericImageNumber(attachmentsRef.current)
+    const names: string[] = []
     for (const raw of rawFiles) {
       let file = raw
       if (isImageFile(raw) && isGenericImageName(raw.name)) {
@@ -4325,7 +4353,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       uploadFile(projectId, file)
         .then((res) => patchAttachment(id, { path: res.path, uploading: false }))
         .catch((err) => patchAttachment(id, { uploading: false, error: formatError(err) }))
+      names.push(file.name || 'pasted-image')
     }
+    return names
   }
 
   function removeAttachment(id: number) {
@@ -4340,7 +4370,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
-    addFiles(files)
+    const names = addFiles(files)
+    // With the preference on, also reference the pasted attachments in the
+    // message text via "[filename]" markers at the caret.
+    if (pasteMarkers && names.length > 0) {
+      const ta = textareaRef.current
+      const start = ta?.selectionStart ?? input.length
+      const end = ta?.selectionEnd ?? input.length
+      const insert = pasteMarkerText(names)
+      const caret = start + insert.length
+      setInput(input.slice(0, start) + insert + input.slice(end))
+      requestAnimationFrame(() => {
+        if (!ta) return
+        ta.focus()
+        ta.selectionStart = ta.selectionEnd = caret
+      })
+    }
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -4946,7 +4991,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
           />
         )}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
+            scrollTop to keep an arbitrary anchor node stable when content above
+            the fold grows (an expanding card), firing a scroll event that lands
+            outside the near-bottom threshold and un-pins the follow - whether it
+            happened depended on which node got picked as the anchor. Our own
+            pin/follow logic owns bottom-following instead. */}
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />

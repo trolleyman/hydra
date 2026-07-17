@@ -18,7 +18,8 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, ChevronDown, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, MoreHorizontal, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { InspectorPane } from './InspectorPane'
 import { IconButton } from './IconButton'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -376,6 +377,102 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
   )
 }
 
+// Small overflow ("...") menu at the end of the metadata row, holding the
+// rarely-used bits that used to crowd the row: the terminal/chat mode switch
+// and the created time. Portalled + fixed-positioned so the row's horizontal
+// scroll clipping can't swallow it.
+function MetaOverflowMenu({
+  agent,
+  savingChatMode,
+  onSaveChatMode,
+}: {
+  agent: AgentResponse
+  savingChatMode: boolean
+  onSaveChatMode: (next: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open) return
+    const el = btnRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const MENU_W = 224 // w-56
+    setCoords({ left: Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8)), top: r.bottom + 4 })
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open])
+  // The terminal/chat mode switch (Claude only). Switching restarts the Claude
+  // process in the new mode; the conversation is preserved via --continue.
+  const chatToggle = agent.agent_type === 'claude' && !agent.archived
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="More details"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && coords && createPortal(
+        <div
+          ref={menuRef}
+          style={{ left: coords.left, top: coords.top }}
+          className="fixed w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
+        >
+          {chatToggle && (
+            savingChatMode ? (
+              <div className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                <LoaderCircle className="w-4 h-4 animate-spin" /> Switching...
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false)
+                  onSaveChatMode(agent.chat_mode !== true)
+                }}
+                title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                {agent.chat_mode ? <TerminalSquare className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
+                {agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'}
+              </button>
+            )
+          )}
+          {agent.created_at !== 0 && agent.created_at !== undefined && (
+            <div className={`px-3 py-2 text-xs text-gray-500 dark:text-gray-400 ${chatToggle ? 'border-t border-gray-100 dark:border-gray-700' : ''}`}>
+              created <RelativeTime createdAt={agent.created_at} />
+            </div>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!mode) return null
   const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
@@ -406,11 +503,11 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   }
   const c = cfg[mode]
   if (!c) return null
+  // Icon-only: the shield color/glyph carries the signal at a glance; the label
+  // and full explanation live in the tooltip (row real estate is precious).
   return (
-    <Tooltip variant="card" title="Network access" content={c.tip}>
-      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>
-        {c.label}
-      </Badge>
+    <Tooltip variant="card" title={`Network access - ${c.label}`} content={c.tip} className="shrink-0">
+      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>{null}</Badge>
     </Tooltip>
   )
 }
@@ -470,37 +567,46 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveDownstream: (n: string) => void
 }) {
   return (
-    // Not `live`: "created X ago" self-updates via its own <RelativeTime> leaf, so
-    // the row no longer subscribes to the 1s clock (which re-rendered + re-measured
-    // it every second even when idle).
-    <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-      <Badge
-        variant="pill"
-        className={agentTypeClass}
-        icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
-      >
-        {agent.agent_type}
-      </Badge>
-      {/* Status pill sits right after the agent-type chip (moved back out of the
-          header). The test verdict stays in the header. */}
+    // A single-line chip strip: no wrapping, no interpunct separators. When
+    // the pane is too narrow it scrolls horizontally (scrollbar hidden); the
+    // rarely-used bits (mode switch, created time) live in the trailing "..."
+    // menu. Dropdown children (base selector, "..." menu) are portalled, so
+    // the horizontal overflow clipping can't swallow them.
+    <div className="flex items-center gap-2 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Agent type, icon only - the colored pill is recognizable without the
+          text label; the tooltip still names it. */}
+      <Tooltip content={agent.agent_type} className="shrink-0">
+        <Badge
+          variant="pill"
+          className={agentTypeClass}
+          icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+        >{null}</Badge>
+      </Tooltip>
       {agent.agent_status && (
-        <Badge className={agentStatusBadge(agent.agent_status.status).className}>
+        <Badge
+          className={agentStatusBadge(agent.agent_status.status).className}
+          containerClassName="shrink-0"
+        >
           {agentStatusBadge(agent.agent_status.status).label}
         </Badge>
       )}
-      {/* Test verdict, right after the status (moved out of the top bar). */}
+      {/* Test verdict, right after the status. shrink-0 wrappers throughout:
+          several chips have min-w-0/truncate internals for wrapping rows, which
+          would otherwise absorb ALL the shrink in this nowrap row and collapse
+          to their icons - the strip must scroll instead. */}
       {agent.tests && agent.tests.status !== 'none' && (
-        <TestVerdictChip tests={agent.tests} variant="sm" />
+        <span className="shrink-0 inline-flex">
+          <TestVerdictChip tests={agent.tests} variant="sm" />
+        </span>
       )}
-      {/* The armed "merges when tests pass" state is shown by the merge button
-          itself now (the green pill), so no separate metadata-row badge. */}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-      {agent.branch_name && <BranchTag branch={agent.branch_name} />}
-      {/* Base branch. Editing it is metadata-only: it changes what
-          update-from-base merges in and what the diff compares against,
-          but does not rebase existing commits. */}
-      <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-        <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
+      {/* Branch -> base as one compact control: the head's branch, an arrow
+          (it merges into / diffs against), then the editable base. Editing the
+          base is metadata-only: it changes what update-from-base merges in and
+          what the diff compares against, but does not rebase commits. */}
+      {agent.branch_name && <span className="shrink-0"><BranchTag branch={agent.branch_name} /></span>}
+      <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
+        <ArrowRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" aria-label="merges into" />
         {branches !== null && !savingBase ? (
           <BranchSelector
             // An agent can't be its own base, so drop its own branch from
@@ -519,58 +625,18 @@ const AgentMetaRow = memo(function AgentMetaRow({
           </span>
         )}
       </span>
-      {/* Terminal/chat mode toggle (Claude only). Switching
-          restarts the Claude process in the new mode; the conversation is
-          preserved via --continue. */}
-      {agent.agent_type === 'claude' && !agent.archived && (
-        <span
-          className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
-          title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
-        >
-          {savingChatMode ? (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
-              <LoaderCircle className="w-3 h-3 animate-spin" />
-              switching
-            </span>
-          ) : (
-            <>
-              <button
-                onClick={() => onSaveChatMode(false)}
-                className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-                  agent.chat_mode
-                    ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                    : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                }`}
-              >
-                <TerminalSquare className="w-3 h-3" />
-                terminal
-              </button>
-              <button
-                onClick={() => onSaveChatMode(true)}
-                className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
-                  agent.chat_mode
-                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                }`}
-              >
-                <MessageSquare className="w-3 h-3" />
-                chat
-              </button>
-            </>
-          )}
-        </span>
-      )}
       {/* Downstream branch (the name this head is pushed AS) - editable
           until first publish, then soft-locked. Only shown once set. */}
-      <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
+      <span className="shrink-0 inline-flex">
+        <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
+      </span>
       {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <MRStateChip agent={agent} />
-      {agent.created_at !== 0 && agent.created_at !== undefined && (
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          created <RelativeTime createdAt={agent.created_at} />
-        </span>
-      )}
-    </SeparatedRow>
+      <span className="shrink-0 inline-flex">
+        <MRStateChip agent={agent} />
+      </span>
+      {/* Overflow: terminal/chat switch + created time. */}
+      <MetaOverflowMenu agent={agent} savingChatMode={savingChatMode} onSaveChatMode={onSaveChatMode} />
+    </div>
   )
 }, (prev, next) =>
   prev.agentTypeClass === next.agentTypeClass &&
@@ -617,9 +683,6 @@ export function AgentDetail({
   const [savingBase, setSavingBase] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
-  // Narrow layout only: whether the metadata row is expanded. Collapsed by
-  // default - on a phone the full chip row eats too much of the chat's height.
-  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
@@ -787,13 +850,6 @@ export function AgentDetail({
   }, [refreshBranches])
 
   const agentTypeClass = agentTypePill(agent.agent_type)
-
-  // One-line summary for the narrow layout's collapsed details row.
-  const mobileDetailsSummary = [
-    agent.agent_type,
-    agent.agent_status ? agentStatusBadge(agent.agent_status.status).label : null,
-    agent.tests && agent.tests.status !== 'none' ? `tests ${agent.tests.status}` : null,
-  ].filter(Boolean).join(' · ')
 
   // Stable wrappers for the metadata-row handlers so memoizing AgentMetaRow isn't
   // defeated by these functions being re-created each render. Each forwards to the
@@ -1715,41 +1771,22 @@ export function AgentDetail({
             }}
           >
             <div className="w-1/2 flex flex-col min-h-0 overflow-hidden">
-              {/* Metadata as a collapsible details row: a phone doesn't have
-                  the vertical room for the full chip row above the chat, so it
-                  collapses to a one-line summary by default. */}
-              <button
-                type="button"
-                onClick={() => setMobileDetailsOpen((o) => !o)}
-                aria-expanded={mobileDetailsOpen}
-                aria-label={mobileDetailsOpen ? 'Hide agent details' : 'Show agent details'}
-                className="shrink-0 w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700/60 cursor-pointer hover:bg-gray-100/60 dark:hover:bg-gray-800/60 transition-colors text-left"
-              >
-                {mobileDetailsOpen ? (
-                  <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                )}
-                <span className="min-w-0 truncate">
-                  {mobileDetailsOpen ? 'Details' : mobileDetailsSummary}
-                </span>
-              </button>
-              {mobileDetailsOpen && (
-                <div className="shrink-0 px-3 pt-3 border-b border-gray-100 dark:border-gray-700/60 pb-3">
-                  <AgentMetaRow
-                    agent={agent}
-                    agentTypeClass={agentTypeClass}
-                    branches={branches}
-                    savingBase={savingBase}
-                    savingChatMode={savingChatMode}
-                    savingDownstream={savingDownstream}
-                    onSaveBase={onSaveBase}
-                    onRefreshBranches={refreshBranches}
-                    onSaveChatMode={onSaveChatMode}
-                    onSaveDownstream={onSaveDownstream}
-                  />
-                </div>
-              )}
+              {/* Metadata as a slim, horizontally scrollable chip strip - one
+                  line, swipe sideways for the tail (AgentMetaRow scrolls). */}
+              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60">
+                <AgentMetaRow
+                  agent={agent}
+                  agentTypeClass={agentTypeClass}
+                  branches={branches}
+                  savingBase={savingBase}
+                  savingChatMode={savingChatMode}
+                  savingDownstream={savingDownstream}
+                  onSaveBase={onSaveBase}
+                  onRefreshBranches={refreshBranches}
+                  onSaveChatMode={onSaveChatMode}
+                  onSaveDownstream={onSaveDownstream}
+                />
+              </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">

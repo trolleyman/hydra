@@ -718,16 +718,13 @@ function RootLayout() {
                             : ahead > 0
                               ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
                               : `Up to date with ${remote}`
-                const hasStatusChips =
-                  !!reviewConfig?.browse_url ||
-                  (pushStatus != null && pushStatus.uncommitted.total > 0) ||
-                  behind > 0 ||
-                  ahead > 0
                 return (
                   <>
                     {/* Row 1: the Repository link (labelled with the project's
-                        path) + the sync action. The path gets the whole row's
-                        width; status chips live on the row below. */}
+                        path), full width. Row 2 (always rendered, so git state
+                        changes never shift the layout): the forge link and
+                        dirty/ahead/behind chips, with Sync anchored at the
+                        right - next to the state it acts on. */}
                     <div className="flex items-center gap-1.5">
                       <Link
                         to="/project/$projectId/repository"
@@ -763,28 +760,8 @@ function RootLayout() {
                           <span className="truncate">Repository</span>
                         )}
                       </Link>
-                      {/* Sync button (pull then push) */}
-                      <Tooltip content={syncTooltip} className="shrink-0">
-                        <button
-                          type="button"
-                          onClick={handleSync}
-                          disabled={!canSync}
-                          aria-label={syncTooltip}
-                          className={
-                            canSync
-                              ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                              : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                          }
-                        >
-                          <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                        </button>
-                      </Tooltip>
                     </div>
-                    {/* Row 2: forge link + dirty/ahead/behind status. Only
-                        rendered when there is something to show, so a clean
-                        repo keeps the section to the single row above. */}
-                    {hasStatusChips && (
-                      <div className="flex items-center gap-1.5 px-1 pb-1">
+                    <div className="flex items-center gap-1.5 px-1 pb-1">
                         {/* Forge web link, derived from the remote URL (read-only, no
                             auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
                             no remote or no https browse URL could be derived. */}
@@ -831,8 +808,27 @@ function RootLayout() {
                             </span>
                           </Tooltip>
                         )}
+                        {/* Sync (pull then push), pinned right, beside the
+                            counters/chip it acts on. Always rendered - it
+                            anchors the row so the section height never shifts
+                            as chips come and go. */}
+                        <div className="flex-1" />
+                        <Tooltip content={syncTooltip} className="shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleSync}
+                            disabled={!canSync}
+                            aria-label={syncTooltip}
+                            className={
+                              canSync
+                                ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                                : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                            }
+                          >
+                            <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                          </button>
+                        </Tooltip>
                       </div>
-                    )}
                   </>
                 )
               })()

@@ -43,6 +43,10 @@ export const StorageKeys = {
   // messages (the default is serif, Claude-app style). User text stays sans
   // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
   chatSerif: 'hydra-chat-serif',
+  // '0' when the user turned OFF the paste markers: pasting an attachment
+  // (image / large text) into a composer also inserts its "[filename]" at the
+  // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
+  pasteMarkers: 'hydra-paste-markers',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
   // text. Default (absent) = on: incoming token bursts are revealed at a steady
   // per-frame rate so the text reads as continuous typing rather than landing in
