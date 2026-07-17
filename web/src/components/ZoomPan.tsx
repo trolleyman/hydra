@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize } from 'lucide-react'
 
@@ -61,7 +61,7 @@ function useMeasure(ref: React.RefObject<HTMLElement | null>) {
 // stay correct; at fit the frame still hugs the content exactly (shadow/rounding
 // unchanged). Without the props the frame stays content-sized (the diff comparator,
 // whose width is externally driven, opts out this way).
-export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight }: {
+export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight, onVerticalSlide }: {
   children: React.ReactNode
   // The image shown inside the minimap (a representative side for a diff pair).
   // Omitted → the minimap shows just the viewport rectangle on a neutral panel.
@@ -72,6 +72,15 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // set to enable grow mode; omit to keep the frame locked to the content's fit size.
   maxWidth?: string
   maxHeight?: string
+  // Reports the frame's vertical grow-slide (fy, px) whenever it changes, plus the CSS
+  // transition to match. In grow mode the frame slides via a CSS transform to keep the
+  // cursor point fixed - but a transform doesn't move the element's layout box, so any
+  // chrome laid out BELOW the frame (the lightbox caption) keeps its old position and
+  // detaches: the image slides down over it (zoom near the top) or up away from it
+  // (zoom near the bottom). The caller shifts that chrome by the same fy to stay glued.
+  // Horizontal slide isn't reported - a centred caption doesn't detach vertically from
+  // it. Must be a stable identity (useCallback) so it doesn't re-fire every render.
+  onVerticalSlide?: (fy: number, transition: string | undefined) => void
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -408,6 +417,16 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // transform and mirrored onto the minimap's viewport rect so they move together.
   const transitionMs = transition === 'glide' ? 200 : 0
   const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined
+
+  // Keep any below-the-frame chrome (the lightbox caption) glued to the frame's
+  // visual bottom by reporting the vertical slide - see onVerticalSlide. Layout
+  // effect so the caption shifts in the same paint as the frame, never a frame late.
+  useLayoutEffect(() => {
+    onVerticalSlide?.(fy, transitionCss)
+  }, [fy, transitionCss, onVerticalSlide])
+  // Reset the caller's shift when this frame unmounts (navigating to an image that
+  // renders a different frame, or closing), so a leftover slide can't strand it.
+  useEffect(() => () => onVerticalSlide?.(0, undefined), [onVerticalSlide])
 
   const mmW = content.w > 0 ? Math.min(MM_W, Math.round(content.w / 4)) : MM_W
   const mmH = content.w > 0 ? Math.round(mmW * content.h / content.w) : 0

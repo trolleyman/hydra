@@ -207,6 +207,29 @@ describe('ZoomPan grow mode', () => {
     for (let i = 0; i < 12; i++) fireEvent.wheel(viewport, { deltaY: 400, clientX: 40, clientY: 300 })
     expect(frameTx(viewport)).toBe('0')
   })
+
+  it('reports the vertical grow-slide so a below-frame caption can follow it', () => {
+    // A small square with lots of vertical grow room, so the frame slides a real
+    // distance rather than capping in the first wheel step.
+    frame = { w: 200, h: 200 }
+    availBox = { w: 1400, h: 900 }
+    const onVerticalSlide = vi.fn()
+    const { container } = render(
+      <ZoomPan minimapSrc="mini.png" maxWidth="90vw" maxHeight="85vh" onVerticalSlide={onVerticalSlide}>
+        <img src="img.png" alt="content" />
+      </ZoomPan>,
+    )
+    const viewport = container.children[1] as HTMLElement
+    // Zoom in near the TOP (y=5): the frame slides DOWN (fy > 0) to keep the top point
+    // under the cursor. Its transform doesn't move its layout box, so a caption laid
+    // out below would overlap the image - the reported bug - unless it shifts by fy.
+    fireEvent.wheel(viewport, { deltaY: -400, clientX: 100, clientY: 5 })
+    const reported = onVerticalSlide.mock.calls.map((c) => c[0] as number)
+    expect(Math.max(...reported)).toBeGreaterThan(0)
+    // Back at fit the slide is 0 again, so the caption re-glues at rest.
+    fireEvent.wheel(viewport, { deltaY: 400, clientX: 100, clientY: 5 })
+    expect(onVerticalSlide.mock.calls.at(-1)![0]).toBe(0)
+  })
 })
 
 describe('ZoomPan minimap', () => {
