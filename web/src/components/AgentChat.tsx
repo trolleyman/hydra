@@ -22,6 +22,7 @@ import {
   MessageSquare,
   Plus,
   Search,
+  SlidersHorizontal,
   Sparkles,
   SquareTerminal,
   Wrench,
@@ -4747,12 +4748,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         )
       }
       case 'cmdout':
+        // A local command's stdout (in practice the "Set model to ..."
+        // confirmation): a short bookkeeping line, so render it as the same
+        // centered notification pill the notice/skill/meta chips use rather than
+        // a code panel.
         return (
-          <pre
-            className={`${PANEL_CLASS} max-w-[95%] whitespace-pre-wrap break-words px-2.5 py-1.5 font-mono text-[11px] leading-4 text-stone-500 dark:text-stone-400`}
-          >
-            {item.text}
-          </pre>
+          <div className="flex justify-center">
+            <div
+              className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none"
+              title={item.text}
+            >
+              <SlidersHorizontal className="w-3 h-3 shrink-0" />
+              <span className="truncate">{item.text}</span>
+            </div>
+          </div>
         )
       case 'notice': {
         // A "sub-agent finished" notice: when it links to a sub-agent we have,
