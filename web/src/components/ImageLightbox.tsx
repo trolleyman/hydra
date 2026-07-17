@@ -117,6 +117,20 @@ export function ImageLightbox({
   // navigate AND type into the terminal). Focusing the (tabIndex -1) backdrop makes
   // the dialog the key target for as long as it's up, like any focused modal.
   const rootRef = useRef<HTMLDivElement | null>(null)
+
+  // The caption sits below the ZoomPan frame. When the frame slides vertically to
+  // keep a zoom anchored to the cursor (grow mode), that slide is a CSS transform, so
+  // it doesn't move the frame's layout box - the caption would keep its old position
+  // and end up overlapping the image or stranded below it. ZoomPan reports the slide
+  // and we shift the caption by the same amount, imperatively (a ref, not state), so
+  // this tracks the per-wheel-tick zoom without re-rendering the lightbox each frame.
+  const captionRef = useRef<HTMLElement | null>(null)
+  const followFrameSlide = useCallback((fy: number, transition: string | undefined) => {
+    const el = captionRef.current
+    if (!el) return
+    el.style.transform = fy ? `translateY(${fy}px)` : ''
+    el.style.transition = transition ? `transform ${transition}` : ''
+  }, [])
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     rootRef.current?.focus()
@@ -292,6 +306,7 @@ export function ImageLightbox({
               className="rounded-lg shadow-2xl"
               maxWidth={hasSiblings ? '80vw' : '90vw'}
               maxHeight="85vh"
+              onVerticalSlide={followFrameSlide}
             >
               <img
                 src={current.url}
@@ -325,7 +340,7 @@ export function ImageLightbox({
             canDiff={!!current.diff.left && !!current.diff.right}
           />
         )}
-        <figcaption className="flex items-center gap-2 text-xs font-mono">
+        <figcaption ref={captionRef} className="flex items-center gap-2 text-xs font-mono">
           {[
             <span key="name" className="flex items-center gap-1.5 text-white/70">
               {current.filename}

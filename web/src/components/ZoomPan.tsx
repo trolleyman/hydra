@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize } from 'lucide-react'
 
@@ -10,6 +10,14 @@ const MAX_SCALE = 8
 // so it doesn't crowd the image it maps - and since the minimap shares the frame's
 // aspect ratio, that same cap bounds its height to a quarter of the frame's too.
 const MM_W = 140
+
+// How far along the grow one axis of the frame is: 0 at the content's fit size,
+// 1 once it has expanded to fill the box it may grow into. The frame's slide off
+// centre (fx/fy) is proportional to this - see relaxF.
+function growProgress(availLen: number, contentLen: number, vpLen: number) {
+  if (availLen <= contentLen) return 0
+  return Math.min(1, Math.max(0, (vpLen - contentLen) / (availLen - contentLen)))
+}
 
 // Measure an element's rendered (layout) size and keep it fresh across image load
 // + window resize. A CSS transform doesn't change layout size, so a transformed
@@ -53,7 +61,7 @@ function useMeasure(ref: React.RefObject<HTMLElement | null>) {
 // stay correct; at fit the frame still hugs the content exactly (shadow/rounding
 // unchanged). Without the props the frame stays content-sized (the diff comparator,
 // whose width is externally driven, opts out this way).
-export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight }: {
+export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight, onVerticalSlide }: {
   children: React.ReactNode
   // The image shown inside the minimap (a representative side for a diff pair).
   // Omitted → the minimap shows just the viewport rectangle on a neutral panel.
@@ -64,6 +72,15 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // set to enable grow mode; omit to keep the frame locked to the content's fit size.
   maxWidth?: string
   maxHeight?: string
+  // Reports the frame's vertical grow-slide (fy, px) whenever it changes, plus the CSS
+  // transition to match. In grow mode the frame slides via a CSS transform to keep the
+  // cursor point fixed - but a transform doesn't move the element's layout box, so any
+  // chrome laid out BELOW the frame (the lightbox caption) keeps its old position and
+  // detaches: the image slides down over it (zoom near the top) or up away from it
+  // (zoom near the bottom). The caller shifts that chrome by the same fy to stay glued.
+  // Horizontal slide isn't reported - a centred caption doesn't detach vertically from
+  // it. Must be a stable identity (useCallback) so it doesn't re-fire every render.
+  onVerticalSlide?: (fy: number, transition: string | undefined) => void
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -141,6 +158,35 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     return [Math.max(-sx, Math.min(sx, fx)), Math.max(-sy, Math.min(sy, fy))]
   }, [grow, content.w, content.h, avail.w, avail.h, vpAt])
 
+  // Shrink the frame's slide back toward centre as the frame shrinks, retracing the
+  // way it came. Used INSTEAD of the cursor-anchored slide whenever the frame is
+  // getting smaller (see zoomAt).
+  //
+  // Anchoring the cursor is the right feel on the way IN, but wrong on the way OUT.
+  // Throughout the grow phase the frame holds the whole image (content*s == vp), so
+  // the slide isn't revealing anything - it's shoving the entire picture sideways.
+  // Anchor a zoom-out to a cursor that's off to one side and the image walks that
+  // way instead of settling back to the middle; worse, it can slide out from under
+  // the cursor entirely, and since the wheel only reaches the frame it's actually
+  // over, the zoom-out strands there - parked to one side at partial zoom. That's the
+  // "zooms out to the left/right, not the middle" bug.
+  //
+  // For a fixed anchor the slide is proportional to the grow progress (fx = (px -
+  // w/2)*(1 - s), and progress ∝ s - 1), so rescaling fx by the progress ratio walks
+  // back down exactly the path a zoom-in drew - and lands at 0, dead centre, at fit.
+  const relaxF = useCallback((v: { fx: number; fy: number; scale: number }, ns: number): [number, number] => {
+    const before = vpAt(v.scale)
+    const after = vpAt(ns)
+    const ratio = (availLen: number, contentLen: number, b: number, a: number) => {
+      const p0 = growProgress(availLen, contentLen, b)
+      return p0 > 0 ? growProgress(availLen, contentLen, a) / p0 : 0
+    }
+    return [
+      v.fx * ratio(avail.w, content.w, before.w, after.w),
+      v.fy * ratio(avail.h, content.h, before.h, after.h),
+    ]
+  }, [avail.w, avail.h, content.w, content.h, vpAt])
+
   // Zoom by `factor` keeping the content point under (cx, cy) - coords relative to
   // the frame's top-left - fixed, so the image grows toward the cursor.
   const zoomAt = useCallback((cx: number, cy: number, factor: number) => {
@@ -159,14 +205,19 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
       // snaps to the cursor once it caps - the little "drifts one way then back"
       // wobble. Screen-x of a content point is C + fx + (px - w/2)*scale, so holding
       // it fixed across scale -> ns gives dfx = (px - w/2)*(scale - ns) (same for y).
-      const [nfx, nfy] = clampF(
-        v.fx + (px - content.w / 2) * (v.scale - ns),
-        v.fy + (py - content.h / 2) * (v.scale - ns),
-        ns,
-      )
+      //
+      // Zooming OUT retraces that slide back to centre instead of anchoring the
+      // cursor - see relaxF for why the two directions differ.
+      const [nfx, nfy] = ns < v.scale
+        ? clampF(...relaxF(v, ns), ns)
+        : clampF(
+            v.fx + (px - content.w / 2) * (v.scale - ns),
+            v.fy + (py - content.h / 2) * (v.scale - ns),
+            ns,
+          )
       return { scale: ns, tx: ntx, ty: nty, fx: nfx, fy: nfy }
     })
-  }, [clampT, clampF, content.w, content.h])
+  }, [clampT, clampF, relaxF, content.w, content.h])
 
   // Wheel must be a non-passive native listener so preventDefault can stop the
   // page/scroll from also reacting; React's synthetic onWheel can't guarantee that.
@@ -366,6 +417,16 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // transform and mirrored onto the minimap's viewport rect so they move together.
   const transitionMs = transition === 'glide' ? 200 : 0
   const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined
+
+  // Keep any below-the-frame chrome (the lightbox caption) glued to the frame's
+  // visual bottom by reporting the vertical slide - see onVerticalSlide. Layout
+  // effect so the caption shifts in the same paint as the frame, never a frame late.
+  useLayoutEffect(() => {
+    onVerticalSlide?.(fy, transitionCss)
+  }, [fy, transitionCss, onVerticalSlide])
+  // Reset the caller's shift when this frame unmounts (navigating to an image that
+  // renders a different frame, or closing), so a leftover slide can't strand it.
+  useEffect(() => () => onVerticalSlide?.(0, undefined), [onVerticalSlide])
 
   const mmW = content.w > 0 ? Math.min(MM_W, Math.round(content.w / 4)) : MM_W
   const mmH = content.w > 0 ? Math.round(mmW * content.h / content.w) : 0

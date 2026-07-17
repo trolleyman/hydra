@@ -19,9 +19,23 @@ class ResizeObserverStub {
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
 
 let frame = { w: 800, h: 600 }
+// Grow mode measures a second box: the hidden probe sized to the maxWidth/maxHeight
+// caps, which reports the ceiling the frame may grow into. It's the only aria-hidden
+// element ZoomPan renders, so the mock keys off that to give the two boxes different
+// sizes - otherwise every element would measure the same and there'd be no grow room
+// to exercise at all.
+let availBox = { w: 800, h: 600 }
+const sizeOf = (el: HTMLElement, box: 'w' | 'h') =>
+  (el.getAttribute('aria-hidden') !== null ? availBox : frame)[box]
 beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => frame.w })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => frame.h })
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) { return sizeOf(this, 'w') },
+  })
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get(this: HTMLElement) { return sizeOf(this, 'h') },
+  })
 })
 afterAll(() => {
   delete (HTMLElement.prototype as { clientWidth?: unknown }).clientWidth
@@ -157,6 +171,64 @@ describe('ZoomPan pinch zoom', () => {
     fireEvent.pointerMove(window, { pointerId: 2, pointerType: 'touch', clientX: 400, clientY: 100 })
     expect(content.style.transform).toContain('scale(1)')
     fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' })
+  })
+})
+
+describe('ZoomPan grow mode', () => {
+  // Grow mode lets the frame expand past the content's fit size into the empty
+  // lightbox space, up to the caps, sliding toward the cursor (fx/fy) as it goes. A
+  // narrow-but-tall content (300x600) with a wide ceiling (1400x900) is the shape
+  // grow mode exists for - and its wide grow range means the horizontal grow phase
+  // spans several wheel steps rather than capping in one, so a slide can build.
+  function renderGrow() {
+    frame = { w: 300, h: 600 }
+    availBox = { w: 1400, h: 900 }
+    const utils = render(
+      <ZoomPan minimapSrc="mini.png" maxWidth="90vw" maxHeight="85vh">
+        <img src="img.png" alt="content" />
+      </ZoomPan>,
+    )
+    // The hidden grow-ceiling probe renders first; the frame follows it.
+    const viewport = utils.container.children[1] as HTMLElement
+    return { ...utils, viewport }
+  }
+
+  const frameTx = (viewport: HTMLElement) =>
+    /translate\((-?[\d.]+)px/.exec(viewport.style.transform)?.[1] ?? '0'
+
+  it('comes to rest centred when zooming out toward a different point than zoom-in', () => {
+    const { viewport } = renderGrow()
+    // Zoom in over the frame's centre (150 = content.w / 2), so no slide builds up...
+    for (let i = 0; i < 8; i++) fireEvent.wheel(viewport, { deltaY: -400, clientX: 150, clientY: 300 })
+    // ...then zoom back out with the cursor off to the LEFT. The old code anchored
+    // this zoom-out to the cursor and dragged the (fully visible) frame leftward,
+    // stranding it off-centre - the "zooms out to the left, not the middle" bug. The
+    // fix retraces the slide instead, so the frame stays centred (fx == 0).
+    for (let i = 0; i < 12; i++) fireEvent.wheel(viewport, { deltaY: 400, clientX: 40, clientY: 300 })
+    expect(frameTx(viewport)).toBe('0')
+  })
+
+  it('reports the vertical grow-slide so a below-frame caption can follow it', () => {
+    // A small square with lots of vertical grow room, so the frame slides a real
+    // distance rather than capping in the first wheel step.
+    frame = { w: 200, h: 200 }
+    availBox = { w: 1400, h: 900 }
+    const onVerticalSlide = vi.fn()
+    const { container } = render(
+      <ZoomPan minimapSrc="mini.png" maxWidth="90vw" maxHeight="85vh" onVerticalSlide={onVerticalSlide}>
+        <img src="img.png" alt="content" />
+      </ZoomPan>,
+    )
+    const viewport = container.children[1] as HTMLElement
+    // Zoom in near the TOP (y=5): the frame slides DOWN (fy > 0) to keep the top point
+    // under the cursor. Its transform doesn't move its layout box, so a caption laid
+    // out below would overlap the image - the reported bug - unless it shifts by fy.
+    fireEvent.wheel(viewport, { deltaY: -400, clientX: 100, clientY: 5 })
+    const reported = onVerticalSlide.mock.calls.map((c) => c[0] as number)
+    expect(Math.max(...reported)).toBeGreaterThan(0)
+    // Back at fit the slide is 0 again, so the caption re-glues at rest.
+    fireEvent.wheel(viewport, { deltaY: 400, clientX: 100, clientY: 5 })
+    expect(onVerticalSlide.mock.calls.at(-1)![0]).toBe(0)
   })
 })
 
