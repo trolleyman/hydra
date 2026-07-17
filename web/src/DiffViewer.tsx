@@ -2825,18 +2825,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           header docks flush under the top bar - no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0).
           z-[25] keeps it above the diff rows and the sticky file-list panel
-          (z-20) while staying *below* the sidebar overlay backdrop (z-30 in
-          __root.tsx) - at equal z-index the later-DOM bar would paint over the
-          scrim and stay bright when the off-canvas sidebar is open on
-          tablet/phone. */}
-      {/* Styled like the app top bar (white/gray-800 bg + matching border) so the
-          inspector reads as its own panel with a real header - and the collapse
-          toggle (changesLeading) sits at its left edge, flanking the divider.
-          In the inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6
-          fully cancels the scroll container's px-3/px-6 (was half), and -mt-4
-          cancels its pt-4 so the bar sits flush at the top at rest too (not just
-          when stuck). The classic layout keeps its narrower bleed. */}
-      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-6' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
+          (z-20) and below the mobile sidebar panel (z-40 in __root.tsx). */}
+      {/* Styled like the global top bar (white/gray-800 bg + matching border,
+          py-2.5 lands a single-line bar at the same h-12) so the inspector reads
+          as its own panel with a real header - and the collapse toggle
+          (changesLeading) sits at its left edge, flanking the divider. In the
+          inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6 fully
+          cancels the scroll container's px-3/px-6, the inner px matches the
+          working pane header's px-3/px-4, and -mt-4 cancels the container's pt-4
+          so the bar sits flush at the top at rest too (not just when stuck). The
+          archived layout keeps its narrower bleed. */}
+      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2.5 border-b border-gray-200 dark:border-gray-700 ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-4' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
         {/* Wide split: the collapse toggle flanks the divider at the bar's left
             edge, vertically centered across however many lines the content wraps
             to. Narrow screen-stack (leadingInline) instead flows the back button
@@ -2848,7 +2847,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
           {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Changes</h2>
           {statsEl}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow

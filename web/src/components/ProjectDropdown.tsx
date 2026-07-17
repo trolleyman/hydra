@@ -193,7 +193,9 @@ export const ProjectDropdown = memo(function ProjectDropdown({
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
         <span className="relative shrink-0 inline-flex">
-          <ProjectIcon icon={selected?.icon} projectId={selected?.id ?? ''} size={14} />
+          {/* Hydra-icon-sized (24px) project icon: it leads the global top bar,
+              standing in for the removed app logo. */}
+          <ProjectIcon icon={selected?.icon} projectId={selected?.id ?? ''} size={24} />
           {otherProjectsNeedsInput > 0 ? (
             <span
               aria-label="an agent in another project needs your input"
@@ -206,7 +208,8 @@ export const ProjectDropdown = memo(function ProjectDropdown({
             />
           ) : null}
         </span>
-        <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
+        {/* On small screens the selector is just the icon + chevron. */}
+        <span className="truncate max-w-[160px] max-md:hidden">{selected?.name ?? 'Select project'}</span>
         <ServiceHealthWarning projectId={selectedId} />
         <ChevronDown className="w-3 h-3" />
       </button>

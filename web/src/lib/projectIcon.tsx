@@ -5,7 +5,9 @@
 //     used directly, any other path is served by the backend /project-icon route);
 //   - a known lucide-react icon name (case-insensitive) renders that icon;
 //   - anything else is rendered as text - i.e. an emoji, or a short label.
-// Empty falls back to the folder icon.
+// Empty falls back to the default icon: a rounded box colored by a hash of the
+// project id with the id's first character inside (or the bare folder glyph
+// when there is no project id, e.g. the "Select project" state).
 
 import {
   Folder, FolderGit2, FolderOpen, Rocket, Database, Server, Cloud, Cpu, Terminal,
@@ -60,6 +62,33 @@ const IMAGE_ICON_RE = /\.(png|svg|ico|jpe?g|gif|webp|avif|bmp)$/i
 
 const DIRECT_URI_RE = /^(https?:|data:)/i
 
+// Deterministic hue (0-359) hashed from the project id, for the default icon's
+// background. Plain 31-multiplier string hash.
+function hashHue(id: string): number {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
+  return ((h % 360) + 360) % 360
+}
+
+// Default icon when the project has no custom `icon`: a rounded box in a color
+// hashed from the project id, with the id's first character in the middle.
+function DefaultProjectIcon({ projectId, size, className }: { projectId: string; size: number; className: string }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-flex items-center justify-center rounded-[25%] font-semibold text-white select-none leading-none ${className}`}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(8, Math.round(size * 0.6)),
+        backgroundColor: `hsl(${hashHue(projectId)} 55% 45%)`,
+      }}
+    >
+      {projectId.charAt(0)}
+    </span>
+  )
+}
+
 export function ProjectIcon({
   icon,
   projectId,
@@ -75,7 +104,12 @@ export function ProjectIcon({
 }) {
   const v = (icon ?? '').trim()
 
-  if (!v) return <Folder size={size} className={className} />
+  if (!v) {
+    // No project at all (e.g. the "Select project" trigger) keeps the folder
+    // glyph; a real project gets its hashed-color letter box.
+    if (!projectId) return <Folder size={size} className={className} />
+    return <DefaultProjectIcon projectId={projectId} size={size} className={className} />
+  }
 
   if (IMAGE_ICON_RE.test(v)) {
     const src = DIRECT_URI_RE.test(v) ? v : `/project-icon/projects/${encodeURIComponent(projectId)}`

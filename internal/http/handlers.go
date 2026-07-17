@@ -298,6 +298,7 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 		resp[i] = api.ProjectInfo{
 			Id:              p.ID,
 			Path:            p.Path,
+			DisplayPath:     displayPathPtr(p.Path),
 			Name:            p.Name,
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
@@ -314,6 +315,34 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 		}
 	}
 	return resp, nil
+}
+
+// displayPathPtr returns the project path for display, with the server's home
+// directory abbreviated to "~". Computed server-side because only the server
+// knows its HOME (the web client must not guess home-directory patterns).
+func displayPathPtr(path string) *string {
+	dp := path
+	if home, err := os.UserHomeDir(); err == nil {
+		dp = abbreviateHome(path, home)
+	}
+	return &dp
+}
+
+// abbreviateHome replaces a leading `home` prefix of path with "~", matching
+// only on a whole path component (so /home/user2 is not abbreviated for
+// HOME=/home/user). Pure - split out of displayPathPtr for testing.
+func abbreviateHome(path, home string) string {
+	home = strings.TrimSuffix(home, "/")
+	if home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
 }
 
 // projectIconValue returns the trimmed custom icon configured in a project's
@@ -360,7 +389,7 @@ func (s *Server) SetProjectIcon(_ context.Context, request api.SetProjectIconReq
 	if err := config.Save(p.Path, *cfg); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, Name: p.Name}
+	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, DisplayPath: displayPathPtr(p.Path), Name: p.Name}
 	if icon != "" {
 		resp.Icon = &icon
 	}
@@ -437,9 +466,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		s.Services.StartProject(p.Path)
 	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
-		Id:   p.ID,
-		Path: p.Path,
-		Name: p.Name,
+		Id:          p.ID,
+		Path:        p.Path,
+		DisplayPath: displayPathPtr(p.Path),
+		Name:        p.Name,
 	}), nil
 }
 

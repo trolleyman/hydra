@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { PanelLeftOpen, MoreHorizontal, ChevronDown } from 'lucide-react'
-import { useSidebarStore } from '../lib/sidebar'
+import { MoreHorizontal, ChevronDown } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
-import { IconButton } from './IconButton'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -495,14 +493,14 @@ function AdaptiveActions({
   )
 }
 
-// The agent page's header bar: the agent name (click / F2 to rename) with an
-// adaptive row of action buttons on the right and a status dot. The actions
-// collapse responsively (labels → icons → overflow menu) so they never spill out
-// of the bar. While the sidebar is collapsed the bar also hosts the show-sidebar
-// toggle.
-export function AgentTopBar({
-  title,
+// The agent page's share of the global top bar (rendered into __root's slot via
+// TopBarPortal): the agent name (click / F2 to rename) with an adaptive row of
+// action buttons on the right and a status dot. The actions collapse
+// responsively (labels → icons → overflow menu) so they never spill out of the
+// bar.
+export function AgentTopBarContent({
   statusDot,
+  title,
   actions,
   rename,
   rightSlot,
@@ -511,13 +509,11 @@ export function AgentTopBar({
   statusDot?: ReactNode
   actions: AgentTopBarAction[]
   rename?: AgentTopBarRename
-  // Far-right control, mirroring the far-left show-sidebar button - the diff
-  // ("inspector") sidebar hide/show toggle. Rendered outside the measured
-  // title/actions row so AdaptiveActions' width budget stays correct.
+  // Far-right control - the diff ("inspector") sidebar hide/show toggle.
+  // Rendered outside the measured title/actions row so AdaptiveActions' width
+  // budget stays correct.
   rightSlot?: ReactNode
 }) {
-  const collapsed = useSidebarStore((s) => s.collapsed)
-  const toggle = useSidebarStore((s) => s.toggle)
   // Only surface keyboard hints on devices that actually have a keyboard.
   const showShortcut = useFinePointer()
 
@@ -538,33 +534,10 @@ export function AgentTopBar({
   }, [editing])
 
   return (
-    // A real header above the scrolling content (not sticky inside it), so it
-    // aligns with the sidebar header and never collides with the diff's own
-    // sticky "Changes" header.
-    <div className="shrink-0 h-12 px-3 sm:px-4 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-      {/* Show-sidebar button (only while the app sidebar is collapsed): its width
-          animates open/shut via the grid-cols 0fr<->1fr trick + a fade, so it
-          eases in rather than popping into place. */}
-      <div
-        className={`shrink-0 grid transition-[grid-template-columns,opacity] duration-200 ${collapsed ? 'opacity-100 -ml-1' : 'opacity-0'}`}
-        style={{ gridTemplateColumns: collapsed ? '1fr' : '0fr' }}
-      >
-        <div className="overflow-hidden">
-          <IconButton
-            variant="panel"
-            aria-label="Show sidebar"
-            title="Show sidebar (Ctrl+.)"
-            onClick={toggle}
-            tabIndex={collapsed ? 0 : -1}
-          >
-            <PanelLeftOpen className="w-5 h-5" />
-          </IconButton>
-        </div>
-      </div>
-
-      {/* Status cluster (dot + status pill + test verdict) sits just before the
-          agent's name - kept OUTSIDE the measured title/actions row so its width
-          doesn't confuse AdaptiveActions' collapse budget. */}
+    <>
+      {/* Status cluster (the dot) sits just before the agent's name - kept
+          OUTSIDE the measured title/actions row so its width doesn't confuse
+          AdaptiveActions' collapse budget. */}
       {statusDot && <div className="shrink-0 flex items-center gap-2">{statusDot}</div>}
 
       {/* Title + adaptive actions share this row; the title flexes/truncates so
@@ -621,9 +594,8 @@ export function AgentTopBar({
         )}
       </div>
 
-      {/* Far-right slot: the diff-sidebar toggle, mirroring the show-sidebar
-          button on the far left. */}
+      {/* Far-right slot: the diff-sidebar toggle. */}
       {rightSlot && <div className="shrink-0">{rightSlot}</div>}
-    </div>
+    </>
   )
 }

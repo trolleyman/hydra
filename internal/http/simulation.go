@@ -134,10 +134,13 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	// including the needs_input count above).
 	simTotal, simRunning, simWaiting, simFinished := 5, 2, 1, 1
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
+	simDisplayPath := "~/code/simulated/project"
+	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
 			Path:            "/simulated/project",
+			DisplayPath:     &simDisplayPath,
 			Name:            "simulated-project",
 			Icon:            &simIcon,
 			UnreadCount:     &simUnread,
@@ -150,6 +153,7 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 		{
 			Id:              "mobile-app",
 			Path:            "/simulated/mobile-app",
+			DisplayPath:     &mobileDisplayPath,
 			Name:            "mobile-app",
 			Icon:            &mobileIcon,
 			UnreadCount:     &otherUnread,

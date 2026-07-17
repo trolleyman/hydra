@@ -2,75 +2,76 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
-// Shared collapse state for the app sidebar. It lives in a store (rather than
-// local state in __root) so other surfaces - e.g. the agent page's sticky top
-// bar, which hosts the "show sidebar" toggle when collapsed - can read and flip
-// it without prop-drilling through the router.
+// Shared visibility state for the app sidebar. It lives in a store (rather than
+// local state in __root) so other surfaces - e.g. the global top bar, which
+// hosts the "show sidebar" toggle - can read and flip it without prop-drilling
+// through the router.
 
-// Below this width the sidebar is an off-canvas overlay; at/above it it's the
+// Below this width the sidebar is a full-screen panel; at/above it it's the
 // usual in-flow column. Matches Tailwind's `md` breakpoint (see __root.tsx) -
 // unified with the agent-page split and RepositoryView so every surface flips
 // to its mobile layout at the same width.
-export const SIDEBAR_OVERLAY_QUERY = '(min-width: 768px)'
+export const SIDEBAR_DESKTOP_QUERY = '(min-width: 768px)'
 
-// Default when the user has never made an explicit choice: collapsed on small
-// screens (an open overlay over the content is a poor default), expanded on wide
-// ones.
-function screenDefaultCollapsed(): boolean {
-  return typeof window !== 'undefined' && !window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches
+function isDesktop(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(SIDEBAR_DESKTOP_QUERY).matches
 }
 
-// The explicit collapse preference, or null when the user has never set one (so
-// the screen-width default applies). Stored raw as '1'/'0' under sidebarCollapsed.
-function loadCollapsePreference(): boolean | null {
-  const saved = readLocal(StorageKeys.sidebarCollapsed)
-  if (saved === '1') return true
-  if (saved === '0') return false
-  return null
+// The persisted desktop collapse preference. Stored raw as '1'/'0' under the
+// pre-existing sidebarCollapsed key ('1' = collapsed); absent = expanded, the
+// desktop default. (The old store persisted a nullable tri-state under the same
+// key, so old values migrate cleanly: only an explicit '1' starts collapsed.)
+function loadDesktopCollapsed(): boolean {
+  return readLocal(StorageKeys.sidebarCollapsed) === '1'
 }
 
+// The desktop and mobile sides are deliberately independent flags: crossing the
+// breakpoint (resizing a window onto a phone-sized viewport) must never pop the
+// sidebar open, so the mobile panel has its own transient open flag that starts
+// closed and is only ever set by an explicit toggle - never by rehydration or
+// the desktop preference.
 interface SidebarState {
-  // Live runtime state - what the UI actually shows. NOT persisted directly.
-  collapsed: boolean
-  // The explicit user choice that IS persisted; null = follow the screen default.
-  preference: boolean | null
-  // persist=true records the choice as the explicit preference (user intent);
-  // transient changes (e.g. the small-screen auto-close on navigation) pass false
-  // so they move `collapsed` without touching `preference` - and so can't clobber
-  // the wide-screen preference.
-  setCollapsed: (collapsed: boolean, persist?: boolean) => void
+  // Persisted desktop preference: the in-flow column is collapsed.
+  desktopCollapsed: boolean
+  // Transient mobile state: the full-screen panel is open. Never persisted.
+  mobileOpen: boolean
+  setDesktopCollapsed: (collapsed: boolean) => void
+  openMobile: () => void
+  closeMobile: () => void
+  // Flip the flag for the breakpoint the window is currently on.
   toggle: () => void
 }
 
-// persist owns the write-on-set (it persists `preference` whenever it changes)
-// and the read-on-init (its storage adapter reads the raw preference, and merge
-// derives the initial `collapsed` from it). singleFieldStorage keeps the stored
-// value as the bare '1'/'0' under the existing key. Only `preference` is
-// persisted; `collapsed` is transient runtime state.
+// persist owns the write-on-set (it persists `desktopCollapsed` whenever it
+// changes) and the read-on-init. singleFieldStorage keeps the stored value as
+// the bare '1'/'0' under the existing key; `mobileOpen` is never persisted.
 export const useSidebarStore = create<SidebarState>()(
   persist(
     (set, get) => ({
-      collapsed: screenDefaultCollapsed(),
-      preference: null,
-      setCollapsed: (collapsed, persist = false) =>
-        set(persist ? { collapsed, preference: collapsed } : { collapsed }),
-      toggle: () => {
-        const next = !get().collapsed
-        set({ collapsed: next, preference: next })
-      },
+      desktopCollapsed: loadDesktopCollapsed(),
+      mobileOpen: false,
+      setDesktopCollapsed: (desktopCollapsed) => set({ desktopCollapsed }),
+      openMobile: () => set({ mobileOpen: true }),
+      closeMobile: () => set({ mobileOpen: false }),
+      toggle: () =>
+        isDesktop()
+          ? set({ desktopCollapsed: !get().desktopCollapsed })
+          : set({ mobileOpen: !get().mobileOpen }),
     }),
     {
       name: StorageKeys.sidebarCollapsed,
-      storage: singleFieldStorage('preference', loadCollapsePreference, (p) =>
-        writeLocal(StorageKeys.sidebarCollapsed, p == null ? null : p ? '1' : '0'),
+      storage: singleFieldStorage('desktopCollapsed', loadDesktopCollapsed, (c) =>
+        writeLocal(StorageKeys.sidebarCollapsed, c ? '1' : null),
       ),
-      partialize: (s) => ({ preference: s.preference }),
-      // Derive the live collapsed flag from the persisted preference, falling back
-      // to the screen-width default when the user has never made an explicit choice.
-      merge: (persisted, current) => {
-        const pref = (persisted as { preference?: boolean | null } | undefined)?.preference ?? null
-        return { ...current, preference: pref, collapsed: pref ?? screenDefaultCollapsed() }
-      },
+      partialize: (s) => ({ desktopCollapsed: s.desktopCollapsed }),
+      // Rehydration restores only the desktop preference; the mobile panel
+      // always boots closed.
+      merge: (persisted, current) => ({
+        ...current,
+        desktopCollapsed:
+          (persisted as { desktopCollapsed?: boolean } | undefined)?.desktopCollapsed ?? false,
+        mobileOpen: false,
+      }),
     },
   ),
 )

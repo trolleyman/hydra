@@ -847,6 +847,9 @@ type ProjectInfo struct {
 	// AgentCount Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
 	AgentCount *int `json:"agent_count,omitempty"`
 
+	// DisplayPath The project path for display, with the server's home directory abbreviated to "~" (e.g. "~/code/hydra"). Computed server-side because only the server knows its HOME. Falls back to `path` verbatim when the path is not under HOME.
+	DisplayPath *string `json:"display_path,omitempty"`
+
 	// FinishedCount Number of this project's active agents currently in the `finished` status (done but not yet archived).
 	FinishedCount *int `json:"finished_count,omitempty"`
 
