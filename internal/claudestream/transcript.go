@@ -1,6 +1,7 @@
 package claudestream
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -411,8 +412,13 @@ func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, don
 	var used int64
 	i := anchor - 1
 	for ; i >= 0; i-- {
+		// Task-notification bookkeeping records (queue-operation/attachment) ride
+		// along whatever their type: they are the only durable trace of a
+		// background command/agent finishing, so an older page must carry them for
+		// the client to render the completion chip in place.
+		isNotif := bytes.Contains(all[i], taskNotificationMarker)
 		ev, ok := ParseEvent(all[i])
-		if !ok || ev.IsSidechain || (ev.Type != "user" && ev.Type != "assistant") {
+		if !ok || ev.IsSidechain || (!isNotif && ev.Type != "user" && ev.Type != "assistant") {
 			continue
 		}
 		cp := make([]byte, len(all[i]))
@@ -442,6 +448,53 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 	return errtrace.Wrap3(tailTranscript(path, maxBytes, false))
 }
 
+// TailTranscriptAndPrelude is TailTranscript plus the transcript's PRE-WINDOW
+// <task-notification> records (oldest-first): every bookkeeping record that
+// fell before the tail window. A byte-dense conversation (image reads) can push
+// a background command/agent's completion record out of the window in seconds -
+// without these the client can't tell a finished background task from a running
+// one after reconnect (its cards read "working" forever). The records are tiny
+// and rare, so relaying all of them costs nothing. Best-effort: a prelude scan
+// failure returns the windowed lines alone.
+func TailTranscriptAndPrelude(path string, maxBytes int64) (lines, prelude [][]byte, uuids map[string]struct{}, err error) {
+	lines, uuids, windowStart, err := tailTranscriptWindowed(path, maxBytes, false)
+	if err != nil || windowStart <= 0 {
+		return lines, nil, uuids, errtrace.Wrap(err)
+	}
+	prelude, scanErr := scanNotificationsBefore(path, windowStart)
+	if scanErr != nil {
+		return lines, nil, uuids, nil
+	}
+	return lines, prelude, uuids, nil
+}
+
+// scanNotificationsBefore streams the transcript's first `end` bytes (a whole
+// number of lines - the tail window's start offset) and returns every parseable
+// line carrying a <task-notification>. Streams line-by-line so a multi-MB
+// prefix costs no more memory than its largest single line.
+func scanNotificationsBefore(path string, end int64) ([][]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(io.LimitReader(f, end), 64*1024)
+	var out [][]byte
+	for {
+		line, readErr := r.ReadBytes('\n')
+		if len(line) > 0 && bytes.Contains(line, taskNotificationMarker) {
+			trimmed := bytes.TrimRight(line, "\n")
+			if _, ok := ParseEvent(trimmed); ok {
+				out = append(out, trimmed)
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return out, nil
+}
+
 // tailTranscript is the shared core of TailTranscript. keepSidechain relays
 // sub-agent sidechain user/assistant lines instead of dropping them - the
 // main-transcript backfill drops them (main conversation only), but a sub-agent
@@ -452,39 +505,50 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 // huge pasted tool result), it retries unbounded rather than backfilling an
 // empty conversation.
 func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, err error) {
-	lines, uuids, truncated, err := tailTranscriptOnce(path, maxBytes, keepSidechain)
-	if err == nil && truncated && len(lines) == 0 {
-		lines, uuids, _, err = tailTranscriptOnce(path, 0, keepSidechain)
-	}
+	lines, uuids, _, err = tailTranscriptWindowed(path, maxBytes, keepSidechain)
 	return lines, uuids, errtrace.Wrap(err)
 }
 
-func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, truncated bool, err error) {
+// tailTranscriptWindowed is tailTranscript that also reports where the returned
+// window started (the byte offset of its first complete line; 0 when the whole
+// file was read), so a caller can scan what came before it.
+func tailTranscriptWindowed(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, windowStart int64, err error) {
+	lines, uuids, windowStart, truncated, err := tailTranscriptOnce(path, maxBytes, keepSidechain)
+	if err == nil && truncated && len(lines) == 0 {
+		lines, uuids, windowStart, _, err = tailTranscriptOnce(path, 0, keepSidechain)
+	}
+	return lines, uuids, windowStart, errtrace.Wrap(err)
+}
+
+func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, windowStart int64, truncated bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, false, errtrace.Wrap(err)
+		return nil, nil, 0, false, errtrace.Wrap(err)
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, false, errtrace.Wrap(err)
+		return nil, nil, 0, false, errtrace.Wrap(err)
 	}
 	if maxBytes > 0 && info.Size() > maxBytes {
-		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
-			return nil, nil, false, errtrace.Wrap(err)
+		windowStart = info.Size() - maxBytes
+		if _, err := f.Seek(windowStart, io.SeekStart); err != nil {
+			return nil, nil, 0, false, errtrace.Wrap(err)
 		}
 		truncated = true
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return nil, nil, false, errtrace.Wrap(err)
+		return nil, nil, 0, false, errtrace.Wrap(err)
 	}
 	if truncated {
 		// The seek landed mid-line; drop the fragment before the first newline.
 		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			windowStart += int64(idx + 1)
 			data = data[idx+1:]
 		} else {
+			windowStart += int64(len(data))
 			data = nil
 		}
 	}
@@ -512,5 +576,5 @@ func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines 
 		copy(cp, line)
 		lines = append(lines, cp)
 	}
-	return lines, uuids, truncated, nil
+	return lines, uuids, windowStart, truncated, nil
 }

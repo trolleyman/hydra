@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -33,6 +33,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
+import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
@@ -90,8 +91,11 @@ type ChatItem =
   // A harness-injected system notice (e.g. a <task-notification> when a
   // background task finishes), rendered as a compact muted line, not raw XML.
   // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
-  // the pill can offer a View button.
-  | { kind: 'notice'; id: number; text: string; subagentKey?: string }
+  // the pill can offer a View button. taskId/toolUseId (from the notification's
+  // own tags) let the pill resolve its background sub-agent at render time, and
+  // outputFile (the <output-file> tag) makes a background command's pill
+  // expandable to show the command's output.
+  | { kind: 'notice'; id: number; text: string; subagentKey?: string; taskId?: string; toolUseId?: string; outputFile?: string }
   // The CLI-injected "session continued" preamble after a context compaction
   // (auto/out-of-context or /compact): a bookkeeping summary, not a real user
   // turn, so it collapses behind an expander (item 39). outOfContext labels the
@@ -472,25 +476,31 @@ function trimWorktreePaths(text: string, worktree: string | null): string {
   return text.split(prefix).join('').split(worktree).join('.')
 }
 
+// Input fields that hold PROSE (a sentence the agent wrote), rendered in the
+// sans font on the card header rather than monospace - a ScheduleWakeup prompt
+// or an Agent brief isn't code.
+const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'description', 'prompt', 'reason'])
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
-// card, favouring the fields agent tools actually carry.
-function summarizeToolInput(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input !== 'object') return String(input)
+// card, favouring the fields agent tools actually carry, and reports whether
+// the picked field is prose (see PROSE_INPUT_KEYS).
+function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
+  if (input == null) return { text: '', prose: false }
+  if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
   if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
     const status = typeof obj.status === 'string' ? obj.status : ''
     const subj = typeof obj.subject === 'string' ? obj.subject : ''
-    return `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`
+    return { text: `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`, prose: true }
   }
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt']) {
-    if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt', 'reason']) {
+    if (typeof obj[key] === 'string' && obj[key]) return { text: obj[key] as string, prose: PROSE_INPUT_KEYS.has(key) }
   }
   try {
-    return JSON.stringify(input)
+    return { text: JSON.stringify(input), prose: false }
   } catch {
-    return ''
+    return { text: '', prose: false }
   }
 }
 
@@ -1004,27 +1014,37 @@ function OutputPanel({ text, lang, isError }: { text: string; lang: string; isEr
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
 
-// NumberedCodePanel renders code with a line-number gutter and syntax
-// highlighting - the shape a Read shows - used for a Write tool's file content.
-// Lines don't wrap (so the gutter stays aligned); long lines scroll sideways and
-// the gutter stays pinned at the left edge.
-function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
-  const body = code.replace(/\n$/, '')
-  const html = useMemo(() => highlightHtml(body, lang), [body, lang])
-  const gutter = useMemo(() => {
-    const n = body.length === 0 ? 1 : body.split('\n').length
-    return Array.from({ length: n }, (_, i) => i + 1).join('\n')
-  }, [body])
+// GutterCodePanel renders code lines beside a line-number gutter, one grid row
+// per source line so a long line WRAPS under its own number instead of scrolling
+// the whole block sideways. Highlighting runs over the whole body (multi-line
+// constructs colourise correctly) and is split back into per-line HTML
+// (highlightLines, which falls back to escaped plain lines for an unknown lang).
+function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[]; lang: string }) {
+  const lines = useMemo(() => highlightLines(code.join('\n'), lang || 'plaintext'), [code, lang])
   return (
-    <div className={`${PANEL_CLASS} max-h-64 overflow-auto`}>
-      <div className="flex min-w-max text-[11px] leading-4 font-mono">
-        <pre className="sticky left-0 shrink-0 select-none text-right px-2 py-1.5 text-stone-400 dark:text-stone-600 bg-[#fdfcf9] dark:bg-[#1d1c1a] border-r border-stone-200 dark:border-white/[0.06]">{gutter}</pre>
-        {html != null
-          ? <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: html }} />
-          : <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200">{body}</pre>}
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+      <div className="grid grid-cols-[auto_1fr] text-[11px] leading-4 font-mono">
+        {nums.map((n, i) => (
+          <Fragment key={i}>
+            {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
+            <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{n}</span>
+            <span className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: lines[i] ?? '' }} />
+          </Fragment>
+        ))}
       </div>
     </div>
   )
+}
+
+// NumberedCodePanel renders code with a 1..N line-number gutter and syntax
+// highlighting - the shape a Read shows - used for a Write tool's file content.
+function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
+  const body = code.replace(/\n$/, '')
+  const parts = useMemo(() => {
+    const lines = body.split('\n')
+    return { nums: lines.map((_, i) => String(i + 1)), code: lines }
+  }, [body])
+  return <GutterCodePanel nums={parts.nums} code={parts.code} lang={lang} />
 }
 
 // ReadOutputPanel renders a Read's `cat -n` output (each line prefixed with its
@@ -1046,19 +1066,8 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
     }
     return { nums, code, ok: lines.length > 0 && matched > lines.length / 2 }
   }, [text])
-  const body = parsed.code.join('\n')
-  const html = useMemo(() => highlightHtml(body, lang), [body, lang])
   if (!parsed.ok) return <OutputPanel text={text} lang={lang} />
-  return (
-    <div className={`${PANEL_CLASS} max-h-64 overflow-auto`}>
-      <div className="flex min-w-max text-[11px] leading-4 font-mono">
-        <pre className="sticky left-0 shrink-0 select-none text-right px-2 py-1.5 text-stone-400 dark:text-stone-600 bg-[#fdfcf9] dark:bg-[#1d1c1a] border-r border-stone-200 dark:border-white/[0.06]">{parsed.nums.join('\n')}</pre>
-        {html != null
-          ? <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: html }} />
-          : <pre className="flex-1 whitespace-pre px-2.5 py-1.5 text-stone-800 dark:text-stone-200">{body}</pre>}
-      </div>
-    </div>
-  )
+  return <GutterCodePanel nums={parsed.nums} code={parsed.code} lang={lang} />
 }
 
 // EditDiffPanel shows an Edit's old_string and new_string as two syntax-
@@ -1250,15 +1259,17 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
+  const summarized = summarizeToolInput(item.input)
   const summary = mem
     ? `memory ${mem}`
-    : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
+    : collapseHome(trimWorktreePaths(isBash ? description || command : summarized.text, worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
-  // description / task subject are prose (sans) already.
+  // description / task subject / prose input field (a ScheduleWakeup prompt)
+  // are prose (sans) already.
   const isPathSummary =
     !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryMono = !mem && !isPathSummary && !isTaskTool && !(isBash && description)
+  const summaryMono = !mem && !isPathSummary && !isTaskTool && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -1658,6 +1669,70 @@ interface SubReport {
   text: string
   isError: boolean
   itemId?: number
+}
+
+// NoticePill renders a task-notification chip. A notice that resolves to a
+// sub-agent is CLICKABLE (opens that agent's chat); a background command's
+// notice (it carried an <output-file>) is EXPANDABLE, fetching and showing the
+// command's output beneath the pill.
+function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
+  text: string
+  onOpenChat?: () => void
+  outputFile?: string
+  requestTaskOutput?: (file: string) => Promise<{ content?: string; error?: string }>
+}) {
+  const [open, setOpen] = useState(false)
+  const [result, setResult] = useState<{ content?: string; error?: string } | null>(null)
+  const expandable = !onOpenChat && !!outputFile && !!requestTaskOutput
+  const clickable = !!onOpenChat || expandable
+  const onClick = () => {
+    if (onOpenChat) {
+      onOpenChat()
+      return
+    }
+    if (!expandable) return
+    const next = !open
+    setOpen(next)
+    if (next && result == null) requestTaskOutput!(outputFile!).then(setResult)
+  }
+  const pill = (
+    <div
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none ${
+        clickable ? 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors' : ''
+      }`}
+      title={text}
+    >
+      {expandable && (
+        <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+      )}
+      <span className="truncate">{text}</span>
+      {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
+    </div>
+  )
+  if (!expandable) return <div className="flex justify-center">{pill}</div>
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex justify-center">{pill}</div>
+      <Expandable open={open}>
+        <div className="w-full">
+          {result == null ? (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              Loading output...
+            </div>
+          ) : result.error ? (
+            <div className="text-center py-1 text-[11px] text-stone-400 dark:text-stone-500">{result.error}</div>
+          ) : (
+            <OutputPanel text={result.content ?? ''} lang="" />
+          )}
+        </div>
+      </Expandable>
+    </div>
+  )
 }
 
 // isLaunchBoilerplate spots the async/background-agent launch acknowledgement
@@ -2609,6 +2684,22 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       }
     }
   }
+  // Distinct task-notifications already rendered in this batch: the CLI records
+  // each one several times (queue-operation, attachment, sometimes a consumed
+  // user turn) and only ONE chip should show (mirrors the live reducer's
+  // seenNotif).
+  const seenNotifs = new Set<string>()
+  const pushNotification = (text: string) => {
+    const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+    const toolUseId = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+    const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+    const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+    const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
+    const dedupKey = `${taskId ?? ''}\0${toolUseId ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
+    if (seenNotifs.has(dedupKey)) return
+    seenNotifs.add(dedupKey)
+    push({ kind: 'notice', text: decodeEntities(summary || 'Background task update'), taskId, toolUseId, outputFile })
+  }
   const routeUser = (rawText: string, isMeta?: boolean) => {
     // Machine-injected context (a skill body etc.) is not a user turn - route it
     // to a skill/meta card off the isMeta flag, before any content-sniffing.
@@ -2639,8 +2730,7 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       return
     }
     if (isTaskNotification(text)) {
-      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
-      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      pushNotification(text)
       return
     }
     const ctxNote = detectContextNote(text)
@@ -2680,6 +2770,17 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
     }
   }
   for (const ev of events) {
+    // A <task-notification> bookkeeping record (queue-operation XML on
+    // `content`, attachment XML on `attachment.prompt`): render its chip in
+    // place, like the live relay does.
+    const notifText =
+      (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
+      (typeof ev.attachment?.prompt === 'string' && isTaskNotification(ev.attachment.prompt) && ev.attachment.prompt) ||
+      ''
+    if (notifText) {
+      pushNotification(notifText)
+      continue
+    }
     if (ev.type === 'user') {
       const content = ev.message?.content
       if (typeof content === 'string') {
@@ -2988,6 +3089,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  // Pending task_output requests (the expandable background-command chip
+  // fetching its output file), resolved by the matching task_output frame.
+  const taskOutputWaitersRef = useRef(new Map<string, (res: { content?: string; error?: string }) => void>())
   const scrollRef = useRef<HTMLDivElement>(null)
   // The inner content wrapper inside the scroll container; observed so we can
   // follow the bottom smoothly while a card expands (item 55) - the height
@@ -3000,6 +3104,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // jump-to-bottom button.
   const pinnedRef = useRef(true)
   const [pinned, setPinned] = useState(true)
+  // The previous scroll event's offset, for telling an UPWARD user scroll apart
+  // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
+  const prevScrollTopRef = useRef(0)
   // Latest scroll offset + pin, mirrored on every scroll so deactivation (the
   // pane going display:none loses its scroll geometry) and unmount can persist
   // it (item 20).
@@ -3387,11 +3494,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // settles it) - marking the matching still-"working" card done by task-id /
     // tool-use-id. Reached both from a user turn that consumed the notification
     // and from the live main-transcript relay, so it dedups its own copies.
-    const handleTaskNotification = (text: string, ts?: number | null) => {
+    const handleTaskNotification = (text: string, ts?: number | null, quiet?: boolean) => {
       const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
       const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
       const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
       const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
       const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
       if (seenNotif.has(dedupKey)) return
       seenNotif.add(dedupKey)
@@ -3410,9 +3518,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           }
         }
       }
+      // A PRE-WINDOW notification relayed for bookkeeping only
+      // (notification_backfill): apply the completion, render nothing - the
+      // chip belongs to a part of the conversation that isn't loaded.
+      if (quiet) return
       // A genuine turn-starting continuation anchors the "working" clock (item 48).
       if (ts != null) turnStartClockRef.current = ts
-      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+      push({
+        kind: 'notice',
+        text: decodeEntities(summary || 'Background task update'),
+        taskId,
+        toolUseId: noticeToolUse,
+        outputFile,
+      })
     }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
@@ -4083,6 +4201,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         description?: string
         events?: ClaudeEvent[]
         done?: boolean
+        file?: string
+        content?: string
+        error?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -4099,12 +4220,37 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         case 'claude_event':
           if (msg.event) handleClaudeEvent(msg.event)
           return
+        case 'notification_backfill': {
+          // A <task-notification> record from BEFORE the backfill window,
+          // relayed so a long-finished background task/agent still settles on
+          // reconnect. Settle-only: no notice chip (its place in the
+          // conversation isn't loaded), no working-clock anchor.
+          const ev = msg.event
+          const notifText =
+            (typeof ev?.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
+            (typeof ev?.attachment?.prompt === 'string' &&
+              isTaskNotification(ev.attachment.prompt) &&
+              ev.attachment.prompt) ||
+            (typeof ev?.message?.content === 'string' && isTaskNotification(ev.message.content) && ev.message.content) ||
+            ''
+          if (notifText) handleTaskNotification(notifText, null, true)
+          return
+        }
         case 'subagent_meta':
           // Links a sub-agent to its Task tool_use (folding it into that card)
           // and labels it; arrives ahead of the sub's events live, and per-sub
           // during backfill. Tolerates arriving after events too.
           handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
           return
+        case 'task_output': {
+          // Answer to a task_output request: hand it to the waiting chip.
+          const waiter = taskOutputWaitersRef.current.get(msg.file ?? '')
+          if (waiter) {
+            taskOutputWaitersRef.current.delete(msg.file ?? '')
+            waiter({ content: msg.content, error: msg.error })
+          }
+          return
+        }
         case 'replay_done':
           // History that ends on a completed turn (no trailing user message to
           // settle it, and no result event in the replay to supersede it) gets
@@ -4119,11 +4265,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // record lives in the main transcript, which the backfill replays
           // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification
           // ran with no sub to match. Apply the recorded completion retroactively
-          // here (independent of the main turn's state); a background sub with no
+          // here, to ANY still-running sub the notifications named (not just ones
+          // already marked background - the launch boilerplate that would mark
+          // them can itself fall outside the backfill window); a sub with no
           // recorded completion is genuinely still live, so leave it be.
           for (const key in subLocal) {
             const sub = subLocal[key]
-            if (sub.status !== 'running' || !sub.background) continue
+            if (sub.status !== 'running') continue
             if (completedNotifs.has(sub.agentId) || (sub.toolUseId && completedNotifs.has(sub.toolUseId))) {
               sub.status = 'done'
             }
@@ -4239,6 +4387,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   function openSubView(key: string) {
     if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
     setChatView(key)
+  }
+
+  // requestTaskOutput fetches a background task's output file over the chat
+  // socket (the expandable notification chip), resolving with the daemon's
+  // task_output answer or an error.
+  function requestTaskOutput(file: string): Promise<{ content?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        resolve({ error: 'Not connected' })
+        return
+      }
+      taskOutputWaitersRef.current.set(file, resolve)
+      ws.send(JSON.stringify({ type: 'task_output', file }))
+      window.setTimeout(() => {
+        const waiter = taskOutputWaitersRef.current.get(file)
+        if (waiter) {
+          taskOutputWaitersRef.current.delete(file)
+          waiter({ error: 'Timed out fetching the output' })
+        }
+      }, 10000)
+    })
   }
 
   // Position the viewport when the view switches: a running sub-agent pins to
@@ -4403,19 +4573,41 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
   }
 
+  // Auto-fill: when the loaded window is shorter than the pane (a byte-dense
+  // backfill - a few image reads can eat the whole window in a handful of
+  // messages), there is no scrollbar, so scrolling can never trigger the
+  // load-older request. Keep paging older history in until the pane overflows
+  // (or history runs out). Re-checked after every batch lands (items change
+  // clears loadingOlder).
+  useEffect(() => {
+    if (!replayDone || loadingOlder || allHistoryLoaded || chatView !== 'main') return
+    const el = scrollRef.current
+    if (!el || el.clientHeight === 0) return
+    if (el.scrollHeight <= el.clientHeight + 1) requestOlderHistory()
+  })
+
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
     // Load-older pages main history; a sub-agent view has its whole run already.
     if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    pinnedRef.current = nearBottom
-    setPinned(nearBottom)
+    // While pinned, content can grow FASTER than the follow effects re-pin (a
+    // card expanding a tall clamped panel adds >40px between frames), so a
+    // momentarily large gap must not read as "the user scrolled away" - that
+    // froze the follow mid-expansion. Only an UPWARD move unpins; any
+    // downward/stationary scroll keeps the pin, and reaching the bottom
+    // (re)pins regardless.
+    const scrolledUp = el.scrollTop < prevScrollTopRef.current - 1
+    prevScrollTopRef.current = el.scrollTop
+    const pin = nearBottom || (pinnedRef.current && !scrolledUp)
+    pinnedRef.current = pin
+    setPinned(pin)
     // A hidden pane has no geometry; don't let a stray 0-measurement clobber
     // the remembered offset. A sub-agent view's offsets aren't remembered at
     // all - the saved spot belongs to the main conversation.
     if (!active || el.clientHeight === 0 || chatView !== 'main') return
-    lastScrollRef.current = { top: el.scrollTop, pinned: nearBottom }
+    lastScrollRef.current = { top: el.scrollTop, pinned: pin }
     if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
     persistScrollTimer.current = setTimeout(() => {
       const last = lastScrollRef.current
@@ -4912,12 +5104,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             />
           )
         }
+        // A background sub-agent's completion notice resolves its sub-agent at
+        // render time (by the notification's task-id / tool-use-id) - clicking
+        // opens that agent's chat. A background command's notice (it carried an
+        // <output-file>) expands to show the command's output.
+        const linked =
+          (item.taskId ? subagents[item.taskId] : undefined) ??
+          (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
         return (
-          <div className="flex justify-center">
-            <div className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
-              <span className="truncate">{item.text}</span>
-            </div>
-          </div>
+          <NoticePill
+            text={item.text}
+            onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
+            outputFile={item.outputFile}
+            requestTaskOutput={requestTaskOutput}
+          />
         )
       }
       case 'contextNote':

@@ -1,8 +1,10 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -51,6 +54,18 @@ type chatClientMsg struct {
 	// Response is a control_response payload (e.g. AskUserQuestion answers),
 	// forwarded verbatim like Content.
 	Response json.RawMessage `json:"response,omitempty"`
+	// File is the <output-file> path of a task_output request: the background
+	// task's output file as the SANDBOXED agent saw it (its private /tmp).
+	File string `json:"file,omitempty"`
+}
+
+// chatTaskOutputFrame answers a task_output request: the (tail of the)
+// background task's output file, or an error when it can't be read.
+type chatTaskOutputFrame struct {
+	terminalEvent
+	File    string `json:"file"`
+	Content string `json:"content,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // chatQueueFrame is the server -> client snapshot of a head's queued messages,
@@ -149,6 +164,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		// client's current oldest line (msg.Before is that line's uuid).
 		sendChatHistoryBefore(conn, worktree, sessionID, msg.Before)
 		return
+	case "task_output":
+		// The expandable background-task chip asking for the task's output file
+		// (the <output-file> path its <task-notification> carried). sessionID is
+		// the head ID for a chat socket, which keys the head's private /tmp.
+		sendChatTaskOutput(conn, projectRoot, sessionID, msg.File)
+		return
 	case "user_message":
 		if !json.Valid(msg.Content) {
 			log.Printf("chat ws: bad user_message content for %q", sessionID)
@@ -235,6 +256,84 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 		return false
 	}
 	return true
+}
+
+// taskOutputMaxBytes caps how much of a background task's output file one
+// task_output reply carries (the tail - the end of a long log is what matters).
+const taskOutputMaxBytes = 256 * 1024
+
+// validTaskOutputPath accepts only the path shape the CLI's <task-notification>
+// records actually carry - an absolute, clean /tmp/.../tasks/<id>.output file -
+// so the socket can't be used to read arbitrary files.
+func validTaskOutputPath(file string) bool {
+	return strings.HasPrefix(file, "/tmp/") &&
+		filepath.Clean(file) == file &&
+		!strings.Contains(file, "..") &&
+		strings.Contains(file, "/tasks/") &&
+		strings.HasSuffix(file, ".output")
+}
+
+// sendChatTaskOutput answers a task_output request with the (tail of the)
+// background task's output file. The path arrives as the SANDBOXED agent saw it
+// (/tmp/claude-.../tasks/<id>.output); on a sandboxed head /tmp is the head's
+// private dir (heads.HeadTmpDir), so that translation is tried first and the
+// raw path second (an unsandboxed head whose /tmp is the real one).
+func sendChatTaskOutput(conn *safeConn, projectRoot, headID, file string) {
+	frame := chatTaskOutputFrame{terminalEvent: terminalEvent{Type: "task_output"}, File: file}
+	if !validTaskOutputPath(file) {
+		frame.Error = "invalid output file path"
+	} else {
+		var candidates []string
+		if tmp := heads.HeadTmpDir(projectRoot, headID); tmp != "" {
+			candidates = append(candidates, filepath.Join(tmp, strings.TrimPrefix(file, "/tmp/")))
+		}
+		candidates = append(candidates, file)
+		frame.Error = "output file not found (it may have been cleaned up)"
+		for _, p := range candidates {
+			content, err := readFileTail(p, taskOutputMaxBytes)
+			if err == nil {
+				frame.Content, frame.Error = content, ""
+				break
+			}
+		}
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// readFileTail reads up to the last maxBytes of a file (whole file when
+// smaller), dropping a leading partial line after a mid-file start.
+func readFileTail(path string, maxBytes int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	truncated := false
+	if info.Size() > maxBytes {
+		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
+			return "", errtrace.Wrap(err)
+		}
+		truncated = true
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if truncated {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			data = data[idx+1:]
+		}
+		return "[... earlier output truncated ...]\n" + string(data), nil
+	}
+	return string(data), nil
 }
 
 // chatStreamDebug traces the arrival cadence of live token deltas (stream_event
@@ -432,10 +531,28 @@ func backfillChatHistory(conn *safeConn, agentID, dir string, subs *subagentReso
 	if transcript == "" {
 		return nil
 	}
-	lines, uuids, err := claudestream.TailTranscript(transcript, claudestream.DefaultBackfillBytes)
+	lines, prelude, uuids, err := claudestream.TailTranscriptAndPrelude(transcript, claudestream.DefaultBackfillBytes)
 	if err != nil {
 		log.Printf("chat ws: backfill transcript for %q: %v", agentID, err)
 		return nil
+	}
+	// Pre-window <task-notification> records first, as settle-only frames: a
+	// byte-dense conversation pushes a background task's completion record out
+	// of the tail window in seconds, and without it the client can't tell a
+	// finished background sub-agent from a running one (its card would read
+	// "working" forever). The distinct frame type lets the client apply the
+	// completion WITHOUT rendering a chronologically misplaced notice chip.
+	for _, line := range prelude {
+		frame, err := json.Marshal(chatEventFrame{
+			terminalEvent: terminalEvent{Type: "notification_backfill"},
+			Event:         json.RawMessage(line),
+		})
+		if err != nil {
+			continue
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+			return uuids
+		}
 	}
 	for _, line := range lines {
 		if !sendChatEventLine(conn, line, agentID) {

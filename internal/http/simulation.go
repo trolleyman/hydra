@@ -2955,6 +2955,25 @@ var simChatEvents = []string{
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
+	// A background Bash command plus its completion <task-notification>
+	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
+	// deduped to ONE notice chip). The notification carries the <output-file>
+	// path, so the chip expands to show the command's output (answered by the
+	// sim's task_output handler below).
+	`{"type":"assistant","message":{"id":"msg_sim_bgcmd","content":[{"type":"tool_use","id":"toolu_sim_bgcmd","name":"Bash","input":{"command":"go test ./... 2>&1","description":"Run the full test suite","run_in_background":true}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bgcmd","content":"Command running in background with ID: bash_sim_bg1. Output is being written to: /tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output. You will be notified when it completes. To check interim output, use Read on that file path."}]}}`,
+	// A ScheduleWakeup while waiting on the background run: its prompt is PROSE,
+	// so the collapsed header shows it in the sans font, not monospace.
+	`{"type":"assistant","message":{"id":"msg_sim_wakeup","content":[{"type":"tool_use","id":"toolu_sim_wakeup","name":"ScheduleWakeup","input":{"delaySeconds":1500,"prompt":"Fallback wakeup: check on the background test run and report the outcome.","reason":"Fallback in case the completion notification doesn't arrive"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_wakeup","content":"Next wakeup scheduled for 21:25:00 (in 1500s). Nothing more to do this turn - the harness re-invokes you when the wakeup fires or a task-notification arrives."}]}}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>bash_sim_bg1</task-id>\n<tool-use-id>toolu_sim_bgcmd</tool-use-id>\n<output-file>/tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run the full test suite\" completed (exit code 0)</summary>\n</task-notification>"}`,
+	`{"type":"attachment","uuid":"sim-notif-bgcmd","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>\n<task-id>bash_sim_bg1</task-id>\n<tool-use-id>toolu_sim_bgcmd</tool-use-id>\n<output-file>/tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run the full test suite\" completed (exit code 0)</summary>\n</task-notification>"}}`,
+	// A long Read near the bottom of the conversation: its output overflows the
+	// card's capped panel (so the panel gets its OWN scrollbar), and one source
+	// line is far wider than the pane (so the gutter panel's per-line wrapping
+	// shows). Exercises pinned-at-bottom follow while such a card expands.
+	`{"type":"assistant","message":{"id":"msg_sim_long","content":[{"type":"tool_use","id":"toolu_sim_long","name":"Read","input":{"file_path":"internal/artifacts/upload_test.go"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_long","content":"     1\tpackage artifacts\n     2\t\n     3\timport (\n     4\t\t\"context\"\n     5\t\t\"errors\"\n     6\t\t\"net/http\"\n     7\t\t\"net/http/httptest\"\n     8\t\t\"strings\"\n     9\t\t\"testing\"\n    10\t)\n    11\t\n    12\t// flakyServer fails the first n PUTs with a 503, then succeeds - the shape of a transient outage the retry loop exists for, so every test in this file drives the uploader through it rather than stubbing the client.\n    13\tfunc flakyServer(t *testing.T, failures int) *httptest.Server {\n    14\t\tn := 0\n    15\t\treturn httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n    16\t\t\tif n < failures {\n    17\t\t\t\tn++\n    18\t\t\t\tw.WriteHeader(http.StatusServiceUnavailable)\n    19\t\t\t\treturn\n    20\t\t\t}\n    21\t\t\tw.WriteHeader(http.StatusOK)\n    22\t\t}))\n    23\t}\n    24\t\n    25\tfunc TestPutRetry(t *testing.T) {\n    26\t\tsrv := flakyServer(t, 1)\n    27\t\tdefer srv.Close()\n    28\t\tu := NewUploader(srv.URL)\n    29\t\tif err := u.Put(context.Background(), \"k\", strings.NewReader(\"v\")); err != nil {\n    30\t\t\tt.Fatalf(\"expected success after one transient failure, got %v\", err)\n    31\t\t}\n    32\t}\n    33\t\n    34\tfunc TestPutGivesUp(t *testing.T) {\n    35\t\tsrv := flakyServer(t, 10)\n    36\t\tdefer srv.Close()\n    37\t\tu := NewUploader(srv.URL)\n    38\t\terr := u.Put(context.Background(), \"k\", strings.NewReader(\"v\"))\n    39\t\tif !errors.Is(err, ErrExhausted) {\n    40\t\t\tt.Fatalf(\"want ErrExhausted, got %v\", err)\n    41\t\t}\n    42\t}"}]}}`,
 	// A tool_use with NO tool_result before the turn ends: it must NOT stay stuck
 	// showing "running" once the turn's result arrives / history replays (item 42).
 	`{"type":"assistant","message":{"id":"msg_sim_6","content":[{"type":"tool_use","id":"toolu_sim_stuck","name":"Read","input":{"file_path":"web/src/components/settings/NotificationsSection.tsx"}}]}}`,
@@ -3154,6 +3173,12 @@ func handleSimChatWS(conn *safeConn) {
 			simQueueRemove("sim-chat", msg.ID)
 		case "load_before":
 			sendSimHistoryBefore(conn, msg.Before)
+		case "task_output":
+			// The expandable background-command chip fetching the task's output
+			// file (see chat_ws.go sendChatTaskOutput). Canned tail for the demo.
+			out := "ok  \tgithub.com/trolleyman/hydra/internal/artifacts\t0.41s\nok  \tgithub.com/trolleyman/hydra/internal/git\t1.02s\nok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s\nok  \tgithub.com/trolleyman/hydra/internal/http\t3.87s\nok  \tgithub.com/trolleyman/hydra/internal/sandbox\t0.66s\nPASS\nexit=0"
+			frame, _ := json.Marshal(map[string]any{"type": "task_output", "file": msg.File, "content": out})
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
 		case "user_message":
 			// A message the client marked queued (a turn was running) is HELD, to
 			// be drained when the current turn ends - here, right after the next
@@ -3180,6 +3205,7 @@ type simChatClientMsg struct {
 	Content  json.RawMessage `json:"content"`
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
+	File     string          `json:"file"`
 }
 
 // simOlderHistory is a canned run of older conversation (oldest-first, uuids
@@ -3205,7 +3231,9 @@ func buildSimOlderHistory() []string {
 func simOlderBefore(beforeUUID string) (events []string, done bool) {
 	const batch = 8
 	idx := -1
-	if beforeUUID == "sim-real-0" {
+	// The client anchors on the FIRST uuid-carrying replayed line - the
+	// compaction preamble (sim-compaction), which precedes sim-real-0.
+	if beforeUUID == "sim-real-0" || beforeUUID == "sim-compaction" {
 		idx = len(simOlderHistory)
 	} else {
 		for i := range simOlderHistory {

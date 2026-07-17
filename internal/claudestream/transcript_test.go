@@ -138,6 +138,87 @@ func TestHistoryBefore(t *testing.T) {
 	}
 }
 
+func TestHistoryBeforeIncludesNotifications(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"oldest"}]},"uuid":"u1"}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`,
+		`{"type":"attachment","uuid":"att1","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"newest"}]},"uuid":"u2"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, done, err := HistoryBefore(path, "u2", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done || len(lines) != 3 {
+		t.Fatalf("got (%d lines, done=%v), want (3, true): the queue-operation and attachment notification records must page in with the conversation", len(lines), done)
+	}
+	for _, l := range lines[1:] {
+		if !bytes.Contains(l, taskNotificationMarker) {
+			t.Errorf("expected a task-notification record, got %q", l)
+		}
+	}
+}
+
+func TestTailTranscriptAndPrelude(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	notif := `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`
+	oldLines := []string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"a long-scrolled-away message"}]},"uuid":"u1"}`,
+		notif,
+	}
+	// Pad the tail so the two lines above fall OUTSIDE the byte window.
+	var recent []string
+	for i := range 20 {
+		recent = append(recent, `{"type":"assistant","message":{"id":"m`+string(rune('a'+i))+`","content":[{"type":"text","text":"recent recent recent recent recent recent"}]},"uuid":"r`+string(rune('a'+i))+`"}`)
+	}
+	content := strings.Join(append(oldLines, recent...), "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Window sized to cover only the recent padding: the notification (and the
+	// old user line) are pre-window; the notification alone must come back as
+	// prelude.
+	window := int64(len(strings.Join(recent, "\n")) - 50)
+	lines, prelude, _, err := TailTranscriptAndPrelude(path, window)
+	if err != nil {
+		t.Fatalf("TailTranscriptAndPrelude: %v", err)
+	}
+	if len(prelude) != 1 || !bytes.Contains(prelude[0], taskNotificationMarker) {
+		t.Fatalf("prelude = %q, want exactly the pre-window task-notification record", prelude)
+	}
+	for _, l := range lines {
+		if bytes.Contains(l, []byte(`"u1"`)) {
+			t.Errorf("pre-window conversation line leaked into the windowed backfill")
+		}
+	}
+
+	// A window covering the whole file yields no prelude (nothing pre-window),
+	// and the notification rides in the windowed lines instead.
+	lines, prelude, _, err = TailTranscriptAndPrelude(path, 0)
+	if err != nil {
+		t.Fatalf("TailTranscriptAndPrelude uncapped: %v", err)
+	}
+	if len(prelude) != 0 {
+		t.Fatalf("uncapped prelude = %q, want none", prelude)
+	}
+	found := false
+	for _, l := range lines {
+		if bytes.Contains(l, taskNotificationMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("uncapped tail lost the task-notification record")
+	}
+}
+
 func TestLatestTranscript(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "old.jsonl")

@@ -18,6 +18,21 @@ func headTmpDir(projectRoot, id string) string {
 	return filepath.Join(paths.GetHydraLocalDirFromProjectRoot(projectRoot), "tmp", id)
 }
 
+// HeadTmpDir returns the host-side path of a head's private /tmp dir, or ""
+// when it doesn't exist (an unsandboxed head writing to the real /tmp). Lets
+// the daemon resolve sandbox-relative /tmp paths a head reported (e.g. a
+// background task's <output-file>) to their host location.
+func HeadTmpDir(projectRoot, id string) string {
+	if projectRoot == "" || id == "" {
+		return ""
+	}
+	dir := headTmpDir(projectRoot, id)
+	if _, err := os.Stat(dir); err != nil {
+		return ""
+	}
+	return dir
+}
+
 // ensureHeadTmpDir creates (idempotently) and returns the head's private /tmp
 // dir, ready to bind into the sandbox. Returns "" if it can't be created (the
 // sandbox then falls back to the fresh tmpfs /tmp) or on empty inputs.

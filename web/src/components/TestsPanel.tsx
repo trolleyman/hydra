@@ -611,7 +611,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
-        <div className="-mx-3 flex flex-col border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 flex flex-col">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
             : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
