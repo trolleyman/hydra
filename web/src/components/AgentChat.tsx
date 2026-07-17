@@ -22,6 +22,8 @@ import {
   MessageSquare,
   Plus,
   Search,
+  SlidersHorizontal,
+  Sparkles,
   SquareTerminal,
   Wrench,
   X,
@@ -92,6 +94,13 @@ type ChatItem =
   // turn, so it collapses behind an expander (item 39). outOfContext labels the
   // auto/ran-out-of-context case specifically.
   | { kind: 'contextNote'; id: number; text: string; outOfContext: boolean }
+  // Machine-injected context (isMeta) that rode in a `user` envelope but was
+  // never typed - rendered out of the chat flow rather than as a user bubble.
+  // `skill` is a Skill's auto-loaded SKILL.md body (name = the skill); `meta` is
+  // the generic fallback for any other injected-context message. Keying both off
+  // the isMeta flag avoids a per-string matcher for each new injection kind.
+  | { kind: 'skill'; id: number; name: string; text: string }
+  | { kind: 'meta'; id: number; text: string }
   | { kind: 'interrupted'; id: number }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
@@ -249,6 +258,11 @@ interface ClaudeEvent {
   isSidechain?: boolean
   agentId?: string
   parent_tool_use_id?: string | null
+  // Set by the CLI on machine-injected context that rides in a `user` envelope
+  // but was never typed by the user - the resume nudge, and a Skill's auto-loaded
+  // SKILL.md body. The reducer routes these out of the normal chat flow (a
+  // collapsed meta card / a skill card) instead of rendering them as a user turn.
+  isMeta?: boolean
   // A background/async sub-agent's completion <task-notification> is written to
   // the main transcript not as a user turn but as bookkeeping records the chat
   // socket relays live: a queue-operation (XML on top-level `content`) and an
@@ -408,6 +422,17 @@ function detectContextNote(text: string): { outOfContext: boolean } | null {
     return { outOfContext: /ran out of context/i.test(t.slice(0, 200)) }
   }
   return null
+}
+
+// detectSkillBody recognises the SKILL.md body Claude auto-injects when a Skill
+// tool runs: an isMeta `user` text block that always opens with "Base directory
+// for this skill: <path>". Returns the skill name (the path's last segment) and
+// the body with that lead line stripped, or null for any other meta message.
+function detectSkillBody(text: string): { name: string; body: string } | null {
+  const m = /^\s*Base directory for this skill:\s*(\S+)[^\n]*\n?/.exec(text)
+  if (!m) return null
+  const name = m[1].split('/').filter(Boolean).pop() || 'skill'
+  return { name, body: text.slice(m[0].length).trim() }
 }
 
 // decodeEntities turns the handful of XML entities that appear in injected
@@ -2260,6 +2285,76 @@ const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { 
   )
 })
 
+// SkillCard renders a Skill's auto-loaded SKILL.md body: a compact "Skill
+// loaded: <name>" header that expands to the instructions as markdown. It's
+// context the model was fed, not a user turn, so it stays collapsed by default
+// (the launch itself is already shown by the Skill tool card above it).
+const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <Sparkles className="w-3 h-3 shrink-0" />
+        <span className="truncate">Skill loaded: {name}</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
+// MetaCard is the generic fallback for machine-injected (isMeta) context that
+// isn't a recognised skill body - collapsed behind an expander so a future
+// injection kind never dumps raw text into the flow (no per-string matcher
+// needed, just the isMeta flag).
+const MetaCard = memo(function MetaCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <Info className="w-3 h-3 shrink-0" />
+        <span className="truncate">Injected context</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
+// routeMetaText classifies a machine-injected (isMeta) `user` text block into a
+// ChatItem: a skill body -> a SkillCard, anything else -> a generic MetaCard.
+// Shared by the live and history reducers so both agree. Returns null for empty
+// text (nothing to show).
+function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
+  const t = text.trim()
+  if (!t) return null
+  const skill = detectSkillBody(t)
+  if (skill) return { kind: 'skill', name: skill.name, text: skill.body }
+  return { kind: 'meta', text: t }
+}
+
 // reduceHistoryEvents reduces a batch of older (settled) conversation events -
 // the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
 // the live reducer's settled-event handling (no streaming, model or
@@ -2287,7 +2382,14 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       }
     }
   }
-  const routeUser = (rawText: string) => {
+  const routeUser = (rawText: string, isMeta?: boolean) => {
+    // Machine-injected context (a skill body etc.) is not a user turn - route it
+    // to a skill/meta card off the isMeta flag, before any content-sniffing.
+    if (isMeta) {
+      const meta = routeMetaText(rawText)
+      if (meta) push(meta)
+      return
+    }
     const text = stripLocalCommandCaveat(rawText)
     if (!text) return
     // A user turn starting settles the previous turn's synthesized footer
@@ -2354,11 +2456,11 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
     if (ev.type === 'user') {
       const content = ev.message?.content
       if (typeof content === 'string') {
-        if (content.trim()) routeUser(content)
+        if (content.trim()) routeUser(content, ev.isMeta)
         continue
       }
       for (const block of content ?? []) {
-        if (block.type === 'text' && block.text?.trim()) routeUser(block.text)
+        if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
           patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
@@ -3265,7 +3367,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null) => {
+    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean) => {
+      // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
+      // in a `user` envelope but was never typed - route it to a skill/meta card
+      // off the isMeta flag rather than the content-sniffing below. It doesn't
+      // start a turn, so it skips the turn-clock/optimistic-echo bookkeeping.
+      if (isMeta) {
+        const meta = routeMetaText(rawText)
+        if (meta) push(meta)
+        return
+      }
       // Drop the CLI's local-command caveat wrapper; a message that is nothing
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
@@ -3454,12 +3565,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs)
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta)
             return
           }
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs)
+              routeUserText(block.text, userTs, ev.isMeta)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
@@ -4481,12 +4592,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         )
       }
       case 'cmdout':
+        // A local command's stdout (in practice the "Set model to ..."
+        // confirmation): a short bookkeeping line, so render it as the same
+        // centered notification pill the notice/skill/meta chips use rather than
+        // a code panel.
         return (
-          <pre
-            className={`${PANEL_CLASS} max-w-[95%] whitespace-pre-wrap break-words px-2.5 py-1.5 font-mono text-[11px] leading-4 text-stone-500 dark:text-stone-400`}
-          >
-            {item.text}
-          </pre>
+          <div className="flex justify-center">
+            <div
+              className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none"
+              title={item.text}
+            >
+              <SlidersHorizontal className="w-3 h-3 shrink-0" />
+              <span className="truncate">{item.text}</span>
+            </div>
+          </div>
         )
       case 'notice': {
         // A "sub-agent finished" notice: when it links to a sub-agent we have,
@@ -4518,6 +4637,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       case 'contextNote':
         return <ContextNoteCard text={item.text} outOfContext={item.outOfContext} />
+      case 'skill':
+        return <SkillCard name={item.name} text={item.text} />
+      case 'meta':
+        return <MetaCard text={item.text} />
       case 'interrupted':
         return (
           <div className="flex justify-end">
