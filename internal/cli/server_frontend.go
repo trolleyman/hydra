@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/trolleyman/hydra/web"
 )
@@ -32,6 +33,7 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 		// Serve file if it exists in dist/
 		_, err := fs.Stat(fsys, cleanPath)
 		if err == nil {
+			setFrontendCacheHeader(w, cleanPath)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -45,6 +47,7 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "text/html")
+		setFrontendCacheHeader(w, "index.html")
 
 		if web.RoutesRegex.MatchString(path) {
 			w.WriteHeader(http.StatusOK)
@@ -54,4 +57,21 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 
 		w.Write(indexContent)
 	}
+}
+
+// setFrontendCacheHeader sets the cache policy for an embedded frontend file.
+// Embedded files carry no modtime, so http.FileServer emits neither
+// Last-Modified nor an ETag - without an explicit Cache-Control the browser
+// falls back to HEURISTIC caching and can keep serving a stale index.html
+// (and through it the whole old app) after a rebuild+restart. Policy:
+// content-hashed Vite bundles (assets/*) are immutable and cacheable forever;
+// everything else (index.html, icons, manifest - stable names, replaceable
+// content) must be revalidated, and with no validators no-cache means a
+// re-fetch, which is fine at these sizes.
+func setFrontendCacheHeader(w http.ResponseWriter, cleanPath string) {
+	if strings.HasPrefix(cleanPath, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }
