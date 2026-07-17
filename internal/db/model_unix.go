@@ -28,7 +28,11 @@ type Agent struct {
 	// Plan is the chat plan/to-do list JSON the chat view reconstructs from the
 	// head's Task*/TodoWrite events, persisted so it survives navigation and is
 	// available in a new browser. Opaque to the server (client-owned JSON).
-	Plan      string
+	Plan string
+	// Model is the chat head's current model alias/id (from the CLI's
+	// system:init / "Set model to ..." events), persisted so the selector shows
+	// the right model on navigation and in a new browser. Opaque to the server.
+	Model     string
 	Ephemeral bool `gorm:"default:false"`
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
 	// renders a chat view instead of a terminal (Claude only).

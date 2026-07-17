@@ -303,6 +303,13 @@ func (s *Store) UpdateAgentPlan(id, plan string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateAgentModel stores the chat head's current model alias/id (client-owned,
+// opaque). Empty clears it.
+func (s *Store) UpdateAgentModel(id, model string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("model", model)
+	return errtrace.Wrap(result.Error)
+}
+
 // UpdateAgentBaseBranch updates the base branch an agent is considered based on.
 // Metadata only: it does not touch the agent's branch, worktree or commits.
 func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {

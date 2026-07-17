@@ -15,6 +15,10 @@ export type AgentResponse = {
      * The chat plan/to-do list JSON the chat view persisted (empty if none). Opaque to the server.
      */
     plan?: string;
+    /**
+     * The chat head's current model alias/id the chat view persisted (empty if unknown). Opaque to the server.
+     */
+    model?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
     project_path: string;

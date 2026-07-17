@@ -539,6 +539,40 @@ export class DefaultService {
         });
     }
     /**
+     * Persist a chat head's current model alias/id
+     * Stores the model the chat head is running (as reported by the CLI's system:init / "Set model to ..." events), so the selector shows the right model on navigation and in a fresh browser instead of a placeholder. Opaque string; the server does not interpret it.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public setAgentModel(
+        projectId: string,
+        id: string,
+        requestBody: {
+            /**
+             * The model alias or id (empty clears it).
+             */
+            model: string;
+        },
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'PUT',
+            url: '/api/projects/{project_id}/agents/{id}/model',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
      * Set a head's downstream branch name (the name it is pushed AS)
      * @param projectId
      * @param id

@@ -566,6 +566,9 @@ func agentResponse(h heads.Head) api.AgentResponse {
 	if h.Plan != "" {
 		resp.Plan = &h.Plan
 	}
+	if h.Model != "" {
+		resp.Model = &h.Model
+	}
 	return resp
 }
 
@@ -1588,6 +1591,32 @@ func (s *Server) SetAgentPlan(ctx context.Context, request api.SetAgentPlanReque
 		return nil, errtrace.Wrap(err)
 	}
 	return api.SetAgentPlan204Response{}, nil
+}
+
+// SetAgentModel persists the chat head's current model alias/id (as reported by
+// the CLI's system:init / "Set model to ..." events). The payload is
+// client-owned and opaque to the server; it is stored so the model selector
+// shows the right model on navigation and in a fresh browser. Empty clears it.
+func (s *Server) SetAgentModel(ctx context.Context, request api.SetAgentModelRequestObject) (api.SetAgentModelResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.SetAgentModel404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	if err := s.DB.UpdateAgentModel(request.Id, request.Body.Model); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.SetAgentModel204Response{}, nil
 }
 
 func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
