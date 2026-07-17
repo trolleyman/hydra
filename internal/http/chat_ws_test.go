@@ -27,7 +27,7 @@ func relayChatChunkOverWS(t *testing.T, chunk string, dropResults bool) []string
 			return
 		}
 		conn := &safeConn{Conn: raw}
-		relayChatChunk(conn, &claudestream.LineBuffer{}, []byte(chunk), "agent", map[string]struct{}{}, nil, dropResults, nil)
+		relayChatChunk(conn, &claudestream.LineBuffer{}, []byte(chunk), "agent", map[string]struct{}{}, nil, dropResults, nil, nil)
 		_ = raw.Close()
 	}))
 	defer srv.Close()
@@ -104,7 +104,7 @@ func relayChatChunkWithTimer(t *testing.T, chunk string, timer *streamTimer) {
 			return
 		}
 		conn := &safeConn{Conn: raw}
-		relayChatChunk(conn, &claudestream.LineBuffer{}, []byte(chunk), "agent-x", map[string]struct{}{}, nil, false, timer)
+		relayChatChunk(conn, &claudestream.LineBuffer{}, []byte(chunk), "agent-x", map[string]struct{}{}, nil, false, timer, nil)
 		_ = raw.Close()
 	}))
 	defer srv.Close()

@@ -35,7 +35,7 @@ type Head struct {
 	ID          string
 	Title       string  // mutable, user-facing display name (empty falls back to ID)
 	Plan        string  // client-owned chat plan/to-do JSON, opaque to the server
-	Model       string  // client-owned chat model alias/id, opaque to the server
+	Model       string  // chat model id, captured by the daemon from system:init
 	Branch      *string // "hydra/<id>", nil if the git branch does not exist
 	Worktree    *string // path to the worktree directory, nil if it does not exist
 	ProjectPath string

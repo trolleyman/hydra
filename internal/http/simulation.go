@@ -50,12 +50,6 @@ type SimulationServer struct {
 	// verification) without a real DB.
 	planMu sync.Mutex
 	plans  map[string]string
-
-	// modelMu/models back the mock model-persistence endpoint the same way:
-	// SetAgentModel stores the client-owned model alias/id and GetAgent overlays
-	// it, so the chat model round-trips within a sim boot without a real DB.
-	modelMu sync.Mutex
-	models  map[string]string
 }
 
 // getPlan returns the stored plan JSON for an agent, if SetAgentPlan saved one.
@@ -64,14 +58,6 @@ func (s *SimulationServer) getPlan(id string) (string, bool) {
 	defer s.planMu.Unlock()
 	p, ok := s.plans[id]
 	return p, ok
-}
-
-// getModel returns the stored model for an agent, if SetAgentModel saved one.
-func (s *SimulationServer) getModel(id string) (string, bool) {
-	s.modelMu.Lock()
-	defer s.modelMu.Unlock()
-	m, ok := s.models[id]
-	return m, ok
 }
 
 // simNow is the fixed wall-clock instant ALL time-derived simulation values are
@@ -258,6 +244,9 @@ func simAgentChat() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentChatPrompt,
 		ChatMode:      ptr(true),
+		// Model as the daemon would have captured it from the head's system:init
+		// line (see simChatEvents); the chat selector seeds its label from this.
+		Model: ptr("claude-opus-4-8"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:    api.Waiting,
 			Timestamp: simNow().Format(time.RFC3339),
@@ -284,6 +273,7 @@ func simAgentAsk() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentAskPrompt,
 		ChatMode:      ptr(true),
+		Model:         ptr("claude-opus-4-8"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:      api.NeedsInput,
 			Timestamp:   simNow().Format(time.RFC3339),
@@ -526,9 +516,6 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	write := func(resp api.AgentResponse) {
 		if p, ok := s.getPlan(id); ok {
 			resp.Plan = &p
-		}
-		if m, ok := s.getModel(id); ok {
-			resp.Model = &m
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
 	}
@@ -951,21 +938,6 @@ func (s *SimulationServer) SetAgentPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	s.plans[id] = body.Plan
 	s.planMu.Unlock()
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *SimulationServer) SetAgentModel(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	var body api.SetAgentModelJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	s.modelMu.Lock()
-	if s.models == nil {
-		s.models = make(map[string]string)
-	}
-	s.models[id] = body.Model
-	s.modelMu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

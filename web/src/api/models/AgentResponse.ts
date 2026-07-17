@@ -16,7 +16,7 @@ export type AgentResponse = {
      */
     plan?: string;
     /**
-     * The chat head's current model alias/id the chat view persisted (empty if unknown). Opaque to the server.
+     * The chat head's current model id, captured by the daemon from the CLI's system:init line (empty if not yet observed).
      */
     model?: string;
     branch_name?: string | null;

@@ -52,6 +52,11 @@ type Event struct {
 	// transcript, so the daemon can detect it live and flip the head into an error
 	// status. The text of the error is in the message's single text block.
 	IsAPIError bool `json:"isApiErrorMessage,omitempty"`
+	// Model is the active model id, carried on the `system`/`init` line the CLI
+	// emits at the start of every (re)connect. The daemon reads it to persist the
+	// head's current model so the chat selector shows the right one on load,
+	// without the client having to observe and echo it back.
+	Model string `json:"model,omitempty"`
 }
 
 // apiErrorMessage is the minimal decode of an isApiErrorMessage assistant line,

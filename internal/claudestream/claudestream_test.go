@@ -29,6 +29,26 @@ func TestParseEvent(t *testing.T) {
 	}
 }
 
+func TestParseEventModel(t *testing.T) {
+	// The system:init line carries the active model at the top level; the daemon
+	// reads it to persist the head's current model.
+	init := `{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-4-8","slash_commands":["compact"]}`
+	ev, ok := ParseEvent([]byte(init))
+	if !ok || ev.Type != "system" || ev.Subtype != "init" {
+		t.Fatalf("ParseEvent(system:init) = (%q/%q, %v)", ev.Type, ev.Subtype, ok)
+	}
+	if ev.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", ev.Model)
+	}
+	// A nested per-message model (assistant envelope) must NOT populate the
+	// top-level Model, so only the system:init line drives model capture.
+	asst := `{"type":"assistant","message":{"model":"<synthetic>","content":[]}}`
+	ev, ok = ParseEvent([]byte(asst))
+	if !ok || ev.Model != "" {
+		t.Errorf("assistant Model = %q (ok=%v), want empty", ev.Model, ok)
+	}
+}
+
 func TestUserMessageLine(t *testing.T) {
 	line, err := UserMessageLine(json.RawMessage(`[{"type":"text","text":"hi"}]`))
 	if err != nil {

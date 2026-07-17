@@ -269,7 +269,7 @@ type AgentResponse struct {
 	// MergeWhenGreen True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
 	MergeWhenGreen *bool `json:"merge_when_green,omitempty"`
 
-	// Model The chat head's current model alias/id the chat view persisted (empty if unknown). Opaque to the server.
+	// Model The chat head's current model id, captured by the daemon from the CLI's system:init line (empty if not yet observed).
 	Model *string `json:"model,omitempty"`
 
 	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "unrestricted" (network on, host filtering off → every host reachable), "filtered-hard" (allow-list enforced in a pasta netns + nft lock - an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (the head isn't live).
@@ -1568,12 +1568,6 @@ type MergeAgentParams struct {
 	Close *bool `form:"close,omitempty" json:"close,omitempty"`
 }
 
-// SetAgentModelJSONBody defines parameters for SetAgentModel.
-type SetAgentModelJSONBody struct {
-	// Model The model alias or id (empty clears it).
-	Model string `json:"model"`
-}
-
 // SetAgentPlanJSONBody defines parameters for SetAgentPlan.
 type SetAgentPlanJSONBody struct {
 	// Plan The plan as a JSON string (empty clears it).
@@ -1740,9 +1734,6 @@ type SetDownstreamBranchJSONRequestBody SetDownstreamBranchJSONBody
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
 
-// SetAgentModelJSONRequestBody defines body for SetAgentModel for application/json ContentType.
-type SetAgentModelJSONRequestBody SetAgentModelJSONBody
-
 // SetAgentPlanJSONRequestBody defines body for SetAgentPlan for application/json ContentType.
 type SetAgentPlanJSONRequestBody SetAgentPlanJSONBody
 
@@ -1829,9 +1820,6 @@ type ServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// Persist a chat head's current model alias/id
-	// (PUT /api/projects/{project_id}/agents/{id}/model)
-	SetAgentModel(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Persist a head's reconstructed chat plan (to-do list) JSON
 	// (PUT /api/projects/{project_id}/agents/{id}/plan)
 	SetAgentPlan(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -2800,40 +2788,6 @@ func (siw *ServerInterfaceWrapper) ArmMergeWhenGreen(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArmMergeWhenGreen(w, r, projectId, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// SetAgentModel operation middleware
-func (siw *ServerInterfaceWrapper) SetAgentModel(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SetAgentModel(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4302,7 +4256,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.ArmMergeWhenGreen)
-	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/model", wrapper.SetAgentModel)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/plan", wrapper.SetAgentPlan)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews", wrapper.GetAgentPreviews)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/start", wrapper.StartAgentPreview)
@@ -5190,33 +5143,6 @@ type ArmMergeWhenGreen500JSONResponse ErrorResponse
 func (response ArmMergeWhenGreen500JSONResponse) VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SetAgentModelRequestObject struct {
-	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
-	Body      *SetAgentModelJSONRequestBody
-}
-
-type SetAgentModelResponseObject interface {
-	VisitSetAgentModelResponse(w http.ResponseWriter) error
-}
-
-type SetAgentModel204Response struct {
-}
-
-func (response SetAgentModel204Response) VisitSetAgentModelResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type SetAgentModel404JSONResponse ErrorResponse
-
-func (response SetAgentModel404JSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -6632,9 +6558,6 @@ type StrictServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
-	// Persist a chat head's current model alias/id
-	// (PUT /api/projects/{project_id}/agents/{id}/model)
-	SetAgentModel(ctx context.Context, request SetAgentModelRequestObject) (SetAgentModelResponseObject, error)
 	// Persist a head's reconstructed chat plan (to-do list) JSON
 	// (PUT /api/projects/{project_id}/agents/{id}/plan)
 	SetAgentPlan(ctx context.Context, request SetAgentPlanRequestObject) (SetAgentPlanResponseObject, error)
@@ -7419,40 +7342,6 @@ func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArmMergeWhenGreenResponseObject); ok {
 		if err := validResponse.VisitArmMergeWhenGreenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// SetAgentModel operation middleware
-func (sh *strictHandler) SetAgentModel(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	var request SetAgentModelRequestObject
-
-	request.ProjectId = projectId
-	request.Id = id
-
-	var body SetAgentModelJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SetAgentModel(ctx, request.(SetAgentModelRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SetAgentModel")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SetAgentModelResponseObject); ok {
-		if err := validResponse.VisitSetAgentModelResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

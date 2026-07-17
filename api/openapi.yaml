@@ -769,45 +769,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/model:
-    put:
-      summary: Persist a chat head's current model alias/id
-      description: >
-        Stores the model the chat head is running (as reported by the CLI's
-        system:init / "Set model to ..." events), so the selector shows the
-        right model on navigation and in a fresh browser instead of a
-        placeholder. Opaque string; the server does not interpret it.
-      operationId: setAgentModel
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema: { type: string }
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [model]
-              properties:
-                model:
-                  type: string
-                  description: The model alias or id (empty clears it).
-      responses:
-        '204':
-          description: Stored.
-        '404':
-          description: Not Found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /api/projects/{project_id}/agents/{id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)
@@ -2840,7 +2801,7 @@ components:
           description: The chat plan/to-do list JSON the chat view persisted (empty if none). Opaque to the server.
         model:
           type: string
-          description: The chat head's current model alias/id the chat view persisted (empty if unknown). Opaque to the server.
+          description: The chat head's current model id, captured by the daemon from the CLI's system:init line (empty if not yet observed).
         branch_name:
           type: string
           nullable: true

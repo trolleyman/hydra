@@ -303,8 +303,8 @@ func (s *Store) UpdateAgentPlan(id, plan string) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateAgentModel stores the chat head's current model alias/id (client-owned,
-// opaque). Empty clears it.
+// UpdateAgentModel stores the chat head's current model id, captured by the
+// daemon from the CLI's system:init line. Empty clears it.
 func (s *Store) UpdateAgentModel(id, model string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("model", model)
 	return errtrace.Wrap(result.Error)

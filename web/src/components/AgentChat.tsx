@@ -45,7 +45,6 @@ import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImage
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
-import { loadModel, saveModel, seedLocalModel } from '../lib/modelStore'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
@@ -2719,12 +2718,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // Current model (from system:init / set_model confirmations) and the slash
-  // commands the CLI advertises, both fed by the event stream. Seeded from the
-  // persisted value (localStorage, backed by the server) so the selector shows
-  // the last-known model on remount rather than the "Model" placeholder, then
-  // corrected by the live stream once it lands (modelStore, mirrors the plan).
-  const [model, setModel] = useState(() => loadModel(projectId, agentId))
+  // Current model, fed live by the event stream (system:init / set_model
+  // confirmations). Seeded from AgentResponse.model - which the daemon captures
+  // from the head's system:init line - so the selector shows the right model on
+  // load instead of the "Model" placeholder, before the live stream re-confirms
+  // it (see the serverModel effect below).
+  const [model, setModel] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   // Prompt-side tokens of the most recent message, i.e. how much context the
   // conversation currently occupies. Drives the "context left" chip beside the
@@ -2797,17 +2796,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
   }, [serverPlan, projectId, agentId])
 
-  // The server-persisted model (AgentResponse.model). On a fresh browser this is
-  // the only copy; seed it into localStorage (only when local is empty) and
-  // adopt it if the selector is still on the placeholder, so the right model
-  // shows before any system:init lands. Mirrors the serverPlan seed above.
+  // The daemon-captured model (AgentResponse.model). Adopt it while the selector
+  // is still on the placeholder, so the right model shows on load before any
+  // live system:init lands. The live stream stays authoritative from there.
   const serverModel = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
   )
   useEffect(() => {
-    const seeded = seedLocalModel(projectId, agentId, serverModel)
-    if (seeded) setModel((m) => m || seeded)
-  }, [serverModel, projectId, agentId])
+    if (serverModel) setModel((m) => m || serverModel)
+  }, [serverModel])
 
   // Smooth (paced) streaming - a Browser setting. Read inside the WS reducer's
   // per-frame flush via a ref so a mid-stream toggle takes effect on the next
@@ -4185,14 +4182,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
     return () => clearTimeout(t)
   }, [input, projectId, agentId])
-
-  // Persist the current model (localStorage + debounced server PUT) so the
-  // selector shows it immediately on remount and in a fresh browser, before the
-  // live stream re-confirms it. saveModel ignores the empty placeholder, so a
-  // not-yet-known model never clobbers a good stored value.
-  useEffect(() => {
-    saveModel(projectId, agentId, model)
-  }, [model, projectId, agentId])
 
   // --- Composer: attachments ------------------------------------------------
 

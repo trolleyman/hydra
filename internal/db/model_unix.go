@@ -29,9 +29,9 @@ type Agent struct {
 	// head's Task*/TodoWrite events, persisted so it survives navigation and is
 	// available in a new browser. Opaque to the server (client-owned JSON).
 	Plan string
-	// Model is the chat head's current model alias/id (from the CLI's
-	// system:init / "Set model to ..." events), persisted so the selector shows
-	// the right model on navigation and in a new browser. Opaque to the server.
+	// Model is the chat head's current model id, captured by the daemon from the
+	// CLI's system:init line (see internal/http/chat_ws.go) and persisted so the
+	// selector shows the right model on navigation and in a new browser.
 	Model     string
 	Ephemeral bool `gorm:"default:false"`
 	// ChatMode drives the head via the Claude CLI's stream-json interface and
