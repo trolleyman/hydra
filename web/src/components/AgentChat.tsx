@@ -713,7 +713,33 @@ function TodoLi({ t }: { t: TodoItem }) {
   )
 }
 
-function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
+// useChipWidth measures the natural (fit-content) width of a floating card's
+// collapsed header chip via an invisible clone, so open/close can animate the
+// card between PIXEL endpoints. Transitioning from `width: fit-content`
+// cannot work here: the moment the list content mounts, fit-content already
+// resolves to the open width, so the transition's start equals its end and
+// the card snaps wide instead of gliding.
+function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null] {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => setW(el.offsetWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w]
+}
+
+function PlanPanel({ todos, narrow, fadeIn }: { todos: TodoItem[]; narrow: boolean; fadeIn: boolean }) {
+  // Frozen at mount: fade in only when the plan APPEARS live (a first
+  // TodoWrite mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
   const total = todos.length
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = total > 0 && done === total
@@ -741,11 +767,27 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
 
   return (
     // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
-    // opening glides the width (fit -> w-64, via interpolate-size where
-    // supported) alongside the Expandable height. Corner-anchored; while open
-    // it takes the higher z so it layers over the selector's chip on a narrow
-    // pane instead of anything relocating.
-    <div className={`absolute top-2 right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in [interpolate-size:allow-keywords] transition-[width] duration-200 ${open ? 'z-30 w-64' : 'z-20 w-fit'}`}>
+    // opening glides the width (the measured chip px -> w-64, see useChipWidth)
+    // alongside the Expandable height. Corner-anchored; while open it takes
+    // the higher z so it layers over the selector's chip on a narrow pane
+    // instead of anything relocating.
+    <div
+      style={{ width: open ? 256 : chipW ?? undefined }}
+      className={`absolute top-2 right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+    >
+      {/* Invisible clone of the header at natural width - the collapsed chip
+          width the open/close transition animates from/to (border included so
+          the border-box width matches the card's). */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+      >
+        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+        <span className="text-xs font-semibold shrink-0">Plan</span>
+        <span className="shrink-0 text-[11px] tabular-nums">{done}/{total}</span>
+        <ChevronRight className="w-3 h-3 shrink-0" />
+      </div>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -1994,13 +2036,19 @@ function ChatViewSelector({
   subagents,
   taskToolByUse,
   onSelect,
+  fadeIn,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
   taskToolByUse: Record<string, ToolItem>
   onSelect: (key: string) => void
+  fadeIn: boolean
 }) {
   const [open, setOpen] = useState(false)
+  // Frozen at mount: fade in only when the selector APPEARS live (the first
+  // sub-agent spawning mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
   const subs = Object.values(subagents)
   const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
   const current = chatView !== 'main' ? subagents[chatView] : undefined
@@ -2011,13 +2059,26 @@ function ChatViewSelector({
   }
   return (
     // A floating card styled like the PlanPanel: the collapsed chip is its
-    // fit-content header, and opening glides both the width (fit -> w-72, via
-    // interpolate-size where supported) and the height (Expandable).
+    // natural-width header, and opening glides both the width (the measured
+    // chip px -> w-72, see useChipWidth) and the height (Expandable).
     // Corner-anchored; while open it takes the higher z so it layers over the
     // plan panel's chip on a narrow pane instead of anything relocating.
     <div
-      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs [interpolate-size:allow-keywords] transition-[width] duration-200 ${open ? 'z-30 w-72' : 'z-20 w-fit'}`}
+      style={{ width: open ? 288 : chipW ?? undefined }}
+      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
+      {/* Invisible clone of the header at natural width - the collapsed chip
+          width the open/close transition animates from/to. */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+      >
+        <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        {current && isSubRunning(current, toolOf(current)) && <LoaderCircle className="w-3 h-3 shrink-0" />}
+        <ChevronRight className="w-3 h-3 shrink-0" />
+      </div>
       <button
         onClick={() => setOpen((o) => !o)}
         title="Switch agent chat"
@@ -2042,17 +2103,20 @@ function ChatViewSelector({
       </button>
       <Expandable open={open}>
         {/* Fixed w-72 (the open card width) so the open-height measurement is
-            width-independent - see the PlanPanel note. */}
+            width-independent - see the PlanPanel note. The list holds only the
+            OTHER views: the current one is already the header, so repeating it
+            (with a check) was noise. */}
         <div className="w-72 pb-1">
-            <button
-              onClick={() => pick('main')}
-              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
-            >
-              <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="font-medium">Main conversation</span>
-              {chatView === 'main' && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-[#c96442]" />}
-            </button>
-            {subs.map((sub) => {
+            {chatView !== 'main' && (
+              <button
+                onClick={() => pick('main')}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+                <span className="font-medium">Main conversation</span>
+              </button>
+            )}
+            {subs.filter((sub) => sub.agentId !== chatView).map((sub) => {
               const tool = toolOf(sub)
               const { label, desc } = subLabels(sub, tool)
               return (
@@ -2068,7 +2132,6 @@ function ChatViewSelector({
                     {isSubRunning(sub, tool) && (
                       <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                     )}
-                    {chatView === sub.agentId && <Check className="w-3.5 h-3.5 text-[#c96442]" />}
                   </span>
                 </button>
               )
@@ -2766,6 +2829,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
   const [replayDone, setReplayDone] = useState(false)
+  // True a beat after the replay settles: floating cards (plan, sub-agent
+  // selector) that MOUNT after this fade in - they appeared live - while cards
+  // restored by the replay itself render without the entrance animation (a
+  // reload should not replay the fade every time).
+  const liveUiRef = useRef(false)
+  useEffect(() => {
+    if (!replayDone) {
+      liveUiRef.current = false
+      return
+    }
+    const t = setTimeout(() => {
+      liveUiRef.current = true
+    }, 150)
+    return () => clearTimeout(t)
+  }, [replayDone])
   // Item ids >= this animate in (they arrived live); replayed history commits
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
@@ -5059,12 +5137,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             subagents={subagents}
             taskToolByUse={taskToolByUse}
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+            fadeIn={liveUiRef.current}
           />
         )}
         {/* Current plan (item 17): the agent's latest TodoWrite. Main view
             only - it is the main agent's plan. */}
         {todos.length > 0 && replayDone && !viewSub && (
-          <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />
+          <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} fadeIn={liveUiRef.current} />
         )}
         {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
             scrollTop to keep an arbitrary anchor node stable when content above

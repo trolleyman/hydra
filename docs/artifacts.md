@@ -139,3 +139,28 @@ plain tags are free-form. When a set mixes images and video, a built-in
 above); a non-positive value is ignored with a warning. Both keys are optional —
 omit either, or skip the sidecar entirely. A malformed sidecar is reported as a
 build warning and otherwise ignored.
+
+## Caching (live `type = "server"` previews)
+
+Previews mirror a live worktree, so stale caches would defeat their purpose.
+Two layers keep them fresh, and neither needs (or offers) configuration:
+
+- **The preview reverse proxy** rewrites every upstream response's freshness to
+  `Cache-Control: no-cache` (revalidate-before-use) while PRESERVING the
+  upstream `ETag`/`Last-Modified` validators (`forceRevalidate` in
+  `internal/preview/proxy.go`). This is applied at the proxy layer, so it works
+  for ANY preview server implementation - a Vite dev server, a Go binary, a
+  static file server - without that server cooperating. Unchanged assets still
+  answer with a cheap 304, so a well-behaved upstream keeps most of the
+  performance of caching; only the "serve from cache without asking" behavior
+  is removed. Deliberately not configurable: a preview that may serve stale
+  bytes silently hides exactly the changes it exists to show, and the 304 path
+  already keeps revalidation cheap.
+- **Hydra's own web UI** (the embedded SPA) serves `assets/*` (content-hashed
+  Vite bundles) as `immutable` and everything with a stable name
+  (`index.html`, icons) as `no-cache` (`setFrontendCacheHeader` in
+  `internal/cli/server_frontend.go`). Embedded files carry no modtime, so
+  without explicit headers browsers heuristically cached `index.html` and kept
+  showing an old build after a rebuild + restart.
+
+The status/loading endpoints the preview holding page uses are `no-store`.
