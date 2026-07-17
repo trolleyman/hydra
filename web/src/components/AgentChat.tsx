@@ -36,6 +36,7 @@ import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { pasteMarkerText } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
@@ -5141,10 +5142,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           onPointerDown={onComposerResizeStart}
           onPointerMove={onComposerResizeMove}
           onPointerUp={onComposerResizeEnd}
-          className="group flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
+          className="group/resize flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
           title="Drag to resize"
         >
-          <div className="h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-stone-300 dark:group-hover:bg-stone-600" />
+          <ResizeGrip orientation="horizontal" />
         </div>
         <div className="relative mx-auto max-w-5xl">
           {slashMatches.length > 0 && (

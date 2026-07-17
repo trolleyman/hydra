@@ -22,6 +22,7 @@ import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalS
 import { createPortal } from 'react-dom'
 import { InspectorPane } from './InspectorPane'
 import { IconButton } from './IconButton'
+import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
@@ -1729,11 +1730,11 @@ export function AgentDetail({
               split so the pane widths add up cleanly and animate. */}
           <div
             onPointerDown={paneCollapse === 'none' ? handleSplitResizeStart : undefined}
-            className={`group shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
+            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
             style={{ width: paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
             title={paneCollapse === 'none' ? 'Drag to resize' : undefined}
           >
-            <div className="w-1 h-20 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
           <div
             className="flex flex-col min-w-0 min-h-0 overflow-hidden shrink-0"

@@ -23,6 +23,7 @@ import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
+import { ResizeGrip } from './components/ResizeGrip'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
@@ -2682,16 +2683,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         }}
       >
         <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-        {/* Width drag handle: a visible grabber pill (like the split divider's)
-            rather than a bare invisible strip, so the file list reads as
-            resizable at a glance. Hidden while the column is collapsed. */}
+        {/* Width drag handle: invisible strip, shared pill on hover (the
+            unified resize affordance). Hidden while the column is collapsed. */}
         {!filesListHidden && (
           <div
             onMouseDown={startResizing}
             title="Drag to resize"
-            className="group/fl absolute right-0 top-0 bottom-0 w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors z-20"
+            className="group/resize absolute right-0 top-0 bottom-0 w-3 -mr-1 flex items-center justify-center cursor-col-resize z-20 touch-none"
           >
-            <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
         )}
       </div>

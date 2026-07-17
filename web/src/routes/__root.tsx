@@ -28,6 +28,7 @@ import { UncommittedChip } from '../components/UncommittedChip'
 import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
 import { ProjectPathLabel } from '../components/ProjectPathLabel'
+import { ResizeGrip } from '../components/ResizeGrip'
 
 import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
@@ -981,12 +982,14 @@ function RootLayout() {
           </div>
         </div>
 
-          {/* Resize handle (lg+ only - the overlay sidebar has a fixed width) */}
+          {/* Resize handle (md+ only - the mobile panel has a fixed width).
+              Invisible strip; the shared pill appears on hover. */}
           <div
             onPointerDown={handleSidebarResizeStart}
-            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
+            title="Drag to resize"
+            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group/resize items-center justify-center touch-none"
           >
-            <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
         </aside>
 

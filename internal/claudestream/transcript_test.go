@@ -374,3 +374,43 @@ func TestLatestSessionID(t *testing.T) {
 		t.Errorf("LatestSessionID(absent) = %q, want empty", got)
 	}
 }
+
+func TestTailTranscriptMinOneMessage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	// The LAST conversation line alone is far bigger than the byte cap - the
+	// capped tail would land mid-line and yield nothing. The fallback must
+	// re-read unbounded so at least one message backfills.
+	huge := strings.Repeat("x", 4096)
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"uuid":"u1"}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"` + huge + `"}]},"uuid":"a1"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, uuids, err := TailTranscript(path, 64)
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("capped tail backfilled nothing; want the unbounded fallback to relay at least one message")
+	}
+	if _, ok := uuids["a1"]; !ok {
+		t.Errorf("uuid set missing a1 after fallback: %v", uuids)
+	}
+
+	// A cap that fits the last line (but cuts into the first) does NOT trigger
+	// the fallback: only the whole trailing lines within budget relay.
+	lines, _, err = TailTranscript(path, int64(len(content)-20))
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("relayed %d lines, want just the last (in-budget) message", len(lines))
+	}
+	if !bytes.Contains(lines[0], []byte(`"a1"`)) {
+		t.Errorf("expected the last assistant line, got: %.80s", lines[0])
+	}
+}

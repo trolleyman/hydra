@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
@@ -1058,9 +1059,10 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
           onPointerDown={onResizeStart}
           onPointerMove={onResizeMove}
           onPointerUp={onResizeEnd}
-          className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
+          title="Drag to resize"
+          className="group/resize absolute bottom-0 left-0 right-0 h-2 flex items-end justify-center cursor-ns-resize z-20 touch-none"
         >
-          <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
+          <ResizeGrip orientation="horizontal" />
         </div>
       )}
     </div>

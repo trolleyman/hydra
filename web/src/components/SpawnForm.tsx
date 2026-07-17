@@ -16,6 +16,7 @@ import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
@@ -391,10 +392,10 @@ export const SpawnForm = memo(function SpawnForm({
     return (
       <div
         onPointerDown={handleCardResizeStart}
-        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
+        className="group/resize shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
         title="Drag to resize"
       >
-        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+        <ResizeGrip orientation="horizontal" />
       </div>
     )
   }

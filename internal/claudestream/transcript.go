@@ -13,9 +13,14 @@ import (
 )
 
 // DefaultBackfillBytes bounds how much of a transcript tail is read for chat
-// backfill. Generous - a transcript line is typically well under 4KB - while
-// keeping a pathological multi-hundred-MB transcript from stalling an attach.
-const DefaultBackfillBytes = 4 * 1024 * 1024
+// backfill - the INITIAL window only; older conversation pages in on demand
+// via load_before (HistoryBefore), so this just decides how much a fresh
+// attach parses and renders before the page is interactive. Kept modest: a
+// long chat's multi-MB transcript replayed wholesale made "Loading
+// conversation..." crawl. When the tail's LAST conversation line alone
+// exceeds this, tailTranscript falls back to an unbounded read so at least
+// one message always backfills.
+const DefaultBackfillBytes = 1 * 1024 * 1024
 
 // LatestTranscript returns the newest session .jsonl in a Claude project
 // directory ("" when the directory or any transcript is absent). Claude Code
@@ -441,27 +446,39 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 // sub-agent sidechain user/assistant lines instead of dropping them - the
 // main-transcript backfill drops them (main conversation only), but a sub-agent
 // transcript IS entirely sidechain, so its own backfill keeps them.
+//
+// Guarantees at least one conversation line when the transcript has any: if the
+// capped tail yields none (a single message larger than the whole budget - a
+// huge pasted tool result), it retries unbounded rather than backfilling an
+// empty conversation.
 func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, err error) {
+	lines, uuids, truncated, err := tailTranscriptOnce(path, maxBytes, keepSidechain)
+	if err == nil && truncated && len(lines) == 0 {
+		lines, uuids, _, err = tailTranscriptOnce(path, 0, keepSidechain)
+	}
+	return lines, uuids, errtrace.Wrap(err)
+}
+
+func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, truncated bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, errtrace.Wrap(err)
+		return nil, nil, false, errtrace.Wrap(err)
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, errtrace.Wrap(err)
+		return nil, nil, false, errtrace.Wrap(err)
 	}
-	truncated := false
 	if maxBytes > 0 && info.Size() > maxBytes {
 		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
-			return nil, nil, errtrace.Wrap(err)
+			return nil, nil, false, errtrace.Wrap(err)
 		}
 		truncated = true
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return nil, nil, errtrace.Wrap(err)
+		return nil, nil, false, errtrace.Wrap(err)
 	}
 	if truncated {
 		// The seek landed mid-line; drop the fragment before the first newline.
@@ -495,5 +512,5 @@ func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]
 		copy(cp, line)
 		lines = append(lines, cp)
 	}
-	return lines, uuids, nil
+	return lines, uuids, truncated, nil
 }
