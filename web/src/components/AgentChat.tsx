@@ -2119,6 +2119,10 @@ function QuestionCard({
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // Whether the "Other" row is selected, per question. Explicit state (not
+  // derived from the text) so a typed-but-then-rejected free text can stay in
+  // the box while a real option is picked instead.
+  const [otherSel, setOtherSel] = useState<boolean[]>(() => specs.map(() => false))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
 
@@ -2131,9 +2135,11 @@ function QuestionCard({
     () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
     [specs, answeredText],
   )
-  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const localEmpty =
+    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
+  const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -2151,16 +2157,34 @@ function QuestionCard({
         return next
       }),
     )
+    // Picking a real option in a single-select takes over from "Other" (the
+    // typed text stays in the box, just deselected).
+    if (!specs[qi].multiSelect) {
+      setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+    }
   }
 
-  const complete = specs.every((_, i) => selected[i].size > 0 || other[i].trim() !== '')
+  // Select (or, when the dot itself is clicked, toggle) the "Other" row.
+  // Clicking anywhere in the row and typing both select it; in a single-select
+  // that clears the picked option, mirroring toggleOption's takeover.
+  function selectOther(qi: number, next = true) {
+    if (answered) return
+    setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
+    if (next && !specs[qi].multiSelect) {
+      setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+    }
+  }
+
+  const complete = specs.every(
+    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+  )
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
-      if (other[i].trim()) labels.push(other[i].trim())
+      if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
     }
     if (onSubmit(answers)) setSubmitted(true)
@@ -2210,14 +2234,57 @@ function QuestionCard({
                 </button>
               )
             })}
-            <input
-              type="text"
-              value={showOther[qi]}
-              onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
-              disabled={answered}
-              placeholder="Other..."
-              className="w-full rounded-lg border border-stone-200 dark:border-white/[0.07] bg-transparent px-2.5 py-1.5 text-xs placeholder-stone-400 dark:placeholder-stone-500 outline-none focus:border-[#c96442]/60 disabled:opacity-50"
-            />
+            {/* "Other" renders as one more option row: it has its own dot and
+                is selected by clicking the row, typing in it, or toggling the
+                dot - and a settled card highlights it like any picked option. */}
+            {(() => {
+              const isSel = showOtherSel[qi]
+              return (
+                <div
+                  onClick={() => selectOther(qi)}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                    answered ? 'cursor-default' : 'cursor-text'
+                  } ${
+                    isSel
+                      ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
+                      : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
+                  } ${answered && !isSel ? 'opacity-50' : ''}`}
+                >
+                  <button
+                    type="button"
+                    disabled={answered}
+                    aria-label={isSel ? 'Deselect Other' : 'Select Other'}
+                    aria-pressed={isSel}
+                    onClick={(e) => {
+                      // The dot is the one spot that can also DEselect.
+                      e.stopPropagation()
+                      selectOther(qi, !otherSel[qi])
+                    }}
+                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                      q.multiSelect ? 'rounded' : 'rounded-full'
+                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'} ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
+                  >
+                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                  </button>
+                  <input
+                    type="text"
+                    value={showOther[qi]}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                      // Typing claims the selection.
+                      selectOther(qi)
+                    }}
+                    onFocus={() => selectOther(qi)}
+                    disabled={answered}
+                    placeholder="Other..."
+                    className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
+                  />
+                </div>
+              )
+            })()}
           </div>
         </div>
       ))}

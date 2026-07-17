@@ -16,7 +16,7 @@ import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
 import { ProviderIcon } from '../components/ReviewControls'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_DESKTOP_QUERY } from '../lib/sidebar'
@@ -626,18 +626,25 @@ function RootLayout() {
           dot, title and action toolbar into the slot (TopBarPortal); the
           repository browser and settings render a static crumb. */}
       <header className="shrink-0 h-12 flex items-center gap-1.5 px-2 sm:px-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        {(!isDesktopViewport || desktopCollapsed) && (
-          <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (Ctrl+.)`}>
-            <button
-              type="button"
-              aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-              onClick={toggleSidebar}
-              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
-              {sidebarVisible ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
-            </button>
-          </Tooltip>
-        )}
+        {/* Sidebar toggle: always present, so it never jumps in and out of the
+            bar - the icon flips between hide and show. On mobile it's the
+            hamburger for the full-screen sidebar panel. */}
+        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (Ctrl+.)`}>
+          <button
+            type="button"
+            aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+            onClick={toggleSidebar}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            {isDesktopViewport ? (
+              sidebarVisible ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />
+            ) : sidebarVisible ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
+          </button>
+        </Tooltip>
         <ProjectDropdown
           projects={projects}
           selectedId={currentProjectId}
@@ -711,120 +718,122 @@ function RootLayout() {
                             : ahead > 0
                               ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
                               : `Up to date with ${remote}`
+                const hasStatusChips =
+                  !!reviewConfig?.browse_url ||
+                  (pushStatus != null && pushStatus.uncommitted.total > 0) ||
+                  behind > 0 ||
+                  ahead > 0
                 return (
-                  <div className="flex items-center gap-1.5">
-                    <Link
-                      to="/project/$projectId/repository"
-                      params={{ projectId: currentProjectId }}
-                      aria-label="Repository"
-                      onClick={(e) => {
-                        if (repositoryActive) {
-                          // Toggle off: left-clicking the active Repository button
-                          // returns to the project home screen, mirroring agent
-                          // deselection. Middle/Ctrl-click ignore this and open the
-                          // repository in a new tab (it's a real link).
-                          e.preventDefault()
-                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                        }
-                      }}
-                      className={
-                        repositoryActive
-                          ? 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                          : 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-                      }
-                    >
-                      <FolderGit2 className="w-4 h-4 shrink-0" />
-                      {/* The label is the project's path (HOME abbreviated to
-                          "~" server-side), middle-elided to fit the row - see
-                          ProjectPathLabel. Falls back to "Repository" until
-                          the project list has loaded. */}
-                      {currentProject ? (
-                        <ProjectPathLabel
-                          path={currentProject.display_path ?? currentProject.path}
-                          title={currentProject.path}
-                        />
-                      ) : (
-                        <span className="truncate">Repository</span>
-                      )}
-                    </Link>
-                    {/* Forge web link, derived from the remote URL (read-only, no
-                        auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
-                        no remote or no https browse URL could be derived. */}
-                    {reviewConfig?.browse_url && (
-                      <Tooltip
-                        content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
-                        // ml-1/-mr-1 shifts the forge glyph rightward within the
-                        // uniform gap-1.5 row: a touch more air after "Repository",
-                        // a touch less before the status chips.
-                        className="shrink-0 ml-1 -mr-1"
-                      >
-                        <a
-                          href={reviewConfig.browse_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Open repository on the forge"
-                          className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
-                        </a>
-                      </Tooltip>
-                    )}
-                    {/* Uncommitted-changes warning: the project checkout is dirty
-                        (e.g. a Settings save rewrote .hydra/config.toml). Click to
-                        review the paths and commit them all. */}
-                    {pushStatus && pushStatus.uncommitted.total > 0 && (
-                      <UncommittedChip
-                        uncommitted={pushStatus.uncommitted}
-                        committing={committing}
-                        onCommit={handleCommit}
-                      />
-                    )}
-                    {/* Ahead/behind status indicator (read-only) */}
-                    {(behind > 0 || ahead > 0) && (
-                      <Tooltip content={statusTooltip} className="shrink-0">
-                        <span className="flex items-center gap-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
-                          {behind > 0 && (
-                            <span className="flex items-center text-amber-600 dark:text-amber-400">
-                              <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
-                            </span>
-                          )}
-                          {ahead > 0 && (
-                            <span className="flex items-center">
-                              <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
-                            </span>
-                          )}
-                        </span>
-                      </Tooltip>
-                    )}
-                    {/* Sync button (pull then push) */}
-                    <Tooltip content={syncTooltip} className="shrink-0">
-                      <button
-                        type="button"
-                        onClick={handleSync}
-                        disabled={!canSync}
-                        aria-label={syncTooltip}
+                  <>
+                    {/* Row 1: the Repository link (labelled with the project's
+                        path) + the sync action. The path gets the whole row's
+                        width; status chips live on the row below. */}
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        to="/project/$projectId/repository"
+                        params={{ projectId: currentProjectId }}
+                        aria-label="Repository"
+                        onClick={(e) => {
+                          if (repositoryActive) {
+                            // Toggle off: left-clicking the active Repository button
+                            // returns to the project home screen, mirroring agent
+                            // deselection. Middle/Ctrl-click ignore this and open the
+                            // repository in a new tab (it's a real link).
+                            e.preventDefault()
+                            navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                          }
+                        }}
                         className={
-                          canSync
-                            ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                            : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          repositoryActive
+                            ? 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                            : 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                         }
                       >
-                        <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                      </button>
-                    </Tooltip>
-                    {/* Hide-sidebar toggle, at the row's trailing edge (the show
-                        toggle lives in the global top bar). */}
-                    <Tooltip content="Hide sidebar (Ctrl+.)" className="shrink-0">
-                      <button
-                        type="button"
-                        aria-label="Hide sidebar"
-                        onClick={toggleSidebar}
-                        className="inline-flex items-center p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                      >
-                        <PanelLeftClose className="w-4 h-4 shrink-0" />
-                      </button>
-                    </Tooltip>
-                  </div>
+                        <FolderGit2 className="w-4 h-4 shrink-0" />
+                        {/* The label is the project's path (HOME abbreviated to
+                            "~" server-side), middle-elided to fit the row - see
+                            ProjectPathLabel. Falls back to "Repository" until
+                            the project list has loaded. */}
+                        {currentProject ? (
+                          <ProjectPathLabel
+                            path={currentProject.display_path ?? currentProject.path}
+                            title={currentProject.path}
+                          />
+                        ) : (
+                          <span className="truncate">Repository</span>
+                        )}
+                      </Link>
+                      {/* Sync button (pull then push) */}
+                      <Tooltip content={syncTooltip} className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSync}
+                          disabled={!canSync}
+                          aria-label={syncTooltip}
+                          className={
+                            canSync
+                              ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                              : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          }
+                        >
+                          <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                    {/* Row 2: forge link + dirty/ahead/behind status. Only
+                        rendered when there is something to show, so a clean
+                        repo keeps the section to the single row above. */}
+                    {hasStatusChips && (
+                      <div className="flex items-center gap-1.5 px-1 pb-1">
+                        {/* Forge web link, derived from the remote URL (read-only, no
+                            auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                            no remote or no https browse URL could be derived. */}
+                        {reviewConfig?.browse_url && (
+                          <Tooltip
+                            content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                            className="shrink-0"
+                          >
+                            <a
+                              href={reviewConfig.browse_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label="Open repository on the forge"
+                              className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
+                            </a>
+                          </Tooltip>
+                        )}
+                        {/* Uncommitted-changes warning: the project checkout is dirty
+                            (e.g. a Settings save rewrote .hydra/config.toml). Click to
+                            review the paths and commit them all. */}
+                        {pushStatus && pushStatus.uncommitted.total > 0 && (
+                          <UncommittedChip
+                            uncommitted={pushStatus.uncommitted}
+                            committing={committing}
+                            onCommit={handleCommit}
+                          />
+                        )}
+                        {/* Ahead/behind status indicator (read-only) */}
+                        {(behind > 0 || ahead > 0) && (
+                          <Tooltip content={statusTooltip} className="shrink-0">
+                            <span className="flex items-center gap-1 px-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
+                              {behind > 0 && (
+                                <span className="flex items-center text-amber-600 dark:text-amber-400">
+                                  <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                                </span>
+                              )}
+                              {ahead > 0 && (
+                                <span className="flex items-center">
+                                  <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                                </span>
+                              )}
+                            </span>
+                          </Tooltip>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )
               })()
             ) : (
@@ -836,16 +845,6 @@ function RootLayout() {
                 <span className="inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
                   <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
-                <Tooltip content="Hide sidebar (Ctrl+.)" className="shrink-0">
-                  <button
-                    type="button"
-                    aria-label="Hide sidebar"
-                    onClick={toggleSidebar}
-                    className="inline-flex items-center p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                  >
-                    <PanelLeftClose className="w-4 h-4 shrink-0" />
-                  </button>
-                </Tooltip>
               </div>
             )}
           </div>

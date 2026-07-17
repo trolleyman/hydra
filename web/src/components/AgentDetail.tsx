@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { memo, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -700,17 +700,37 @@ export function AgentDetail({
   splitRatioRef.current = splitRatio
   const [splitResizing, setSplitResizing] = useState(false)
   const panesRef = useRef<HTMLDivElement>(null)
-  // Suppress the pane width transition when the working pane is (un)mounted
-  // ("Diff only" on/off): the working pane can't animate through width 0 (xterm
-  // would relayout at 0 cols, so it unmounts instead), and animating just the
-  // inspector's width makes the diff appear to slide in from the left. Swap
-  // instantly in both directions; the inspector collapse keeps its glide.
+  // Pixel width of the panes container - the working pane's inner content is
+  // pinned to a fixed pixel width during its collapse/reveal animation, and
+  // that width is derived from this.
+  const [panesW, setPanesW] = useState(0)
+  useLayoutEffect(() => {
+    if (!isWide) return
+    const el = panesRef.current
+    if (!el) return
+    const update = () => setPanesW(el.clientWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [isWide])
+  // True while the working pane is animating back open from "Diff only": its
+  // inner content must stay at the fixed target width until the outer width
+  // tween lands, or the terminal would relayout through near-zero widths.
+  const [workingRevealing, setWorkingRevealing] = useState(false)
   const prevPaneCollapseRef = useRef(paneCollapse)
-  const workingSwap = paneCollapse === 'working' || prevPaneCollapseRef.current === 'working'
   useEffect(() => {
+    if (prevPaneCollapseRef.current === 'working' && paneCollapse !== 'working') setWorkingRevealing(true)
     prevPaneCollapseRef.current = paneCollapse
   }, [paneCollapse])
-  const paneTransition = splitResizing || workingSwap ? undefined : 'width 240ms ease'
+  useEffect(() => {
+    if (!workingRevealing) return
+    // Matches the 240ms width tween (with a little slack).
+    const t = setTimeout(() => setWorkingRevealing(false), 300)
+    return () => clearTimeout(t)
+  }, [workingRevealing])
+  const paneTransition = splitResizing ? undefined : 'width 240ms ease'
   // Hand-rolled divider drag, mirroring handleSidebarResizeStart in __root.tsx.
   const handleSplitResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
@@ -1574,43 +1594,64 @@ export function AgentDetail({
       {agentTopBar}
       {isWide ? (
         // ── Two-pane split ──────────────────────────────────────────────────
-        // Left: metadata + collapsible prompt + terminal/chat filling the height.
-        // Right: the inspector pane (diff / tests / previews). A hand-rolled
-        // divider between them, plus the three collapse states from paneCollapse.
-        // The panes' widths animate (width transition) so collapsing/expanding the
-        // inspector glides; the transition is suppressed mid-drag so resizing stays
-        // snappy. The working pane stays mounted while the inspector collapses (so
-        // its terminal never hits a 0-width relayout); "Diff only" (working
-        // collapsed) unmounts it instead - that transition isn't animated.
+        // Left: a pane toolbar (metadata + hide-chat toggle) then collapsible
+        // prompt + terminal/chat filling the height. Right: the inspector pane
+        // (diff / tests / previews). A hand-rolled divider between them, plus
+        // the three collapse states from paneCollapse. The panes' widths
+        // animate (width transition) so collapsing/expanding either side
+        // glides; the transition is suppressed mid-drag so resizing stays
+        // snappy. The working pane stays mounted in every state: while it
+        // collapses its INNER content keeps a fixed pixel width (clipped by
+        // the outer overflow-hidden), so the terminal never relayouts at a
+        // transient width and the swap is a real slide, not a jump.
         <div ref={panesRef} className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
-          {paneCollapse !== 'working' && (
+          <div
+            className="flex min-h-0 overflow-hidden shrink-0"
+            style={{
+              width:
+                paneCollapse === 'working'
+                  ? 0
+                  : paneCollapse === 'inspector'
+                    ? '100%'
+                    : `calc(${(splitRatio * 100).toFixed(4)}% - 6px)`,
+              transition: paneTransition,
+            }}
+          >
+            {/* Inner content pinned to a fixed pixel width while the pane
+                collapses/reveals, so the width tween clips it instead of
+                reflowing the terminal (same trick as the sidebar collapse). */}
             <div
-              className="flex flex-col min-h-0 overflow-hidden shrink-0"
+              className="flex flex-col min-h-0 h-full shrink-0"
               style={{
-                width: paneCollapse === 'inspector' ? '100%' : `calc(${(splitRatio * 100).toFixed(4)}% - 6px)`,
-                transition: paneTransition,
+                width:
+                  paneCollapse === 'working' || workingRevealing
+                    ? Math.max(0, panesW * splitRatio - 6)
+                    : '100%',
               }}
             >
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-                <div className="shrink-0 flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <AgentMetaRow
-                      agent={agent}
-                      agentTypeClass={agentTypeClass}
-                      branches={branches}
-                      savingBase={savingBase}
-                      savingChatMode={savingChatMode}
-                      savingDownstream={savingDownstream}
-                      onSaveBase={onSaveBase}
-                      onRefreshBranches={refreshBranches}
-                      onSaveChatMode={onSaveChatMode}
-                      onSaveDownstream={onSaveDownstream}
-                    />
-                  </div>
-                  {/* Hide-chat toggle, inline at the metadata row's right (no header
-                      box - it must not push the metadata chips down). */}
-                  {workingTopButton}
+              {/* Pane toolbar: flush at the pane top, min-h matching the
+                  inspector's Changes bar so the two collapse toggles line up. */}
+              <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex-1 min-w-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
                 </div>
+                {/* self-start pins the toggle to the toolbar's first line even
+                    when the chips wrap, so it stays level with the inspector
+                    bar's toggle across the divider. */}
+                <div className="shrink-0 self-start">{workingTopButton}</div>
+              </div>
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-3 pb-4 gap-3">
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
                     replay the task as the first chat message. */}
                 {agent.prompt && agent.chat_mode !== true && (
@@ -1627,7 +1668,7 @@ export function AgentDetail({
                 />
               </div>
             </div>
-          )}
+          </div>
           {/* Draggable divider - kept mounted but width-collapsed off the full
               split so the pane widths add up cleanly and animate. */}
           <div
@@ -1709,9 +1750,13 @@ export function AgentDetail({
                   />
                 </div>
               )}
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-3 pb-4 gap-3">
+              {/* No padding around the chat/terminal on mobile - it fills the
+                  screen edge-to-edge; only the prompt keeps a small inset. */}
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               {agent.prompt && agent.chat_mode !== true && (
-                <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+                <div className="shrink-0 px-3 pt-2 pb-1">
+                  <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+                </div>
               )}
               <AgentTerminal
                 agentId={agent.id}
