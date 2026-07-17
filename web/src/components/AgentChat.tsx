@@ -742,8 +742,10 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
   return (
     // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
     // opening glides the width (fit -> w-64, via interpolate-size where
-    // supported) alongside the Expandable height.
-    <div className={`overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in [interpolate-size:allow-keywords] transition-[width] duration-200 max-w-full ${open ? 'w-64' : 'w-fit'}`}>
+    // supported) alongside the Expandable height. Corner-anchored; while open
+    // it takes the higher z so it layers over the selector's chip on a narrow
+    // pane instead of anything relocating.
+    <div className={`absolute top-2 right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in [interpolate-size:allow-keywords] transition-[width] duration-200 ${open ? 'z-30 w-64' : 'z-20 w-fit'}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -758,7 +760,12 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
         />
       </button>
       <Expandable open={open}>
-        <div className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+        {/* Fixed w-64 (the card's OPEN width): Expandable measures scrollHeight
+            the moment it opens, while the card is still gliding out from its
+            narrow chip width - without a fixed inner width the text wraps into
+            a huge column, the height animates to that, then snaps back down
+            once the width lands. */}
+        <div className="w-64 max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
           {completed.length > 0 && (
             <>
               <button
@@ -2006,8 +2013,10 @@ function ChatViewSelector({
     // A floating card styled like the PlanPanel: the collapsed chip is its
     // fit-content header, and opening glides both the width (fit -> w-72, via
     // interpolate-size where supported) and the height (Expandable).
+    // Corner-anchored; while open it takes the higher z so it layers over the
+    // plan panel's chip on a narrow pane instead of anything relocating.
     <div
-      className={`overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs [interpolate-size:allow-keywords] transition-[width] duration-200 max-w-full ${open ? 'w-72' : 'w-fit'}`}
+      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs [interpolate-size:allow-keywords] transition-[width] duration-200 ${open ? 'z-30 w-72' : 'z-20 w-fit'}`}
     >
       <button
         onClick={() => setOpen((o) => !o)}
@@ -2032,7 +2041,9 @@ function ChatViewSelector({
         />
       </button>
       <Expandable open={open}>
-        <div className="pb-1">
+        {/* Fixed w-72 (the open card width) so the open-height measurement is
+            width-independent - see the PlanPanel note. */}
+        <div className="w-72 pb-1">
             <button
               onClick={() => pick('main')}
               className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
@@ -5036,30 +5047,24 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }}
     >
       <div className="relative flex-1 min-h-0">
-        {/* Floating top strip over the transcript: the current-agents selector
-            (left, once any sub-agent exists) and the plan panel (right). One
-            wrapping flex row, so on a narrow pane an expanded plan drops BELOW
-            the selector instead of overlapping it. */}
-        {(hasSubagents || (todos.length > 0 && replayDone && !viewSub)) && (
-          <div className="pointer-events-none absolute inset-x-3 top-2 z-20 flex flex-wrap items-start gap-2">
-            {hasSubagents && (
-              <div className="pointer-events-auto min-w-0 max-w-full">
-                <ChatViewSelector
-                  chatView={viewSub ? chatView : 'main'}
-                  subagents={subagents}
-                  taskToolByUse={taskToolByUse}
-                  onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
-                />
-              </div>
-            )}
-            {/* Current plan (item 17): the agent's latest TodoWrite. Main view
-                only - it is the main agent's plan. */}
-            {todos.length > 0 && replayDone && !viewSub && (
-              <div className="pointer-events-auto ml-auto min-w-0 max-w-full">
-                <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />
-              </div>
-            )}
-          </div>
+        {/* Floating cards over the transcript: the current-agents selector
+            (top-left, once any sub-agent exists) and the plan panel
+            (top-right). Both are corner-anchored so expanding one never
+            relocates the other (no pushing/jumping); when they'd overlap on a
+            narrow pane, the OPEN card takes the higher z and simply layers
+            over the other's chip. */}
+        {hasSubagents && (
+          <ChatViewSelector
+            chatView={viewSub ? chatView : 'main'}
+            subagents={subagents}
+            taskToolByUse={taskToolByUse}
+            onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+          />
+        )}
+        {/* Current plan (item 17): the agent's latest TodoWrite. Main view
+            only - it is the main agent's plan. */}
+        {todos.length > 0 && replayDone && !viewSub && (
+          <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />
         )}
         {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
             scrollTop to keep an arbitrary anchor node stable when content above

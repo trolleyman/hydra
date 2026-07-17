@@ -520,6 +520,19 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveChatMode: (next: boolean) => void
   onSaveDownstream: (n: string) => void
 }) {
+  // Confirm before flipping the terminal/chat mode - switching restarts the
+  // Claude process, so an accidental tap on the pill shouldn't do it silently.
+  const confirmChatMode = (next: boolean) => {
+    if ((agent.chat_mode === true) === next) return
+    useDialogStore.getState().show({
+      title: next ? 'Switch to chat?' : 'Switch to terminal?',
+      message: 'This restarts the Claude process in the new mode. The conversation is preserved.',
+      type: 'confirm',
+      showCancel: true,
+      confirmLabel: next ? 'Switch to chat' : 'Switch to terminal',
+      onConfirm: () => onSaveChatMode(next),
+    })
+  }
   return (
     // The chip strip: no interpunct separators; wraps on desktop, scrolls on
     // mobile (see MetaStrip). Dropdown children (the base selector) are
@@ -588,29 +601,47 @@ const AgentMetaRow = memo(function AgentMetaRow({
       <span className="shrink-0 inline-flex items-center">
         <MRStateChip agent={agent} />
       </span>
-      {/* Terminal/chat mode switch (Claude only), inline as an icon button -
-          shows the mode you'd switch TO. Switching restarts the Claude process
-          in the new mode; the conversation is preserved via --continue. */}
+      {/* Terminal/chat mode toggle (Claude only) - the segmented pill, with a
+          confirm dialog so an accidental tap can't restart the Claude process
+          (switching restarts it in the new mode; the conversation is preserved
+          via --continue). */}
       {agent.agent_type === 'claude' && !agent.archived && (
-        savingChatMode ? (
-          <span className="shrink-0 inline-flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
-            <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> switching
-          </span>
-        ) : (
-          <Tooltip
-            content={`${agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'} (restarts the Claude process; the conversation is preserved)`}
-            className="shrink-0"
-          >
-            <button
-              type="button"
-              aria-label={agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'}
-              onClick={() => onSaveChatMode(agent.chat_mode !== true)}
-              className="inline-flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
-              {agent.chat_mode ? <TerminalSquare className="w-3.5 h-3.5" /> : <MessageSquare className="w-3.5 h-3.5" />}
-            </button>
-          </Tooltip>
-        )
+        <span
+          className="shrink-0 inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
+          title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
+        >
+          {savingChatMode ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              switching
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={() => confirmChatMode(false)}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                  agent.chat_mode
+                    ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                    : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                }`}
+              >
+                <TerminalSquare className="w-3 h-3" />
+                terminal
+              </button>
+              <button
+                onClick={() => confirmChatMode(true)}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
+                  agent.chat_mode
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                chat
+              </button>
+            </>
+          )}
+        </span>
       )}
       {agent.created_at !== 0 && agent.created_at !== undefined && (
         <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
+import { pinCardToTop } from '../lib/collapseScroll'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
 // icons at rest and brighten ONLY the icon the pointer is actually over - a
@@ -135,16 +136,10 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
   const rootRef = useRef<HTMLDivElement>(null)
   // Collapsing a card whose top has scrolled above the viewport would leave the
   // scroll at a random depth of whatever content replaces the folded body -
-  // bring the (now short) card to the top instead, docked under the sticky
-  // chrome (scroll-margin covers the stuck Changes/section bars).
+  // pin the (now short) card to the top instead, docked under the sticky
+  // chrome (see pinCardToTop for why it's a pin, not a one-shot scroll).
   const handleToggle = () => {
-    if (!collapsed) {
-      const el = rootRef.current
-      const scroller = el?.closest('[data-inspector-scroll], [data-main-scroll]')
-      if (el && scroller && el.getBoundingClientRect().top < scroller.getBoundingClientRect().top) {
-        requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
-      }
-    }
+    if (!collapsed && rootRef.current) pinCardToTop(rootRef.current)
     onToggleCollapsed()
   }
   return (

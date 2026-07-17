@@ -24,6 +24,7 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
+import { pinCardToTop } from './lib/collapseScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
@@ -941,16 +942,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave
-  // the scroll at a random depth of the files below - bring the (now short)
-  // card to the top instead, docked under the sticky chrome (scroll-margin).
+  // the scroll at a random depth of the files below - pin the (now short)
+  // card to the top instead, docked under the sticky chrome (see pinCardToTop
+  // for why it's a pin, not a one-shot scroll).
   const toggleCollapse = () => {
-    if (!isCollapsed) {
-      const el = cardRef.current
-      const scroller = el?.closest('[data-inspector-scroll], [data-main-scroll]')
-      if (el && scroller && el.getBoundingClientRect().top < scroller.getBoundingClientRect().top) {
-        requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
-      }
-    }
+    if (!isCollapsed && cardRef.current) pinCardToTop(cardRef.current)
     onToggleCollapse(file.path)
   }
 
