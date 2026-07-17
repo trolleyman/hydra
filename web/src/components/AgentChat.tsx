@@ -2886,15 +2886,29 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // applyTaskResult re-keys a just-created task from its provisional tool_use
     // key to the real "#N" id parsed from the TaskCreate result ("Task #17
     // created successfully: ..."), so later TaskUpdates for #17 find it.
+    //
+    // The real id often ALREADY exists: the plan was seeded from the persisted
+    // entries (keyed by real id) and the replay window then re-delivers the very
+    // creates that produced them. That replayed create is the same task, not a
+    // new one, so it folds into the seeded entry - which keeps its restored
+    // status and order, both newer than this create's `pending`. Bailing out
+    // here instead left the provisional entry stranded, and every restored task
+    // showed twice: once completed, once as a pending clone.
     const applyTaskResult = (toolUseId: string, resultText: string) => {
       const provKey = `use:${toolUseId}`
       const cur = taskItems.get(provKey)
       if (!cur) return
       const m = /#(\d+)/.exec(resultText)
       const id = m ? m[1] : String(cur.order)
-      if (id === provKey || taskItems.has(id)) return
       taskItems.delete(provKey)
-      taskItems.set(id, cur)
+      const existing = taskItems.get(id)
+      if (existing) {
+        existing.content = cur.content
+        existing.activeForm = cur.activeForm
+        existing.description = cur.description
+      } else {
+        taskItems.set(id, cur)
+      }
       publishTasks()
     }
     // applyTodoWrite replaces the whole plan from a TodoWrite (the whole-list
