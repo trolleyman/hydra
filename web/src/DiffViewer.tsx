@@ -261,6 +261,13 @@ function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
+// Row hover tint. This is a translucent overlay rather than `hover:brightness-95`
+// on the row: a filter promotes the row to its own compositing layer and forces a
+// re-raster of its text on every pointer move between rows, which leaves ghosted
+// glyph fragments from neighbouring wrapped rows. A black overlay at alpha a is
+// arithmetically identical to brightness(1-a), so the light-mode tint is unchanged.
+const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:after:absolute hover:after:inset-0 hover:after:bg-black/[0.05] dark:hover:after:bg-white/[0.04]"
+
 const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
@@ -286,7 +293,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const rowSel = selOld || selNew
         return (
           <Fragment key={idx}>
-            <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+            <div className={`flex items-stretch ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
               <div className="relative flex shrink-0 select-none">
                 <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
