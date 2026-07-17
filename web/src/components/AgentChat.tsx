@@ -41,7 +41,8 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { loadPlan, savePlan, seedLocalPlan, type PlanEntry } from '../lib/planStore'
+import { loadPlan, savePlan, seedLocalPlan } from '../lib/planStore'
+import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { loadModel, saveModel, seedLocalModel } from '../lib/modelStore'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -526,79 +527,10 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
 
 // --- Plan / to-do panel (TodoWrite) -----------------------------------------
 
-// One entry of the agent's TodoWrite list. `activeForm` is the present-tense
-// label the CLI shows while a step is in progress ("Running tests").
-interface TodoItem {
-  content: string
-  status: 'pending' | 'in_progress' | 'completed'
-  activeForm?: string
-  // TaskCreate's description (TodoWrite items carry none), shown in the plan
-  // panel behind a per-row expander.
-  description?: string
-}
-
-// parseTodos validates a TodoWrite tool input ({todos: [...]}), returning null
-// for anything malformed so the call falls back to a normal tool card.
-function parseTodos(input: unknown): TodoItem[] | null {
-  if (!input || typeof input !== 'object') return null
-  const todos = (input as { todos?: unknown }).todos
-  if (!Array.isArray(todos)) return null
-  const out: TodoItem[] = []
-  for (const t of todos) {
-    if (!t || typeof t !== 'object') continue
-    const o = t as Record<string, unknown>
-    if (typeof o.content !== 'string' || !o.content) continue
-    const status = o.status === 'in_progress' || o.status === 'completed' ? o.status : 'pending'
-    out.push({ content: o.content, status, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined })
-  }
-  return out.length ? out : null
-}
-
 // restoredPlan reads the persisted plan for an agent as display TodoItems, so
 // the panel can seed from it on mount / reconnect (see planStore).
 function restoredPlan(projectId: string | null, agentId: string): TodoItem[] {
-  return loadPlan(projectId, agentId)
-    .sort((a, b) => a.order - b.order)
-    .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description }))
-}
-
-// The Task* tool family (TaskCreate/TaskUpdate) is the incremental cousin of
-// TodoWrite: instead of one call carrying the whole list, each call mutates a
-// single task. parseTaskCreate reads a TaskCreate input ({subject, ...}); a new
-// task always starts `pending` (the harness assigns its id in creation order).
-function parseTaskCreate(input: unknown): { content: string; activeForm?: string; description?: string } | null {
-  if (!input || typeof input !== 'object') return null
-  const o = input as Record<string, unknown>
-  if (typeof o.subject !== 'string' || !o.subject) return null
-  return {
-    content: o.subject,
-    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
-    description: typeof o.description === 'string' && o.description ? o.description : undefined,
-  }
-}
-
-// parseTaskUpdate reads a TaskUpdate input ({taskId, status?, subject?, ...}),
-// returning the referenced id plus only the fields it changes (status "deleted"
-// removes the task). Returns null when it names no task, so the call falls back
-// to a normal tool card.
-function parseTaskUpdate(
-  input: unknown,
-): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string; description?: string } | null {
-  if (!input || typeof input !== 'object') return null
-  const o = input as Record<string, unknown>
-  const taskId = typeof o.taskId === 'string' ? o.taskId : typeof o.taskId === 'number' ? String(o.taskId) : ''
-  if (!taskId) return null
-  const status =
-    o.status === 'pending' || o.status === 'in_progress' || o.status === 'completed' || o.status === 'deleted'
-      ? o.status
-      : undefined
-  return {
-    taskId,
-    status,
-    content: typeof o.subject === 'string' && o.subject ? o.subject : undefined,
-    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
-    description: typeof o.description === 'string' && o.description ? o.description : undefined,
-  }
+  return toTodoItems(loadPlan(projectId, agentId))
 }
 
 // parseExitPlan reads an ExitPlanMode input ({plan, planFilePath}) - the plan
@@ -2835,102 +2767,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const seenBlocks = new Map<string, Set<string>>()
 
     // --- Task* plan reconstruction (item 17, cont.) ------------------------
-    // TodoWrite carries the whole to-do list in one call, so it can just replace
-    // `todos`. The Task* family (TaskCreate/TaskUpdate) is incremental, so we
-    // rebuild the list here and republish it to the same PlanPanel: TaskCreate
-    // appends a task; TaskUpdate mutates one by id, or drops it on status
-    // "deleted". A session uses one planning tool or the other; if both ever
-    // appear, the most recent write wins.
-    //
-    // A TaskCreate's assigned id (#1, #2, ...) lives in its tool *result*, not
-    // its input - and it is that id, not creation order, that a later TaskUpdate
-    // references. So a created task is keyed PROVISIONALLY by its tool_use id
-    // (`use:<id>`) when the tool_use lands, then RE-KEYED to the real `#N` id
-    // once the result arrives (applyTaskResult). Keying by creation order broke
-    // once the replay window dropped early creates: the order restarted at 1
-    // while the real ids kept climbing, so every TaskUpdate missed and the panel
-    // showed 0/N.
-    type TaskEntry = { content: string; status: TodoItem['status']; activeForm?: string; description?: string; order: number }
-    const taskItems = new Map<string, TaskEntry>()
-    let taskSeq = 0
-    // Seed from the persisted plan (keyed by real id where known), so a
-    // TaskUpdate whose create has scrolled out of the replay window still finds
-    // its target and the panel isn't wiped to empty on reconnect.
-    for (const e of loadPlan(projectId, agentId)) {
-      taskItems.set(e.key, { content: e.content, status: e.status, activeForm: e.activeForm, description: e.description, order: e.order })
-      taskSeq = Math.max(taskSeq, e.order)
-    }
-    // A session uses ONE planning tool - TodoWrite (whole-list) or Task*
-    // (incremental) - so the most recent tool wins: switching from one to the
-    // other clears the old list. Inferred from the seeded keys on restore.
-    let planMode: 'todo' | 'task' | null = taskItems.size
-      ? ([...taskItems.keys()].some((k) => k.startsWith('todo:')) ? 'todo' : 'task')
-      : null
-    const publishTasks = () => {
-      const entries: PlanEntry[] = [...taskItems.entries()]
-        .map(([key, v]) => ({ key, ...v }))
-        .sort((a, b) => a.order - b.order)
+    // The plan is rebuilt from the agent's tool calls and republished to the
+    // PlanPanel. The reducer itself lives in lib/planReducer (it is pure, and
+    // tested there); here it is wired to the persisted plan on both ends - the
+    // seed it starts from, and savePlan/setTodos on every change.
+    const plan = createPlanBuilder(loadPlan(projectId, agentId), (entries) => {
       savePlan(projectId, agentId, entries)
-      setTodos(entries.map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })))
-    }
-    const applyTaskTool = (name: string | undefined, input: unknown, toolUseId: string) => {
-      if (name === 'TaskCreate') {
-        const t = parseTaskCreate(input)
-        if (!t) return
-        // Switching from a TodoWrite plan to Task* replaces it (latest tool wins).
-        if (planMode === 'todo') {
-          taskItems.clear()
-          taskSeq = 0
-        }
-        planMode = 'task'
-        taskSeq += 1
-        // Provisional key until the result gives us the real id (see above).
-        taskItems.set(`use:${toolUseId}`, { content: t.content, status: 'pending', activeForm: t.activeForm, description: t.description, order: taskSeq })
-        publishTasks()
-      } else if (name === 'TaskUpdate') {
-        const u = parseTaskUpdate(input)
-        if (!u) return
-        // A TaskUpdate for a task we never saw created (e.g. its create predates
-        // the replay window) has nothing to reflect yet.
-        const cur = taskItems.get(u.taskId)
-        if (!cur) return
-        if (u.status === 'deleted') taskItems.delete(u.taskId)
-        else {
-          if (u.status) cur.status = u.status
-          if (u.content) cur.content = u.content
-          if (u.activeForm !== undefined) cur.activeForm = u.activeForm
-          if (u.description !== undefined) cur.description = u.description
-        }
-        publishTasks()
-      }
-    }
-    // applyTaskResult re-keys a just-created task from its provisional tool_use
-    // key to the real "#N" id parsed from the TaskCreate result ("Task #17
-    // created successfully: ..."), so later TaskUpdates for #17 find it.
-    const applyTaskResult = (toolUseId: string, resultText: string) => {
-      const provKey = `use:${toolUseId}`
-      const cur = taskItems.get(provKey)
-      if (!cur) return
-      const m = /#(\d+)/.exec(resultText)
-      const id = m ? m[1] : String(cur.order)
-      if (id === provKey || taskItems.has(id)) return
-      taskItems.delete(provKey)
-      taskItems.set(id, cur)
-      publishTasks()
-    }
-    // applyTodoWrite replaces the whole plan from a TodoWrite (the whole-list
-    // cousin of Task*). Routed through taskItems so it persists + restores the
-    // same way; keys are synthetic since TodoWrite carries no per-task id.
-    const applyTodoWrite = (list: TodoItem[]) => {
-      planMode = 'todo'
-      taskItems.clear()
-      taskSeq = 0
-      list.forEach((t, i) => {
-        taskSeq = i + 1
-        taskItems.set(`todo:${i}`, { content: t.content, status: t.status, activeForm: t.activeForm, description: t.description, order: taskSeq })
-      })
-      publishTasks()
-    }
+      setTodos(toTodoItems(entries))
+    })
 
     const pending: ChatItem[] = []
     let flushScheduled = false
@@ -3641,7 +3485,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
-              if (block.is_error !== true) applyTaskResult(block.tool_use_id, parsed.text)
+              if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
             }
           }
           return
@@ -3713,9 +3557,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               if (specs) {
                 push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
               } else if (todos) {
-                applyTodoWrite(todos)
+                plan.applyTodoWrite(todos)
               } else {
-                applyTaskTool(block.name, block.input, block.id)
+                plan.applyTaskTool(block.name, block.input, block.id)
                 if (block.name === 'Task') {
                   const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
                   taskInputByUse.set(block.id, {
