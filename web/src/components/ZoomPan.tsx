@@ -11,6 +11,14 @@ const MAX_SCALE = 8
 // aspect ratio, that same cap bounds its height to a quarter of the frame's too.
 const MM_W = 140
 
+// How far along the grow one axis of the frame is: 0 at the content's fit size,
+// 1 once it has expanded to fill the box it may grow into. The frame's slide off
+// centre (fx/fy) is proportional to this - see relaxF.
+function growProgress(availLen: number, contentLen: number, vpLen: number) {
+  if (availLen <= contentLen) return 0
+  return Math.min(1, Math.max(0, (vpLen - contentLen) / (availLen - contentLen)))
+}
+
 // Measure an element's rendered (layout) size and keep it fresh across image load
 // + window resize. A CSS transform doesn't change layout size, so a transformed
 // element still reports its untransformed (fit) size here.
@@ -141,6 +149,35 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
     return [Math.max(-sx, Math.min(sx, fx)), Math.max(-sy, Math.min(sy, fy))]
   }, [grow, content.w, content.h, avail.w, avail.h, vpAt])
 
+  // Shrink the frame's slide back toward centre as the frame shrinks, retracing the
+  // way it came. Used INSTEAD of the cursor-anchored slide whenever the frame is
+  // getting smaller (see zoomAt).
+  //
+  // Anchoring the cursor is the right feel on the way IN, but wrong on the way OUT.
+  // Throughout the grow phase the frame holds the whole image (content*s == vp), so
+  // the slide isn't revealing anything - it's shoving the entire picture sideways.
+  // Anchor a zoom-out to a cursor that's off to one side and the image walks that
+  // way instead of settling back to the middle; worse, it can slide out from under
+  // the cursor entirely, and since the wheel only reaches the frame it's actually
+  // over, the zoom-out strands there - parked to one side at partial zoom. That's the
+  // "zooms out to the left/right, not the middle" bug.
+  //
+  // For a fixed anchor the slide is proportional to the grow progress (fx = (px -
+  // w/2)*(1 - s), and progress ∝ s - 1), so rescaling fx by the progress ratio walks
+  // back down exactly the path a zoom-in drew - and lands at 0, dead centre, at fit.
+  const relaxF = useCallback((v: { fx: number; fy: number; scale: number }, ns: number): [number, number] => {
+    const before = vpAt(v.scale)
+    const after = vpAt(ns)
+    const ratio = (availLen: number, contentLen: number, b: number, a: number) => {
+      const p0 = growProgress(availLen, contentLen, b)
+      return p0 > 0 ? growProgress(availLen, contentLen, a) / p0 : 0
+    }
+    return [
+      v.fx * ratio(avail.w, content.w, before.w, after.w),
+      v.fy * ratio(avail.h, content.h, before.h, after.h),
+    ]
+  }, [avail.w, avail.h, content.w, content.h, vpAt])
+
   // Zoom by `factor` keeping the content point under (cx, cy) - coords relative to
   // the frame's top-left - fixed, so the image grows toward the cursor.
   const zoomAt = useCallback((cx: number, cy: number, factor: number) => {
@@ -159,14 +196,19 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
       // snaps to the cursor once it caps - the little "drifts one way then back"
       // wobble. Screen-x of a content point is C + fx + (px - w/2)*scale, so holding
       // it fixed across scale -> ns gives dfx = (px - w/2)*(scale - ns) (same for y).
-      const [nfx, nfy] = clampF(
-        v.fx + (px - content.w / 2) * (v.scale - ns),
-        v.fy + (py - content.h / 2) * (v.scale - ns),
-        ns,
-      )
+      //
+      // Zooming OUT retraces that slide back to centre instead of anchoring the
+      // cursor - see relaxF for why the two directions differ.
+      const [nfx, nfy] = ns < v.scale
+        ? clampF(...relaxF(v, ns), ns)
+        : clampF(
+            v.fx + (px - content.w / 2) * (v.scale - ns),
+            v.fy + (py - content.h / 2) * (v.scale - ns),
+            ns,
+          )
       return { scale: ns, tx: ntx, ty: nty, fx: nfx, fy: nfy }
     })
-  }, [clampT, clampF, content.w, content.h])
+  }, [clampT, clampF, relaxF, content.w, content.h])
 
   // Wheel must be a non-passive native listener so preventDefault can stop the
   // page/scroll from also reacting; React's synthetic onWheel can't guarantee that.
