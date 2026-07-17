@@ -193,9 +193,9 @@ export const ProjectDropdown = memo(function ProjectDropdown({
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
         <span className="relative shrink-0 inline-flex">
-          {/* Hydra-icon-sized (24px) project icon: it leads the global top bar,
-              standing in for the removed app logo. */}
-          <ProjectIcon icon={selected?.icon} projectId={selected?.id ?? ''} size={24} />
+          {/* The project icon leads the global top bar, standing in for the
+              removed app logo (20px - 24 read too heavy in the bar). */}
+          <ProjectIcon icon={selected?.icon} projectId={selected?.id ?? ''} size={20} />
           {otherProjectsNeedsInput > 0 ? (
             <span
               aria-label="an agent in another project needs your input"
@@ -225,7 +225,10 @@ export const ProjectDropdown = memo(function ProjectDropdown({
               {projects.map((p) => (
                 <div
                   key={p.id}
-                  className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                  // mx-1 + rounded: the highlight/hover is an inset pill, so the
+                  // selected row doesn't butt against the menu's py-1 padding
+                  // (which read as a stray white strip above/below edge rows).
+                  className={`relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                     p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
                   onClick={() => {

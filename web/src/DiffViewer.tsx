@@ -2775,7 +2775,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     <div
       ref={filesHeaderRef}
       style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
-      className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      // z-[22]: above the file cards' own sticky headers (z-20), which are later
+      // in the DOM and would otherwise paint OVER this section header while
+      // docking; below the Changes bar's z-[25].
+      className="sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
     >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
@@ -2849,7 +2852,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
           {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Changes</h2>
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400">Changes</h2>
           {statsEl}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow

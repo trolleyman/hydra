@@ -655,8 +655,11 @@ function RootLayout() {
           onDeselect={handleProjectDeselect}
           onAddProject={handleAddProject}
         />
+        {/* mr-2.5 balances the separator: the selector's trailing padding sits
+            10px left of it, so match that on the right (the slot content has no
+            leading padding of its own). */}
         {(selectedAgentId != null || crumb != null) && (
-          <span aria-hidden className="shrink-0 text-gray-300 dark:text-gray-600 select-none">/</span>
+          <span aria-hidden className="shrink-0 mr-2.5 text-gray-300 dark:text-gray-600 select-none">/</span>
         )}
         <div ref={registerTopBarSlot} className="flex-1 min-w-0 flex items-center gap-2">
           {crumb != null && (
@@ -762,7 +765,7 @@ function RootLayout() {
                         )}
                       </Link>
                     </div>
-                    <div className="flex items-center gap-1.5 px-1 pb-1">
+                    <div className="flex items-center gap-1.5 px-1 mt-1 pb-1">
                         {/* Forge web link, derived from the remote URL (read-only, no
                             auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
                             no remote or no https browse URL could be derived. */}
@@ -792,7 +795,11 @@ function RootLayout() {
                             onCommit={handleCommit}
                           />
                         )}
-                        {/* Ahead/behind status indicator (read-only) */}
+                        {/* Ahead/behind counters + Sync, pinned right together
+                            (the counters describe exactly what Sync will do).
+                            Sync always renders - it anchors the row so the
+                            section height never shifts as chips come and go. */}
+                        <div className="flex-1" />
                         {(behind > 0 || ahead > 0) && (
                           <Tooltip content={statusTooltip} className="shrink-0">
                             <span className="flex items-center gap-1 px-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
@@ -809,11 +816,6 @@ function RootLayout() {
                             </span>
                           </Tooltip>
                         )}
-                        {/* Sync (pull then push), pinned right, beside the
-                            counters/chip it acts on. Always rendered - it
-                            anchors the row so the section height never shifts
-                            as chips come and go. */}
-                        <div className="flex-1" />
                         <Tooltip content={syncTooltip} className="shrink-0">
                           <button
                             type="button"

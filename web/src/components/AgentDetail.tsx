@@ -18,10 +18,9 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, MoreHorizontal, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, MoreHorizontal, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { InspectorPane } from './InspectorPane'
-import { IconButton } from './IconButton'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
@@ -508,7 +507,10 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   // and full explanation live in the tooltip (row real estate is precious).
   return (
     <Tooltip variant="card" title={`Network access - ${c.label}`} content={c.tip} className="shrink-0">
-      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>{null}</Badge>
+      {/* min-h-5 matches the text chips' height (text-xs line + py-0.5) - an
+          icon-only chip would otherwise sit a few px shorter than its
+          neighbours. */}
+      <Badge className={c.className} containerClassName="min-h-5" icon={<c.Icon className="w-3 h-3 shrink-0" />}>{null}</Badge>
     </Tooltip>
   )
 }
@@ -577,9 +579,11 @@ const AgentMetaRow = memo(function AgentMetaRow({
       {/* Agent type, icon only - the colored pill is recognizable without the
           text label; the tooltip still names it. */}
       <Tooltip content={agent.agent_type} className="shrink-0">
+        {/* min-h-5 keeps the icon-only pill the same height as text chips. */}
         <Badge
           variant="pill"
           className={agentTypeClass}
+          containerClassName="min-h-5"
           icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
         >{null}</Badge>
       </Tooltip>
@@ -628,11 +632,11 @@ const AgentMetaRow = memo(function AgentMetaRow({
       </span>
       {/* Downstream branch (the name this head is pushed AS) - editable
           until first publish, then soft-locked. Only shown once set. */}
-      <span className="shrink-0 inline-flex">
+      <span className="shrink-0 inline-flex items-center">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
       </span>
       {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <span className="shrink-0 inline-flex">
+      <span className="shrink-0 inline-flex items-center">
         <MRStateChip agent={agent} />
       </span>
       {/* Overflow: terminal/chat switch + created time. */}
@@ -707,7 +711,6 @@ export function AgentDetail({
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
-  const narrowSplit = !isWide
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
@@ -1608,22 +1611,6 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
-        // Narrow only: the single pane flips between the working view and a
-        // full-screen diff (Ctrl+, does the same). On a wide split this toggle
-        // moves to the two buttons flanking the divider (see workingTopButton /
-        // changesLeadingButton below).
-        rightSlot={
-          narrowSplit ? (
-            <IconButton
-              variant="panel"
-              aria-label={diffShown ? 'Show chat' : 'Show diff'}
-              title={`${diffShown ? 'Show chat' : 'Show diff'} (${SHORTCUT_DIFF_SIDEBAR})`}
-              onClick={toggleDiffSidebar}
-            >
-              {diffShown ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
-            </IconButton>
-          ) : undefined
-        }
         actions={[
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
@@ -1773,20 +1760,30 @@ export function AgentDetail({
           >
             <div className="w-1/2 flex flex-col min-h-0 overflow-hidden">
               {/* Metadata as a slim, horizontally scrollable chip strip - one
-                  line, swipe sideways for the tail (AgentMetaRow scrolls). */}
-              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60">
-                <AgentMetaRow
-                  agent={agent}
-                  agentTypeClass={agentTypeClass}
-                  branches={branches}
-                  savingBase={savingBase}
-                  savingChatMode={savingChatMode}
-                  savingDownstream={savingDownstream}
-                  onSaveBase={onSaveBase}
-                  onRefreshBranches={refreshBranches}
-                  onSaveChatMode={onSaveChatMode}
-                  onSaveDownstream={onSaveDownstream}
-                />
+                  line, swipe sideways for the tail (AgentMetaRow scrolls) -
+                  with the show-diff button pinned after it (outside the
+                  scroll). No hide counterpart: the diff screen's own back
+                  chevron returns to the chat. */}
+              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
+                </div>
+                <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+                  <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
+                    <FileDiff className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}

@@ -503,16 +503,11 @@ export function AgentTopBarContent({
   title,
   actions,
   rename,
-  rightSlot,
 }: {
   title: string
   statusDot?: ReactNode
   actions: AgentTopBarAction[]
   rename?: AgentTopBarRename
-  // Far-right control - the diff ("inspector") sidebar hide/show toggle.
-  // Rendered outside the measured title/actions row so AdaptiveActions' width
-  // budget stays correct.
-  rightSlot?: ReactNode
 }) {
   // Only surface keyboard hints on devices that actually have a keyboard.
   const showShortcut = useFinePointer()
@@ -594,8 +589,6 @@ export function AgentTopBarContent({
         )}
       </div>
 
-      {/* Far-right slot: the diff-sidebar toggle. */}
-      {rightSlot && <div className="shrink-0">{rightSlot}</div>}
     </>
   )
 }
