@@ -735,7 +735,11 @@ function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null]
   return [ref, w]
 }
 
-function PlanPanel({ todos, narrow, fadeIn }: { todos: TodoItem[]; narrow: boolean; fadeIn: boolean }) {
+// `stacked`: anchor to a second row below the sub-agent selector - on a
+// narrow pane even the two COLLAPSED chips overlap side by side (the plan
+// chip sat over the selector and swallowed its clicks). Static, so nothing
+// relocates when either card expands.
+function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
   // Frozen at mount: fade in only when the plan APPEARS live (a first
   // TodoWrite mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
@@ -773,7 +777,7 @@ function PlanPanel({ todos, narrow, fadeIn }: { todos: TodoItem[]; narrow: boole
     // instead of anything relocating.
     <div
       style={{ width: open ? 256 : chipW ?? undefined }}
-      className={`absolute top-2 right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute ${stacked ? 'top-12' : 'top-2'} right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
       {/* Invisible clone of the header at natural width - the collapsed chip
           width the open/close transition animates from/to (border included so
@@ -2053,6 +2057,9 @@ function ChatViewSelector({
   const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
   const current = chatView !== 'main' ? subagents[chatView] : undefined
   const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
+  // The task description disambiguates same-type sub-agents (two "Explore"s)
+  // in the header chip, just like the list rows.
+  const currentDesc = current ? subLabels(current, toolOf(current)).desc : undefined
   const pick = (key: string) => {
     setOpen(false)
     onSelect(key)
@@ -2076,6 +2083,7 @@ function ChatViewSelector({
       >
         <MessageSquare className="w-3.5 h-3.5 shrink-0" />
         <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        {currentDesc && <span className="max-w-44 truncate">{currentDesc}</span>}
         {current && isSubRunning(current, toolOf(current)) && <LoaderCircle className="w-3 h-3 shrink-0" />}
         <ChevronRight className="w-3 h-3 shrink-0" />
       </div>
@@ -2093,7 +2101,10 @@ function ChatViewSelector({
         ) : (
           <MessageSquare className="w-3.5 h-3.5 shrink-0" />
         )}
-        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        <span className="max-w-48 shrink-0 truncate font-medium">{currentLabel}</span>
+        {currentDesc && (
+          <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{currentDesc}</span>
+        )}
         {current && isSubRunning(current, toolOf(current)) && (
           <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
         )}
@@ -5143,7 +5154,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         {/* Current plan (item 17): the agent's latest TodoWrite. Main view
             only - it is the main agent's plan. */}
         {todos.length > 0 && replayDone && !viewSub && (
-          <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} fadeIn={liveUiRef.current} />
+          <PlanPanel
+            todos={todos}
+            narrow={paneWidth > 0 && paneWidth < 560}
+            stacked={hasSubagents && paneWidth > 0 && paneWidth < 560}
+            fadeIn={liveUiRef.current}
+          />
         )}
         {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
             scrollTop to keep an arbitrary anchor node stable when content above
