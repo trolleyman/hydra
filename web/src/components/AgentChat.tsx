@@ -539,6 +539,38 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
   return { text: stripToolUseError(collect(content)), images }
 }
 
+// Decoded intrinsic sizes of tool-result images, cached module-wide so a
+// re-render (or the same image in another card) never re-decodes.
+const imageDimsCache = new Map<string, { w: number; h: number }>()
+
+// useImageDims eagerly decodes the given image sources - as soon as the result
+// arrives, while the card is still collapsed - and returns the cache of their
+// intrinsic sizes. Rendering the <img> with width/height attributes lets
+// layout reserve the correct box BEFORE the pixels are decoded, so the card's
+// open animation (Expandable measures scrollHeight at open) sees the true
+// height. Without this an image Read opened at its text-only height and
+// snapped tall once the image landed after the animation.
+function useImageDims(srcs: string[] | undefined): Map<string, { w: number; h: number }> {
+  const [, bump] = useState(0)
+  useEffect(() => {
+    if (!srcs?.length) return
+    let cancelled = false
+    for (const src of srcs) {
+      if (imageDimsCache.has(src)) continue
+      const img = new Image()
+      img.onload = () => {
+        if (img.naturalWidth > 0) imageDimsCache.set(src, { w: img.naturalWidth, h: img.naturalHeight })
+        if (!cancelled) bump((n) => n + 1)
+      }
+      img.src = src
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [srcs])
+  return imageDimsCache
+}
+
 // --- Plan / to-do panel (TodoWrite) -----------------------------------------
 
 // One entry of the agent's TodoWrite list. `activeForm` is the present-tense
@@ -1163,6 +1195,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // Eagerly decode result images (the card mounts collapsed the moment the
+  // result lands), so opening later measures the true expanded height.
+  const imageDims = useImageDims(item.resultImages)
   const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -1305,15 +1340,27 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
-                      {item.resultImages.map((src, i) => (
-                        <img
-                          key={i}
-                          src={src}
-                          alt="Tool output image"
-                          onClick={() => setImgLightbox(i)}
-                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in"
-                        />
-                      ))}
+                      {item.resultImages.map((src, i) => {
+                        // width/height attrs (from the eager decode) + h-auto:
+                        // layout reserves the image's aspect box before the
+                        // browser paints the pixels - see useImageDims.
+                        const dims = imageDims.get(src)
+                        return (
+                          <img
+                            key={i}
+                            src={src}
+                            width={dims?.w}
+                            height={dims?.h}
+                            alt="Tool output image"
+                            onClick={() => setImgLightbox(i)}
+                            // min-h while the size is still unknown (a slow
+                            // url-source image opened before the eager decode
+                            // finished): the open measures a visible loading
+                            // box instead of a sliver.
+                            className={`max-w-full h-auto rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
+                          />
+                        )
+                      })}
                     </div>
                   )}
                   {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
