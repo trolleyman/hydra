@@ -708,7 +708,10 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
   }
 
   return (
-    <div className="absolute top-3 right-3 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in">
+    // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
+    // opening glides the width (fit -> w-64, via interpolate-size where
+    // supported) alongside the Expandable height.
+    <div className={`overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in [interpolate-size:allow-keywords] transition-[width] duration-200 max-w-full ${open ? 'w-64' : 'w-fit'}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -1953,11 +1956,16 @@ function ChatViewSelector({
     onSelect(key)
   }
   return (
-    <div className="absolute top-2 left-3 z-20 text-xs">
+    // A floating card styled like the PlanPanel: the collapsed chip is its
+    // fit-content header, and opening glides both the width (fit -> w-72, via
+    // interpolate-size where supported) and the height (Expandable).
+    <div
+      className={`overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs [interpolate-size:allow-keywords] transition-[width] duration-200 max-w-full ${open ? 'w-72' : 'w-fit'}`}
+    >
       <button
         onClick={() => setOpen((o) => !o)}
         title="Switch agent chat"
-        className={`flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 backdrop-blur px-2.5 py-1 shadow-sm transition-colors cursor-pointer ${
+        className={`flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors cursor-pointer ${
           open
             ? 'text-stone-800 dark:text-stone-100'
             : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
@@ -1972,12 +1980,12 @@ function ChatViewSelector({
         {current && isSubRunning(current, toolOf(current)) && (
           <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
         )}
-        <ChevronDown className="w-3 h-3 shrink-0" />
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 z-20 w-72 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+      <Expandable open={open}>
+        <div className="pb-1">
             <button
               onClick={() => pick('main')}
               className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
@@ -2007,9 +2015,8 @@ function ChatViewSelector({
                 </button>
               )
             })}
-          </div>
-        </>
-      )}
+        </div>
+      </Expandable>
     </div>
   )
 }
@@ -4982,15 +4989,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }}
     >
       <div className="relative flex-1 min-h-0">
-        {/* The current-agents selector (main + sub-agents), floated top-left
-            once any sub-agent exists. */}
-        {hasSubagents && (
-          <ChatViewSelector
-            chatView={viewSub ? chatView : 'main'}
-            subagents={subagents}
-            taskToolByUse={taskToolByUse}
-            onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
-          />
+        {/* Floating top strip over the transcript: the current-agents selector
+            (left, once any sub-agent exists) and the plan panel (right). One
+            wrapping flex row, so on a narrow pane an expanded plan drops BELOW
+            the selector instead of overlapping it. */}
+        {(hasSubagents || (todos.length > 0 && replayDone && !viewSub)) && (
+          <div className="pointer-events-none absolute inset-x-3 top-2 z-20 flex flex-wrap items-start gap-2">
+            {hasSubagents && (
+              <div className="pointer-events-auto min-w-0 max-w-full">
+                <ChatViewSelector
+                  chatView={viewSub ? chatView : 'main'}
+                  subagents={subagents}
+                  taskToolByUse={taskToolByUse}
+                  onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+                />
+              </div>
+            )}
+            {/* Current plan (item 17): the agent's latest TodoWrite. Main view
+                only - it is the main agent's plan. */}
+            {todos.length > 0 && replayDone && !viewSub && (
+              <div className="pointer-events-auto ml-auto min-w-0 max-w-full">
+                <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />
+              </div>
+            )}
+          </div>
         )}
         {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
             scrollTop to keep an arbitrary anchor node stable when content above
@@ -5111,10 +5133,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <ArrowDown className="w-4 h-4" />
           </button>
         )}
-        {/* Current plan (item 17): the agent's latest TodoWrite, floated in the
-            top-right; collapses to a chip when the pane is narrow. Main view
-            only - it is the main agent's plan. */}
-        {todos.length > 0 && replayDone && !viewSub && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
       </div>
 
       {/* A sub-agent's chat can only be read, not talked to: swap the composer

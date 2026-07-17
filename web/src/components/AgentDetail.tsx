@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
+import { memo, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -18,8 +18,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, MoreHorizontal, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
-import { createPortal } from 'react-dom'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -377,99 +376,51 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
   )
 }
 
-// Small overflow ("...") menu at the end of the metadata row, holding the
-// rarely-used bits that used to crowd the row: the terminal/chat mode switch
-// and the created time. Portalled + fixed-positioned so the row's horizontal
-// scroll clipping can't swallow it.
-function MetaOverflowMenu({
-  agent,
-  savingChatMode,
-  onSaveChatMode,
-}: {
-  agent: AgentResponse
-  savingChatMode: boolean
-  onSaveChatMode: (next: boolean) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
-  useLayoutEffect(() => {
-    if (!open) return
-    const el = btnRef.current
+// MetaStrip is the chip row's container. On md+ it wraps to multiple lines
+// (plenty of room, and a visible scrollbar there read badly); below md it's a
+// single horizontally scrollable line with edge fades hinting at overflowing
+// content on either side.
+function MetaStrip({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fade, setFade] = useState({ left: false, right: false })
+  const update = useCallback(() => {
+    const el = ref.current
     if (!el) return
-    const r = el.getBoundingClientRect()
-    const MENU_W = 224 // w-56
-    setCoords({ left: Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8)), top: r.bottom + 4 })
-  }, [open])
+    const left = el.scrollLeft > 1
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+    setFade((f) => (f.left === left && f.right === right ? f : { left, right }))
+  }, [])
   useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onEsc)
+    const el = ref.current
+    if (!el) return
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    ro?.observe(el)
     return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onEsc)
+      el.removeEventListener('scroll', update)
+      ro?.disconnect()
     }
-  }, [open])
-  // The terminal/chat mode switch (Claude only). Switching restarts the Claude
-  // process in the new mode; the conversation is preserved via --continue.
-  const chatToggle = agent.agent_type === 'claude' && !agent.archived
+  }, [update])
+  // Chips come and go with agent state (scrollWidth changes without the element
+  // resizing), so re-measure after every render of the row.
+  useEffect(() => {
+    update()
+  })
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        aria-label="More details"
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+    <div data-meta-strip className="relative min-w-0">
+      <div
+        ref={ref}
+        className="flex items-center gap-2 min-w-0 md:flex-wrap md:gap-y-1.5 max-md:overflow-x-auto max-md:whitespace-nowrap max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden"
       >
-        <MoreHorizontal className="w-4 h-4" />
-      </button>
-      {open && coords && createPortal(
-        <div
-          ref={menuRef}
-          style={{ left: coords.left, top: coords.top }}
-          className="fixed w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
-        >
-          {chatToggle && (
-            savingChatMode ? (
-              <div className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                <LoaderCircle className="w-4 h-4 animate-spin" /> Switching...
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false)
-                  onSaveChatMode(agent.chat_mode !== true)
-                }}
-                title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                {agent.chat_mode ? <TerminalSquare className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
-                {agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'}
-              </button>
-            )
-          )}
-          {agent.created_at !== 0 && agent.created_at !== undefined && (
-            <div className={`px-3 py-2 text-xs text-gray-500 dark:text-gray-400 ${chatToggle ? 'border-t border-gray-100 dark:border-gray-700' : ''}`}>
-              created <RelativeTime createdAt={agent.created_at} />
-            </div>
-          )}
-        </div>,
-        document.body,
+        {children}
+      </div>
+      {fade.left && (
+        <div aria-hidden className="md:hidden pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-gray-50 dark:from-gray-900 to-transparent" />
       )}
-    </>
+      {fade.right && (
+        <div aria-hidden className="md:hidden pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-gray-50 dark:from-gray-900 to-transparent" />
+      )}
+    </div>
   )
 }
 
@@ -570,12 +521,10 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveDownstream: (n: string) => void
 }) {
   return (
-    // A single-line chip strip: no wrapping, no interpunct separators. When
-    // the pane is too narrow it scrolls horizontally (scrollbar hidden); the
-    // rarely-used bits (mode switch, created time) live in the trailing "..."
-    // menu. Dropdown children (base selector, "..." menu) are portalled, so
-    // the horizontal overflow clipping can't swallow them.
-    <div className="flex items-center gap-2 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    // The chip strip: no interpunct separators; wraps on desktop, scrolls on
+    // mobile (see MetaStrip). Dropdown children (the base selector) are
+    // portalled, so the mobile overflow clipping can't swallow them.
+    <MetaStrip>
       {/* Agent type, icon only - the colored pill is recognizable without the
           text label; the tooltip still names it. */}
       <Tooltip content={agent.agent_type} className="shrink-0">
@@ -639,9 +588,36 @@ const AgentMetaRow = memo(function AgentMetaRow({
       <span className="shrink-0 inline-flex items-center">
         <MRStateChip agent={agent} />
       </span>
-      {/* Overflow: terminal/chat switch + created time. */}
-      <MetaOverflowMenu agent={agent} savingChatMode={savingChatMode} onSaveChatMode={onSaveChatMode} />
-    </div>
+      {/* Terminal/chat mode switch (Claude only), inline as an icon button -
+          shows the mode you'd switch TO. Switching restarts the Claude process
+          in the new mode; the conversation is preserved via --continue. */}
+      {agent.agent_type === 'claude' && !agent.archived && (
+        savingChatMode ? (
+          <span className="shrink-0 inline-flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+            <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> switching
+          </span>
+        ) : (
+          <Tooltip
+            content={`${agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'} (restarts the Claude process; the conversation is preserved)`}
+            className="shrink-0"
+          >
+            <button
+              type="button"
+              aria-label={agent.chat_mode ? 'Switch to terminal' : 'Switch to chat'}
+              onClick={() => onSaveChatMode(agent.chat_mode !== true)}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              {agent.chat_mode ? <TerminalSquare className="w-3.5 h-3.5" /> : <MessageSquare className="w-3.5 h-3.5" />}
+            </button>
+          </Tooltip>
+        )
+      )}
+      {agent.created_at !== 0 && agent.created_at !== undefined && (
+        <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">
+          created <RelativeTime createdAt={agent.created_at} />
+        </span>
+      )}
+    </MetaStrip>
   )
 }, (prev, next) =>
   prev.agentTypeClass === next.agentTypeClass &&

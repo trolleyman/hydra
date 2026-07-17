@@ -682,7 +682,7 @@ function RootLayout() {
           bar's toggle reveals it again. */}
       <aside
         style={{ width: desktopCollapsed ? 0 : sidebarWidth }}
-        className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform] duration-200'} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
+        className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform,translate] duration-200'} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
       >
         {/* Inner content at a fixed width (the expanded sidebar width, or the full
             panel width below md) so the collapse width-tween clips it instead of

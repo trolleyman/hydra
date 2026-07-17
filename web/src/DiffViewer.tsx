@@ -940,9 +940,24 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
+  // Collapsing a file whose top has scrolled above the viewport would leave
+  // the scroll at a random depth of the files below - bring the (now short)
+  // card to the top instead, docked under the sticky chrome (scroll-margin).
+  const toggleCollapse = () => {
+    if (!isCollapsed) {
+      const el = cardRef.current
+      const scroller = el?.closest('[data-inspector-scroll], [data-main-scroll]')
+      if (el && scroller && el.getBoundingClientRect().top < scroller.getBoundingClientRect().top) {
+        requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
+      }
+    }
+    onToggleCollapse(file.path)
+  }
+
   return (
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
+      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 8px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
@@ -954,10 +969,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       <div
         style={{ top: FILE_STICKY_TOP }}
         className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
-        onClick={() => onToggleCollapse(file.path)}
+        onClick={toggleCollapse}
       >
+        {/* No onClick of its own: the header div handles the toggle, and a
+            second handler here would fire too (bubbling) and toggle right
+            back - the chevron was a no-op because of exactly that. */}
         <button
-          onClick={() => onToggleCollapse(file.path)}
+          aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
