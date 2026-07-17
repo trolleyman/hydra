@@ -15,10 +15,6 @@ export const StorageKeys = {
   // explicit toggle persists this; the small-screen auto-close on navigation is
   // transient so it doesn't clobber the desktop preference.
   sidebarCollapsed: 'hydra-sidebar-collapsed',
-  // '0' when the user has opted OUT of the new two-pane agent layout, falling
-  // back to the classic single-scroll stacked layout. Absent/'1' = the new split
-  // layout (the default). Browser-scoped, global (see lib/layout.ts).
-  splitLayoutEnabled: 'hydra-split-layout',
   // The left (working) pane's share of the agent-page split, as a stored float
   // fraction in [0,1] (e.g. '0.4' = 40% terminal / 60% inspector). Global, like
   // sidebarWidth. See AgentDetail / lib/layout.ts.
@@ -47,6 +43,10 @@ export const StorageKeys = {
   // messages (the default is serif, Claude-app style). User text stays sans
   // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
   chatSerif: 'hydra-chat-serif',
+  // '0' when the user turned OFF the paste markers: pasting an attachment
+  // (image / large text) into a composer also inserts its "[filename]" at the
+  // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
+  pasteMarkers: 'hydra-paste-markers',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
   // text. Default (absent) = on: incoming token bursts are revealed at a steady
   // per-frame rate so the text reads as continuous typing rather than landing in

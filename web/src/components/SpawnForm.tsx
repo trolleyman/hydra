@@ -14,7 +14,9 @@ import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } f
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
-import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime } from '../lib/pastedText'
+import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
+import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
@@ -245,12 +247,15 @@ export const SpawnForm = memo(function SpawnForm({
   // immediate re-paste of the SAME text inlines it instead (dropping the chip),
   // fenced when `lang` is set. Cleared on a different paste, spawn, or project
   // switch so a stale block can't be "re-pasted" later.
-  const lastPasteRef = useRef<{ text: string; attachmentId: number; lang: string | null } | null>(null)
+  const lastPasteRef = useRef<{ text: string; attachmentId: number; filename: string; lang: string | null } | null>(null)
   // Set by a Ctrl/Cmd+Shift+V keystroke (the "paste as plain text" gesture, see
   // handleKeyDown) so the paste it triggers inserts literally instead of being
   // attached. Read-and-cleared by the next handlePaste; a timer clears it too in
   // case no paste follows (e.g. an empty clipboard), so it can't go stale.
   const literalPasteRef = useRef(false)
+  // Whether pasting an attachment also inserts its "[filename]" marker (a
+  // Browser preference, default on).
+  const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Mirrors `attachments` into a ref so the project-switch effect can stash the
   // outgoing project's attachments without depending on (and re-running for)
@@ -387,10 +392,10 @@ export const SpawnForm = memo(function SpawnForm({
     return (
       <div
         onPointerDown={handleCardResizeStart}
-        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
+        className="group/resize shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
         title="Drag to resize"
       >
-        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+        <ResizeGrip orientation="horizontal" />
       </div>
     )
   }
@@ -490,8 +495,10 @@ export const SpawnForm = memo(function SpawnForm({
 
   // Upload each file as an attachment chip. Generically-named images are
   // renamed image<N>.ext, N = max(current) + 1 (running within the batch).
-  function addFiles(rawFiles: File[]) {
+  // Returns the final (possibly renamed) filenames, for the paste markers.
+  function addFiles(rawFiles: File[]): string[] {
     let nextN = nextGenericImageNumber(attachments)
+    const names: string[] = []
     for (const raw of rawFiles) {
       let file = raw
       if (isImageFile(raw) && isGenericImageName(raw.name)) {
@@ -500,17 +507,40 @@ export const SpawnForm = memo(function SpawnForm({
         nextN++
       }
       uploadAttachment(file)
+      names.push(file.name || 'pasted-image')
     }
+    return names
   }
 
   // Attach a large text paste as a numbered file so it rides along like any
   // other attachment instead of burying the task description. The extension
   // comes from the clipboard's declared language (markdown -> .md, code -> its
   // ext), falling back to .txt, so the agent gets a correctly-typed file.
-  function attachPastedText(text: string, dt: DataTransfer | null): number {
+  function attachPastedText(text: string, dt: DataTransfer | null): { id: number; filename: string } {
     const n = ++pastedTextCounterRef.current
     const ext = pastedTextExtension(dt)
-    return uploadAttachment(new File([text], `pasted-text-${n}.${ext}`, { type: extensionMime(ext) }))
+    const filename = `pasted-text-${n}.${ext}`
+    return { id: uploadAttachment(new File([text], filename, { type: extensionMime(ext) })), filename }
+  }
+
+  // Insert text into the prompt at the caret, as its own undo step - used for
+  // the "[filename]" paste markers.
+  function insertAtCaret(insert: string) {
+    const ta = textareaRef.current
+    const start = ta?.selectionStart ?? prompt.length
+    const end = ta?.selectionEnd ?? prompt.length
+    const caret = start + insert.length
+    const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
+      false,
+    )
+    if (draftKey) writeLocal(draftKey, nextPrompt || null)
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = caret
+    })
   }
 
   // Stable (memo'd AttachmentChips takes it as a prop): `commit` never changes.
@@ -536,11 +566,14 @@ export const SpawnForm = memo(function SpawnForm({
     const literal = literalPasteRef.current
     literalPasteRef.current = false
 
-    // Pasted files (screenshots, copied files) keep their upload behavior.
+    // Pasted files (screenshots, copied files) keep their upload behavior -
+    // plus, with the preference on, "[filename]" markers at the caret so the
+    // prompt references them explicitly.
     const files = extractFiles(e.clipboardData)
     if (files.length > 0) {
       e.preventDefault()
-      addFiles(files)
+      const names = addFiles(files)
+      if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
       return
     }
 
@@ -557,21 +590,31 @@ export const SpawnForm = memo(function SpawnForm({
       // Second paste of the same block: the user wants it inline after all. Drop
       // the chip AND splice the text in (fenced if it's code) as ONE undo step,
       // so a single Ctrl+Z reverses the inline - putting the block back in a chip.
+      // The chip's "[filename]" marker (if the markers preference inserted one)
+      // is stripped too, with the caret adjusted when it sat before it.
       e.preventDefault()
       const insert = last.lang ? fenceCode(text, last.lang) : text
       const ta = textareaRef.current
-      const start = ta?.selectionStart ?? prompt.length
-      const end = ta?.selectionEnd ?? prompt.length
+      let start = ta?.selectionStart ?? prompt.length
+      let end = ta?.selectionEnd ?? prompt.length
+      const stripped = stripPasteMarker(prompt, last.filename)
+      if (stripped) {
+        if (stripped.index < start) start = Math.max(stripped.index, start - stripped.length)
+        if (stripped.index < end) end = Math.max(stripped.index, end - stripped.length)
+      }
+      const base = stripped?.text ?? prompt
       const caret = start + insert.length
-      const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
+      const nextPrompt = base.slice(0, start) + insert + base.slice(end)
       commit(
-        (prev) =>
-          makeSnapshot(
-            prev.prompt.slice(0, start) + insert + prev.prompt.slice(end),
+        (prev) => {
+          const prevBase = stripPasteMarker(prev.prompt, last.filename)?.text ?? prev.prompt
+          return makeSnapshot(
+            prevBase.slice(0, start) + insert + prevBase.slice(end),
             prev.attachments.filter((a) => a.id !== last.attachmentId),
             caret,
             caret,
-          ),
+          )
+        },
         false,
       )
       if (draftKey) writeLocal(draftKey, nextPrompt || null)
@@ -586,8 +629,9 @@ export const SpawnForm = memo(function SpawnForm({
 
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
-    const id = attachPastedText(text, e.clipboardData)
-    lastPasteRef.current = { text, attachmentId: id, lang: detectCodeLanguage(e.clipboardData) }
+    const { id, filename } = attachPastedText(text, e.clipboardData)
+    if (pasteMarkers) insertAtCaret(pasteMarkerText([filename]))
+    lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
   function handleDrop(e: React.DragEvent) {

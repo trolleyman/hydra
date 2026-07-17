@@ -36,6 +36,9 @@ import hljs from '../lib/hljs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { pasteMarkerText } from '../lib/pastedText'
+import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
@@ -338,12 +341,25 @@ const STOP_REASON_LABEL: Record<string, string> = {
   model_context_window_exceeded: 'response cut off (context full)',
 }
 
-// Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
-// one is picked per turn so it stays stable while the turn runs.
+// Playful gerunds for the live "working" indicator (item 48), Claude-Code
+// style: a broad grab-bag picked at RANDOM per turn (not round-robin, which
+// made the same few words - Flambeing, Crunching - feel like fixtures). The
+// pick stays stable while the turn runs.
 const WORKING_VERBS = [
-  'Flambéing', 'Percolating', 'Simmering', 'Noodling', 'Conjuring', 'Marinating',
-  'Whisking', 'Churning', 'Brewing', 'Pondering', 'Tinkering', 'Finagling',
-  'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
+  'Accomplishing', 'Actualizing', 'Baking', 'Brewing', 'Cerebrating',
+  'Churning', 'Coalescing', 'Cogitating', 'Combobulating', 'Computing',
+  'Concocting', 'Conjuring', 'Considering', 'Cooking', 'Crafting',
+  'Crunching', 'Deciphering', 'Deliberating', 'Distilling', 'Divining',
+  'Effecting', 'Elucidating', 'Envisioning', 'Finagling', 'Flambeing',
+  'Forging', 'Frolicking', 'Germinating', 'Hatching', 'Herding',
+  'Hustling', 'Ideating', 'Incubating', 'Inferring', 'Manifesting',
+  'Marinating', 'Moseying', 'Mulling', 'Musing', 'Mustering',
+  'Noodling', 'Percolating', 'Perusing', 'Pondering', 'Pontificating',
+  'Puttering', 'Puzzling', 'Reticulating', 'Ruminating', 'Scheming',
+  'Schlepping', 'Simmering', 'Smooshing', 'Spelunking', 'Stewing',
+  'Sussing', 'Synthesizing', 'Thinking', 'Tinkering', 'Transmuting',
+  'Unfurling', 'Unravelling', 'Vibing', 'Wandering', 'Whirring',
+  'Whisking', 'Wibbling', 'Wizarding', 'Working', 'Wrangling',
 ]
 
 // Auto-reconnect tuning: a connection that stayed open this long counts as
@@ -549,6 +565,38 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
   return { text: stripToolUseError(collect(content)), images }
 }
 
+// Decoded intrinsic sizes of tool-result images, cached module-wide so a
+// re-render (or the same image in another card) never re-decodes.
+const imageDimsCache = new Map<string, { w: number; h: number }>()
+
+// useImageDims eagerly decodes the given image sources - as soon as the result
+// arrives, while the card is still collapsed - and returns the cache of their
+// intrinsic sizes. Rendering the <img> with width/height attributes lets
+// layout reserve the correct box BEFORE the pixels are decoded, so the card's
+// open animation (Expandable measures scrollHeight at open) sees the true
+// height. Without this an image Read opened at its text-only height and
+// snapped tall once the image landed after the animation.
+function useImageDims(srcs: string[] | undefined): Map<string, { w: number; h: number }> {
+  const [, bump] = useState(0)
+  useEffect(() => {
+    if (!srcs?.length) return
+    let cancelled = false
+    for (const src of srcs) {
+      if (imageDimsCache.has(src)) continue
+      const img = new Image()
+      img.onload = () => {
+        if (img.naturalWidth > 0) imageDimsCache.set(src, { w: img.naturalWidth, h: img.naturalHeight })
+        if (!cancelled) bump((n) => n + 1)
+      }
+      img.src = src
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [srcs])
+  return imageDimsCache
+}
+
 // --- Plan / to-do panel (TodoWrite) -----------------------------------------
 
 // restoredPlan reads the persisted plan for an agent as display TodoItems, so
@@ -622,7 +670,37 @@ function TodoLi({ t }: { t: TodoItem }) {
   )
 }
 
-function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
+// useChipWidth measures the natural (fit-content) width of a floating card's
+// collapsed header chip via an invisible clone, so open/close can animate the
+// card between PIXEL endpoints. Transitioning from `width: fit-content`
+// cannot work here: the moment the list content mounts, fit-content already
+// resolves to the open width, so the transition's start equals its end and
+// the card snaps wide instead of gliding.
+function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null] {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => setW(el.offsetWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w]
+}
+
+// `stacked`: anchor to a second row below the sub-agent selector - on a
+// narrow pane even the two COLLAPSED chips overlap side by side (the plan
+// chip sat over the selector and swallowed its clicks). Static, so nothing
+// relocates when either card expands.
+function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
+  // Frozen at mount: fade in only when the plan APPEARS live (a first
+  // TodoWrite mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
   const total = todos.length
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = total > 0 && done === total
@@ -649,7 +727,28 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
   }
 
   return (
-    <div className="absolute top-3 right-3 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in">
+    // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
+    // opening glides the width (the measured chip px -> w-64, see useChipWidth)
+    // alongside the Expandable height. Corner-anchored; while open it takes
+    // the higher z so it layers over the selector's chip on a narrow pane
+    // instead of anything relocating.
+    <div
+      style={{ width: open ? 256 : chipW ?? undefined }}
+      className={`absolute ${stacked ? 'top-12' : 'top-2'} right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+    >
+      {/* Invisible clone of the header at natural width - the collapsed chip
+          width the open/close transition animates from/to (border included so
+          the border-box width matches the card's). */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+      >
+        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+        <span className="text-xs font-semibold shrink-0">Plan</span>
+        <span className="shrink-0 text-[11px] tabular-nums">{done}/{total}</span>
+        <ChevronRight className="w-3 h-3 shrink-0" />
+      </div>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -664,7 +763,12 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
         />
       </button>
       <Expandable open={open}>
-        <div className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+        {/* Fixed w-64 (the card's OPEN width): Expandable measures scrollHeight
+            the moment it opens, while the card is still gliding out from its
+            narrow chip width - without a fixed inner width the text wraps into
+            a huge column, the height animates to that, then snaps back down
+            once the width lands. */}
+        <div className="w-64 max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
           {completed.length > 0 && (
             <>
               <button
@@ -1106,6 +1210,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // Eagerly decode result images (the card mounts collapsed the moment the
+  // result lands), so opening later measures the true expanded height.
+  const imageDims = useImageDims(item.resultImages)
   const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
   const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -1248,15 +1355,27 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
-                      {item.resultImages.map((src, i) => (
-                        <img
-                          key={i}
-                          src={src}
-                          alt="Tool output image"
-                          onClick={() => setImgLightbox(i)}
-                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in"
-                        />
-                      ))}
+                      {item.resultImages.map((src, i) => {
+                        // width/height attrs (from the eager decode) + h-auto:
+                        // layout reserves the image's aspect box before the
+                        // browser paints the pixels - see useImageDims.
+                        const dims = imageDims.get(src)
+                        return (
+                          <img
+                            key={i}
+                            src={src}
+                            width={dims?.w}
+                            height={dims?.h}
+                            alt="Tool output image"
+                            onClick={() => setImgLightbox(i)}
+                            // min-h while the size is still unknown (a slow
+                            // url-source image opened before the eager decode
+                            // finished): the open measures a visible loading
+                            // box instead of a sliver.
+                            className={`max-w-full h-auto rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
+                          />
+                        )
+                      })}
                     </div>
                   )}
                   {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
@@ -1883,27 +2002,57 @@ function ChatViewSelector({
   subagents,
   taskToolByUse,
   onSelect,
+  fadeIn,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
   taskToolByUse: Record<string, ToolItem>
   onSelect: (key: string) => void
+  fadeIn: boolean
 }) {
   const [open, setOpen] = useState(false)
+  // Frozen at mount: fade in only when the selector APPEARS live (the first
+  // sub-agent spawning mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
   const subs = Object.values(subagents)
   const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
   const current = chatView !== 'main' ? subagents[chatView] : undefined
   const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
+  // The task description disambiguates same-type sub-agents (two "Explore"s)
+  // in the header chip, just like the list rows.
+  const currentDesc = current ? subLabels(current, toolOf(current)).desc : undefined
   const pick = (key: string) => {
     setOpen(false)
     onSelect(key)
   }
   return (
-    <div className="absolute top-2 left-3 z-20 text-xs">
+    // A floating card styled like the PlanPanel: the collapsed chip is its
+    // natural-width header, and opening glides both the width (the measured
+    // chip px -> w-72, see useChipWidth) and the height (Expandable).
+    // Corner-anchored; while open it takes the higher z so it layers over the
+    // plan panel's chip on a narrow pane instead of anything relocating.
+    <div
+      style={{ width: open ? 288 : chipW ?? undefined }}
+      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+    >
+      {/* Invisible clone of the header at natural width - the collapsed chip
+          width the open/close transition animates from/to. */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+      >
+        <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        {currentDesc && <span className="max-w-44 truncate">{currentDesc}</span>}
+        {current && isSubRunning(current, toolOf(current)) && <LoaderCircle className="w-3 h-3 shrink-0" />}
+        <ChevronRight className="w-3 h-3 shrink-0" />
+      </div>
       <button
         onClick={() => setOpen((o) => !o)}
         title="Switch agent chat"
-        className={`flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 backdrop-blur px-2.5 py-1 shadow-sm transition-colors cursor-pointer ${
+        className={`flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors cursor-pointer ${
           open
             ? 'text-stone-800 dark:text-stone-100'
             : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
@@ -1914,25 +2063,33 @@ function ChatViewSelector({
         ) : (
           <MessageSquare className="w-3.5 h-3.5 shrink-0" />
         )}
-        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
+        <span className="max-w-48 shrink-0 truncate font-medium">{currentLabel}</span>
+        {currentDesc && (
+          <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{currentDesc}</span>
+        )}
         {current && isSubRunning(current, toolOf(current)) && (
           <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
         )}
-        <ChevronDown className="w-3 h-3 shrink-0" />
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 z-20 w-72 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
-            <button
-              onClick={() => pick('main')}
-              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
-            >
-              <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="font-medium">Main conversation</span>
-              {chatView === 'main' && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-[#c96442]" />}
-            </button>
-            {subs.map((sub) => {
+      <Expandable open={open}>
+        {/* Fixed w-72 (the open card width) so the open-height measurement is
+            width-independent - see the PlanPanel note. The list holds only the
+            OTHER views: the current one is already the header, so repeating it
+            (with a check) was noise. */}
+        <div className="w-72 pb-1">
+            {chatView !== 'main' && (
+              <button
+                onClick={() => pick('main')}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+                <span className="font-medium">Main conversation</span>
+              </button>
+            )}
+            {subs.filter((sub) => sub.agentId !== chatView).map((sub) => {
               const tool = toolOf(sub)
               const { label, desc } = subLabels(sub, tool)
               return (
@@ -1948,14 +2105,12 @@ function ChatViewSelector({
                     {isSubRunning(sub, tool) && (
                       <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                     )}
-                    {chatView === sub.agentId && <Check className="w-3.5 h-3.5 text-[#c96442]" />}
                   </span>
                 </button>
               )
             })}
-          </div>
-        </>
-      )}
+        </div>
+      </Expandable>
     </div>
   )
 }
@@ -2081,6 +2236,10 @@ function QuestionCard({
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // Whether the "Other" row is selected, per question. Explicit state (not
+  // derived from the text) so a typed-but-then-rejected free text can stay in
+  // the box while a real option is picked instead.
+  const [otherSel, setOtherSel] = useState<boolean[]>(() => specs.map(() => false))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
 
@@ -2093,9 +2252,11 @@ function QuestionCard({
     () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
     [specs, answeredText],
   )
-  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const localEmpty =
+    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
+  const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -2113,16 +2274,34 @@ function QuestionCard({
         return next
       }),
     )
+    // Picking a real option in a single-select takes over from "Other" (the
+    // typed text stays in the box, just deselected).
+    if (!specs[qi].multiSelect) {
+      setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+    }
   }
 
-  const complete = specs.every((_, i) => selected[i].size > 0 || other[i].trim() !== '')
+  // Select (or, when the dot itself is clicked, toggle) the "Other" row.
+  // Clicking anywhere in the row and typing both select it; in a single-select
+  // that clears the picked option, mirroring toggleOption's takeover.
+  function selectOther(qi: number, next = true) {
+    if (answered) return
+    setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
+    if (next && !specs[qi].multiSelect) {
+      setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+    }
+  }
+
+  const complete = specs.every(
+    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+  )
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
-      if (other[i].trim()) labels.push(other[i].trim())
+      if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
     }
     if (onSubmit(answers)) setSubmitted(true)
@@ -2172,14 +2351,57 @@ function QuestionCard({
                 </button>
               )
             })}
-            <input
-              type="text"
-              value={showOther[qi]}
-              onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
-              disabled={answered}
-              placeholder="Other..."
-              className="w-full rounded-lg border border-stone-200 dark:border-white/[0.07] bg-transparent px-2.5 py-1.5 text-xs placeholder-stone-400 dark:placeholder-stone-500 outline-none focus:border-[#c96442]/60 disabled:opacity-50"
-            />
+            {/* "Other" renders as one more option row: it has its own dot and
+                is selected by clicking the row, typing in it, or toggling the
+                dot - and a settled card highlights it like any picked option. */}
+            {(() => {
+              const isSel = showOtherSel[qi]
+              return (
+                <div
+                  onClick={() => selectOther(qi)}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                    answered ? 'cursor-default' : 'cursor-text'
+                  } ${
+                    isSel
+                      ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
+                      : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
+                  } ${answered && !isSel ? 'opacity-50' : ''}`}
+                >
+                  <button
+                    type="button"
+                    disabled={answered}
+                    aria-label={isSel ? 'Deselect Other' : 'Select Other'}
+                    aria-pressed={isSel}
+                    onClick={(e) => {
+                      // The dot is the one spot that can also DEselect.
+                      e.stopPropagation()
+                      selectOther(qi, !otherSel[qi])
+                    }}
+                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                      q.multiSelect ? 'rounded' : 'rounded-full'
+                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'} ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
+                  >
+                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                  </button>
+                  <input
+                    type="text"
+                    value={showOther[qi]}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                      // Typing claims the selection.
+                      selectOther(qi)
+                    }}
+                    onFocus={() => selectOther(qi)}
+                    disabled={answered}
+                    placeholder="Other..."
+                    className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
+                  />
+                </div>
+              )
+            })()}
           </div>
         </div>
       ))}
@@ -2630,7 +2852,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const turnStartClockRef = useRef<number | null>(null)
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
-  const turnCountRef = useRef(0)
   // The latest assistant message's stop_reason this turn, so the footer can flag
   // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
   const turnStopReasonRef = useRef<string | null>(null)
@@ -2658,6 +2879,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
   const [replayDone, setReplayDone] = useState(false)
+  // True a beat after the replay settles: floating cards (plan, sub-agent
+  // selector) that MOUNT after this fade in - they appeared live - while cards
+  // restored by the replay itself render without the entrance animation (a
+  // reload should not replay the fade every time).
+  const liveUiRef = useRef(false)
+  useEffect(() => {
+    if (!replayDone) {
+      liveUiRef.current = false
+      return
+    }
+    const t = setTimeout(() => {
+      liveUiRef.current = true
+    }, 150)
+    return () => clearTimeout(t)
+  }, [replayDone])
   // Item ids >= this animate in (they arrived live); replayed history commits
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
@@ -2773,6 +3009,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
+  // Whether pasting an attachment also inserts its "[filename]" marker into the
+  // composer (a Browser setting, default on).
+  const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
@@ -3916,12 +4155,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // elapsed effect set turnStartRef to page-load time before the
           // backfill arrived; correct it (and elapsed) here, before the
           // indicator first renders (it's gated on replayDone).
-          {
+          if (isTurnRunningRef.current) {
             const real = turnStartClockRef.current
             if (real != null && real <= Date.now()) {
               turnStartRef.current = real
               setElapsed(Math.floor((Date.now() - real) / 1000))
             }
+          } else {
+            // Idle chat: the backfill's historical user messages also passed
+            // through markTurnStart, so the anchor now holds the LAST turn's
+            // start. Clear it, or the next live turn would show its elapsed
+            // time as "since that old message" instead of starting from 0.
+            turnStartClockRef.current = null
           }
           setLiveFromId(nextId)
           setReplayDone(true)
@@ -4055,7 +4300,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       curMsgTokensRef.current = 0
       turnStopReasonRef.current = null
       setTurnTokens(0)
-      setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
+      setTurnVerb(WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)])
     }
     const tick = () => setElapsed(Math.floor((Date.now() - (turnStartRef.current ?? Date.now())) / 1000))
     tick()
@@ -4070,12 +4315,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
   }, [items, stream, replayDone, pendingSends, subagents])
 
-  // Follow the bottom continuously while pinned as the content height changes
+  // Follow the bottom continuously while pinned as the geometry changes
   // between renders - notably during a card's 0.22s expand/collapse animation,
   // which grows the height frame-by-frame. Without this the disclosure glides
   // open and then the view snaps to the bottom in one jump once React next
-  // re-renders (item 55). A no-op when the user has scrolled up (not pinned),
-  // so load-older prepends and the restored offset are left alone.
+  // re-renders (item 55). The VIEWPORT is observed too: the composer sits
+  // below the scroll pane, so a growing textarea (a wrapped line) shrinks the
+  // pane without touching the content height - re-pin then as well. A no-op
+  // when the user has scrolled up (not pinned), so load-older prepends and the
+  // restored offset are left alone.
   useEffect(() => {
     const el = scrollRef.current
     const content = contentRef.current
@@ -4084,6 +4332,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (pinnedRef.current) el.scrollTop = el.scrollHeight
     })
     ro.observe(content)
+    ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
@@ -4213,8 +4462,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // fresh here rather than from an ever-growing counter: it resets to 1 once the
   // attachments clear on send, and fills the gap after a removal (so removing #2
   // and re-adding reuses 2, not 3).
-  function addFiles(rawFiles: File[]) {
+  function addFiles(rawFiles: File[]): string[] {
     let nextN = nextGenericImageNumber(attachmentsRef.current)
+    const names: string[] = []
     for (const raw of rawFiles) {
       let file = raw
       if (isImageFile(raw) && isGenericImageName(raw.name)) {
@@ -4231,7 +4481,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       uploadFile(projectId, file)
         .then((res) => patchAttachment(id, { path: res.path, uploading: false }))
         .catch((err) => patchAttachment(id, { uploading: false, error: formatError(err) }))
+      names.push(file.name || 'pasted-image')
     }
+    return names
   }
 
   function removeAttachment(id: number) {
@@ -4246,7 +4498,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
-    addFiles(files)
+    const names = addFiles(files)
+    // With the preference on, also reference the pasted attachments in the
+    // message text via "[filename]" markers at the caret.
+    if (pasteMarkers && names.length > 0) {
+      const ta = textareaRef.current
+      const start = ta?.selectionStart ?? input.length
+      const end = ta?.selectionEnd ?? input.length
+      const insert = pasteMarkerText(names)
+      const caret = start + insert.length
+      setInput(input.slice(0, start) + insert + input.slice(end))
+      requestAnimationFrame(() => {
+        if (!ta) return
+        ta.focus()
+        ta.selectionStart = ta.selectionEnd = caret
+      })
+    }
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -4855,17 +5122,38 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }}
     >
       <div className="relative flex-1 min-h-0">
-        {/* The current-agents selector (main + sub-agents), floated top-left
-            once any sub-agent exists. */}
+        {/* Floating cards over the transcript: the current-agents selector
+            (top-left, once any sub-agent exists) and the plan panel
+            (top-right). Both are corner-anchored so expanding one never
+            relocates the other (no pushing/jumping); when they'd overlap on a
+            narrow pane, the OPEN card takes the higher z and simply layers
+            over the other's chip. */}
         {hasSubagents && (
           <ChatViewSelector
             chatView={viewSub ? chatView : 'main'}
             subagents={subagents}
             taskToolByUse={taskToolByUse}
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+            fadeIn={liveUiRef.current}
           />
         )}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        {/* Current plan (item 17): the agent's latest TodoWrite. Main view
+            only - it is the main agent's plan. */}
+        {todos.length > 0 && replayDone && !viewSub && (
+          <PlanPanel
+            todos={todos}
+            narrow={paneWidth > 0 && paneWidth < 560}
+            stacked={hasSubagents && paneWidth > 0 && paneWidth < 560}
+            fadeIn={liveUiRef.current}
+          />
+        )}
+        {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
+            scrollTop to keep an arbitrary anchor node stable when content above
+            the fold grows (an expanding card), firing a scroll event that lands
+            outside the near-bottom threshold and un-pins the follow - whether it
+            happened depended on which node got picked as the anchor. Our own
+            pin/follow logic owns bottom-following instead. */}
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />
@@ -4978,10 +5266,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <ArrowDown className="w-4 h-4" />
           </button>
         )}
-        {/* Current plan (item 17): the agent's latest TodoWrite, floated in the
-            top-right; collapses to a chip when the pane is narrow. Main view
-            only - it is the main agent's plan. */}
-        {todos.length > 0 && replayDone && !viewSub && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
       </div>
 
       {/* A sub-agent's chat can only be read, not talked to: swap the composer
@@ -5009,10 +5293,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           onPointerDown={onComposerResizeStart}
           onPointerMove={onComposerResizeMove}
           onPointerUp={onComposerResizeEnd}
-          className="group flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
+          className="group/resize flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
           title="Drag to resize"
         >
-          <div className="h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-stone-300 dark:group-hover:bg-stone-600" />
+          <ResizeGrip orientation="horizontal" />
         </div>
         <div className="relative mx-auto max-w-5xl">
           {slashMatches.length > 0 && (

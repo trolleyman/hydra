@@ -23,6 +23,8 @@ import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
+import { ResizeGrip } from './components/ResizeGrip'
+import { pinCardToTop } from './lib/collapseScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
@@ -946,9 +948,19 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
+  // Collapsing a file whose top has scrolled above the viewport would leave
+  // the scroll at a random depth of the files below - pin the (now short)
+  // card to the top instead, docked under the sticky chrome (see pinCardToTop
+  // for why it's a pin, not a one-shot scroll).
+  const toggleCollapse = () => {
+    if (!isCollapsed && cardRef.current) pinCardToTop(cardRef.current)
+    onToggleCollapse(file.path)
+  }
+
   return (
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
+      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 8px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
@@ -960,10 +972,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       <div
         style={{ top: FILE_STICKY_TOP }}
         className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
-        onClick={() => onToggleCollapse(file.path)}
+        onClick={toggleCollapse}
       >
+        {/* No onClick of its own: the header div handles the toggle, and a
+            second handler here would fire too (bubbling) and toggle right
+            back - the chevron was a no-op because of exactly that. */}
         <button
-          onClick={() => onToggleCollapse(file.path)}
+          aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
@@ -2689,16 +2704,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         }}
       >
         <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-        {/* Width drag handle: a visible grabber pill (like the split divider's)
-            rather than a bare invisible strip, so the file list reads as
-            resizable at a glance. Hidden while the column is collapsed. */}
+        {/* Width drag handle: invisible strip, shared pill on hover (the
+            unified resize affordance). Hidden while the column is collapsed. */}
         {!filesListHidden && (
           <div
             onMouseDown={startResizing}
             title="Drag to resize"
-            className="group/fl absolute right-0 top-0 bottom-0 w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors z-20"
+            className="group/resize absolute right-0 top-0 bottom-0 w-3 -mr-1 flex items-center justify-center cursor-col-resize z-20 touch-none"
           >
-            <div className="w-1 h-10 rounded-full bg-gray-300 dark:bg-gray-600 group-hover/fl:bg-blue-400/70 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
         )}
       </div>
@@ -2782,7 +2796,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     <div
       ref={filesHeaderRef}
       style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
-      className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      // z-[22]: above the file cards' own sticky headers (z-20), which are later
+      // in the DOM and would otherwise paint OVER this section header while
+      // docking; below the Changes bar's z-[25].
+      className="sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
     >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
@@ -2832,30 +2849,31 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           header docks flush under the top bar - no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0).
           z-[25] keeps it above the diff rows and the sticky file-list panel
-          (z-20) while staying *below* the sidebar overlay backdrop (z-30 in
-          __root.tsx) - at equal z-index the later-DOM bar would paint over the
-          scrim and stay bright when the off-canvas sidebar is open on
-          tablet/phone. */}
-      {/* Styled like the app top bar (white/gray-800 bg + matching border) so the
-          inspector reads as its own panel with a real header - and the collapse
-          toggle (changesLeading) sits at its left edge, flanking the divider.
-          In the inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6
-          fully cancels the scroll container's px-3/px-6 (was half), and -mt-4
-          cancels its pt-4 so the bar sits flush at the top at rest too (not just
-          when stuck). The classic layout keeps its narrower bleed. */}
-      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-white dark:bg-gray-800 py-2 border-b border-gray-200 dark:border-gray-700 shadow-sm ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-6' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
+          (z-20) and below the mobile sidebar panel (z-40 in __root.tsx). */}
+      {/* A pane TOOLBAR, deliberately subordinate to the global top bar: page
+          background (opaque, so content scrolls under it while stuck) and a
+          small section label rather than the top bar's white bg + title type.
+          py-2.5 lands a single-line bar at the working pane toolbar's min-h-12,
+          so the two collapse toggles flanking the divider line up. In the
+          inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6 fully
+          cancels the scroll container's px-3/px-6, the inner px matches the
+          working pane toolbar's px-3/px-4, and -mt-4 cancels the container's
+          pt-4 so the bar sits flush at the top at rest too (not just when
+          stuck). */}
+      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2.5 border-b border-gray-200 dark:border-gray-700 ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-4' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
         {/* Wide split: the collapse toggle flanks the divider at the bar's left
-            edge, vertically centered across however many lines the content wraps
-            to. Narrow screen-stack (leadingInline) instead flows the back button
-            INLINE as the first item of the top row (beside "Changes"), so the
-            ref-selector row below gets the full width - no self-center indent. */}
-        {changesLeading && !leadingInline && <div className="shrink-0 self-center">{changesLeading}</div>}
+            edge, pinned to the first line (self-start under items-start) so it
+            stays level with the working pane toolbar's toggle even when either
+            side wraps. Narrow screen-stack (leadingInline) instead flows the
+            back button INLINE as the first item of the top row (beside
+            "Changes"), so the ref-selector row below gets the full width. */}
+        {changesLeading && !leadingInline && <div className="shrink-0">{changesLeading}</div>}
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
           {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400">Changes</h2>
           {statsEl}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow

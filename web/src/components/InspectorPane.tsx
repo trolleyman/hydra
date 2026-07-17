@@ -39,9 +39,13 @@ export function InspectorPane({
     // chrome docks flush at the pane top. data-inspector-scroll marks this as the
     // pane's own scroll context (the classic layout's single [data-main-scroll]
     // is gone in the split - each pane scrolls independently).
+    // [overflow-anchor:none]: collapsing a card triggers the browser's scroll
+    // anchoring, which re-adjusts scrollTop against an arbitrary anchor node
+    // and drags the view away from the card being collapsed (the card
+    // components own their scroll positioning explicitly).
     <div
       data-inspector-scroll
-      className="flex-1 min-w-0 min-h-0 overflow-auto px-3 sm:px-6 pt-4 pb-6"
+      className="flex-1 min-w-0 min-h-0 overflow-auto px-3 sm:px-6 pt-4 pb-6 [overflow-anchor:none]"
     >
       <DiffViewer
         agent={agent}

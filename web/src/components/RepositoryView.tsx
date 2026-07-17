@@ -12,7 +12,7 @@ import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompareArrows, ArrowRightLeft, PanelLeftOpen, Menu,
+  GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -21,8 +21,6 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
-import { IconButton } from './IconButton'
-import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
   type DiffSide,
@@ -824,12 +822,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
 
-  // The app's nav sidebar collapse state - the repository header hosts the
-  // "show sidebar" toggle while it's hidden (small screens), matching the agent
-  // page's top bar.
-  const collapsed = useSidebarStore((s) => s.collapsed)
-  const toggleSidebar = useSidebarStore((s) => s.toggle)
-
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [currentBranch, setCurrentBranch] = useState('')
 
@@ -1346,14 +1338,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       <div
         className={`shrink-0 h-12 px-3 sm:px-4 items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
       >
-        {collapsed && (
-          <Tooltip content="Show sidebar (Ctrl+.)">
-            <IconButton variant="panel" aria-label="Show sidebar" onClick={toggleSidebar} className="shrink-0 -ml-1">
-              <PanelLeftOpen className="w-5 h-5" />
-            </IconButton>
-          </Tooltip>
-        )}
-        <span className="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
         {branches !== null ? (
           // The base picker always sizes to its own content (it stays
           // shrink-0 + truncates at its own max width). Keeping it un-shrinkable
@@ -1596,10 +1580,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               </div>
             </>
           ) : (
-            <>
-              <span className="text-sm text-gray-400 dark:text-gray-500">Repository</span>
-              <div className="ml-auto"><SettingsPopup settings={settings} onChange={setSettings} /></div>
-            </>
+            <div className="ml-auto"><SettingsPopup settings={settings} onChange={setSettings} /></div>
           )}
         </div>
 

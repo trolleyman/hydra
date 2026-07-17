@@ -2586,6 +2586,13 @@ components:
         path:
           type: string
           description: Absolute filesystem path to the project root
+        display_path:
+          type: string
+          description: >-
+            The project path for display, with the server's home directory
+            abbreviated to "~" (e.g. "~/code/hydra"). Computed server-side
+            because only the server knows its HOME. Falls back to `path`
+            verbatim when the path is not under HOME.
         name:
           type: string
           description: Human-readable project name (last path component)

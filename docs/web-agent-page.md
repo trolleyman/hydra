@@ -3,10 +3,19 @@
 Facts that matter when touching the agent page (`web/src/components/AgentDetail.tsx`
 and `web/src/DiffViewer.tsx`):
 
-- `AgentDetail.tsx` has **two render paths**, each with its own `[data-main-scroll]`
-  scroll container: the active-agent page (metadata `SeparatedRow` -> `PromptBlock` ->
-  `AgentTerminal` -> `DiffViewer`, with `AgentTopBar` as a non-scrolling header above)
-  and a simpler archived-agent view. Layout changes must handle both.
+- `AgentDetail.tsx` has **two render paths**: the active-agent page (always the
+  split layout - a wide two-pane split or the narrow screen-stack; each pane owns
+  its own scroll context, the inspector's marked `[data-inspector-scroll]`) and a
+  simpler archived-agent view with a single `[data-main-scroll]` container.
+  Layout changes must handle both.
+- The agent page has no in-page header bar: both paths portal their status dot,
+  title (inline rename) and action toolbar into the **global top bar** in
+  `__root.tsx` via `TopBarPortal` (`web/src/lib/topBarSlot.ts` holds the slot
+  element; `AgentTopBarContent` in `AgentTopBar.tsx` is the portalled content,
+  including the width-measuring `AdaptiveActions` toolbar). Non-agent routes get
+  a static crumb ("Repository" / "Settings") in the same slot. On the narrow
+  layout the metadata row collapses to a one-line details disclosure above the
+  chat.
 - `DiffViewer.tsx` renders, in order: the sticky "Changes" toolbar (`LeftSelector` =
   base ref, `RightSelector` = head/target ref - both component-local `useState`,
   never lifted; stats, refresh, settings cog), then `TestsPanel` -> `PreviewPanel` ->
@@ -20,17 +29,22 @@ and `web/src/DiffViewer.tsx`):
   ResizeObserver; `--sticky-section-h`, `FILE_STICKY_TOP` (DiffViewer) and
   `STICKY_CARD_TOP` (CollapsibleCard) dock section headers under it. The file-list
   column is `position: sticky` with hard-coded `max-h-[calc(100vh-140px)]` viewport
-  math, and the Changes bar's `z-[25]` is deliberately below the sidebar scrim's
-  `z-30` in `__root.tsx` (comment at the JSX explains why).
+  math, and the Changes bar's `z-[25]` sits below the mobile sidebar panel's
+  `z-40` in `__root.tsx`. The bar is styled to match the global top bar (same
+  bg/border; `py-2.5` lands a single-line bar at h-12) but stays sticky inside
+  the scroll container - its ref selectors must remain reachable deep in a diff.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles).
 - `web/src/lib/storage.ts` is the `StorageKeys` registry. The left sidebar's
-  *collapsed* state persists via the zustand `useSidebarStore`
-  (`web/src/lib/sidebar.ts`), but its *width* does not - width is plain `useState`
-  in `__root.tsx` persisted with `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
-  `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel delta
-  into `[data-main-scroll]`.
+  state is two independent flags in the zustand `useSidebarStore`
+  (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference
+  and a transient mobile `mobileOpen` (never persisted, so crossing the 768px
+  breakpoint can't pop the sidebar open; below it the sidebar is a full-screen
+  panel under the top bar, no scrim). Sidebar *width* is plain `useState` in
+  `__root.tsx` persisted with `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
+  `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
+  delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar
   width (`__root.tsx`), diff file-list width (`DiffViewer.tsx`), terminal height
   (`AgentTerminal.tsx`).

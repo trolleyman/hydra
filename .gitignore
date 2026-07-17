@@ -50,3 +50,6 @@ mage/mage_output_file.go
 # Core dumps
 core
 core.*
+# Stray root-level node_modules (tooling run from the repo root by mistake;
+# the real one lives in web/)
+/node_modules/

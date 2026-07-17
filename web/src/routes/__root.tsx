@@ -16,15 +16,19 @@ import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
 import { ProviderIcon } from '../components/ReviewControls'
 import { useApplyTheme } from '../lib/theme'
-import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
+import { useSidebarStore, SIDEBAR_DESKTOP_QUERY } from '../lib/sidebar'
+import { useMediaQuery } from '../lib/layout'
+import { useTopBarSlot } from '../lib/topBarSlot'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { Uptime } from '../components/LiveTime'
 import { UncommittedChip } from '../components/UncommittedChip'
 import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
+import { ProjectPathLabel } from '../components/ProjectPathLabel'
+import { ResizeGrip } from '../components/ResizeGrip'
 
 import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
@@ -64,8 +68,9 @@ const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 264
 
 // When the agents sidebar can't consume a wheel event (no scrollbar, or already
-// at the top/bottom edge), forward the scroll to the main content area (e.g. the
-// diff view) so the wheel isn't swallowed by the sidebar's dead space.
+// at the top/bottom edge), forward the scroll to the main content area (the
+// archived page's single scroll container, or the split layout's inspector
+// pane) so the wheel isn't swallowed by the sidebar's dead space.
 function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
   const list = e.currentTarget
   const atTop = list.scrollTop <= 0
@@ -75,7 +80,7 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
     ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom))
   if (canConsume) return
 
-  const main = document.querySelector<HTMLElement>('[data-main-scroll]')
+  const main = document.querySelector<HTMLElement>('[data-main-scroll], [data-inspector-scroll]')
   if (main && main.scrollHeight > main.clientHeight) {
     main.scrollTop += e.deltaY
   }
@@ -110,13 +115,14 @@ function RootLayout() {
   // later switch back restores the agent once it's been read.
   const deflectedUnreadProject = useRef<string | null>(null)
   const [restarting, setRestarting] = useState(false)
-  // The sidebar can be hidden on any screen size via the collapse button in its
-  // header (revealed again by the floating button / agent top bar over the
-  // content). On wide screens collapsing reclaims the space; below the overlay
-  // breakpoint the sidebar is an off-canvas overlay, so collapsed means "closed".
-  // State lives in a shared store so the agent page's top bar can host the toggle.
-  const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
+  // Sidebar visibility: the persisted desktop collapse preference and the
+  // transient mobile panel state are independent flags (see lib/sidebar.ts), so
+  // resizing across the breakpoint never pops the sidebar open. The top bar
+  // hosts the show toggle; the sidebar's sync row hosts the hide toggle.
+  const desktopCollapsed = useSidebarStore((s) => s.desktopCollapsed)
+  const mobileSidebarOpen = useSidebarStore((s) => s.mobileOpen)
   const toggleSidebar = useSidebarStore((s) => s.toggle)
+  const isDesktopViewport = useMediaQuery(SIDEBAR_DESKTOP_QUERY)
   // When adding a project, the user first reviews its repo-controlled
   // .hydra/config.toml (which can run code) before it's registered. This holds
   // the pending review; its callbacks resolve the in-flight add (see
@@ -349,7 +355,8 @@ function RootLayout() {
   // Build the rest of the title from the current view: project, then the open
   // agent (its title, falling back to id) or the repository browser. Computed as
   // primitive strings so the effect only fires when the displayed text changes.
-  const titleProjectName = projects.find((p) => p.id === currentProjectId)?.name
+  const currentProject = projects.find((p) => p.id === currentProjectId)
+  const titleProjectName = currentProject?.name
   const titleAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : undefined
   const titleAgentName = titleAgent ? titleAgent.title || titleAgent.id : undefined
   const onRepository = /\/repository(\/|$)/.test(location.pathname)
@@ -434,17 +441,20 @@ function RootLayout() {
     saveProjectView(projectId, { kind: 'agent', agentId })
   }, [routeParams.projectId, routeParams.agentId, location.pathname])
 
-  // Drop expired per-artifact and per-agent-view UI prefs once on boot.
-  useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
-
-  // On small screens (overlay mode) close the sidebar on any navigation so it
-  // never lingers over the content. This is transient - it does NOT persist, so
-  // it can't clobber the wide-screen collapse preference (only the explicit
-  // toggle writes storage). On wide screens the sidebar stays as the user left it.
+  // Drop expired per-artifact and per-agent-view UI prefs once on boot, plus
+  // the retired split-layout opt-out key (the toggle is gone; split is always
+  // on).
   useEffect(() => {
-    if (!window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches) {
-      useSidebarStore.getState().setCollapsed(true, false)
-    }
+    pruneArtifactPrefs()
+    pruneAgentViewPrefs()
+    try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
+  }, [])
+
+  // Close the mobile sidebar panel on any navigation so it never lingers over
+  // the content. mobileOpen is transient and mobile-only, so this can't touch
+  // the desktop collapse preference - no breakpoint check needed.
+  useEffect(() => {
+    useSidebarStore.getState().closeMobile()
   }, [location.pathname])
 
   // App-wide keyboard shortcuts: Ctrl+. sidebar toggle, `?` help overlay, and the
@@ -587,71 +597,101 @@ function RootLayout() {
 
   const filteredAgents = agents.filter((a) => !a.ephemeral)
 
+  // Breadcrumb shown in the top bar after the "/" on non-agent pages. Agent
+  // pages portal their own status/title/actions into the slot instead
+  // (TopBarPortal), so the crumb stays out of their way.
+  const crumb = selectedAgentId
+    ? null
+    : onRepository
+      ? 'Repository'
+      : /\/settings(\/|$)/.test(location.pathname)
+        ? 'Settings'
+        : null
+
+  // The top bar's route-content slot element, registered into a store so route
+  // content can portal into it from an unrelated router subtree.
+  const registerTopBarSlot = useCallback((el: HTMLDivElement | null) => {
+    useTopBarSlot.getState().setEl(el)
+  }, [])
+
+  // Whether the sidebar is on screen for the current breakpoint - drives the
+  // top bar toggle's icon/tooltip. On desktop the toggle only renders while
+  // the sidebar is hidden (the sidebar's own sync row hosts the hide button);
+  // on mobile it stays as a true toggle.
+  const sidebarVisible = isDesktopViewport ? !desktopCollapsed : mobileSidebarOpen
+
   return (
-    <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex overflow-hidden">
-      {/* Backdrop behind the sidebar overlay (small screens only, when open). */}
-      {!sidebarCollapsed && (
-        <div
-          aria-hidden
-          onClick={toggleSidebar}
-          className="md:hidden fixed inset-0 z-30 bg-black/40"
+    <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
+      {/* Global top bar: sidebar toggle (while hidden), project icon + selector,
+          then the route's slice after the "/". The agent page portals its status
+          dot, title and action toolbar into the slot (TopBarPortal); the
+          repository browser and settings render a static crumb. */}
+      <header className="shrink-0 h-12 flex items-center gap-1.5 px-2 sm:px-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        {/* Sidebar toggle: always present, so it never jumps in and out of the
+            bar - the icon flips between hide and show. On mobile it's the
+            hamburger for the full-screen sidebar panel. */}
+        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (Ctrl+.)`}>
+          <button
+            type="button"
+            aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+            onClick={toggleSidebar}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            {isDesktopViewport ? (
+              sidebarVisible ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />
+            ) : sidebarVisible ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
+          </button>
+        </Tooltip>
+        <ProjectDropdown
+          projects={projects}
+          selectedId={currentProjectId}
+          // Restore the view (agent / repository / project) last open in the
+          // project we're switching to (see selectProject / restoreProjectView).
+          onSelect={selectProject}
+          onDeselect={handleProjectDeselect}
+          onAddProject={handleAddProject}
         />
-      )}
-      {/* Sidebar: a persistent, resizable column at lg+, an off-canvas overlay
-          below that (so it never squeezes a tablet / landscape phone). With the
-          top bar gone it now holds the whole app chrome: the project selector +
-          collapse button in its header, the spawn box / repository / agents list
-          in the middle, and settings + usage in its footer. Collapsing animates:
-          at lg+ the column's width tweens to 0 (the inner content keeps its full
-          width and is clipped by overflow-hidden, so it slides away cleanly
-          without reflowing); as an overlay it slides off-canvas via translate.
-          The floating button over the content reveals it again. */}
+        {/* mr-2.5 balances the separator: the selector's trailing padding sits
+            10px left of it, so match that on the right (the slot content has no
+            leading padding of its own). */}
+        {(selectedAgentId != null || crumb != null) && (
+          <span aria-hidden className="shrink-0 mr-2.5 text-gray-300 dark:text-gray-600 select-none">/</span>
+        )}
+        <div ref={registerTopBarSlot} className="flex-1 min-w-0 flex items-center gap-2">
+          {crumb != null && (
+            <span className="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-100 px-1">
+              {crumb}
+            </span>
+          )}
+        </div>
+      </header>
+
+      {/* Content row below the bar: sidebar + routed page. relative so the
+          mobile sidebar panel can cover exactly this region (the bar stays). */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+      {/* Sidebar: a persistent, resizable column at md+; below that a
+          full-screen panel over the content row (its own screen - the top bar
+          stays visible above it). Collapsing animates: at md+ the column's
+          width tweens to 0 (the inner content keeps its full width and is
+          clipped by overflow-hidden, so it slides away cleanly without
+          reflowing); the mobile panel slides off-canvas via translate. The top
+          bar's toggle reveals it again. */}
       <aside
-        style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-        className={`relative overflow-hidden max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-[80vw] max-md:!max-w-[20rem] max-md:shadow-2xl bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform] duration-200'} ${sidebarCollapsed ? 'max-md:-translate-x-full' : 'translate-x-0'}`}
+        style={{ width: desktopCollapsed ? 0 : sidebarWidth }}
+        className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform,translate] duration-200'} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
       >
         {/* Inner content at a fixed width (the expanded sidebar width, or the full
-            overlay width below lg) so the collapse width-tween clips it instead of
+            panel width below md) so the collapse width-tween clips it instead of
             squishing/reflowing every row. shrink-0 keeps it from shrinking with the
             aside; the right border rides its trailing edge. */}
         <div
           style={{ width: sidebarWidth }}
           className="flex flex-col h-full shrink-0 max-md:!w-full border-r border-gray-200 dark:border-gray-700"
         >
-        {/* Sidebar header - app icon, project selector, and the collapse button
-            to its right. This is what replaced the global top bar. */}
-        <div className="flex items-center gap-1 h-12 px-2 border-b border-gray-200 dark:border-gray-700 shrink-0">
-          <Link
-            to={currentProjectId ? '/project/$projectId' : '/'}
-            params={currentProjectId ? { projectId: currentProjectId } : {}}
-            aria-label="Hydra home"
-            className="shrink-0 w-7 h-7 flex items-center justify-center overflow-hidden rounded-sm"
-          >
-            <img className="w-6 h-6 object-cover object-center" srcSet="/icon.png, /icon.avif" src="/icon.png" alt="Hydra icon" />
-          </Link>
-          <div className="flex-1 min-w-0">
-            <ProjectDropdown
-              projects={projects}
-              selectedId={currentProjectId}
-              // Restore the view (agent / repository / project) last open in the
-              // project we're switching to (see selectProject / restoreProjectView).
-              onSelect={selectProject}
-              onDeselect={handleProjectDeselect}
-              onAddProject={handleAddProject}
-            />
-          </div>
-          <Tooltip content="Hide sidebar (Ctrl+.)">
-            <button
-              type="button"
-              aria-label="Hide sidebar"
-              onClick={toggleSidebar}
-              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
-              <PanelLeftClose className="w-5 h-5" />
-            </button>
-          </Tooltip>
-        </div>
-
           {/* Repository view + Sync - above the spawn box, adjacent to the project
               selector it describes: context (repo/branch/sync) -> action (spawn)
               -> results (agents list). NON_LOCAL_INTEGRATION.md 3.8. */}
@@ -683,98 +723,116 @@ function RootLayout() {
                               ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
                               : `Up to date with ${remote}`
                 return (
-                  <div className="flex items-center gap-1.5">
-                    <Link
-                      to="/project/$projectId/repository"
-                      params={{ projectId: currentProjectId }}
-                      onClick={(e) => {
-                        if (repositoryActive) {
-                          // Toggle off: left-clicking the active Repository button
-                          // returns to the project home screen, mirroring agent
-                          // deselection. Middle/Ctrl-click ignore this and open the
-                          // repository in a new tab (it's a real link).
-                          e.preventDefault()
-                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                        }
-                      }}
-                      className={
-                        repositoryActive
-                          ? 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                          : 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-                      }
-                    >
-                      <FolderGit2 className="w-4 h-4 shrink-0" />
-                      {/* truncate (not a raw text node) so a cramped sidebar
-                          ellipsises the label instead of overflowing it under
-                          the forge logo / status chips (image35). */}
-                      <span className="truncate">Repository</span>
-                    </Link>
-                    {/* Forge web link, derived from the remote URL (read-only, no
-                        auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
-                        no remote or no https browse URL could be derived. */}
-                    {reviewConfig?.browse_url && (
-                      <Tooltip
-                        content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
-                        // ml-1/-mr-1 shifts the forge glyph rightward within the
-                        // uniform gap-1.5 row: a touch more air after "Repository",
-                        // a touch less before the status chips.
-                        className="shrink-0 ml-1 -mr-1"
-                      >
-                        <a
-                          href={reviewConfig.browse_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Open repository on the forge"
-                          className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
-                        </a>
-                      </Tooltip>
-                    )}
-                    {/* Uncommitted-changes warning: the project checkout is dirty
-                        (e.g. a Settings save rewrote .hydra/config.toml). Click to
-                        review the paths and commit them all. */}
-                    {pushStatus && pushStatus.uncommitted.total > 0 && (
-                      <UncommittedChip
-                        uncommitted={pushStatus.uncommitted}
-                        committing={committing}
-                        onCommit={handleCommit}
-                      />
-                    )}
-                    {/* Ahead/behind status indicator (read-only) */}
-                    {(behind > 0 || ahead > 0) && (
-                      <Tooltip content={statusTooltip} className="shrink-0">
-                        <span className="flex items-center gap-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
-                          {behind > 0 && (
-                            <span className="flex items-center text-amber-600 dark:text-amber-400">
-                              <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
-                            </span>
-                          )}
-                          {ahead > 0 && (
-                            <span className="flex items-center">
-                              <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
-                            </span>
-                          )}
-                        </span>
-                      </Tooltip>
-                    )}
-                    {/* Sync button (pull then push) */}
-                    <Tooltip content={syncTooltip} className="shrink-0">
-                      <button
-                        type="button"
-                        onClick={handleSync}
-                        disabled={!canSync}
-                        aria-label={syncTooltip}
+                  <>
+                    {/* Row 1: the Repository link (labelled with the project's
+                        path), full width. Row 2 (always rendered, so git state
+                        changes never shift the layout): the forge link and
+                        dirty/ahead/behind chips, with Sync anchored at the
+                        right - next to the state it acts on. */}
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        to="/project/$projectId/repository"
+                        params={{ projectId: currentProjectId }}
+                        aria-label="Repository"
+                        onClick={(e) => {
+                          if (repositoryActive) {
+                            // Toggle off: left-clicking the active Repository button
+                            // returns to the project home screen, mirroring agent
+                            // deselection. Middle/Ctrl-click ignore this and open the
+                            // repository in a new tab (it's a real link).
+                            e.preventDefault()
+                            navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                          }
+                        }}
                         className={
-                          canSync
-                            ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                            : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          repositoryActive
+                            ? 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                            : 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                         }
                       >
-                        <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                      </button>
-                    </Tooltip>
-                  </div>
+                        <FolderGit2 className="w-4 h-4 shrink-0" />
+                        {/* The label is the project's path (HOME abbreviated to
+                            "~" server-side), middle-elided to fit the row - see
+                            ProjectPathLabel. Falls back to "Repository" until
+                            the project list has loaded. */}
+                        {currentProject ? (
+                          <ProjectPathLabel
+                            path={currentProject.display_path ?? currentProject.path}
+                            title={currentProject.path}
+                          />
+                        ) : (
+                          <span className="truncate">Repository</span>
+                        )}
+                      </Link>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-1 mt-1 pb-1">
+                        {/* Forge web link, derived from the remote URL (read-only, no
+                            auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                            no remote or no https browse URL could be derived. */}
+                        {reviewConfig?.browse_url && (
+                          <Tooltip
+                            content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                            className="shrink-0"
+                          >
+                            <a
+                              href={reviewConfig.browse_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label="Open repository on the forge"
+                              className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
+                            </a>
+                          </Tooltip>
+                        )}
+                        {/* Uncommitted-changes warning: the project checkout is dirty
+                            (e.g. a Settings save rewrote .hydra/config.toml). Click to
+                            review the paths and commit them all. */}
+                        {pushStatus && pushStatus.uncommitted.total > 0 && (
+                          <UncommittedChip
+                            uncommitted={pushStatus.uncommitted}
+                            committing={committing}
+                            onCommit={handleCommit}
+                          />
+                        )}
+                        {/* Ahead/behind counters + Sync, pinned right together
+                            (the counters describe exactly what Sync will do).
+                            Sync always renders - it anchors the row so the
+                            section height never shifts as chips come and go. */}
+                        <div className="flex-1" />
+                        {(behind > 0 || ahead > 0) && (
+                          <Tooltip content={statusTooltip} className="shrink-0">
+                            <span className="flex items-center gap-1 px-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
+                              {behind > 0 && (
+                                <span className="flex items-center text-amber-600 dark:text-amber-400">
+                                  <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                                </span>
+                              )}
+                              {ahead > 0 && (
+                                <span className="flex items-center">
+                                  <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                                </span>
+                              )}
+                            </span>
+                          </Tooltip>
+                        )}
+                        <Tooltip content={syncTooltip} className="shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleSync}
+                            disabled={!canSync}
+                            aria-label={syncTooltip}
+                            className={
+                              canSync
+                                ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                                : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                            }
+                          >
+                            <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                  </>
                 )
               })()
             ) : (
@@ -926,36 +984,21 @@ function RootLayout() {
           </div>
         </div>
 
-          {/* Resize handle (lg+ only - the overlay sidebar has a fixed width) */}
+          {/* Resize handle (md+ only - the mobile panel has a fixed width).
+              Invisible strip; the shared pill appears on hover. */}
           <div
             onPointerDown={handleSidebarResizeStart}
-            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
+            title="Drag to resize"
+            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group/resize items-center justify-center touch-none"
           >
-            <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
         </aside>
 
-        {/* Main content. When the sidebar is collapsed a floating button at the
-            top-left brings it back - except on pages that host the toggle in
-            their own header bar (the agent page, the repository browser, and
-            settings). */}
-        {sidebarCollapsed && !selectedAgentId && !/\/(repository|settings)(\/|$)/.test(location.pathname) && (
-          <Tooltip content="Show sidebar (Ctrl+.)">
-            <button
-              type="button"
-              aria-label="Show sidebar"
-              onClick={toggleSidebar}
-              className="fixed top-2 left-2 z-30 w-9 h-9 flex items-center justify-center rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
-              <PanelLeftOpen className="w-5 h-5" />
-            </button>
-          </Tooltip>
-        )}
-        {/* The floating reveal button (when collapsed) just overlays the top-left
-            corner - no reserved strip, so the content keeps the full width. */}
         <div className="flex-1 flex min-w-0 overflow-hidden">
           <Outlet />
         </div>
+      </div>
       <Dialog />
       <Toaster />
       <KeyboardShortcutsModal />

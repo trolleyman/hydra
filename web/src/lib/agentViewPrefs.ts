@@ -2,7 +2,6 @@
 // agent, so an agent's detail page restores its own layout on reload and when
 // switching between agents - treating each agent like its own page. We persist:
 //   - terminalHeight: the height the user dragged the terminal panel to.
-//   - scrollTop: the scroll position of the agent detail page.
 //   - collapsedFiles: which files are collapsed in the diff viewer.
 //
 //   - bashTabs: the extra bash shell tabs open in the terminal panel (each with
@@ -25,7 +24,6 @@ export type BashTabPref = {
 
 export type AgentViewPrefs = {
   terminalHeight?: number
-  scrollTop?: number
   collapsedFiles?: string[]
   bashTabs?: BashTabPref[]
   activeTabId?: string
@@ -66,7 +64,6 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
   if (!stored) return {}
   return {
     terminalHeight: stored.terminalHeight,
-    scrollTop: stored.scrollTop,
     collapsedFiles: stored.collapsedFiles,
     bashTabs: stored.bashTabs,
     activeTabId: stored.activeTabId,

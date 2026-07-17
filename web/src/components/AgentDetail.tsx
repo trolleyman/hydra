@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { memo, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -11,17 +11,17 @@ import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
 import { copyBranchName } from '../lib/branch'
 import { SeparatedRow } from './SeparatedRow'
-import { AgentTopBar, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
+import { AgentTopBarContent, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
+import { TopBarPortal } from './TopBarPortal'
 import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
-import { DiffViewer } from '../DiffViewer'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
-import { IconButton } from './IconButton'
-import { useSplitLayoutStore, usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
+import { ResizeGrip } from './ResizeGrip'
+import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -244,17 +244,17 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* The agent header is a single header bar (no separate H1): the archived
-          agent's name + a delete action, and a dim status dot. While the sidebar
-          is collapsed it also hosts the show-sidebar toggle. It sits above the
-          scroll area. */}
-      <AgentTopBar
-        title={agent.title || agent.id}
-        statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
-        actions={[
-          { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
-        ]}
-      />
+      {/* The archived agent's slice of the global top bar (portalled into
+          __root's slot): the name + a delete action, and a dim status dot. */}
+      <TopBarPortal>
+        <AgentTopBarContent
+          title={agent.title || agent.id}
+          statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
+          actions={[
+            { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
+          ]}
+        />
+      </TopBarPortal>
       <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
         <div className="w-full">
         {/* Header */}
@@ -376,6 +376,54 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
   )
 }
 
+// MetaStrip is the chip row's container. On md+ it wraps to multiple lines
+// (plenty of room, and a visible scrollbar there read badly); below md it's a
+// single horizontally scrollable line with edge fades hinting at overflowing
+// content on either side.
+function MetaStrip({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fade, setFade] = useState({ left: false, right: false })
+  const update = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const left = el.scrollLeft > 1
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+    setFade((f) => (f.left === left && f.right === right ? f : { left, right }))
+  }, [])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', update)
+      ro?.disconnect()
+    }
+  }, [update])
+  // Chips come and go with agent state (scrollWidth changes without the element
+  // resizing), so re-measure after every render of the row.
+  useEffect(() => {
+    update()
+  })
+  return (
+    <div data-meta-strip className="relative min-w-0">
+      <div
+        ref={ref}
+        className="flex items-center gap-2 min-w-0 md:flex-wrap md:gap-y-1.5 max-md:overflow-x-auto max-md:whitespace-nowrap max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden"
+      >
+        {children}
+      </div>
+      {fade.left && (
+        <div aria-hidden className="md:hidden pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-gray-50 dark:from-gray-900 to-transparent" />
+      )}
+      {fade.right && (
+        <div aria-hidden className="md:hidden pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-gray-50 dark:from-gray-900 to-transparent" />
+      )}
+    </div>
+  )
+}
+
 function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!mode) return null
   const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
@@ -406,11 +454,14 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   }
   const c = cfg[mode]
   if (!c) return null
+  // Icon-only: the shield color/glyph carries the signal at a glance; the label
+  // and full explanation live in the tooltip (row real estate is precious).
   return (
-    <Tooltip variant="card" title="Network access" content={c.tip}>
-      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>
-        {c.label}
-      </Badge>
+    <Tooltip variant="card" title={`Network access - ${c.label}`} content={c.tip} className="shrink-0">
+      {/* min-h-5 matches the text chips' height (text-xs line + py-0.5) - an
+          icon-only chip would otherwise sit a few px shorter than its
+          neighbours. */}
+      <Badge className={c.className} containerClassName="min-h-5" icon={<c.Icon className="w-3 h-3 shrink-0" />}>{null}</Badge>
     </Tooltip>
   )
 }
@@ -427,8 +478,9 @@ function metaRowSignature(a: AgentResponse) {
   return {
     agent_type: a.agent_type,
     archived: a.archived,
-    // status + tests moved to the header (AgentTopBar), so the row no longer
-    // depends on them.
+    // Read by the status pill + test verdict chip.
+    agent_status: a.agent_status,
+    tests: a.tests,
     network_enforcement: a.network_enforcement,
     branch_name: a.branch_name,
     base_branch: a.base_branch,
@@ -468,34 +520,60 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveChatMode: (next: boolean) => void
   onSaveDownstream: (n: string) => void
 }) {
+  // Confirm before flipping the terminal/chat mode - switching restarts the
+  // Claude process, so an accidental tap on the pill shouldn't do it silently.
+  const confirmChatMode = (next: boolean) => {
+    if ((agent.chat_mode === true) === next) return
+    useDialogStore.getState().show({
+      title: next ? 'Switch to chat?' : 'Switch to terminal?',
+      message: 'This restarts the Claude process in the new mode. The conversation is preserved.',
+      type: 'confirm',
+      showCancel: true,
+      confirmLabel: next ? 'Switch to chat' : 'Switch to terminal',
+      onConfirm: () => onSaveChatMode(next),
+    })
+  }
   return (
-    // Not `live`: "created X ago" self-updates via its own <RelativeTime> leaf, so
-    // the row no longer subscribes to the 1s clock (which re-rendered + re-measured
-    // it every second even when idle).
-    <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-      <Badge
-        variant="pill"
-        className={agentTypeClass}
-        icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
-      >
-        {agent.agent_type}
-      </Badge>
-      {/* Status pill sits right after the agent-type chip (moved back out of the
-          header). The test verdict stays in the header. */}
+    // The chip strip: no interpunct separators; wraps on desktop, scrolls on
+    // mobile (see MetaStrip). Dropdown children (the base selector) are
+    // portalled, so the mobile overflow clipping can't swallow them.
+    <MetaStrip>
+      {/* Agent type, icon only - the colored pill is recognizable without the
+          text label; the tooltip still names it. */}
+      <Tooltip content={agent.agent_type} className="shrink-0">
+        {/* min-h-5 keeps the icon-only pill the same height as text chips. */}
+        <Badge
+          variant="pill"
+          className={agentTypeClass}
+          containerClassName="min-h-5"
+          icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+        >{null}</Badge>
+      </Tooltip>
       {agent.agent_status && (
-        <Badge className={agentStatusBadge(agent.agent_status.status).className}>
+        <Badge
+          className={agentStatusBadge(agent.agent_status.status).className}
+          containerClassName="shrink-0"
+        >
           {agentStatusBadge(agent.agent_status.status).label}
         </Badge>
       )}
-      {/* The armed "merges when tests pass" state is shown by the merge button
-          itself now (the green pill), so no separate metadata-row badge. */}
+      {/* Test verdict, right after the status. shrink-0 wrappers throughout:
+          several chips have min-w-0/truncate internals for wrapping rows, which
+          would otherwise absorb ALL the shrink in this nowrap row and collapse
+          to their icons - the strip must scroll instead. */}
+      {agent.tests && agent.tests.status !== 'none' && (
+        <span className="shrink-0 inline-flex">
+          <TestVerdictChip tests={agent.tests} variant="sm" />
+        </span>
+      )}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-      {agent.branch_name && <BranchTag branch={agent.branch_name} />}
-      {/* Base branch. Editing it is metadata-only: it changes what
-          update-from-base merges in and what the diff compares against,
-          but does not rebase existing commits. */}
-      <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-        <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
+      {/* Branch -> base as one compact control: the head's branch, an arrow
+          (it merges into / diffs against), then the editable base. Editing the
+          base is metadata-only: it changes what update-from-base merges in and
+          what the diff compares against, but does not rebase commits. */}
+      {agent.branch_name && <span className="shrink-0"><BranchTag branch={agent.branch_name} /></span>}
+      <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
+        <ArrowRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" aria-label="merges into" />
         {branches !== null && !savingBase ? (
           <BranchSelector
             // An agent can't be its own base, so drop its own branch from
@@ -514,12 +592,22 @@ const AgentMetaRow = memo(function AgentMetaRow({
           </span>
         )}
       </span>
-      {/* Terminal/chat mode toggle (Claude only). Switching
-          restarts the Claude process in the new mode; the conversation is
-          preserved via --continue. */}
+      {/* Downstream branch (the name this head is pushed AS) - editable
+          until first publish, then soft-locked. Only shown once set. */}
+      <span className="shrink-0 inline-flex items-center">
+        <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
+      </span>
+      {/* Linked-MR state chip (state/CI/approvals/discussions). */}
+      <span className="shrink-0 inline-flex items-center">
+        <MRStateChip agent={agent} />
+      </span>
+      {/* Terminal/chat mode toggle (Claude only) - the segmented pill, with a
+          confirm dialog so an accidental tap can't restart the Claude process
+          (switching restarts it in the new mode; the conversation is preserved
+          via --continue). */}
       {agent.agent_type === 'claude' && !agent.archived && (
         <span
-          className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
+          className="shrink-0 inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
           title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
         >
           {savingChatMode ? (
@@ -530,7 +618,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
           ) : (
             <>
               <button
-                onClick={() => onSaveChatMode(false)}
+                onClick={() => confirmChatMode(false)}
                 className={`flex items-center gap-1 px-2 py-1 transition-colors ${
                   agent.chat_mode
                     ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
@@ -541,7 +629,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
                 terminal
               </button>
               <button
-                onClick={() => onSaveChatMode(true)}
+                onClick={() => confirmChatMode(true)}
                 className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
                   agent.chat_mode
                     ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
@@ -555,17 +643,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
           )}
         </span>
       )}
-      {/* Downstream branch (the name this head is pushed AS) - editable
-          until first publish, then soft-locked. Only shown once set. */}
-      <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
-      {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <MRStateChip agent={agent} />
       {agent.created_at !== 0 && agent.created_at !== undefined && (
-        <span className="text-xs text-gray-500 dark:text-gray-400">
+        <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">
           created <RelativeTime createdAt={agent.created_at} />
         </span>
       )}
-    </SeparatedRow>
+    </MetaStrip>
   )
 }, (prev, next) =>
   prev.agentTypeClass === next.agentTypeClass &&
@@ -625,34 +708,25 @@ export function AgentDetail({
     setDiffRefreshTrigger((t) => t + 1)
     if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
   }, [])
-  const scrollRef = useRef<HTMLDivElement>(null)
-
   // ── Two-pane split layout ──────────────────────────────────────────────────
-  // Gated behind the split-layout flag. On a WIDE viewport it's the real two-pane
-  // split (working pane + diff/inspector pane, divider between). On a NARROW
-  // viewport there's no room for two panes, so it degrades to a single pane that
-  // the diff-sidebar toggle flips between the working view and a full-screen diff.
-  // The pane-collapse store holds the shared state (none / inspector-hidden /
-  // working-hidden). With the flag off (or archived) the classic stacked layout
-  // renders instead.
-  const splitEnabled = useSplitLayoutStore((s) => s.enabled)
+  // On a WIDE viewport it's the real two-pane split (working pane +
+  // diff/inspector pane, divider between). On a NARROW viewport there's no room
+  // for two panes, so it degrades to a single pane that the diff-sidebar toggle
+  // flips between the working view and a full-screen diff. The pane-collapse
+  // store holds the shared state (none / inspector-hidden / working-hidden).
   const isWide = useMediaQuery(SPLIT_QUERY)
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
-  const splitActive = splitEnabled && isWide && !agent.archived
-  const narrowSplit = splitEnabled && !isWide && !agent.archived
-  const paneActive = splitActive || narrowSplit
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
   // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
   // pane; narrow flips the single pane between working and full-screen diff.
   const toggleDiffSidebar = useCallback(() => {
-    if (!paneActive) return
     if (isWide) toggleInspector()
     else toggleWorking()
-  }, [paneActive, isWide, toggleInspector, toggleWorking])
+  }, [isWide, toggleInspector, toggleWorking])
   // Divider-flanking collapse toggles (wide split). The same two spots host both
   // hide and show, keyed off the OTHER pane's state:
   //  - workingTopButton (working pane's top-right, left of the divider): "Hide
@@ -700,6 +774,37 @@ export function AgentDetail({
   splitRatioRef.current = splitRatio
   const [splitResizing, setSplitResizing] = useState(false)
   const panesRef = useRef<HTMLDivElement>(null)
+  // Pixel width of the panes container - the working pane's inner content is
+  // pinned to a fixed pixel width during its collapse/reveal animation, and
+  // that width is derived from this.
+  const [panesW, setPanesW] = useState(0)
+  useLayoutEffect(() => {
+    if (!isWide) return
+    const el = panesRef.current
+    if (!el) return
+    const update = () => setPanesW(el.clientWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [isWide])
+  // True while the working pane is animating back open from "Diff only": its
+  // inner content must stay at the fixed target width until the outer width
+  // tween lands, or the terminal would relayout through near-zero widths.
+  const [workingRevealing, setWorkingRevealing] = useState(false)
+  const prevPaneCollapseRef = useRef(paneCollapse)
+  useEffect(() => {
+    if (prevPaneCollapseRef.current === 'working' && paneCollapse !== 'working') setWorkingRevealing(true)
+    prevPaneCollapseRef.current = paneCollapse
+  }, [paneCollapse])
+  useEffect(() => {
+    if (!workingRevealing) return
+    // Matches the 240ms width tween (with a little slack).
+    const t = setTimeout(() => setWorkingRevealing(false), 300)
+    return () => clearTimeout(t)
+  }, [workingRevealing])
+  const paneTransition = splitResizing ? undefined : 'width 240ms ease'
   // Hand-rolled divider drag, mirroring handleSidebarResizeStart in __root.tsx.
   const handleSplitResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
@@ -754,55 +859,6 @@ export function AgentDetail({
     setBranches(null)
     void refreshBranches()
   }, [refreshBranches])
-
-  // Restore & persist the page scroll position per agent, so each agent's detail
-  // page behaves like its own page. Content below the fold (terminal, diff)
-  // loads asynchronously and grows the page, so we retry the restore for a short
-  // window until the saved offset is reachable, yielding the moment the user
-  // scrolls so we never fight them.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const target = loadAgentViewPrefs(projectId, agent.id).scrollTop ?? 0
-    let restoring = target > 0
-    let raf = 0
-    const save = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        if (restoring) return // ignore the programmatic scrolls of an in-flight restore
-        patchAgentViewPrefs(projectId, agent.id, { scrollTop: Math.round(el.scrollTop) })
-      })
-    }
-    const stopRestore = () => { restoring = false }
-    el.addEventListener('scroll', save, { passive: true })
-    // A real user gesture cancels any in-progress restore.
-    el.addEventListener('wheel', stopRestore, { passive: true })
-    el.addEventListener('touchstart', stopRestore, { passive: true })
-
-    let attempts = 0
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const tryRestore = () => {
-      if (!restoring) return
-      el.scrollTop = target
-      // Reached it (within rounding) or out of attempts → stop restoring.
-      if (el.scrollTop >= target - 1 || attempts >= 30) {
-        restoring = false
-        return
-      }
-      attempts++
-      timer = setTimeout(tryRestore, 50)
-    }
-    tryRestore()
-
-    return () => {
-      el.removeEventListener('scroll', save)
-      el.removeEventListener('wheel', stopRestore)
-      el.removeEventListener('touchstart', stopRestore)
-      if (raf) cancelAnimationFrame(raf)
-      if (timer) clearTimeout(timer)
-    }
-  }, [agent.id, projectId])
 
   const agentTypeClass = agentTypePill(agent.agent_type)
 
@@ -1542,27 +1598,16 @@ export function AgentDetail({
   // the View-MR button, still first.
   const mrFirst = true
 
-  // The agent header is a single header bar (no separate H1): the name with an
-  // actions dropdown (Rename / Merge / Kill - clicking the name also renames it
-  // inline) and a status dot. While the sidebar is collapsed it also hosts the
-  // show-sidebar toggle. It sits above the scroll area so it never collides with
-  // the diff's own sticky "Changes" header. On the narrow screen-stack it rides
-  // INSIDE the chat screen (not above the whole track), so the diff screen's own
-  // Changes bar is its top-level header - back button top-left, no agent status.
+  // The agent's slice of the global top bar (portalled into __root's slot,
+  // after the project selector + "/"): a status dot, the name (clicking it
+  // renames inline) and the adaptive action toolbar. The status pill and test
+  // verdict live in the metadata row.
   const agentTopBar = (
-    <AgentTopBar
-      title={agent.title || agent.id}
-        // Status cluster next to the name: the dot, the status pill, and the test
-        // verdict - pulled out of the metadata row to declutter it (image 13/14).
+    <TopBarPortal>
+      <AgentTopBarContent
+        title={agent.title || agent.id}
         statusDot={
-          <>
-            <span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />
-            {/* Status pill moved back to the metadata row (after the agent-type
-                chip); the header keeps just the dot + test verdict. */}
-            {agent.tests && agent.tests.status !== 'none' && (
-              <TestVerdictChip tests={agent.tests} variant="sm" />
-            )}
-          </>
+          <span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />
         }
         rename={{
           editing: editingTitle,
@@ -1573,22 +1618,6 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
-        // Narrow only: the single pane flips between the working view and a
-        // full-screen diff (Ctrl+, does the same). On a wide split this toggle
-        // moves to the two buttons flanking the divider (see workingTopButton /
-        // changesLeadingButton below).
-        rightSlot={
-          narrowSplit ? (
-            <IconButton
-              variant="panel"
-              aria-label={diffShown ? 'Show chat' : 'Show diff'}
-              title={`${diffShown ? 'Show chat' : 'Show diff'} (${SHORTCUT_DIFF_SIDEBAR})`}
-              onClick={toggleDiffSidebar}
-            >
-              {diffShown ? <PanelRightClose className="w-5 h-5" /> : <PanelRightOpen className="w-5 h-5" />}
-            </IconButton>
-          ) : undefined
-        }
         actions={[
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
@@ -1596,6 +1625,7 @@ export function AgentDetail({
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
+    </TopBarPortal>
   )
 
   return (
@@ -1611,48 +1641,68 @@ export function AgentDetail({
           onCancel={() => setShowCreateMR(false)}
         />
       )}
-      {/* Narrow (screen-stack) hosts the top bar inside the chat screen instead,
-          so the diff screen's Changes bar is its own top-level header. */}
-      {!narrowSplit && agentTopBar}
-      {splitActive ? (
+      {/* Portals into the global top bar - renders nothing in place. */}
+      {agentTopBar}
+      {isWide ? (
         // ── Two-pane split ──────────────────────────────────────────────────
-        // Left: metadata + collapsible prompt + terminal/chat filling the height.
-        // Right: the inspector pane (diff / tests / previews). A hand-rolled
-        // divider between them, plus the three collapse states from paneCollapse.
-        // The panes' widths animate (width transition) so collapsing/expanding the
-        // inspector glides; the transition is suppressed mid-drag so resizing stays
-        // snappy. The working pane stays mounted while the inspector collapses (so
-        // its terminal never hits a 0-width relayout); "Diff only" (working
-        // collapsed) unmounts it instead - that transition isn't animated.
+        // Left: a pane toolbar (metadata + hide-chat toggle) then collapsible
+        // prompt + terminal/chat filling the height. Right: the inspector pane
+        // (diff / tests / previews). A hand-rolled divider between them, plus
+        // the three collapse states from paneCollapse. The panes' widths
+        // animate (width transition) so collapsing/expanding either side
+        // glides; the transition is suppressed mid-drag so resizing stays
+        // snappy. The working pane stays mounted in every state: while it
+        // collapses its INNER content keeps a fixed pixel width (clipped by
+        // the outer overflow-hidden), so the terminal never relayouts at a
+        // transient width and the swap is a real slide, not a jump.
         <div ref={panesRef} className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
-          {paneCollapse !== 'working' && (
+          <div
+            className="flex min-h-0 overflow-hidden shrink-0"
+            style={{
+              width:
+                paneCollapse === 'working'
+                  ? 0
+                  : paneCollapse === 'inspector'
+                    ? '100%'
+                    : `calc(${(splitRatio * 100).toFixed(4)}% - 6px)`,
+              transition: paneTransition,
+            }}
+          >
+            {/* Inner content pinned to a fixed pixel width while the pane
+                collapses/reveals, so the width tween clips it instead of
+                reflowing the terminal (same trick as the sidebar collapse). */}
             <div
-              className="flex flex-col min-h-0 overflow-hidden shrink-0"
+              className="flex flex-col min-h-0 h-full shrink-0"
               style={{
-                width: paneCollapse === 'inspector' ? '100%' : `calc(${(splitRatio * 100).toFixed(4)}% - 6px)`,
-                transition: splitResizing ? undefined : 'width 240ms ease',
+                width:
+                  paneCollapse === 'working' || workingRevealing
+                    ? Math.max(0, panesW * splitRatio - 6)
+                    : '100%',
               }}
             >
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-                <div className="shrink-0 flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <AgentMetaRow
-                      agent={agent}
-                      agentTypeClass={agentTypeClass}
-                      branches={branches}
-                      savingBase={savingBase}
-                      savingChatMode={savingChatMode}
-                      savingDownstream={savingDownstream}
-                      onSaveBase={onSaveBase}
-                      onRefreshBranches={refreshBranches}
-                      onSaveChatMode={onSaveChatMode}
-                      onSaveDownstream={onSaveDownstream}
-                    />
-                  </div>
-                  {/* Hide-chat toggle, inline at the metadata row's right (no header
-                      box - it must not push the metadata chips down). */}
-                  {workingTopButton}
+              {/* Pane toolbar: flush at the pane top, min-h matching the
+                  inspector's Changes bar so the two collapse toggles line up. */}
+              <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex-1 min-w-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
                 </div>
+                {/* self-start pins the toggle to the toolbar's first line even
+                    when the chips wrap, so it stays level with the inspector
+                    bar's toggle across the divider. */}
+                <div className="shrink-0 self-start">{workingTopButton}</div>
+              </div>
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-3 pb-4 gap-3">
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
                     replay the task as the first chat message. */}
                 {agent.prompt && agent.chat_mode !== true && (
@@ -1669,22 +1719,22 @@ export function AgentDetail({
                 />
               </div>
             </div>
-          )}
+          </div>
           {/* Draggable divider - kept mounted but width-collapsed off the full
               split so the pane widths add up cleanly and animate. */}
           <div
             onPointerDown={paneCollapse === 'none' ? handleSplitResizeStart : undefined}
-            className={`group shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
-            style={{ width: paneCollapse === 'none' ? 12 : 0, transition: splitResizing ? undefined : 'width 240ms ease' }}
+            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
+            style={{ width: paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
             title={paneCollapse === 'none' ? 'Drag to resize' : undefined}
           >
-            <div className="w-1 h-20 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+            <ResizeGrip orientation="vertical" />
           </div>
           <div
             className="flex flex-col min-w-0 min-h-0 overflow-hidden shrink-0"
             style={{
               width: paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
-              transition: splitResizing ? undefined : 'width 240ms ease',
+              transition: paneTransition,
             }}
           >
             <InspectorPane
@@ -1699,8 +1749,8 @@ export function AgentDetail({
               swallowed by the xterm/iframe (gotcha #5). */}
           {splitResizing && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
         </div>
-      ) : narrowSplit ? (
-        // ── Narrow single-pane "screen stack" (split on, no room for two) ────
+      ) : (
+        // ── Narrow single-pane "screen stack" (no room for two panes) ────────
         // The chat and the diff are two full-screen screens on a horizontal
         // track: the diff slides in over the chat when diffShown (the top-bar
         // toggle / Ctrl+, / the diff's own back chevron flip paneCollapse
@@ -1716,24 +1766,39 @@ export function AgentDetail({
             }}
           >
             <div className="w-1/2 flex flex-col min-h-0 overflow-hidden">
-              {agentTopBar}
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-4 pb-4 gap-3">
-              <div className="shrink-0">
-                <AgentMetaRow
-                  agent={agent}
-                  agentTypeClass={agentTypeClass}
-                  branches={branches}
-                  savingBase={savingBase}
-                  savingChatMode={savingChatMode}
-                  savingDownstream={savingDownstream}
-                  onSaveBase={onSaveBase}
-                  onRefreshBranches={refreshBranches}
-                  onSaveChatMode={onSaveChatMode}
-                  onSaveDownstream={onSaveDownstream}
-                />
+              {/* Metadata as a slim, horizontally scrollable chip strip - one
+                  line, swipe sideways for the tail (AgentMetaRow scrolls) -
+                  with the show-diff button pinned after it (outside the
+                  scroll). No hide counterpart: the diff screen's own back
+                  chevron returns to the chat. */}
+              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <AgentMetaRow
+                    agent={agent}
+                    agentTypeClass={agentTypeClass}
+                    branches={branches}
+                    savingBase={savingBase}
+                    savingChatMode={savingChatMode}
+                    savingDownstream={savingDownstream}
+                    onSaveBase={onSaveBase}
+                    onRefreshBranches={refreshBranches}
+                    onSaveChatMode={onSaveChatMode}
+                    onSaveDownstream={onSaveDownstream}
+                  />
+                </div>
+                <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+                  <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
+                    <FileDiff className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
+              {/* No padding around the chat/terminal on mobile - it fills the
+                  screen edge-to-edge; only the prompt keeps a small inset. */}
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               {agent.prompt && agent.chat_mode !== true && (
-                <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+                <div className="shrink-0 px-3 pt-2 pb-1">
+                  <CollapsiblePrompt prompt={agent.prompt} projectId={projectId} agentId={agent.id} />
+                </div>
               )}
               <AgentTerminal
                 agentId={agent.id}
@@ -1756,38 +1821,6 @@ export function AgentDetail({
                 externalArtifactRefresh={artifactRefreshTrigger}
               />
             </div>
-          </div>
-        </div>
-      ) : (
-        // ── Classic single-column stacked layout (flag off, or archived) ─────
-        // pt-4 (16px) above the metadata row matches the effective gap below it
-        // (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced.
-        <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>
-          <div className="w-full">
-            <div className="mb-6">
-              <AgentMetaRow
-                agent={agent}
-                agentTypeClass={agentTypeClass}
-                branches={branches}
-                savingBase={savingBase}
-                savingChatMode={savingChatMode}
-                savingDownstream={savingDownstream}
-                onSaveBase={onSaveBase}
-                onRefreshBranches={refreshBranches}
-                onSaveChatMode={onSaveChatMode}
-                onSaveDownstream={onSaveDownstream}
-              />
-            </div>
-            {agent.prompt && agent.chat_mode !== true && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
-            <AgentTerminal
-              agentId={agent.id}
-              projectId={projectId}
-              isEphemeral={agent.ephemeral}
-              chatMode={agent.chat_mode === true}
-              onRefresh={onRefresh}
-              onDiffRefresh={handleDiffRefresh}
-            />
-            <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
           </div>
         </div>
       )}

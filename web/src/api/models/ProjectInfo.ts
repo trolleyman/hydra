@@ -12,6 +12,10 @@ export type ProjectInfo = {
      */
     path: string;
     /**
+     * The project path for display, with the server's home directory abbreviated to "~" (e.g. "~/code/hydra"). Computed server-side because only the server knows its HOME. Falls back to `path` verbatim when the path is not under HOME.
+     */
+    display_path?: string;
+    /**
      * Human-readable project name (last path component)
      */
     name: string;
