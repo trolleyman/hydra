@@ -306,6 +306,17 @@ func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
 // these records.
 var taskNotificationMarker = []byte("<task-notification>")
 
+// queuedCommandMarker picks out "queued_command" attachment records. When the
+// CLI consumes a queued message INTO A RUNNING TURN (mid-turn steering - the
+// queue-operation "remove" path), it does NOT write a plain `user` event for
+// it; this attachment record, carrying the message text on attachment.prompt,
+// is the message's ONLY durable trace. Without relaying it, a message queued
+// while a turn ran vanished from the conversation on the next reattach (the
+// live view had shown it only via the sender's own optimistic bubble). A
+// message consumed while the CLI sits idle (the "dequeue" path) does get a
+// real user event and needs no special casing.
+var queuedCommandMarker = []byte(`"queued_command"`)
+
 // NotificationTailer incrementally tails the newest session's MAIN transcript
 // for <task-notification> records. A background/async sub-agent reports its
 // completion only through one of these, which the CLI writes into the main
@@ -370,7 +381,11 @@ func (t *NotificationTailer) Poll() [][]byte {
 	t.offset += int64(end + 1)
 	var lines [][]byte
 	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
-		if len(line) == 0 || !bytes.Contains(line, taskNotificationMarker) {
+		// queued_command attachments are relayed live alongside notifications:
+		// a queued message consumed into a running turn leaves no stdout trace,
+		// so an attached client would otherwise only ever see its own optimistic
+		// bubble (and another browser nothing at all).
+		if len(line) == 0 || (!bytes.Contains(line, taskNotificationMarker) && !bytes.Contains(line, queuedCommandMarker)) {
 			continue
 		}
 		cp := make([]byte, len(line))
@@ -418,7 +433,10 @@ func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, don
 		// the client to render the completion chip in place.
 		isNotif := bytes.Contains(all[i], taskNotificationMarker)
 		ev, ok := ParseEvent(all[i])
-		if !ok || ev.IsSidechain || (!isNotif && ev.Type != "user" && ev.Type != "assistant") {
+		// queued_command attachments ride along like task-notifications: they are
+		// the only durable trace of a message consumed into a running turn.
+		isQueuedCmd := ev.Type == "attachment" && bytes.Contains(all[i], queuedCommandMarker)
+		if !ok || ev.IsSidechain || (!isNotif && !isQueuedCmd && ev.Type != "user" && ev.Type != "assistant") {
 			continue
 		}
 		cp := make([]byte, len(all[i]))
@@ -454,45 +472,65 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 // a background command/agent's completion record out of the window in seconds -
 // without these the client can't tell a finished background task from a running
 // one after reconnect (its cards read "working" forever). The records are tiny
-// and rare, so relaying all of them costs nothing. Best-effort: a prelude scan
-// failure returns the windowed lines alone.
+// and rare, so relaying all of them costs nothing.
+//
+// The uuid set covers the ENTIRE transcript, not just the tail window: it
+// exists to dedup the scrollback-ring replay, and the ring (which holds the
+// live process's whole stdout) can reach back further than the byte-capped
+// window. A ring line recorded anywhere in the transcript is durable history -
+// already relayed, deliberately filtered, or reachable via load_before - so
+// replaying it would duplicate the conversation (the pre-window part appeared
+// once via the ring at the bottom and again when load_before paged it in).
+// Best-effort: a prefix scan failure returns the windowed lines and their
+// uuids alone.
 func TailTranscriptAndPrelude(path string, maxBytes int64) (lines, prelude [][]byte, uuids map[string]struct{}, err error) {
 	lines, uuids, windowStart, err := tailTranscriptWindowed(path, maxBytes, false)
 	if err != nil || windowStart <= 0 {
 		return lines, nil, uuids, errtrace.Wrap(err)
 	}
-	prelude, scanErr := scanNotificationsBefore(path, windowStart)
+	prelude, preUUIDs, scanErr := scanPrefixBefore(path, windowStart)
 	if scanErr != nil {
 		return lines, nil, uuids, nil
+	}
+	for u := range preUUIDs {
+		uuids[u] = struct{}{}
 	}
 	return lines, prelude, uuids, nil
 }
 
-// scanNotificationsBefore streams the transcript's first `end` bytes (a whole
-// number of lines - the tail window's start offset) and returns every parseable
-// line carrying a <task-notification>. Streams line-by-line so a multi-MB
-// prefix costs no more memory than its largest single line.
-func scanNotificationsBefore(path string, end int64) ([][]byte, error) {
+// scanPrefixBefore streams the transcript's first `end` bytes (a whole number
+// of lines - the tail window's start offset) and returns every parseable line
+// carrying a <task-notification>, plus the uuid of every parseable line (see
+// TailTranscriptAndPrelude: ring-replay dedup needs the whole transcript's
+// uuids). Streams line-by-line so a multi-MB prefix costs no more memory than
+// its largest single line.
+func scanPrefixBefore(path string, end int64) (notifs [][]byte, uuids map[string]struct{}, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, errtrace.Wrap(err)
+		return nil, nil, errtrace.Wrap(err)
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(io.LimitReader(f, end), 64*1024)
-	var out [][]byte
+	uuids = make(map[string]struct{})
 	for {
 		line, readErr := r.ReadBytes('\n')
-		if len(line) > 0 && bytes.Contains(line, taskNotificationMarker) {
-			trimmed := bytes.TrimRight(line, "\n")
-			if _, ok := ParseEvent(trimmed); ok {
-				out = append(out, trimmed)
+		if trimmed := bytes.TrimRight(line, "\n"); len(trimmed) > 0 {
+			if ev, ok := ParseEvent(trimmed); ok {
+				if ev.UUID != "" {
+					uuids[ev.UUID] = struct{}{}
+				}
+				if bytes.Contains(trimmed, taskNotificationMarker) {
+					cp := make([]byte, len(trimmed))
+					copy(cp, trimmed)
+					notifs = append(notifs, cp)
+				}
 			}
 		}
 		if readErr != nil {
 			break
 		}
 	}
-	return out, nil
+	return notifs, uuids, nil
 }
 
 // tailTranscript is the shared core of TailTranscript. keepSidechain relays
@@ -569,7 +607,8 @@ func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines 
 		// settle a finished background sub - which the client can't otherwise tell
 		// from a still-running one after its live signal is gone.
 		isConversation := (!ev.IsSidechain || keepSidechain) && (ev.Type == "user" || ev.Type == "assistant")
-		if !isConversation && !bytes.Contains(line, taskNotificationMarker) {
+		if !isConversation && !bytes.Contains(line, taskNotificationMarker) &&
+			!(ev.Type == "attachment" && bytes.Contains(line, queuedCommandMarker)) {
 			continue
 		}
 		cp := make([]byte, len(line))

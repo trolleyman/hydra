@@ -2,8 +2,61 @@ package egress
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
+
+// pastaLogSizeBytes caps each per-netns pasta log file. pasta rotates in place
+// once it grows past this, so a long-lived head can never grow it without bound.
+const pastaLogSizeBytes = 256 * 1024
+
+// pastaLogDir is where pasta writes its own per-netns log (see PastaLogFile). It
+// lives under the host temp dir because pasta runs OUTSIDE the sandbox on the
+// host, and the id is globally unique across projects (the single daemon serves
+// all of them), so one shared dir keyed by id is correct. /tmp is cleared on
+// reboot, which doubles as cleanup.
+var pastaLogDir = filepath.Join(os.TempDir(), "hydra-pasta")
+
+// PastaLogFile returns the path pasta should log to for the netns identified by
+// id, creating the parent dir. It returns "" (pasta keeps its default sink) when
+// id is empty or the dir can't be created.
+//
+// Diverting pasta's log to a file keeps its runtime chatter OUT of the host
+// journal (and out of agent terminals, whose PTY is pasta's stderr). The chief
+// offender is the benign per-flow "Flow N (TCP connection): shutdown() failed:
+// Transport endpoint is not connected" teardown warning pasta emits whenever a
+// peer has already closed a connection - it is logged at error level, so pasta's
+// -q quiet flag does NOT suppress it, yet it carries no diagnostic value. Real
+// pasta errors still land in the file for debugging.
+func PastaLogFile(id string) string {
+	if id == "" {
+		return ""
+	}
+	if err := os.MkdirAll(pastaLogDir, 0o755); err != nil {
+		return ""
+	}
+	return filepath.Join(pastaLogDir, sanitizePastaLogName(id)+".log")
+}
+
+// sanitizePastaLogName maps an id to a safe single-path-component filename. Ids
+// like "tests:foo" / "preview:bar" carry a ":" label prefix; keep only
+// filename-safe bytes so the result is one component with no surprises.
+func sanitizePastaLogName(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "pasta"
+	}
+	return b.String()
+}
 
 // PastaArgs returns the pasta invocation (up to and including the "--"
 // separator) that creates a network namespace whose host-loopback is reachable
@@ -42,8 +95,13 @@ import (
 // bound to 127.0.0.1 inside still receives it. Live previews use this so the
 // daemon's reverse proxy can reach the sandboxed demo server's
 // $HYDRA_PREVIEW_PORT. 0 = no inbound forwarding (the default posture).
-func PastaArgs(pasta, mapAddr string, loopbackTCPPorts []int, inboundTCPPort int) []string {
-	return []string{
+//
+// logFile, when non-empty, is passed as pasta's -l/--log-file so ALL of pasta's
+// own logging goes there instead of the host journal (see PastaLogFile) - pasta
+// logs to syslog whenever its stderr is not a tty, which spams the journal with
+// benign per-flow teardown warnings. --log-size bounds the file.
+func PastaArgs(pasta, mapAddr string, loopbackTCPPorts []int, inboundTCPPort int, logFile string) []string {
+	args := []string{
 		pasta,
 		"--config-net",                        // actually configure the netns (see doc comment)
 		"-4",                                  // IPv4-only (see doc comment)
@@ -55,8 +113,11 @@ func PastaArgs(pasta, mapAddr string, loopbackTCPPorts []int, inboundTCPPort int
 		"-T", LoopbackPortSpec(loopbackTCPPorts), // outbound TCP: only the allow-listed loopback ports
 		"-U", "none", // no outbound UDP forwarding
 		"--no-dhcp", "--no-dhcpv6", "--no-ndp", "--no-ra", // no autoconfig services
-		"--",
 	}
+	if logFile != "" {
+		args = append(args, "-l", logFile, "--log-size", fmt.Sprintf("%d", pastaLogSizeBytes))
+	}
+	return append(args, "--")
 }
 
 // InboundPortSpec renders the single inbound-forward port as a pasta -t spec:
@@ -135,9 +196,13 @@ NFTEOF`, nft, mapAddr, proxyPort)
 // (config `[sandbox.network] allowed_loopback_ports`, spliced via pasta -T -
 // see LoopbackPortSpec). inboundTCPPort > 0 additionally forwards that one
 // host-loopback port into the namespace (see PastaArgs/InboundPortSpec).
-func HardWrapArgv(h HardMode, proxyPort int, loopbackTCPPorts []int, inboundTCPPort int, bwrapArgv []string, preExec string) []string {
+//
+// logFile, when non-empty, diverts pasta's own logging to that file instead of
+// syslog (see PastaLogFile/PastaArgs), keeping its benign per-flow teardown
+// chatter out of the host journal.
+func HardWrapArgv(h HardMode, proxyPort int, loopbackTCPPorts []int, inboundTCPPort int, bwrapArgv []string, preExec, logFile string) []string {
 	script := NftScript(h.NftPath, MapAddr, proxyPort) + "\n" + preExec + "exec \"$@\""
-	argv := PastaArgs(h.PastaPath, MapAddr, loopbackTCPPorts, inboundTCPPort)
+	argv := PastaArgs(h.PastaPath, MapAddr, loopbackTCPPorts, inboundTCPPort, logFile)
 	argv = append(argv, "bash", "-c", script, "bash")
 	return append(argv, bwrapArgv...)
 }
