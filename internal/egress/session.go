@@ -86,7 +86,7 @@ func StartCommandEgress(id string, agentType sandbox.AgentType, netPol *sandbox.
 			return &Session{
 				Env: ProxyEnv(proxyURL),
 				Wrap: func(bwrapArgv []string, preExec string) []string {
-					return HardWrapArgv(hm, port, loopbackPorts, inboundPort, bwrapArgv, preExec)
+					return HardWrapArgv(hm, port, loopbackPorts, inboundPort, bwrapArgv, preExec, PastaLogFile(id))
 				},
 				proxy: p,
 			}
