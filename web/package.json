@@ -12,6 +12,7 @@
     "build": "tsc -b && vite build",
     "postbuild": "bun run generate-routes-regex",
     "lint": "eslint .",
+    "probe:rerenders": "bun scripts/rerender-probe.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

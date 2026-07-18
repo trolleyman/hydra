@@ -706,7 +706,11 @@ function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null]
 // narrow pane even the two COLLAPSED chips overlap side by side (the plan
 // chip sat over the selector and swallowed its clicks). Static, so nothing
 // relocates when either card expands.
-function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
+// memo: this sits next to the composer, whose `input` state re-renders ChatPane
+// on every keystroke. The plan only changes on a TodoWrite (stable `todos`
+// identity between those), and the layout flags are stable while typing, so the
+// panel - and its chip-width measurement - skips the per-keystroke churn.
+const PlanPanel = memo(function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
   // Frozen at mount: fade in only when the plan APPEARS live (a first
   // TodoWrite mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
@@ -804,7 +808,7 @@ function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narr
       </Expandable>
     </div>
   )
-}
+})
 
 // --- Claude-app-ish shared styles -------------------------------------------
 
@@ -4759,7 +4763,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
-    setComposerHeight(rows * lineHeight + pad)
+    // Bail when the height is unchanged (sub-pixel tolerance): a fractional
+    // lineHeight can make this recompute a hair-different value each pass, and an
+    // unconditional setState there would keep committing - a needless re-render at
+    // best, a feedback loop with any height-driven layout at worst.
+    const nextH = rows * lineHeight + pad
+    setComposerHeight((cur) => (Math.abs(cur - nextH) < 0.5 ? cur : nextH))
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {

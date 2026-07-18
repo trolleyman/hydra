@@ -163,7 +163,11 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
 // comment" button centred over the gutter on hover. The button has a solid
 // button-style background so the icon stays legible on top of code/line
 // backgrounds, and its tooltip sits directly above the icon's centre.
-function CommentButton({ onClick }: { onClick: () => void }) {
+// memo + an (idx, onToggle) shape rather than a bound `onClick`: a diff line
+// re-renders whenever its file re-highlights (the agent edits it), but the gutter
+// comment button is identical across those. A stable onToggle (see UnifiedHunk /
+// SideBySideHunk) lets this skip that churn - one button per line adds up.
+const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: number; onToggle: (idx: number) => void }) {
   return (
     // The overlay spans the gutter to centre the button but is pointer-events-none
     // so it doesn't swallow clicks meant for the (now clickable) line numbers
@@ -172,7 +176,7 @@ function CommentButton({ onClick }: { onClick: () => void }) {
     <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
       <Tooltip content="Add comment" side="top" className="pointer-events-auto">
         <button
-          onClick={(e) => { e.stopPropagation(); onClick() }}
+          onClick={(e) => { e.stopPropagation(); onToggle(idx) }}
           className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
         >
           <MessageSquarePlus className="w-3 h-3 text-blue-500" />
@@ -180,7 +184,7 @@ function CommentButton({ onClick }: { onClick: () => void }) {
       </Tooltip>
     </div>
   )
-}
+})
 
 // Computes the number of lines hidden between two adjacent hunks.
 function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
@@ -235,7 +239,11 @@ const SELECTED_NUM_CLASS = 'bg-amber-100 dark:bg-amber-400/15 !text-amber-700 da
 // and onSelectLine is wired, is clickable to select the line (shift+click to
 // extend the range). It sits under the hover comment overlay, which is
 // pointer-events-none until hovered, so plain clicks reach this.
-function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
+// memo: a line re-renders whenever its file re-highlights (live edits stream a
+// new highlight map into the hunk), but a gutter number only changes when the
+// line's own number/selection does. Skipping the unchanged cells cuts the diff's
+// biggest render cost - there are two of these per line, across every hunk.
+const LineNumCell = memo(function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
   num: number | null | undefined
   side: DiffSide
   baseClass: string
@@ -256,7 +264,7 @@ function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
       {num ?? ''}
     </span>
   )
-}
+})
 
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
@@ -280,6 +288,8 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
+  // Stable so the memo'd CommentButton on each line skips a re-highlight tick.
+  const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
   return (
     <div>
       {hunk.lines.map((line, idx) => {
@@ -300,7 +310,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
                 <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
                 {!isNoNewline && !readOnly && (
-                  <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                  <CommentButton idx={idx} onToggle={toggleComment} />
                 )}
               </div>
               <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
@@ -347,6 +357,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
+  const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -364,7 +375,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <LineNumCell num={line.oldLineNum} side="old" baseClass={SBS_LINE_NUM} selected={selOld} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
-                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                    <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -379,7 +390,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <LineNumCell num={line.newLineNum} side="new" baseClass={SBS_LINE_NUM} selected={selNew} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
-                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                    <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -940,12 +951,22 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const lineSel = controlled ? (selection ?? null) : localSel
   const selectLine = controlled ? onSelectLine : localSelectLine
 
+  // Stable per-file comment handler. Passed to the memo'd hunks below - an inline
+  // arrow here would mint a new identity every render, defeating UnifiedHunk /
+  // SideBySideHunk's memo so EVERY line re-rendered whenever this FileDiff did
+  // (e.g. an unrelated live-tick re-render of the diff subtree). Binding file.path
+  // once keeps the hunks' props stable so unchanged lines skip the render.
+  const onCommentForFile = useCallback(
+    (ln: number, isNew: boolean, txt: string) => onComment(file.path, ln, isNew, txt),
+    [onComment, file.path],
+  )
+
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave
@@ -1118,9 +1139,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
