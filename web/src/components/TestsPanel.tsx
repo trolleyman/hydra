@@ -569,7 +569,9 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
   return (
     <CollapsibleCard
       sticky
-      icon={<FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
+      // translate-y-px optically re-centres the bottom-heavy flask glyph against
+      // the lowercase runner name - geometric centering leaves it reading high.
+      icon={<FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 translate-y-px" />}
       name={runner.name}
       status={status}
       actions={actions}
@@ -754,8 +756,12 @@ function liveDenominator(runner: TestRunResult): number {
 
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
+  // items-center (not items-baseline): the header height must not depend on the
+  // summary's contents, or it grows by a pixel when a settled run adds its mono
+  // `. 4.2s . junit` suffix - a visible layout jump the moment the loading bar
+  // finishes. Centering pins every child to the row's natural height.
   return (
-    <span className="flex items-baseline gap-2 text-sm font-medium shrink-0">
+    <span className="flex items-center gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>
