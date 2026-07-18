@@ -286,8 +286,17 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			}
 		}
 		// A system:init line names the active model; persist it off the read
-		// goroutine like the other hooks.
+		// goroutine like the other hooks. Deduped PER SESSION (not per head id
+		// across the daemon's lifetime): a head killed and respawned under the
+		// same id starts a fresh DB row, and a longer-lived dedupe would skip
+		// re-persisting an unchanged model into it. lastModel needs no lock -
+		// Filter runs under the session lock, so calls are serialized.
+		lastModel := ""
 		ringFilter.OnModel = func(model string) {
+			if model == lastModel {
+				return
+			}
+			lastModel = model
 			r.mu.RLock()
 			fn := r.onChatModel
 			r.mu.RUnlock()

@@ -202,6 +202,10 @@ func TestRingFilterOnModel(t *testing.T) {
 
 	feed(`{"type":"system","subtype":"init","model":"claude-opus-4-8"}` + "\n")
 	feed(`{"type":"assistant","uuid":"a1"}` + "\n")
+	// A nested per-message model (assistant envelope) must not leak into the
+	// capture - only the system:init top-level model drives it (the guard the
+	// original daemon-capture commit shipped with).
+	feed(`{"type":"assistant","message":{"model":"<synthetic>","content":[]}}` + "\n")
 	// A non-init system line, and an init without a model: neither fires.
 	feed(`{"type":"system","subtype":"other","model":"nope"}` + "\n")
 	feed(`{"type":"system","subtype":"init"}` + "\n")
