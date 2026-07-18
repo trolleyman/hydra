@@ -441,6 +441,16 @@ type RingFilter struct {
 	// hooks - the callback dispatches the actual stdin write off the read
 	// goroutine.
 	OnPlanApproval func(requestID string, input json.RawMessage)
+	// Plan, if set, incrementally folds each complete line into the head's
+	// plan/to-do list (TaskCreate/TaskUpdate/TodoWrite and their results) - the
+	// daemon-owned durable copy, maintained whether or not any browser is
+	// attached. OnPlanChange fires (once per line that changed the plan) with
+	// the new PlanEntry JSON; the daemon wires it to persist onto Agent.Plan.
+	// Same under-the-session-lock cheapness rule as the other hooks - the
+	// tracker's substring pre-filter dismisses almost every line without JSON
+	// work, and the callback dispatches the DB write off the read goroutine.
+	Plan         *PlanTracker
+	OnPlanChange func(planJSON string)
 	// OnThinking, if set, fires once per completed thinking block with the block's
 	// message id and the wall-clock duration Hydra measured for it (from the
 	// block's content_block_start to its content_block_stop on the live stream).
@@ -578,6 +588,9 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 			if req, isReq := ParseToolPermissionRequest(line); isReq && req.ToolName == "ExitPlanMode" {
 				f.OnPlanApproval(req.RequestID, req.Input)
 			}
+		}
+		if ok && f.Plan != nil && f.Plan.Feed(line) && f.OnPlanChange != nil {
+			f.OnPlanChange(f.Plan.JSON())
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

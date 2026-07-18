@@ -47,7 +47,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { loadPlan, markPlanSynced, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
+import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -4333,17 +4333,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
         case 'plan': {
-          // The daemon's full-transcript plan reconstruction (sent once per
-          // attach, after the backfill). It supersedes anything assembled from
-          // the tail window or restored from storage - without it a plan whose
-          // Task* creates predate the backfill window (a head that ran
-          // unwatched, a byte-dense conversation) never resurfaces. Mark it
-          // synced first so the adopt's savePlan doesn't PUT it back.
+          // The daemon's stream-tracked plan (sent once per attach, after the
+          // backfill). It supersedes anything assembled from the tail window
+          // or restored from storage - without it a plan whose Task* creates
+          // predate the backfill window (a head that ran unwatched, a
+          // byte-dense conversation) never resurfaces.
           const entries = parseServerPlan(typeof msg.plan === 'string' ? msg.plan : '')
-          if (entries.length) {
-            markPlanSynced(projectId, agentId, entries)
-            plan.adoptServer(entries)
-          }
+          if (entries.length) plan.adoptServer(entries)
           return
         }
       }

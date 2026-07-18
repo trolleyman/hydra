@@ -43,21 +43,6 @@ type SimulationServer struct {
 	// panel is drivable deterministically (no wall clock - see simNow).
 	previewMu    sync.Mutex
 	previewPolls map[string]int
-
-	// planMu/plans back the mock plan-persistence endpoint: SetAgentPlan stores
-	// the client-owned plan JSON here and GetAgent overlays it, so the chat
-	// plan round-trips within a sim boot (drivable cross-browser-persistence
-	// verification) without a real DB.
-	planMu sync.Mutex
-	plans  map[string]string
-}
-
-// getPlan returns the stored plan JSON for an agent, if SetAgentPlan saved one.
-func (s *SimulationServer) getPlan(id string) (string, bool) {
-	s.planMu.Lock()
-	defer s.planMu.Unlock()
-	p, ok := s.plans[id]
-	return p, ok
 }
 
 // simNow is the fixed wall-clock instant ALL time-derived simulation values are
@@ -515,12 +500,9 @@ func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Req
 }
 
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	// Overlay any plan SetAgentPlan stored for this id, so the persisted chat
-	// plan round-trips on a fresh page/browser load just like the real backend.
+	// The chat plan reaches the client via the chat WS "plan" frame (see
+	// handleSimChatWS), mirroring the daemon's incremental tracking.
 	write := func(resp api.AgentResponse) {
-		if p, ok := s.getPlan(id); ok {
-			resp.Plan = &p
-		}
 		api.WriteJSON(w, http.StatusOK, resp)
 	}
 	for _, a := range simArchivedAgents() {
@@ -927,21 +909,6 @@ func simTestSummary(id string) *api.TestSummary {
 }
 
 func (s *SimulationServer) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *SimulationServer) SetAgentPlan(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	var body api.SetAgentPlanJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	s.planMu.Lock()
-	if s.plans == nil {
-		s.plans = make(map[string]string)
-	}
-	s.plans[id] = body.Plan
-	s.planMu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

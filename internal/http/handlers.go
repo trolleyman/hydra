@@ -1597,32 +1597,6 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }
 
-// SetAgentPlan persists the chat plan/to-do JSON the chat view reconstructs from
-// the head's Task*/TodoWrite events. The payload is client-owned and opaque to the
-// server; it is stored so the plan survives navigation and is available in a fresh
-// browser. An empty string clears it.
-func (s *Server) SetAgentPlan(ctx context.Context, request api.SetAgentPlanRequestObject) (api.SetAgentPlanResponseObject, error) {
-	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	if head == nil {
-		return api.SetAgentPlan404JSONResponse{
-			Code:    404,
-			Error:   api.ErrorResponseErrorNotFound,
-			Details: "agent not found",
-		}, nil
-	}
-	if err := s.DB.UpdateAgentPlan(request.Id, request.Body.Plan); err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	return api.SetAgentPlan204Response{}, nil
-}
-
 func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {

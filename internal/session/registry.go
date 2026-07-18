@@ -42,6 +42,8 @@ type Registry struct {
 	onChatStep        func(id string)
 	onChatPlanApprove func(id, requestID string, input json.RawMessage)
 	onChatThinking    func(id, messageID string, durationMS int64)
+	onChatPlanSeed    func(id string) string
+	onChatPlanChange  func(id, planJSON string)
 }
 
 // NewRegistry returns an empty registry.
@@ -109,6 +111,40 @@ func (r *Registry) SetOnChatThinking(fn func(id, messageID string, durationMS in
 	r.mu.Lock()
 	r.onChatThinking = fn
 	r.mu.Unlock()
+}
+
+// SetOnChatPlanSeed registers a callback that supplies the persisted plan JSON
+// (Agent.Plan) for a head, called synchronously when a chat session registers,
+// so the session's plan tracker resumes from where the last session left off
+// (a TaskUpdate after a daemon restart still finds its task).
+func (r *Registry) SetOnChatPlanSeed(fn func(id string) string) {
+	r.mu.Lock()
+	r.onChatPlanSeed = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatPlanChange registers a callback invoked (off the read goroutine)
+// each time a chat-mode session's stdout changes the head's plan/to-do list
+// (a TaskCreate/TaskUpdate/TodoWrite or a create's result). The daemon wires
+// it to persist the new plan JSON onto the agent record, so the durable copy
+// stays fresh with no browser attached.
+func (r *Registry) SetOnChatPlanChange(fn func(id, planJSON string)) {
+	r.mu.Lock()
+	r.onChatPlanChange = fn
+	r.mu.Unlock()
+}
+
+// ChatPlanJSON returns the current incrementally-tracked plan for a session
+// ("" when the session or its plan doesn't exist). Exited sessions still
+// answer while they remain registered.
+func (r *Registry) ChatPlanJSON(id string) string {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+	return s.PlanJSON()
 }
 
 // Start builds the sandbox command, launches it under a PTY, and registers the
@@ -217,6 +253,24 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, requestID, input)
+			}
+		}
+		// Incremental plan tracking: seed from the persisted copy (synchronously,
+		// BEFORE the read loop starts, so no line can beat the seed), then persist
+		// each change off the read goroutine like the other hooks.
+		r.mu.RLock()
+		seedFn := r.onChatPlanSeed
+		r.mu.RUnlock()
+		ringFilter.Plan = claudestream.NewPlanTracker()
+		if seedFn != nil {
+			ringFilter.Plan.Seed(seedFn(id))
+		}
+		ringFilter.OnPlanChange = func(planJSON string) {
+			r.mu.RLock()
+			fn := r.onChatPlanChange
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, planJSON)
 			}
 		}
 		// A completed thinking block: persist its measured duration to the head's
