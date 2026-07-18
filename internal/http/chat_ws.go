@@ -380,7 +380,7 @@ func (t *streamTimer) note(agentID string, line []byte) {
 // skip so the sub-agent transcript tailer never re-delivers a line an (older)
 // CLI also put on stdout. Returns false once the socket write fails. timer is
 // the chatStreamDebug tracer (nil on non-live paths, e.g. the ring replay).
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool, timer *streamTimer, onModel func(model string)) bool {
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool, timer *streamTimer) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
@@ -389,11 +389,8 @@ func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, a
 			}
 			continue
 		}
-		// The CLI's system:init line carries the active model: capture it so the
-		// daemon persists the head's current model (no client round-trip needed).
-		if ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && onModel != nil {
-			onModel(ev.Model)
-		}
+		// (The active model on a system:init line is captured by the session's
+		// RingFilter.OnModel, browser-independent - not here.)
 		// A live token delta (partial-message stream_event): trace its cadence.
 		if ev.Type == "stream_event" {
 			timer.note(agentID, line)
@@ -691,19 +688,6 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	// Per-connection token-delta cadence tracer (HYDRA_CHAT_STREAM_DEBUG); nil-safe
 	// and a no-op unless enabled.
 	streamDbg := &streamTimer{}
-	// Persist the active model whenever a system:init line reports it (initial
-	// connect and every resume, so a mid-session /model change lands on the next
-	// reconnect). Deduped so an unchanged model isn't re-written each connect.
-	lastModel := ""
-	persistModel := func(model string) {
-		if model == "" || model == lastModel {
-			return
-		}
-		lastModel = model
-		if err := s.DB.UpdateAgentModel(agentID, model); err != nil {
-			log.Printf("chat ws: persist model for %q: %v", agentID, err)
-		}
-	}
 	// Attach queues the ring snapshot synchronously before returning, so a
 	// non-blocking receive here reliably distinguishes "history exists" from
 	// "nothing yet" - the client needs replay_done to know when the live
@@ -713,7 +697,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
 		// before Attach returned) - drop its misplaced past-turn result footers.
 		// nil timer: replayed history isn't live streaming, so don't trace it.
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil, persistModel) {
+		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil) {
 			return
 		}
 	default:
@@ -795,7 +779,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 				return
 			}
 			// Live stream (post replay_done): results arrive in order, so keep them.
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg, persistModel) {
+			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
 				return
 			}
 		}

@@ -194,6 +194,26 @@ func TestPlanTrackerSeed(t *testing.T) {
 	}
 }
 
+func TestRingFilterOnModel(t *testing.T) {
+	f := &RingFilter{}
+	var models []string
+	f.OnModel = func(m string) { models = append(models, m) }
+	feed := func(chunk string) { f.Filter([]byte(chunk)) }
+
+	feed(`{"type":"system","subtype":"init","model":"claude-opus-4-8"}` + "\n")
+	feed(`{"type":"assistant","uuid":"a1"}` + "\n")
+	// A non-init system line, and an init without a model: neither fires.
+	feed(`{"type":"system","subtype":"other","model":"nope"}` + "\n")
+	feed(`{"type":"system","subtype":"init"}` + "\n")
+	// A mid-session /model change re-inits with the new model.
+	feed(`{"type":"system","subtype":"init","model":"claude-sonnet-5"}` + "\n")
+
+	want := []string{"claude-opus-4-8", "claude-sonnet-5"}
+	if len(models) != len(want) || models[0] != want[0] || models[1] != want[1] {
+		t.Errorf("OnModel fired with %v, want %v", models, want)
+	}
+}
+
 func TestPlanTrackerSeedTolerantOfGarbage(t *testing.T) {
 	for _, seed := range []string{"", "not json", "[]", "{}"} {
 		tr := NewPlanTracker()

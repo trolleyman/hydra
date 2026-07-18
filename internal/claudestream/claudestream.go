@@ -451,6 +451,14 @@ type RingFilter struct {
 	// work, and the callback dispatches the DB write off the read goroutine.
 	Plan         *PlanTracker
 	OnPlanChange func(planJSON string)
+	// OnModel, if set, is called with the active model id whenever a
+	// system:init line carries one - session start and every /model change.
+	// The daemon wires it to persist the head's current model. Living here
+	// (not the per-connection relay) means it fires with no browser attached,
+	// so a mid-session /model change survives a daemon restart even if nobody
+	// reattached in between. Same under-the-session-lock cheapness rule as the
+	// other hooks.
+	OnModel func(model string)
 	// OnThinking, if set, fires once per completed thinking block with the block's
 	// message id and the wall-clock duration Hydra measured for it (from the
 	// block's content_block_start to its content_block_stop on the live stream).
@@ -591,6 +599,9 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 		}
 		if ok && f.Plan != nil && f.Plan.Feed(line) && f.OnPlanChange != nil {
 			f.OnPlanChange(f.Plan.JSON())
+		}
+		if ok && ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && f.OnModel != nil {
+			f.OnModel(ev.Model)
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

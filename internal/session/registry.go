@@ -44,6 +44,7 @@ type Registry struct {
 	onChatThinking    func(id, messageID string, durationMS int64)
 	onChatPlanSeed    func(id string) string
 	onChatPlanChange  func(id, planJSON string)
+	onChatModel       func(id, model string)
 }
 
 // NewRegistry returns an empty registry.
@@ -131,6 +132,17 @@ func (r *Registry) SetOnChatPlanSeed(fn func(id string) string) {
 func (r *Registry) SetOnChatPlanChange(fn func(id, planJSON string)) {
 	r.mu.Lock()
 	r.onChatPlanChange = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatModel registers a callback invoked (off the read goroutine) when a
+// chat-mode session's stdout carries a system:init line naming the active
+// model - session start and every /model change. The daemon wires it to
+// persist the head's current model, so the selector shows the right one on
+// load even if no browser was attached when the model changed.
+func (r *Registry) SetOnChatModel(fn func(id, model string)) {
+	r.mu.Lock()
+	r.onChatModel = fn
 	r.mu.Unlock()
 }
 
@@ -271,6 +283,16 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, planJSON)
+			}
+		}
+		// A system:init line names the active model; persist it off the read
+		// goroutine like the other hooks.
+		ringFilter.OnModel = func(model string) {
+			r.mu.RLock()
+			fn := r.onChatModel
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, model)
 			}
 		}
 		// A completed thinking block: persist its measured duration to the head's

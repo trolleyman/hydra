@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -170,6 +171,19 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			return ""
 		}
 		return agent.Plan
+	})
+	// Persist the active model from each system:init line (session start and
+	// every /model change) - daemon-side, so a mid-session model change is
+	// captured even with no browser attached.
+	lastModels := sync.Map{}
+	reg.SetOnChatModel(func(id, model string) {
+		if prev, _ := lastModels.Load(id); prev == model {
+			return
+		}
+		lastModels.Store(id, model)
+		if err := store.UpdateAgentModel(id, model); err != nil {
+			log.Printf("warn: persist model for %s: %v", id, err)
+		}
 	})
 	reg.SetOnChatPlanChange(func(id, planJSON string) {
 		if cur := reg.ChatPlanJSON(id); cur != "" {
