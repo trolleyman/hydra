@@ -12,6 +12,7 @@ import {
   ClipboardList,
   FilePen,
   FileText,
+  GitCommitHorizontal,
   Globe,
   History,
   Info,
@@ -29,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import { AgentStatus } from '../api'
+import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -69,6 +71,9 @@ interface ChatProps {
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // Clicking a commit chip: point the diff viewer at just that commit (and
+  // reveal the diff pane). Absent -> chips render non-clickable.
+  onSelectCommit?: (sha: string) => void
 }
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
@@ -132,6 +137,12 @@ type ChatItem =
   // common case - a sub-agent linked to its Task card - needs no item: the Task
   // ToolCard upgrades into a SubagentCard in place (see renderChatItem).
   | { kind: 'subagent'; id: number; agentId: string }
+  // A commit the agent made on its branch, shown as a clickable notification
+  // chip. Not a chat event: git is the durable record, so chips derive from the
+  // commits endpoint and are interleaved into the transcript by `ts` (the
+  // commit's author date, epoch ms) against the items' stamped times (see
+  // mergedItems). Clicking one points the diff viewer at just that commit.
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; noEntrance?: boolean }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -158,6 +169,7 @@ interface SubagentView {
 }
 
 type ToolItem = Extract<ChatItem, { kind: 'tool' }>
+type CommitChipItem = Extract<ChatItem, { kind: 'commit' }>
 
 // isSubRunning reports whether a sub-agent is still working: the parent Task
 // card's tool_result (or its turn ending, `ended`) is the precise done signal
@@ -2710,10 +2722,15 @@ function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
 // assistant text/thinking/tool_use/question blocks with tool_result patching,
 // and result footers. A TodoWrite is dropped (the plan panel already holds the
 // latest state, not this older one). allocId hands out ids for the batch.
-function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durations?: Map<string, number>): ChatItem[] {
+function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>): ChatItem[] {
   const items: ChatItem[] = []
+  // The current event's transcript timestamp, carried forward over entries
+  // without one - stamped per pushed item (tsOut) for the commit-chip interleave.
+  let lastTs: number | null = null
   const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
-    items.push({ ...item, id: allocId() } as ChatItem)
+    const id = allocId()
+    if (lastTs != null) tsOut?.set(id, lastTs)
+    items.push({ ...item, id } as ChatItem)
   }
   const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -2816,6 +2833,8 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
     }
   }
   for (const ev of events) {
+    const evTs = parseEventTs(ev)
+    if (evTs != null) lastTs = evTs
     // A <task-notification> bookkeeping record (queue-operation XML on
     // `content`, attachment XML on `attachment.prompt`): render its chip in
     // place, like the live relay does.
@@ -3008,8 +3027,83 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
+export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
+  // Wall-clock time per item id (epoch ms) - the message side of the
+  // commit-chip interleave. Stamped by the reducers: replayed events carry the
+  // transcript's own timestamp (carried forward over ring lines, which have
+  // none), live items use arrival time. A side map rather than a ChatItem
+  // field so the many push/setItems sites stay untouched.
+  const itemTsRef = useRef<Map<number, number>>(new Map())
+  // ── Commit chips ─────────────────────────────────────────────────────────
+  // The branch's commits (oldest first), rendered as notification chips
+  // interleaved into the transcript (see mergedItems). Fetched on mount /
+  // reconnect and again on every head_moved diff_refresh frame - git is the
+  // durable record, so replay needs no persisted chat event.
+  const [commitChips, setCommitChips] = useState<CommitChipItem[]>([])
+  // Chip bookkeeping: `cache` keeps each sha's chip (and id) identity-stable
+  // across refetches so SettledRow's memo holds; ids allocate far above the
+  // live reducer's (from 1) and the history pager's (negative), so they never
+  // collide. Chips from the first fetch are noEntrance - only commits that
+  // land while the transcript is on screen animate in. inflight/again coalesce
+  // concurrent fetches (a burst of head_moved frames) into one trailing rerun.
+  const chipStateRef = useRef({
+    cache: new Map<string, CommitChipItem>(),
+    nextId: 2_000_000_000,
+    sig: '',
+    loadedOnce: false,
+    inflight: false,
+    again: false,
+  })
+  const fetchCommitsRef = useRef<() => void>(() => {})
+  const fetchCommits = useCallback(() => {
+    const st = chipStateRef.current
+    if (st.inflight) {
+      st.again = true
+      return
+    }
+    st.inflight = true
+    api.default.getAgentCommits(projectId ?? '', agentId)
+      .then((commits) => {
+        const firstLoad = !st.loadedOnce
+        st.loadedOnce = true
+        // Only rebuild state when the list actually changed, so an idle
+        // refetch never re-renders the transcript.
+        const sig = commits.map((c) => c.sha).join('\0')
+        if (sig === st.sig) return
+        st.sig = sig
+        const chips = commits.map((c) => {
+          let chip = st.cache.get(c.sha)
+          if (!chip) {
+            chip = {
+              kind: 'commit',
+              id: st.nextId++,
+              sha: c.sha,
+              shortSha: c.short_sha,
+              subject: (c.subject ?? c.message).split('\n')[0].trim(),
+              ts: Date.parse(c.timestamp) || 0,
+              noEntrance: firstLoad || undefined,
+            }
+            st.cache.set(c.sha, chip)
+          }
+          return chip
+        })
+        chips.sort((a, b) => a.ts - b.ts)
+        setCommitChips(chips)
+      })
+      .catch(() => {})
+      .then(() => {
+        st.inflight = false
+        if (st.again) {
+          st.again = false
+          fetchCommitsRef.current()
+        }
+      })
+  }, [agentId, projectId])
+  fetchCommitsRef.current = fetchCommits
+  useEffect(() => {
+    fetchCommits()
+  }, [fetchCommits, reconnectAttempt])
   // Thinking-block durations the daemon measured, keyed by assistant message id
   // (delivered as hydra_thinking events - replayed from the head's sidecar on
   // connect, then live). The reducer reads this when it builds a thinking item;
@@ -3262,6 +3356,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   useEffect(() => {
     setItems([])
+    itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
     // the last known plan before the replay reconstructs it (planStore).
@@ -3319,7 +3414,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       setItems((prev) => [...prev, ...batch])
     }
     const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
-      pending.push({ ...item, id: nextId++ } as ChatItem)
+      const id = nextId++
+      // Stamp the item's wall-clock time for the commit-chip interleave:
+      // replayed events use the transcript's timestamp (prevEventTs carries it
+      // forward over ring lines, which have none), live items arrival time.
+      const ts = replaying ? prevEventTs : Date.now()
+      if (ts != null) itemTsRef.current.set(id, ts)
+      pending.push({ ...item, id } as ChatItem)
       if (!replaying && !flushScheduled) {
         flushScheduled = true
         queueMicrotask(flush)
@@ -3798,7 +3899,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
-        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current)
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current, itemTsRef.current)
         // Advance the anchor to the oldest event of this batch.
         const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
         if (anchor) oldestUuidRef.current = anchor
@@ -4347,6 +4448,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return
         case 'diff_refresh':
           onDiffRefreshRef.current?.(msg.head_moved ?? false)
+          // HEAD moved = a commit landed (or the branch was rewritten): refresh
+          // the commit chips so the new one appears within the poll interval.
+          if (msg.head_moved) fetchCommitsRef.current()
           return
         case 'claude_event':
           if (msg.event) handleClaudeEvent(msg.event)
@@ -5266,6 +5370,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           />
         )
       }
+      case 'commit': {
+        // A commit chip: the same centered notification-pill look as
+        // notice/cmdout, clickable to show just this commit in the diff view.
+        const clickable = !!onSelectCommit
+        const activate = () => onSelectCommit?.(item.sha)
+        return (
+          <div className="flex justify-center">
+            <div
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? activate : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
+              className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none ${
+                clickable ? 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors' : ''
+              }`}
+              title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
+            >
+              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+              <span className="font-mono shrink-0">{item.shortSha}</span>
+              <span className="truncate">{item.subject}</span>
+            </div>
+          </div>
+        )
+      }
       case 'contextNote':
         return <ContextNoteCard text={item.text} outOfContext={item.outOfContext} />
       case 'skill':
@@ -5418,6 +5546,42 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
     [items],
   )
+  // Interleave the commit chips into the settled transcript by timestamp: a
+  // chip slots in before the first item stamped after it (so, right where the
+  // commit happened). Unstamped items (ring-replayed lines, optimistic sends)
+  // inherit their predecessor's position, and chips newer than everything
+  // append at the end - the live case, where the commit just landed. Chips
+  // older than the loaded window are held back until load-older paging reaches
+  // their part of the conversation (they'd otherwise pile up at the top of the
+  // tail as if they happened there). Gated on replayDone so chips never render
+  // above the "Loading conversation..." placeholder.
+  const mergedItems = useMemo(() => {
+    if (!replayDone || commitChips.length === 0) return visibleItems
+    const tsMap = itemTsRef.current
+    let firstTs: number | null = null
+    for (const it of visibleItems) {
+      const t = tsMap.get(it.id)
+      if (t != null) {
+        firstTs = t
+        break
+      }
+    }
+    const chips = allHistoryLoaded || firstTs == null
+      ? commitChips
+      : commitChips.filter((c) => c.ts >= firstTs)
+    if (chips.length === 0) return visibleItems
+    const out: ChatItem[] = []
+    let ci = 0
+    for (const it of visibleItems) {
+      const t = tsMap.get(it.id)
+      if (t != null) {
+        while (ci < chips.length && chips[ci].ts < t) out.push(chips[ci++])
+      }
+      out.push(it)
+    }
+    while (ci < chips.length) out.push(chips[ci++])
+    return out
+  }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
   // The turn's end-of-turn "Crunched for Xs" footer (a result item) has landed.
   // The agent status flip that clears isTurnRunning can lag a frame behind it, so
   // gate the live "working" indicator on this too - otherwise both the footer and
@@ -5523,7 +5687,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )}
           <SettledMessages
-            items={visibleItems}
+            items={mergedItems}
             liveFromId={liveFromId}
             renderItem={renderItem}
             serif={serif}

@@ -727,6 +727,23 @@ export function AgentDetail({
     if (isWide) toggleInspector()
     else toggleWorking()
   }, [isWide, toggleInspector, toggleWorking])
+  // A commit chip clicked in the chat transcript: point the diff viewer at just
+  // that commit (nonce makes re-clicking the same chip re-apply) and make sure
+  // the diff is on screen - wide: un-collapse the inspector pane; narrow: slide
+  // the full-screen diff over the chat. Stable identity (state read via the
+  // store/ref) so it never breaks the memo'd AgentTerminal.
+  const [commitSelect, setCommitSelect] = useState<{ sha: string; nonce: number } | null>(null)
+  const isWideRef = useRef(isWide)
+  isWideRef.current = isWide
+  const handleSelectCommit = useCallback((sha: string) => {
+    setCommitSelect((prev) => ({ sha, nonce: (prev?.nonce ?? 0) + 1 }))
+    const store = usePaneCollapseStore.getState()
+    if (isWideRef.current) {
+      if (store.collapse === 'inspector') store.setCollapse('none')
+    } else if (store.collapse !== 'working') {
+      store.setCollapse('working')
+    }
+  }, [])
   // Divider-flanking collapse toggles (wide split). The same two spots host both
   // hide and show, keyed off the OTHER pane's state:
   //  - workingTopButton (working pane's top-right, left of the divider): "Hide
@@ -1716,6 +1733,7 @@ export function AgentDetail({
                   fill
                   onRefresh={onRefresh}
                   onDiffRefresh={handleDiffRefresh}
+                  onSelectCommit={handleSelectCommit}
                 />
               </div>
             </div>
@@ -1742,6 +1760,7 @@ export function AgentDetail({
               projectId={projectId}
               externalRefreshTrigger={diffRefreshTrigger}
               externalArtifactRefresh={artifactRefreshTrigger}
+              externalCommitSelect={commitSelect}
               changesLeading={changesLeadingButton}
             />
           </div>
@@ -1808,6 +1827,7 @@ export function AgentDetail({
                 fill
                 onRefresh={onRefresh}
                 onDiffRefresh={handleDiffRefresh}
+                onSelectCommit={handleSelectCommit}
               />
               </div>
             </div>
@@ -1819,6 +1839,7 @@ export function AgentDetail({
                 leadingInline
                 externalRefreshTrigger={diffRefreshTrigger}
                 externalArtifactRefresh={artifactRefreshTrigger}
+                externalCommitSelect={commitSelect}
               />
             </div>
           </div>

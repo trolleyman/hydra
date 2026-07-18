@@ -963,6 +963,34 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
+	// agent-chat: two commits whose author dates interleave with the canned
+	// conversation's timestamps (simChatEvents), so the chat renders their
+	// commit chips mid-transcript - one after the Write card (18:01:30), one
+	// after the first turn's result footer (18:05:30).
+	if id == "agent-chat" {
+		resp := api.GetAgentCommits200JSONResponse{
+			{
+				Sha:         "beefcafe0123456789abcdef0123456789abcdef",
+				ShortSha:    "beefcaf",
+				Subject:     ptr("Cover the giving-up path with a test"),
+				Message:     "Cover the giving-up path with a test",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   "2026-07-09T18:05:30Z",
+			},
+			{
+				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
+				ShortSha:    "cafebab",
+				Subject:     ptr("Add jittered backoff helper to the uploader"),
+				Message:     "Add jittered backoff helper to the uploader\n\nBase 100ms, doubled per attempt, +/- 50% jitter, capped at 5 attempts.",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   "2026-07-09T18:01:30Z",
+			},
+		}
+		api.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.GetAgentCommits200JSONResponse{})
 }
 
@@ -2829,11 +2857,13 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
 	// A Write tool call: its content renders as a numbered, syntax-highlighted
 	// code block (like a Read), not raw JSON.
-	`{"type":"assistant","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,
+	`{"type":"assistant","timestamp":"2026-07-09T18:01:00.000Z","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_write","content":"File created successfully at: internal/artifacts/backoff.go"}]}}`,
 	// A TaskCreate tool call: its subject shows in the header in the regular
-	// (sans) font, like a path - not monospace.
-	`{"type":"assistant","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when **every** attempt fails, ` + "`Put`" + ` surfaces the last error - a fake server that fails more times than the attempt cap."}}]}}`,
+	// (sans) font, like a path - not monospace. The timestamps here and on the
+	// Write above bracket the agent-chat commit at 18:01:30 (see
+	// GetAgentCommits), so its chip interleaves between the two cards.
+	`{"type":"assistant","timestamp":"2026-07-09T18:02:00.000Z","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when **every** attempt fails, ` + "`Put`" + ` surfaces the last error - a fake server that fails more times than the attempt cap."}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate","content":"Task #1 created successfully: Add a giving-up test for the uploader"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_taskcreate2","content":[{"type":"tool_use","id":"toolu_sim_taskcreate2","name":"TaskCreate","input":{"subject":"Thread MaxAttempts through the uploader config","description":"So callers can tune the retry cap without recompiling."}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate2","content":"Task #2 created successfully: Thread MaxAttempts through the uploader config"}]}}`,
@@ -2954,7 +2984,9 @@ var simChatEvents = []string{
 	// proves 1./2./3. indent with hanging wrapped lines, and a trailing unordered
 	// list shows bullets indent the same way. (Before the react-markdown switch
 	// the old inline renderer left these as flat, flush-left literal text.)
-	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Recap what changed - numbered."}]}}`,
+	// The timestamp places the second agent-chat commit's chip (18:05:30) after
+	// the previous turn's result footer, before this closing mini-turn.
+	`{"type":"user","timestamp":"2026-07-09T18:06:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Recap what changed - numbered."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_list","content":[{"type":"text","text":"All three changes are in:\n\n1. **Retry loop** - wrapped ` + "`Put`" + ` in a bounded backoff loop that stops after 5 attempts and returns early on the first success, so a transient failure no longer sinks the whole upload.\n2. **Jitter** - each delay carries +/- 50% jitter, so a burst of clients that all failed at once don't retry in lockstep and stampede the server on the way back up.\n3. **Give-up path** - once the attempts are exhausted the loop surfaces the last error instead of swallowing it, now covered by ` + "`TestPutRetry`" + `.\n\nBullets indent the same way:\n\n- base delay doubles each attempt (100ms, 200ms, 400ms...)\n- the cap is configurable through ` + "`MaxAttempts`" + `\n\nAll green."}]}}`,
 	`{"type":"result","subtype":"success","duration_ms":5120,"total_cost_usd":0.021,"usage":{"input_tokens":180,"output_tokens":260,"cache_read_input_tokens":22100,"cache_creation_input_tokens":256},"session_id":"sim-chat"}`,
 }

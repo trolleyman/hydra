@@ -1913,6 +1913,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.projectId === next.projectId &&
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
+  prev.externalCommitSelect === next.externalCommitSelect &&
   prev.inspector === next.inspector &&
   prev.changesLeading === next.changesLeading &&
   prev.leadingInline === next.leadingInline &&
@@ -1926,7 +1927,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector, changesLeading, leadingInline }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalCommitSelect, inspector, changesLeading, leadingInline }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -2348,6 +2349,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const ri = commitIdx(rightSel.sha, commits)
     if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
   }, [leftSel, rightSel, commits])
+
+  // An externally-driven "show just this commit" selection (a commit chip
+  // clicked in the chat transcript): parent -> commit, like picking the
+  // adjacent pair in the selectors by hand. Applied once per nonce - the
+  // selectors stay user-driven afterwards. When the sha isn't in our list yet
+  // (the chip's list can be fresher than ours right after a commit), refetch
+  // once and re-apply when the fresh list lands; if it's still missing then,
+  // the commit is gone for real (a rebase) and the click is dropped.
+  const appliedCommitNonceRef = useRef(0)
+  const retriedCommitNonceRef = useRef(0)
+  useEffect(() => {
+    const sel = externalCommitSelect
+    if (!sel || sel.nonce === appliedCommitNonceRef.current || commits.length === 0) return
+    const idx = commitIdx(sel.sha, commits)
+    if (idx === -1) {
+      if (retriedCommitNonceRef.current !== sel.nonce) {
+        retriedCommitNonceRef.current = sel.nonce
+        setRefreshKey((k) => k + 1)
+      } else {
+        appliedCommitNonceRef.current = sel.nonce
+      }
+      return
+    }
+    appliedCommitNonceRef.current = sel.nonce
+    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    setRightSel({ type: 'commit', sha: sel.sha })
+    // Bring the Changes bar + file list into view in whichever scroll context
+    // hosts us (the inspector pane, or the archived page's main scroll).
+    rootRef.current?.closest('[data-inspector-scroll], [data-main-scroll]')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [externalCommitSelect, commits])
 
   const getFileRef = useCallback((path: string) => {
     if (!fileRefCallbacksRef.current.has(path)) {

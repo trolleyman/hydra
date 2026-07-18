@@ -19,6 +19,7 @@ export function InspectorPane({
   projectId,
   externalRefreshTrigger,
   externalArtifactRefresh,
+  externalCommitSelect,
   changesLeading,
   leadingInline,
 }: {
@@ -26,6 +27,8 @@ export function InspectorPane({
   projectId: string | null
   externalRefreshTrigger?: number
   externalArtifactRefresh?: number
+  // A commit chip clicked in the chat: show just that commit's diff.
+  externalCommitSelect?: { sha: string; nonce: number } | null
   // A control rendered at the left edge of the diff's Changes bar (the split
   // layout's collapse toggle, flanking the divider).
   changesLeading?: ReactNode
@@ -52,6 +55,7 @@ export function InspectorPane({
         projectId={projectId}
         externalRefreshTrigger={externalRefreshTrigger}
         externalArtifactRefresh={externalArtifactRefresh}
+        externalCommitSelect={externalCommitSelect}
         inspector
         changesLeading={changesLeading}
         leadingInline={leadingInline}

@@ -674,6 +674,8 @@ interface Props {
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // Chat mode only: a commit chip was clicked - show that commit's diff.
+  onSelectCommit?: (sha: string) => void
 }
 
 // memo: AgentDetail re-renders on every live tick of its agent (activity line,
@@ -681,7 +683,7 @@ interface Props {
 // so those ticks skip the whole tab strip + xterm/chat subtree.
 export const AgentTerminal = memo(AgentTerminalImpl)
 
-function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -1032,6 +1034,7 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
               reconnectAttempt={reconnectKeys[tab.id] ?? 0}
               onStatusUpdate={handleStatusUpdate}
               onDiffRefresh={onDiffRefresh}
+              onSelectCommit={onSelectCommit}
             />
           ) : (
             <TerminalPane
