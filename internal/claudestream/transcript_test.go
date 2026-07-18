@@ -138,6 +138,72 @@ func TestHistoryBefore(t *testing.T) {
 	}
 }
 
+func TestBackfillIncludesQueuedCommands(t *testing.T) {
+	// A queued message consumed INTO a running turn is recorded only as a
+	// queued_command attachment (no plain user event) - both the attach-time
+	// tail and the load-older page must relay it, or the message vanishes from
+	// the conversation on reattach.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	queuedLine := `{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"steer the turn please"}],"commandMode":"prompt"}}`
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"oldest"}]},"uuid":"u1"}`,
+		`{"type":"queue-operation","operation":"remove"}`,
+		queuedLine,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"newest"}]},"uuid":"u2"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, uuids, err := TailTranscript(path, 0)
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("relayed %d lines, want 3 (2 user + queued_command, no bare queue-operation): %s", len(lines), lines)
+	}
+	if !bytes.Equal(lines[1], []byte(queuedLine)) {
+		t.Errorf("backfill dropped the queued_command attachment: %q", lines)
+	}
+	if _, ok := uuids["q1"]; !ok {
+		t.Errorf("uuid set missing the queued_command entry (needed for ring dedup)")
+	}
+
+	older, done, err := HistoryBefore(path, "u2", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done || len(older) != 2 {
+		t.Fatalf("got (%d lines, done=%v), want (2, true): the queued_command record must page in with the conversation", len(older), done)
+	}
+	if !bytes.Equal(older[1], []byte(queuedLine)) {
+		t.Errorf("load-older dropped the queued_command attachment: %q", older)
+	}
+}
+
+func TestNotificationTailerRelaysQueuedCommands(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"uuid":"u1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tailer := NewNotificationTailer(dir)
+	queuedLine := `{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"consumed mid-turn"}],"commandMode":"prompt"}}`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"assistant","message":{"id":"m1","content":[]},"uuid":"a1"}` + "\n" + queuedLine + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	lines := tailer.Poll()
+	if len(lines) != 1 || !bytes.Equal(lines[0], []byte(queuedLine)) {
+		t.Fatalf("Poll = %q, want just the queued_command line", lines)
+	}
+}
+
 func TestHistoryBeforeIncludesNotifications(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session-1.jsonl")

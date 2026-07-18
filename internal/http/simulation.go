@@ -2843,6 +2843,10 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd1","content":"Updated task #1 status"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_taskupd2","content":[{"type":"tool_use","id":"toolu_sim_taskupd2","name":"TaskUpdate","input":{"taskId":"2","status":"in_progress"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd2","content":"Updated task #2 status"}]}}`,
+	// A queued message consumed INTO the running turn (queue-operation "remove"
+	// path): recorded only as this queued_command attachment - no plain user
+	// event exists - so the chat must rebuild the user bubble from it on replay.
+	`{"type":"attachment","uuid":"sim-queued-cmd-1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"Queued while you were working: prefer a helper named backoffRetry."}],"commandMode":"prompt"}}`,
 	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
 	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
 	// call, its reply), then the Task tool_result. The chat folds the sidechain

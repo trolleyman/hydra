@@ -276,7 +276,10 @@ interface ClaudeEvent {
   // attachment (XML on `attachment.prompt`). handleClaudeEvent settles the sub
   // off whichever carries it (see handleTaskNotification).
   content?: string
-  attachment?: { prompt?: string; commandMode?: string }
+  // attachment.prompt is a string for <task-notification> records, and an array
+  // of content blocks for queued_command records (a queued message consumed
+  // into a running turn - see queuedCommandText).
+  attachment?: { type?: string; prompt?: string | { type?: string; text?: string }[]; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -429,6 +432,33 @@ function stripLocalCommandCaveat(text: string): string {
 // relay channels (ev.content / attachment.prompt) that aren't pre-trimmed.
 function isTaskNotification(text: string): boolean {
   return text.trimStart().startsWith('<task-notification>')
+}
+
+// queuedCommandText extracts the message text from a queued_command attachment
+// record. When the CLI consumes a queued message INTO A RUNNING TURN (mid-turn
+// steering - the queue-operation "remove" path), it writes NO plain `user`
+// event; this attachment, with the text on attachment.prompt content blocks,
+// is the message's only durable trace - so replay must rebuild the user bubble
+// from it or the message vanishes on the next reattach. (A message consumed
+// while the CLI is idle gets a real user event and never reaches this path.)
+function queuedCommandText(ev: ClaudeEvent): string | null {
+  const att = ev.attachment
+  if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
+  const prompt = att.prompt
+  if (typeof prompt === 'string') {
+    // A background task's <task-notification> rides the same attachment type
+    // with a string prompt - that's a notice, never a user message (the
+    // reducers consume it before reaching here; this guard is belt+braces).
+    const t = prompt.trim()
+    return !t || isTaskNotification(t) ? null : t
+  }
+  if (!Array.isArray(prompt)) return null
+  const text = prompt
+    .filter((b) => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+  return text || null
 }
 
 // detectContextNote recognises the CLI-injected "session continued" preamble that
@@ -2781,6 +2811,16 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       pushNotification(notifText)
       continue
     }
+    // A queued message consumed into a running turn: its queued_command
+    // attachment is its only durable record (no plain user event exists) -
+    // rebuild the user bubble from it, settling the prior turn's footer like
+    // any real user turn.
+    const queuedText = queuedCommandText(ev)
+    if (queuedText != null) {
+      flushHistFooter()
+      push({ kind: 'user', text: queuedText })
+      continue
+    }
     if (ev.type === 'user') {
       const content = ev.message?.content
       if (typeof content === 'string') {
@@ -3836,6 +3876,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
+      // The stdout echo of a message already rendered from its queued_command
+      // attachment (a queued message consumed into a running turn): the
+      // attachment is the durable, correctly-placed copy - drop the echo.
+      const qi = queuedCmdTexts.indexOf(text)
+      if (qi >= 0) {
+        queuedCmdTexts.splice(qi, 1)
+        markTurnStart()
+        settlePendingSend(text)
+        return
+      }
       // The echo of a message we already showed optimistically (item 26): just
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
@@ -3867,7 +3917,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
+      plainUserTexts.push(text)
       push({ kind: 'user', text, noEntrance: fromQueue })
+    }
+
+    // One-shot dedup between a queued_command attachment and the stdout echo of
+    // the same message: whichever renders first is remembered here so the other
+    // is dropped (they carry different uuids, so the socket's uuid dedup can't
+    // pair them).
+    const queuedCmdTexts: string[] = []
+    const plainUserTexts: string[] = []
+
+    // routeQueuedCommand renders a queued_command attachment - the only durable
+    // record of a queued message consumed into a RUNNING turn (see
+    // queuedCommandText). Routed through routeUserText so the sender's own
+    // optimistic/queued bubbles fold into the settled item.
+    const routeQueuedCommand = (text: string, ts: number | null) => {
+      const pi = plainUserTexts.indexOf(text)
+      if (pi >= 0) {
+        // Its stdout echo already rendered the bubble (ring replay order).
+        plainUserTexts.splice(pi, 1)
+        return
+      }
+      routeUserText(text, ts)
+      queuedCmdTexts.push(text)
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
@@ -3886,6 +3959,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         ''
       if (notifText) {
         handleTaskNotification(notifText, parseEventTs(ev))
+        return
+      }
+      // A queued message consumed into a running turn: its queued_command
+      // attachment (relayed by the backfill and the live notification tailer)
+      // is its only durable record - render the user bubble from it.
+      const queuedText = queuedCommandText(ev)
+      if (queuedText != null) {
+        routeQueuedCommand(queuedText, parseEventTs(ev))
         return
       }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
