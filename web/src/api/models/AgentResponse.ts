@@ -12,7 +12,7 @@ export type AgentResponse = {
      */
     title?: string;
     /**
-     * The chat plan/to-do list JSON the chat view persisted (empty if none). Opaque to the server.
+     * The chat plan/to-do list JSON the daemon tracks from the head's live Task*TodoWrite events (empty if none).
      */
     plan?: string;
     /**

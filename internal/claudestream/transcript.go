@@ -306,6 +306,17 @@ func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
 // these records.
 var taskNotificationMarker = []byte("<task-notification>")
 
+// queuedCommandMarker picks out "queued_command" attachment records. When the
+// CLI consumes a queued message INTO A RUNNING TURN (mid-turn steering - the
+// queue-operation "remove" path), it does NOT write a plain `user` event for
+// it; this attachment record, carrying the message text on attachment.prompt,
+// is the message's ONLY durable trace. Without relaying it, a message queued
+// while a turn ran vanished from the conversation on the next reattach (the
+// live view had shown it only via the sender's own optimistic bubble). A
+// message consumed while the CLI sits idle (the "dequeue" path) does get a
+// real user event and needs no special casing.
+var queuedCommandMarker = []byte(`"queued_command"`)
+
 // NotificationTailer incrementally tails the newest session's MAIN transcript
 // for <task-notification> records. A background/async sub-agent reports its
 // completion only through one of these, which the CLI writes into the main
@@ -370,7 +381,11 @@ func (t *NotificationTailer) Poll() [][]byte {
 	t.offset += int64(end + 1)
 	var lines [][]byte
 	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
-		if len(line) == 0 || !bytes.Contains(line, taskNotificationMarker) {
+		// queued_command attachments are relayed live alongside notifications:
+		// a queued message consumed into a running turn leaves no stdout trace,
+		// so an attached client would otherwise only ever see its own optimistic
+		// bubble (and another browser nothing at all).
+		if len(line) == 0 || (!bytes.Contains(line, taskNotificationMarker) && !bytes.Contains(line, queuedCommandMarker)) {
 			continue
 		}
 		cp := make([]byte, len(line))
@@ -418,7 +433,10 @@ func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, don
 		// the client to render the completion chip in place.
 		isNotif := bytes.Contains(all[i], taskNotificationMarker)
 		ev, ok := ParseEvent(all[i])
-		if !ok || ev.IsSidechain || (!isNotif && ev.Type != "user" && ev.Type != "assistant") {
+		// queued_command attachments ride along like task-notifications: they are
+		// the only durable trace of a message consumed into a running turn.
+		isQueuedCmd := ev.Type == "attachment" && bytes.Contains(all[i], queuedCommandMarker)
+		if !ok || ev.IsSidechain || (!isNotif && !isQueuedCmd && ev.Type != "user" && ev.Type != "assistant") {
 			continue
 		}
 		cp := make([]byte, len(all[i]))
@@ -589,7 +607,8 @@ func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines 
 		// settle a finished background sub - which the client can't otherwise tell
 		// from a still-running one after its live signal is gone.
 		isConversation := (!ev.IsSidechain || keepSidechain) && (ev.Type == "user" || ev.Type == "assistant")
-		if !isConversation && !bytes.Contains(line, taskNotificationMarker) {
+		if !isConversation && !bytes.Contains(line, taskNotificationMarker) &&
+			!(ev.Type == "attachment" && bytes.Contains(line, queuedCommandMarker)) {
 			continue
 		}
 		cp := make([]byte, len(line))
