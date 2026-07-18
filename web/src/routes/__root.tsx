@@ -1,5 +1,5 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
-import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
+import { useEffect, useRef, useState, useCallback, memo, type WheelEvent, type RefObject } from 'react'
 import { api } from '../stores/apiClient'
 import { ensureReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
@@ -86,6 +86,109 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
   }
 }
 
+// The sidebar's live agent list (active + archived). Split out of RootLayout and
+// given its OWN agent-store subscription so the rest of the shell - top bar,
+// project path, forge/settings buttons, footer, resize handles, tooltips - no
+// longer re-renders on the ~1/s agent-store refresh a working agent drives. This
+// component still re-renders each tick (it shows live status), but its rows are
+// memo'd AgentSidebarItems that skip untouched agents. All its props are stable
+// across those ticks (ids, the collapse flag, the sentinel ref, the memo'd
+// handlers), so a tick only re-renders here - not the whole layout.
+const AgentSidebarList = memo(function AgentSidebarList({
+  currentProjectId,
+  selectedAgentId,
+  archivedCollapsed,
+  onToggleArchivedCollapsed,
+  onDeselect,
+  archivedSentinelRef,
+}: {
+  currentProjectId: string | null | undefined
+  selectedAgentId: string | undefined
+  archivedCollapsed: boolean
+  onToggleArchivedCollapsed: () => void
+  onDeselect: () => void
+  archivedSentinelRef: RefObject<HTMLDivElement | null>
+}) {
+  // Select the raw arrays (stable identity across a no-op refresh via the store's
+  // reconcileList) and filter in the body, so an unchanged refresh bails here too.
+  const agents = useAgentStore((s) => s.agents)
+  const archived = useAgentStore((s) => s.archived)
+  const archivedLoading = useAgentStore((s) => s.archivedLoading)
+  const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
+  const filteredAgents = agents.filter((a) => !a.ephemeral)
+  return (
+    <>
+      <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1.5">
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
+          Agents
+        </span>
+        <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{filteredAgents.length}</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-0.5" onWheel={forwardSidebarWheelToMain}>
+        {filteredAgents.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+            {!currentProjectId
+              ? 'Select a project to view agents'
+              : 'Spawn an agent to get started'}
+          </div>
+        ) : (
+          currentProjectId && filteredAgents.map((agent) => (
+            <AgentSidebarItem
+              key={agent.id}
+              agent={agent}
+              selected={agent.id === selectedAgentId}
+              projectId={currentProjectId}
+              onDeselect={onDeselect}
+            />
+          ))
+        )}
+
+        {/* Archived (killed/merged) history - read-only, paginated and loaded
+            lazily as it scrolls into view (infinite scroll). */}
+        {currentProjectId && archived.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={onToggleArchivedCollapsed}
+              className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group cursor-pointer rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/40"
+            >
+              {archivedCollapsed ? (
+                <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+              ) : (
+                <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+              )}
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
+                Archived
+              </span>
+              <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
+              <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
+              <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
+            </button>
+            {!archivedCollapsed &&
+              archived.map((agent) => (
+                <AgentSidebarItem
+                  key={agent.id}
+                  agent={agent}
+                  selected={agent.id === selectedAgentId}
+                  projectId={currentProjectId}
+                  onDeselect={onDeselect}
+                />
+              ))}
+          </>
+        )}
+        {/* Sentinel + spinner for archived infinite scroll. */}
+        {currentProjectId && !archivedCollapsed && archivedHasMore && (
+          <div ref={archivedSentinelRef} className="py-3 flex items-center justify-center">
+            {archivedLoading && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
+          </div>
+        )}
+      </div>
+    </>
+  )
+})
+
 // ── Root Layout ────────────────────────────────────────────────────────────────
 
 // Derive the current view from the active route so it can be persisted as the
@@ -143,19 +246,30 @@ function RootLayout() {
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
   const setProjects = useProjectStore((s) => s.setProjects)
   const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
-  const agents = useAgentStore((s) => s.agents)
   const addAgent = useAgentStore((s) => s.addAgent)
   const markRead = useAgentStore((s) => s.markRead)
   const patchAgentTests = useAgentStore((s) => s.patchAgentTests)
-  const archived = useAgentStore((s) => s.archived)
-  const archivedLoading = useAgentStore((s) => s.archivedLoading)
-  const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
   const showDialog = useDialogStore((s) => s.show)
   const navigate = useNavigate()
   const location = useLocation()
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+  // Narrow slices of the agent store, so the layout re-renders only when one of
+  // THESE derived values changes - not on every ~1/s agent refresh. The live
+  // agent list itself lives in <AgentSidebarList>, which owns its own
+  // subscription (see above), keeping the whole shell out of the per-tick churn.
+  // - the selected agent's unread bit drives the auto-clear effect below;
+  // - its display name and the project's unread count feed the tab title.
+  const selectedAgentUnread = useAgentStore((s) =>
+    selectedAgentId ? !!s.agents.find((a) => a.id === selectedAgentId)?.has_unread_changes : false,
+  )
+  const selectedAgentName = useAgentStore((s) => {
+    if (!selectedAgentId) return undefined
+    const a = s.agents.find((x) => x.id === selectedAgentId)
+    return a ? a.title || a.id : undefined
+  })
+  const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -264,10 +378,10 @@ function RootLayout() {
     // Collapsed is the default, so store nothing for it; only persist an explicit
     // expand ('0'). Toggling back to collapsed clears the key.
     writeLocal(archivedCollapsedKey(currentProjectId), next ? null : '0')
-    if (next && selectedAgentId && archived.some((a) => a.id === selectedAgentId)) {
+    if (next && selectedAgentId && useAgentStore.getState().archived.some((a) => a.id === selectedAgentId)) {
       navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
     }
-  }, [currentProjectId, archivedCollapsed, selectedAgentId, archived, navigate])
+  }, [currentProjectId, archivedCollapsed, selectedAgentId, navigate])
 
   // Pointer events (not mouse) so the drag works with touch + pen too - e.g. a
   // large phone in landscape where the sidebar is a persistent column rather
@@ -332,12 +446,11 @@ function RootLayout() {
     // /unread → POST /read flip-flop). Skip auto-clear while the override holds.
     const unreadUntil = useAgentStore.getState().unreadUntil[selectedAgentId] ?? 0
     if (unreadUntil > Date.now()) return
-    const sel = agents.find((a) => a.id === selectedAgentId)
-    if (sel?.has_unread_changes) {
+    if (selectedAgentUnread) {
       markRead(selectedAgentId)
       api.default.markAgentRead(currentProjectId, selectedAgentId).catch(() => {})
     }
-  }, [agents, selectedAgentId, currentProjectId, markRead, pageActive])
+  }, [selectedAgentUnread, selectedAgentId, currentProjectId, markRead, pageActive])
 
   // Reflect unread changes in the browser tab title with a leading dot, so a
   // backgrounded tab signals "something's waiting" without the page in focus.
@@ -347,7 +460,6 @@ function RootLayout() {
   // We count the live (optimistically-cleared) agents for the current project
   // and trust the backend per-project counts for the others - so the dot tracks
   // the same state as the in-app indicators and clears the moment they do.
-  const currentProjectUnread = agents.filter((a) => a.has_unread_changes).length
   const otherProjectsUnread = projects
     .filter((p) => p.id !== currentProjectId)
     .reduce((n, p) => n + (p.unread_count ?? 0), 0)
@@ -357,8 +469,7 @@ function RootLayout() {
   // primitive strings so the effect only fires when the displayed text changes.
   const currentProject = projects.find((p) => p.id === currentProjectId)
   const titleProjectName = currentProject?.name
-  const titleAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : undefined
-  const titleAgentName = titleAgent ? titleAgent.title || titleAgent.id : undefined
+  const titleAgentName = selectedAgentName
   const onRepository = /\/repository(\/|$)/.test(location.pathname)
   useEffect(() => {
     const parts = [anyUnread ? '● Hydra' : 'Hydra']
@@ -594,8 +705,6 @@ function RootLayout() {
     setSelectedProjectId(null)
     navigate({ to: '/' })
   }, [setSelectedProjectId, navigate])
-
-  const filteredAgents = agents.filter((a) => !a.ephemeral)
 
   // Breadcrumb shown in the top bar after the "/" on non-agent pages. Agent
   // pages portal their own status/title/actions into the slot instead
@@ -850,73 +959,14 @@ function RootLayout() {
 
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
-          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
-              Agents
-            </span>
-            <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
-            <span className="text-xs text-gray-400 dark:text-gray-500">{filteredAgents.length}</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2 space-y-0.5" onWheel={forwardSidebarWheelToMain}>
-            {filteredAgents.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
-                {!currentProjectId
-                  ? 'Select a project to view agents'
-                  : 'Spawn an agent to get started'}
-              </div>
-            ) : (
-              currentProjectId && filteredAgents.map((agent) => (
-                <AgentSidebarItem
-                  key={agent.id}
-                  agent={agent}
-                  selected={agent.id === selectedAgentId}
-                  projectId={currentProjectId}
-                  onDeselect={handleAgentDeselect}
-                />
-              ))
-            )}
-
-            {/* Archived (killed/merged) history - read-only, paginated and loaded
-                lazily as it scrolls into view (infinite scroll). */}
-            {currentProjectId && archived.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  onClick={toggleArchivedCollapsed}
-                  className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group cursor-pointer rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/40"
-                >
-                  {archivedCollapsed ? (
-                    <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-                  ) : (
-                    <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-                  )}
-                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
-                    Archived
-                  </span>
-                  <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
-                  <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
-                  <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
-                </button>
-                {!archivedCollapsed &&
-                  archived.map((agent) => (
-                    <AgentSidebarItem
-                      key={agent.id}
-                      agent={agent}
-                      selected={agent.id === selectedAgentId}
-                      projectId={currentProjectId}
-                      onDeselect={handleAgentDeselect}
-                    />
-                  ))}
-              </>
-            )}
-            {/* Sentinel + spinner for archived infinite scroll. */}
-            {currentProjectId && !archivedCollapsed && archivedHasMore && (
-              <div ref={archivedSentinelRef} className="py-3 flex items-center justify-center">
-                {archivedLoading && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
-              </div>
-            )}
-          </div>
+          <AgentSidebarList
+            currentProjectId={currentProjectId}
+            selectedAgentId={selectedAgentId}
+            archivedCollapsed={archivedCollapsed}
+            onToggleArchivedCollapsed={toggleArchivedCollapsed}
+            onDeselect={handleAgentDeselect}
+            archivedSentinelRef={archivedSentinelRef}
+          />
 
           {/* Sidebar footer - a single row: restart (icon) + uptime on the left,
               Claude usage + Settings (icon) on the right. The theme switcher now

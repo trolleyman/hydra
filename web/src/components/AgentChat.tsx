@@ -2893,21 +2893,54 @@ interface SettledMessagesProps {
   subagents: Record<string, SubagentView>
 }
 
+// One settled row, memo'd per item so appending a new message renders ONLY the
+// new row - not the whole transcript. renderItem reads the live serif / connected
+// / worktree / subagents values through a ref, so those are passed here purely as
+// memo keys (unused in the body): a change to any of them re-renders every row so
+// its output can't go stale, but a plain message append leaves them untouched and
+// the existing rows bail. `animate` is stable per row (liveFromId is fixed once
+// replay completes), so a new message doesn't re-trigger neighbours' entrance.
+interface SettledRowProps {
+  item: ChatItem
+  animate: boolean
+  renderItem: (item: ChatItem) => ReactNode
+  serif: boolean
+  connected: boolean
+  worktreePath: string | null
+  subByToolUse: Record<string, SubagentView>
+  subagents: Record<string, SubagentView>
+}
+const SettledRow = memo(
+  function SettledRow({ item, animate, renderItem }: SettledRowProps) {
+    return <div className={animate ? 'animate-chat-item-in' : undefined}>{renderItem(item)}</div>
+  },
+  (a, b) =>
+    a.item === b.item &&
+    a.animate === b.animate &&
+    a.renderItem === b.renderItem &&
+    a.serif === b.serif &&
+    a.connected === b.connected &&
+    a.worktreePath === b.worktreePath &&
+    a.subByToolUse === b.subByToolUse &&
+    a.subagents === b.subagents,
+)
+
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem }: SettledMessagesProps) {
+  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents }: SettledMessagesProps) {
     return (
       <>
         {items.map((item) => (
-          <div
+          <SettledRow
             key={item.id}
-            className={
-              liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)
-                ? 'animate-chat-item-in'
-                : undefined
-            }
-          >
-            {renderItem(item)}
-          </div>
+            item={item}
+            animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+            renderItem={renderItem}
+            serif={serif}
+            connected={connected}
+            worktreePath={worktreePath}
+            subByToolUse={subByToolUse}
+            subagents={subagents}
+          />
         ))}
       </>
     )
