@@ -454,45 +454,65 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 // a background command/agent's completion record out of the window in seconds -
 // without these the client can't tell a finished background task from a running
 // one after reconnect (its cards read "working" forever). The records are tiny
-// and rare, so relaying all of them costs nothing. Best-effort: a prelude scan
-// failure returns the windowed lines alone.
+// and rare, so relaying all of them costs nothing.
+//
+// The uuid set covers the ENTIRE transcript, not just the tail window: it
+// exists to dedup the scrollback-ring replay, and the ring (which holds the
+// live process's whole stdout) can reach back further than the byte-capped
+// window. A ring line recorded anywhere in the transcript is durable history -
+// already relayed, deliberately filtered, or reachable via load_before - so
+// replaying it would duplicate the conversation (the pre-window part appeared
+// once via the ring at the bottom and again when load_before paged it in).
+// Best-effort: a prefix scan failure returns the windowed lines and their
+// uuids alone.
 func TailTranscriptAndPrelude(path string, maxBytes int64) (lines, prelude [][]byte, uuids map[string]struct{}, err error) {
 	lines, uuids, windowStart, err := tailTranscriptWindowed(path, maxBytes, false)
 	if err != nil || windowStart <= 0 {
 		return lines, nil, uuids, errtrace.Wrap(err)
 	}
-	prelude, scanErr := scanNotificationsBefore(path, windowStart)
+	prelude, preUUIDs, scanErr := scanPrefixBefore(path, windowStart)
 	if scanErr != nil {
 		return lines, nil, uuids, nil
+	}
+	for u := range preUUIDs {
+		uuids[u] = struct{}{}
 	}
 	return lines, prelude, uuids, nil
 }
 
-// scanNotificationsBefore streams the transcript's first `end` bytes (a whole
-// number of lines - the tail window's start offset) and returns every parseable
-// line carrying a <task-notification>. Streams line-by-line so a multi-MB
-// prefix costs no more memory than its largest single line.
-func scanNotificationsBefore(path string, end int64) ([][]byte, error) {
+// scanPrefixBefore streams the transcript's first `end` bytes (a whole number
+// of lines - the tail window's start offset) and returns every parseable line
+// carrying a <task-notification>, plus the uuid of every parseable line (see
+// TailTranscriptAndPrelude: ring-replay dedup needs the whole transcript's
+// uuids). Streams line-by-line so a multi-MB prefix costs no more memory than
+// its largest single line.
+func scanPrefixBefore(path string, end int64) (notifs [][]byte, uuids map[string]struct{}, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, errtrace.Wrap(err)
+		return nil, nil, errtrace.Wrap(err)
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(io.LimitReader(f, end), 64*1024)
-	var out [][]byte
+	uuids = make(map[string]struct{})
 	for {
 		line, readErr := r.ReadBytes('\n')
-		if len(line) > 0 && bytes.Contains(line, taskNotificationMarker) {
-			trimmed := bytes.TrimRight(line, "\n")
-			if _, ok := ParseEvent(trimmed); ok {
-				out = append(out, trimmed)
+		if trimmed := bytes.TrimRight(line, "\n"); len(trimmed) > 0 {
+			if ev, ok := ParseEvent(trimmed); ok {
+				if ev.UUID != "" {
+					uuids[ev.UUID] = struct{}{}
+				}
+				if bytes.Contains(trimmed, taskNotificationMarker) {
+					cp := make([]byte, len(trimmed))
+					copy(cp, trimmed)
+					notifs = append(notifs, cp)
+				}
 			}
 		}
 		if readErr != nil {
 			break
 		}
 	}
-	return out, nil
+	return notifs, uuids, nil
 }
 
 // tailTranscript is the shared core of TailTranscript. keepSidechain relays

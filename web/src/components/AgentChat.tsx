@@ -1682,6 +1682,7 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
   requestTaskOutput?: (file: string) => Promise<{ content?: string; error?: string }>
 }) {
   const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ content?: string; error?: string } | null>(null)
   const expandable = !onOpenChat && !!outputFile && !!requestTaskOutput
   const clickable = !!onOpenChat || expandable
@@ -1691,9 +1692,22 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       return
     }
     if (!expandable) return
-    const next = !open
-    setOpen(next)
-    if (next && result == null) requestTaskOutput!(outputFile!).then(setResult)
+    if (open || result != null) {
+      setOpen(!open)
+      return
+    }
+    // First expand: fetch the output BEFORE opening, so the reveal animation
+    // measures the real content. Opening around a small "loading" placeholder
+    // made the panel glide to placeholder height and then jump to full size
+    // when the output landed (the same first-open jump image reads had before
+    // their dimensions were reserved). The pill's chevron spins while fetching.
+    if (loading) return
+    setLoading(true)
+    requestTaskOutput!(outputFile!).then((res) => {
+      setResult(res)
+      setLoading(false)
+      setOpen(true)
+    })
   }
   const pill = (
     <div
@@ -1706,9 +1720,12 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       }`}
       title={text}
     >
-      {expandable && (
-        <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-      )}
+      {expandable &&
+        (loading ? (
+          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-stone-400 dark:text-stone-500" />
+        ) : (
+          <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        ))}
       <span className="truncate">{text}</span>
       {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
     </div>
@@ -1719,15 +1736,10 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       <div className="flex justify-center">{pill}</div>
       <Expandable open={open}>
         <div className="w-full">
-          {result == null ? (
-            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500">
-              <LoaderCircle className="w-3 h-3 animate-spin" />
-              Loading output...
-            </div>
-          ) : result.error ? (
+          {result?.error ? (
             <div className="text-center py-1 text-[11px] text-stone-400 dark:text-stone-500">{result.error}</div>
           ) : (
-            <OutputPanel text={result.content ?? ''} lang="" />
+            <OutputPanel text={result?.content ?? ''} lang="" />
           )}
         </div>
       </Expandable>

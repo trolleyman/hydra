@@ -186,7 +186,7 @@ func TestTailTranscriptAndPrelude(t *testing.T) {
 	// old user line) are pre-window; the notification alone must come back as
 	// prelude.
 	window := int64(len(strings.Join(recent, "\n")) - 50)
-	lines, prelude, _, err := TailTranscriptAndPrelude(path, window)
+	lines, prelude, uuids, err := TailTranscriptAndPrelude(path, window)
 	if err != nil {
 		t.Fatalf("TailTranscriptAndPrelude: %v", err)
 	}
@@ -197,6 +197,17 @@ func TestTailTranscriptAndPrelude(t *testing.T) {
 		if bytes.Contains(l, []byte(`"u1"`)) {
 			t.Errorf("pre-window conversation line leaked into the windowed backfill")
 		}
+	}
+	// The uuid set must cover the WHOLE transcript, pre-window lines included:
+	// it dedups the scrollback-ring replay, which can reach back further than
+	// the byte-capped window - a pre-window uuid missing from the set would let
+	// the ring re-deliver that line at the bottom of the conversation, and
+	// load_before would then page the same line in at the top (duplicates).
+	if _, ok := uuids["u1"]; !ok {
+		t.Error("pre-window uuid u1 missing from the dedup set")
+	}
+	if _, ok := uuids["ra"]; !ok {
+		t.Error("windowed uuid ra missing from the dedup set")
 	}
 
 	// A window covering the whole file yields no prelude (nothing pre-window),
