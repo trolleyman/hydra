@@ -3802,7 +3802,25 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	<-done
+	// Then keep streaming build-log lines for the still-generating "components"
+	// set, a couple per tick, mirroring a chatty capture script. This exercises
+	// the panel's live-log path (and its re-render behaviour under a fast log).
+	for i := 0; ; i++ {
+		select {
+		case <-done:
+			return
+		case <-time.After(150 * time.Millisecond):
+		}
+		side := "left"
+		if i%2 == 1 {
+			side = "right"
+		}
+		line := &api.ArtifactLogLine{Stream: api.Stdout, Text: fmt.Sprintf("[%s] capturing frame %d ... ok", side, i)}
+		ldata, _ := json.Marshal(artifactWSMessage{Type: "log", Script: "components", Side: side, Line: line})
+		if err := conn.WriteMessage(websocket.TextMessage, ldata); err != nil {
+			return
+		}
+	}
 }
 
 // simStreamedArtifactFiles is the ordered list of tiles the simulated in-flight

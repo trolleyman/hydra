@@ -26,6 +26,7 @@ import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
+import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -1256,6 +1257,10 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   onArtifactSpanChange: (key: string, span: number | null) => void
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
+  // Streamed live-log lines live here (not in `sets`) so a log frame re-renders
+  // only its LogView. Seeded/reset from snapshot/set/refresh below to mirror the
+  // old sets[].left_log semantics exactly.
+  const liveLog = useLiveLogStore()
   const [error, setError] = useState<string | null>(null)
   // Connection mode: WS while live, polling if the socket can't connect or drops.
   const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
@@ -1340,17 +1345,11 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   // tick, and appending each on its own would re-copy the whole growing log
   // array per line (O(n^2)). Queue them by script+side and apply one batch per
   // ~frame. The key packs both axes so left/right stay separate.
+  // A flushed batch appends into the live-log store (keyed set+side), NOT into
+  // `sets` - so a chatty log re-renders only the subscribed LogView, not the whole
+  // panel. The keys already match the store's (`${name}\0${side}`).
   const { enqueue: enqueueLog, flushNow: flushLogs } = useLogCoalescer<ArtifactLogLine>((batches) => {
-    setSets((prev) => prev?.map((s) => {
-      const left = batches.get(`${s.name}\0left`)
-      const right = batches.get(`${s.name}\0right`)
-      if (!left && !right) return s
-      return {
-        ...s,
-        ...(left ? { left_log: [...(s.left_log ?? []), ...left] } : {}),
-        ...(right ? { right_log: [...(s.right_log ?? []), ...right] } : {}),
-      }
-    }) ?? prev)
+    for (const [key, lines] of batches) liveLog.append(key, lines)
   })
 
   // Apply a server→client WS message to local state.
@@ -1366,8 +1365,17 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     // so they land in order on the current set before it changes.
     flushLogs()
     if (msg.type === 'snapshot') {
-      setSets(msg.scripts ?? [])
+      const scripts = msg.scripts ?? []
+      // Seed the live-log store with each side's authoritative buffer (replace),
+      // matching how the old code set sets[].left_log from the snapshot.
+      for (const s of scripts) {
+        liveLog.set(`${s.name}\0left`, s.left_log ?? [])
+        liveLog.set(`${s.name}\0right`, s.right_log ?? [])
+      }
+      setSets(scripts)
     } else if (msg.type === 'set') {
+      liveLog.set(`${msg.set.name}\0left`, msg.set.left_log ?? [])
+      liveLog.set(`${msg.set.name}\0right`, msg.set.right_log ?? [])
       setSets((prev) => {
         if (!prev) return [msg.set]
         return prev.map((s) => {
@@ -1393,7 +1401,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
         return msg.side === 'left' ? { ...s, left_progress: msg.progress } : { ...s, right_progress: msg.progress }
       }) ?? prev)
     }
-  }, [enqueueLog, flushLogs])
+  }, [enqueueLog, flushLogs, liveLog])
 
   // Primary path: stream updates over a WebSocket so progress/log update instantly.
   // Falls back to polling (below) if the socket fails to open or later drops.
@@ -1460,6 +1468,10 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     // only zeroes that side - the other keeps its existing log/progress so it isn't
     // visually thrown away while it stays cached.
     const both = side === undefined
+    // Clear the refreshed side(s) in the live-log store too, so the empty log shows
+    // immediately (mirrors the left_log: [] reset on the set below).
+    if (both || side === 'left') liveLog.set(`${name}\0left`, [])
+    if (both || side === 'right') liveLog.set(`${name}\0right`, [])
     setSets((prev) => prev?.map((s) => (s.name === name
       ? {
           ...s,
@@ -1479,7 +1491,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
       refreshScriptRef.current = { name, side }
       setRefreshNonce((n) => n + 1)
     }
-  }, [mode])
+  }, [mode, liveLog])
 
   // What to render: the live sets once they arrive, otherwise a skeleton built
   // from the cached chrome (one collapsed, "generating" card per script name) so
@@ -1538,6 +1550,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   return (
     // Publish the measured filter-bar height so card headers can dock flush beneath
     // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
+    <LiveLogProvider value={liveLog}>
     <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
@@ -1654,5 +1667,6 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
         </ABControlsContext.Provider>
       </div>
     </div>
+    </LiveLogProvider>
   )
 }
