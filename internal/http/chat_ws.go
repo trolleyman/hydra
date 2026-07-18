@@ -582,6 +582,38 @@ func backfillChatHistory(conn *safeConn, agentID, dir string, subs *subagentReso
 	return uuids
 }
 
+// chatPlanFrame carries the server-reconstructed plan/to-do list, sent once
+// per attach right after the transcript backfill.
+type chatPlanFrame struct {
+	terminalEvent
+	Plan string `json:"plan"`
+}
+
+// sendReconstructedPlan rebuilds the head's plan/to-do list from its FULL
+// transcript and hands it to the client, persisting it on the agent record on
+// the way. The client's own reconstruction only sees the backfill tail window,
+// so without this a plan whose Task* creates predate the window - a head that
+// ran unwatched, or a byte-dense conversation - never resurfaces (the
+// scroll-older page deliberately leaves the panel alone). Best-effort: no
+// transcript or no plan sends nothing (the client falls back to the persisted
+// AgentResponse.plan, which this keeps fresh).
+func (s *Server) sendReconstructedPlan(conn *safeConn, agentID, dir string) {
+	planJSON := claudestream.ReconstructPlan(claudestream.LatestTranscript(dir))
+	if planJSON == "" {
+		return
+	}
+	if ag, err := s.DB.GetAgent(agentID); err == nil && ag != nil && ag.Plan != planJSON {
+		if err := s.DB.UpdateAgentPlan(agentID, planJSON); err != nil {
+			log.Printf("chat ws: persist reconstructed plan for %q: %v", agentID, err)
+		}
+	}
+	frame, err := json.Marshal(chatPlanFrame{terminalEvent: terminalEvent{Type: "plan"}, Plan: planJSON})
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
+}
+
 // chatTranscriptPath resolves the head's newest Claude transcript file, or ""
 // when there's no worktree/dir/file yet.
 func chatTranscriptPath(worktree string) string {
@@ -654,6 +686,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	if skip == nil {
 		skip = map[string]struct{}{}
 	}
+	s.sendReconstructedPlan(conn, agentID, dir)
 
 	lb := &claudestream.LineBuffer{}
 	// Per-connection token-delta cadence tracer (HYDRA_CHAT_STREAM_DEBUG); nil-safe

@@ -133,6 +133,38 @@ describe('createPlanBuilder', () => {
     expect(published().map((e) => [e.key, e.status])).toEqual([['1', 'pending']])
   })
 
+  it('adoptServer replaces the assembled plan and later updates land on it', () => {
+    // The window's partial reconstruction (one stray create) gives way to the
+    // daemon's full-transcript plan; a live TaskUpdate then addresses the
+    // adopted ids.
+    const { plan, published } = build()
+    create(plan, 'u1', 9, 'Window stray')
+    plan.adoptServer([
+      entry({ key: '1', content: 'First', status: 'completed', order: 1 }),
+      entry({ key: '2', content: 'Second', status: 'in_progress', order: 2 }),
+    ])
+    plan.applyTaskTool('TaskUpdate', { taskId: '2', status: 'completed' }, 'u2')
+
+    expect(published().map((e) => [e.key, e.content, e.status])).toEqual([
+      ['1', 'First', 'completed'],
+      ['2', 'Second', 'completed'],
+    ])
+  })
+
+  it('adoptServer with an empty list is a no-op', () => {
+    const { plan, published } = build()
+    create(plan, 'u1', 1, 'Kept')
+    plan.adoptServer([])
+    expect(published().map((e) => e.key)).toEqual(['1'])
+  })
+
+  it('adoptServer infers todo mode, so a later TaskCreate replaces the list', () => {
+    const { plan, published } = build()
+    plan.adoptServer([entry({ key: 'todo:0', content: 'Adopted todo', status: 'pending', order: 1 })])
+    create(plan, 'u1', 1, 'Task-mode takeover')
+    expect(published().map((e) => [e.key, e.content])).toEqual([['1', 'Task-mode takeover']])
+  })
+
   it('ignores a result for a tool_use it never saw created', () => {
     const { plan, published } = build()
     plan.applyTaskResult('unknown', 'Task #4 created successfully: Ghost')

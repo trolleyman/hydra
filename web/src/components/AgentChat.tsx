@@ -47,7 +47,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { loadPlan, savePlan, seedLocalPlan } from '../lib/planStore'
+import { loadPlan, markPlanSynced, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -4204,6 +4204,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         file?: string
         content?: string
         error?: string
+        plan?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -4331,6 +4332,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // A load-older page (item 25): older conversation events to prepend.
           handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
+        case 'plan': {
+          // The daemon's full-transcript plan reconstruction (sent once per
+          // attach, after the backfill). It supersedes anything assembled from
+          // the tail window or restored from storage - without it a plan whose
+          // Task* creates predate the backfill window (a head that ran
+          // unwatched, a byte-dense conversation) never resurfaces. Mark it
+          // synced first so the adopt's savePlan doesn't PUT it back.
+          const entries = parseServerPlan(typeof msg.plan === 'string' ? msg.plan : '')
+          if (entries.length) {
+            markPlanSynced(projectId, agentId, entries)
+            plan.adoptServer(entries)
+          }
+          return
+        }
       }
     }
     ws.onclose = () => {

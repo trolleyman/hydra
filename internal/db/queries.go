@@ -296,8 +296,9 @@ func (s *Store) UpdateAgentTitle(id, title string) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateAgentPlan stores the chat plan/to-do JSON for an agent (client-owned,
-// opaque). Empty clears it.
+// UpdateAgentPlan stores the chat plan/to-do JSON for an agent (opaque;
+// written by the chat client's debounced PUT and by the daemon's transcript
+// reconstruction on chat attach). Empty clears it.
 func (s *Store) UpdateAgentPlan(id, plan string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("plan", plan)
 	return errtrace.Wrap(result.Error)

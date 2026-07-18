@@ -9,6 +9,10 @@
 // Two layers back it up: localStorage (instant, same-browser) and the backend
 // (AgentResponse.plan, so a fresh browser or a teammate gets it too). savePlan
 // writes both - localStorage synchronously and the server via a debounced PUT.
+// The daemon is a third, authoritative source: on chat attach it reconstructs
+// the plan from the FULL transcript (claudestream.ReconstructPlan) and sends it
+// in a "plan" frame, which the chat adopts over whatever these layers held -
+// covering heads that ran with no browser watching.
 
 import { api } from '../stores/apiClient'
 import { readLocal, writeLocal } from './storage'
@@ -66,6 +70,13 @@ export function seedLocalPlan(
   // an unchanged plan back to the server.
   lastSent.set(planKey(projectId, agentId), json)
   return entries
+}
+
+// markPlanSynced records that the server already holds exactly `entries` (it
+// just sent them in a chat "plan" frame), so the savePlan that follows an
+// adopt doesn't PUT the server's own plan straight back at it.
+export function markPlanSynced(projectId: string | null, agentId: string, entries: PlanEntry[]): void {
+  lastSent.set(planKey(projectId, agentId), entries.length ? JSON.stringify(entries) : '')
 }
 
 // Debounced per-agent PUT queue. Coalesces bursts of savePlan calls (a plan gets

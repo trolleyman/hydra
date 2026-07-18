@@ -97,6 +97,11 @@ export interface PlanBuilder {
   applyTaskResult(toolUseId: string, resultText: string): void
   // applyTodoWrite replaces the whole plan from a TodoWrite list.
   applyTodoWrite(list: TodoItem[]): void
+  // adoptServer replaces the whole plan with the daemon's full-transcript
+  // reconstruction (the chat "plan" frame). The frame is built from every
+  // Task*/TodoWrite event in the transcript, so it supersedes whatever this
+  // builder assembled from the backfill window or restored from storage.
+  adoptServer(entries: PlanEntry[]): void
   // entries returns the current plan, ordered.
   entries(): PlanEntry[]
 }
@@ -187,6 +192,17 @@ export function createPlanBuilder(seed: PlanEntry[], onChange: (entries: PlanEnt
       } else {
         taskItems.set(id, cur)
       }
+      publish()
+    },
+    adoptServer(seed) {
+      if (!seed.length) return
+      taskItems.clear()
+      taskSeq = 0
+      for (const e of seed) {
+        taskItems.set(e.key, { content: e.content, status: e.status, activeForm: e.activeForm, description: e.description, order: e.order })
+        taskSeq = Math.max(taskSeq, e.order)
+      }
+      planMode = [...taskItems.keys()].some((k) => k.startsWith('todo:')) ? 'todo' : 'task'
       publish()
     },
     applyTodoWrite(list) {

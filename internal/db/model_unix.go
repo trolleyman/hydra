@@ -25,9 +25,10 @@ type Agent struct {
 	// identity (primary key, branch, worktree path, session key); renaming only
 	// touches this field. Seeded from the prompt, optionally refined by an LLM.
 	Title string
-	// Plan is the chat plan/to-do list JSON the chat view reconstructs from the
-	// head's Task*/TodoWrite events, persisted so it survives navigation and is
-	// available in a new browser. Opaque to the server (client-owned JSON).
+	// Plan is the chat plan/to-do list JSON reconstructed from the head's
+	// Task*/TodoWrite events - by the chat view live, and by the daemon from the
+	// full transcript on chat attach (claudestream.ReconstructPlan) - persisted
+	// so it survives navigation and is available in a new browser.
 	Plan string
 	// Model is the chat head's current model id, captured by the daemon from the
 	// CLI's system:init line (see internal/http/chat_ws.go) and persisted so the

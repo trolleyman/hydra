@@ -3057,6 +3057,14 @@ func handleSimChatWS(conn *safeConn) {
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
 	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
+	// The daemon's full-transcript plan reconstruction (sendReconstructedPlan),
+	// derived here from the same canned events so sim exercises the real
+	// reducer + frame end to end.
+	if planJSON := claudestream.ReconstructPlanFromTranscript([]byte(strings.Join(simChatEvents, "\n"))); planJSON != "" {
+		if frame, err := json.Marshal(chatPlanFrame{terminalEvent: terminalEvent{Type: "plan"}, Plan: planJSON}); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+	}
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).
