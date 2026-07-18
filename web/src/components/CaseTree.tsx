@@ -532,6 +532,19 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
   // cases the filter fully hid don't render (their counts survive in the
   // ancestors' badges).
   const children = [...node.children.values()].filter((c) => c.visTotal > 0).sort((a, b) => a.label.localeCompare(b.label))
+  // React keys must be assigned in the STABLE visCases order, before the
+  // status sort below: a post-sort index suffix changed a row's key whenever a
+  // streamed status update reordered the list, remounting rows mid-reorder
+  // (and desyncing React DevTools' mirror of the tree). The occurrence counter
+  // only disambiguates genuine duplicates (a repeated JUnit case entry).
+  const seenKeys = new Map<string, number>()
+  const rowKeys = new Map<TestCase, string>()
+  for (const c of node.visCases) {
+    const base = caseKey(c)
+    const n = seenKeys.get(base) ?? 0
+    seenKeys.set(base, n + 1)
+    rowKeys.set(c, n === 0 ? base : `${base}\0${n}`)
+  }
   const cases = [...node.visCases].sort((a, b) => statusRank(a.status) - statusRank(b.status))
   // One render list so the LAST row (whether a sub-node or a case) knows to end
   // the vertical line. A child keeps its chevron unless it's a one-case subtree
@@ -542,8 +555,8 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
       hasChevron: hoistedCase(child) === null,
       el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />,
     })),
-    ...cases.map((c, i) => ({
-      key: `${caseKey(c)}-${i}`,
+    ...cases.map((c) => ({
+      key: rowKeys.get(c)!,
       hasChevron: false,
       el: <CaseRow c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />,
     })),

@@ -157,7 +157,7 @@ func smokeTest(pasta, nft string) string {
 	// listener sends. bash's /dev/tcp needs no extra tools in the sandbox.
 	inner := fmt.Sprintf("exec 3<>/dev/tcp/%s/%d && cat <&3", MapAddr, port)
 	script := NftScript(nft, MapAddr, port) + "\nexec \"$@\""
-	args := append(PastaArgs(pasta, MapAddr, nil, 0), "bash", "-c", script, "bash", "bash", "-c", inner)
+	args := append(PastaArgs(pasta, MapAddr, nil, 0, ""), "bash", "-c", script, "bash", "bash", "-c", inner)
 	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
 	if strings.Contains(string(out), token) {
 		return ""

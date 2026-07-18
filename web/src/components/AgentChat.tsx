@@ -47,7 +47,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { loadPlan, savePlan, seedLocalPlan } from '../lib/planStore'
+import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -276,7 +276,10 @@ interface ClaudeEvent {
   // attachment (XML on `attachment.prompt`). handleClaudeEvent settles the sub
   // off whichever carries it (see handleTaskNotification).
   content?: string
-  attachment?: { prompt?: string; commandMode?: string }
+  // attachment.prompt is a string for <task-notification> records, and an array
+  // of content blocks for queued_command records (a queued message consumed
+  // into a running turn - see queuedCommandText).
+  attachment?: { type?: string; prompt?: string | { type?: string; text?: string }[]; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -429,6 +432,33 @@ function stripLocalCommandCaveat(text: string): string {
 // relay channels (ev.content / attachment.prompt) that aren't pre-trimmed.
 function isTaskNotification(text: string): boolean {
   return text.trimStart().startsWith('<task-notification>')
+}
+
+// queuedCommandText extracts the message text from a queued_command attachment
+// record. When the CLI consumes a queued message INTO A RUNNING TURN (mid-turn
+// steering - the queue-operation "remove" path), it writes NO plain `user`
+// event; this attachment, with the text on attachment.prompt content blocks,
+// is the message's only durable trace - so replay must rebuild the user bubble
+// from it or the message vanishes on the next reattach. (A message consumed
+// while the CLI is idle gets a real user event and never reaches this path.)
+function queuedCommandText(ev: ClaudeEvent): string | null {
+  const att = ev.attachment
+  if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
+  const prompt = att.prompt
+  if (typeof prompt === 'string') {
+    // A background task's <task-notification> rides the same attachment type
+    // with a string prompt - that's a notice, never a user message (the
+    // reducers consume it before reaching here; this guard is belt+braces).
+    const t = prompt.trim()
+    return !t || isTaskNotification(t) ? null : t
+  }
+  if (!Array.isArray(prompt)) return null
+  const text = prompt
+    .filter((b) => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+  return text || null
 }
 
 // detectContextNote recognises the CLI-injected "session continued" preamble that
@@ -1686,6 +1716,7 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
   requestTaskOutput?: (file: string) => Promise<{ content?: string; error?: string }>
 }) {
   const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ content?: string; error?: string } | null>(null)
   const expandable = !onOpenChat && !!outputFile && !!requestTaskOutput
   const clickable = !!onOpenChat || expandable
@@ -1695,9 +1726,22 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       return
     }
     if (!expandable) return
-    const next = !open
-    setOpen(next)
-    if (next && result == null) requestTaskOutput!(outputFile!).then(setResult)
+    if (open || result != null) {
+      setOpen(!open)
+      return
+    }
+    // First expand: fetch the output BEFORE opening, so the reveal animation
+    // measures the real content. Opening around a small "loading" placeholder
+    // made the panel glide to placeholder height and then jump to full size
+    // when the output landed (the same first-open jump image reads had before
+    // their dimensions were reserved). The pill's chevron spins while fetching.
+    if (loading) return
+    setLoading(true)
+    requestTaskOutput!(outputFile!).then((res) => {
+      setResult(res)
+      setLoading(false)
+      setOpen(true)
+    })
   }
   const pill = (
     <div
@@ -1710,9 +1754,12 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       }`}
       title={text}
     >
-      {expandable && (
-        <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-      )}
+      {expandable &&
+        (loading ? (
+          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-stone-400 dark:text-stone-500" />
+        ) : (
+          <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        ))}
       <span className="truncate">{text}</span>
       {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
     </div>
@@ -1723,15 +1770,10 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       <div className="flex justify-center">{pill}</div>
       <Expandable open={open}>
         <div className="w-full">
-          {result == null ? (
-            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500">
-              <LoaderCircle className="w-3 h-3 animate-spin" />
-              Loading output...
-            </div>
-          ) : result.error ? (
+          {result?.error ? (
             <div className="text-center py-1 text-[11px] text-stone-400 dark:text-stone-500">{result.error}</div>
           ) : (
-            <OutputPanel text={result.content ?? ''} lang="" />
+            <OutputPanel text={result?.content ?? ''} lang="" />
           )}
         </div>
       </Expandable>
@@ -2783,6 +2825,16 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durat
       ''
     if (notifText) {
       pushNotification(notifText)
+      continue
+    }
+    // A queued message consumed into a running turn: its queued_command
+    // attachment is its only durable record (no plain user event exists) -
+    // rebuild the user bubble from it, settling the prior turn's footer like
+    // any real user turn.
+    const queuedText = queuedCommandText(ev)
+    if (queuedText != null) {
+      flushHistFooter()
+      push({ kind: 'user', text: queuedText })
       continue
     }
     if (ev.type === 'user') {
@@ -3873,6 +3925,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
+      // The stdout echo of a message already rendered from its queued_command
+      // attachment (a queued message consumed into a running turn): the
+      // attachment is the durable, correctly-placed copy - drop the echo.
+      const qi = queuedCmdTexts.indexOf(text)
+      if (qi >= 0) {
+        queuedCmdTexts.splice(qi, 1)
+        markTurnStart()
+        settlePendingSend(text)
+        return
+      }
       // The echo of a message we already showed optimistically (item 26): just
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
@@ -3904,7 +3966,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
+      plainUserTexts.push(text)
       push({ kind: 'user', text, noEntrance: fromQueue })
+    }
+
+    // One-shot dedup between a queued_command attachment and the stdout echo of
+    // the same message: whichever renders first is remembered here so the other
+    // is dropped (they carry different uuids, so the socket's uuid dedup can't
+    // pair them).
+    const queuedCmdTexts: string[] = []
+    const plainUserTexts: string[] = []
+
+    // routeQueuedCommand renders a queued_command attachment - the only durable
+    // record of a queued message consumed into a RUNNING turn (see
+    // queuedCommandText). Routed through routeUserText so the sender's own
+    // optimistic/queued bubbles fold into the settled item.
+    const routeQueuedCommand = (text: string, ts: number | null) => {
+      const pi = plainUserTexts.indexOf(text)
+      if (pi >= 0) {
+        // Its stdout echo already rendered the bubble (ring replay order).
+        plainUserTexts.splice(pi, 1)
+        return
+      }
+      routeUserText(text, ts)
+      queuedCmdTexts.push(text)
     }
 
     const handleClaudeEvent = (ev: ClaudeEvent) => {
@@ -3923,6 +4008,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         ''
       if (notifText) {
         handleTaskNotification(notifText, parseEventTs(ev))
+        return
+      }
+      // A queued message consumed into a running turn: its queued_command
+      // attachment (relayed by the backfill and the live notification tailer)
+      // is its only durable record - render the user bubble from it.
+      const queuedText = queuedCommandText(ev)
+      if (queuedText != null) {
+        routeQueuedCommand(queuedText, parseEventTs(ev))
         return
       }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
@@ -4241,6 +4334,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         file?: string
         content?: string
         error?: string
+        plan?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -4368,6 +4462,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // A load-older page (item 25): older conversation events to prepend.
           handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
+        case 'plan': {
+          // The daemon's stream-tracked plan (sent once per attach, after the
+          // backfill). It supersedes anything assembled from the tail window
+          // or restored from storage - without it a plan whose Task* creates
+          // predate the backfill window (a head that ran unwatched, a
+          // byte-dense conversation) never resurfaces.
+          const entries = parseServerPlan(typeof msg.plan === 'string' ? msg.plan : '')
+          if (entries.length) plan.adoptServer(entries)
+          return
+        }
       }
     }
     ws.onclose = () => {

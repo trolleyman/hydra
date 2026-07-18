@@ -8,7 +8,7 @@ import (
 func TestHardWrapArgvShape(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--ro-bind", "/", "/", "--", "claude"}
-	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, "")
+	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, "", "")
 
 	if argv[0] != "/usr/bin/pasta" {
 		t.Fatalf("argv[0] should be pasta, got %q", argv[0])
@@ -41,7 +41,7 @@ func TestHardWrapArgvInjectsPreExec(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--seccomp", "3", "--", "claude"}
 	pre := "exec 3<\"/tmp/hydra-seccomp-x\"\nrm -f \"/tmp/hydra-seccomp-x\"\n"
-	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, pre)
+	argv := HardWrapArgv(hm, 54321, nil, 0, bwrap, pre, "")
 
 	// The script pasta runs is the -c argument (index after "bash", "-c").
 	var script string
@@ -74,7 +74,7 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	if strings.HasPrefix(MapAddr, "169.254.") {
 		t.Fatalf("MapAddr %q is link-local - unroutable via a gateway in the netns", MapAddr)
 	}
-	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0)
+	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0, "")
 	// mapAddr must be handed to pasta as the gateway, so pasta installs a default
 	// route via it and it becomes on-link for the guest.
 	if !argHasValue(args, "-g", MapAddr) {
@@ -120,12 +120,12 @@ func TestLoopbackPortSpec(t *testing.T) {
 
 func TestPastaArgsLoopbackPorts(t *testing.T) {
 	// Without an allow-list, outbound TCP splicing must be off entirely.
-	if args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0); !argHasValue(args, "-T", "none") {
+	if args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0, ""); !argHasValue(args, "-T", "none") {
 		t.Errorf("PastaArgs without ports must pass -T none: %v", args)
 	}
 	// With an allow-list, only those ports are spliced (-T), and everything else
 	// stays off - inbound (-t/-u) and outbound UDP (-U) in particular.
-	args := PastaArgs("/usr/bin/pasta", MapAddr, []int{5037}, 0)
+	args := PastaArgs("/usr/bin/pasta", MapAddr, []int{5037}, 0, "")
 	if !argHasValue(args, "-T", "5037") {
 		t.Errorf("PastaArgs must splice the allow-listed loopback port via -T: %v", args)
 	}
@@ -140,9 +140,45 @@ func TestHardWrapArgvLoopbackPorts(t *testing.T) {
 	// The port allow-list must reach pasta's argv through the wrap used at launch.
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--", "claude"}
-	argv := HardWrapArgv(hm, 54321, []int{5037, 5555}, 0, bwrap, "")
+	argv := HardWrapArgv(hm, 54321, []int{5037, 5555}, 0, bwrap, "", "")
 	if !argHasValue(argv, "-T", "5037,5555") {
 		t.Errorf("HardWrapArgv must forward the loopback-port allow-list to pasta -T: %v", argv)
+	}
+}
+
+func TestPastaArgsLogFile(t *testing.T) {
+	// Without a log file, pasta keeps its default sink (no -l), which is what the
+	// smoke test wants (it reads pasta's stderr directly).
+	if args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0, ""); contains(args, "-l") {
+		t.Errorf("PastaArgs with no logFile must not pass -l: %v", args)
+	}
+	// With a log file, pasta must be told to log ONLY there (-l) with a bounded
+	// size, so its per-flow teardown chatter stays out of the host journal.
+	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 0, "/tmp/hydra-pasta/x.log")
+	if !argHasValue(args, "-l", "/tmp/hydra-pasta/x.log") {
+		t.Errorf("PastaArgs must pass the log file via -l: %v", args)
+	}
+	if !contains(args, "--log-size") {
+		t.Errorf("PastaArgs must bound the log file with --log-size: %v", args)
+	}
+}
+
+func TestPastaLogFile(t *testing.T) {
+	// A blank id has no netns to name, so there is nothing to log for.
+	if got := PastaLogFile(""); got != "" {
+		t.Errorf("PastaLogFile(\"\") = %q, want empty", got)
+	}
+	// A label-prefixed id (":" is not filename-safe as a component separator on
+	// every path, and reads oddly) is sanitised to a single safe component.
+	got := PastaLogFile("tests:my-runner")
+	if got == "" {
+		t.Fatal("PastaLogFile(id) should return a path")
+	}
+	if strings.Contains(got, ":") {
+		t.Errorf("PastaLogFile must sanitise the id label separator: %q", got)
+	}
+	if !strings.HasSuffix(got, ".log") {
+		t.Errorf("PastaLogFile should end in .log: %q", got)
 	}
 }
 

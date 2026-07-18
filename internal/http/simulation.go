@@ -43,21 +43,6 @@ type SimulationServer struct {
 	// panel is drivable deterministically (no wall clock - see simNow).
 	previewMu    sync.Mutex
 	previewPolls map[string]int
-
-	// planMu/plans back the mock plan-persistence endpoint: SetAgentPlan stores
-	// the client-owned plan JSON here and GetAgent overlays it, so the chat
-	// plan round-trips within a sim boot (drivable cross-browser-persistence
-	// verification) without a real DB.
-	planMu sync.Mutex
-	plans  map[string]string
-}
-
-// getPlan returns the stored plan JSON for an agent, if SetAgentPlan saved one.
-func (s *SimulationServer) getPlan(id string) (string, bool) {
-	s.planMu.Lock()
-	defer s.planMu.Unlock()
-	p, ok := s.plans[id]
-	return p, ok
 }
 
 // simNow is the fixed wall-clock instant ALL time-derived simulation values are
@@ -515,12 +500,9 @@ func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Req
 }
 
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	// Overlay any plan SetAgentPlan stored for this id, so the persisted chat
-	// plan round-trips on a fresh page/browser load just like the real backend.
+	// The chat plan reaches the client via the chat WS "plan" frame (see
+	// handleSimChatWS), mirroring the daemon's incremental tracking.
 	write := func(resp api.AgentResponse) {
-		if p, ok := s.getPlan(id); ok {
-			resp.Plan = &p
-		}
 		api.WriteJSON(w, http.StatusOK, resp)
 	}
 	for _, a := range simArchivedAgents() {
@@ -927,21 +909,6 @@ func simTestSummary(id string) *api.TestSummary {
 }
 
 func (s *SimulationServer) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *SimulationServer) SetAgentPlan(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	var body api.SetAgentPlanJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	s.planMu.Lock()
-	if s.plans == nil {
-		s.plans = make(map[string]string)
-	}
-	s.plans[id] = body.Plan
-	s.planMu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2876,6 +2843,10 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd1","content":"Updated task #1 status"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_taskupd2","content":[{"type":"tool_use","id":"toolu_sim_taskupd2","name":"TaskUpdate","input":{"taskId":"2","status":"in_progress"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd2","content":"Updated task #2 status"}]}}`,
+	// A queued message consumed INTO the running turn (queue-operation "remove"
+	// path): recorded only as this queued_command attachment - no plain user
+	// event exists - so the chat must rebuild the user bubble from it on replay.
+	`{"type":"attachment","uuid":"sim-queued-cmd-1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"Queued while you were working: prefer a helper named backoffRetry."}],"commandMode":"prompt"}}`,
 	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
 	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
 	// call, its reply), then the Task tool_result. The chat folds the sidechain
@@ -3057,6 +3028,14 @@ func handleSimChatWS(conn *safeConn) {
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
 	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
+	// The daemon's full-transcript plan reconstruction (sendReconstructedPlan),
+	// derived here from the same canned events so sim exercises the real
+	// reducer + frame end to end.
+	if planJSON := claudestream.ReconstructPlanFromTranscript([]byte(strings.Join(simChatEvents, "\n"))); planJSON != "" {
+		if frame, err := json.Marshal(chatPlanFrame{terminalEvent: terminalEvent{Type: "plan"}, Plan: planJSON}); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+	}
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).

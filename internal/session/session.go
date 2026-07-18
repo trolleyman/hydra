@@ -335,6 +335,19 @@ func (s *Session) PID() int {
 	return s.proc.Pid()
 }
 
+// PlanJSON returns the session's incrementally-tracked chat plan as PlanEntry
+// JSON ("" for terminal sessions or when no plan exists). Persist consumers
+// re-read this at write time so a delayed dispatch always writes the freshest
+// state instead of a stale snapshot (see Registry.SetOnChatPlanChange).
+func (s *Session) PlanJSON() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ringFilter == nil || s.ringFilter.Plan == nil {
+		return ""
+	}
+	return s.ringFilter.Plan.JSON()
+}
+
 // alive reports whether the underlying OS process is still running, via a
 // signal-0 probe (side-effect-free; it only checks existence/permission).
 func (s *Session) alive() bool {
