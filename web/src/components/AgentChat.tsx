@@ -119,19 +119,22 @@ type ChatItem =
   // replaces the in-flight streamed copy already on screen - it was visible, so
   // re-animating it as it settles reads as a flicker (item 56), same rationale
   // as the queued-user-bubble case above.
-  | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean }
+  // uuid is the conversation-record id of the assistant block this item was built
+  // from, stamped so a model_refusal_fallback retraction can evict it (see
+  // ClaudeEvent.retractedMessageUuids). Only set on live assistant-produced items.
+  | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean; uuid?: string }
   // durationMs is the thinking time the daemon measured for this block (delivered
   // as a hydra_thinking event keyed by msgId); absent for old history recorded
   // before backend timing, which falls back to a transcript-gap estimate or a
   // plain "Thought". msgId lets a late-arriving duration patch this item.
-  | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean }
+  | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean; uuid?: string }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
-  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
+  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; uuid?: string }
   | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
   // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
   // no Task card to fold into and renders as a standalone card in the flow. The
@@ -260,6 +263,16 @@ interface ClaudeEvent {
   // system:init fields the pane cares about.
   model?: string
   slash_commands?: string[]
+  // model_refusal_fallback system event: when a turn trips a model's safety
+  // classifier the CLI retries it under a fallback model and emits this, listing
+  // the uuids of the flagged blocks it retracted. On the LIVE stream those blocks
+  // already streamed and rendered (the retry then re-emits them under new uuids),
+  // so the reducer evicts the listed uuids to undo the duplicate. Read both
+  // spellings: the persisted transcript uses camelCase, and the stdout stream-json
+  // field name isn't guaranteed identical. Only the retry is persisted, so the
+  // backfill/history path never sees the duplicate and needs no eviction.
+  retractedMessageUuids?: string[]
+  retracted_message_uuids?: string[]
   // "none" when the CLI is authed with an OAuth subscription - then
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
@@ -4106,6 +4119,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               setSlashCommands(ev.slash_commands.filter((c): c is string => typeof c === 'string'))
             }
             if (typeof ev.apiKeySource === 'string') setApiKeyReal(ev.apiKeySource !== 'none')
+          } else if (ev.subtype === 'model_refusal_fallback') {
+            // A safety-classifier refusal: the flagged blocks already streamed and
+            // rendered live, and the retry re-emits them under new uuids, so evict
+            // the retracted uuids to undo the duplicate. Both the not-yet-flushed
+            // pending batch and committed state, mirroring the hydra_thinking patch.
+            // This is gated on the refusal subtype, so a normal turn never reaches
+            // it; if the uuids don't match (e.g. an unexpected wire shape) nothing
+            // is evicted and the duplicate simply remains - never a false removal.
+            const retracted = new Set([...(ev.retractedMessageUuids ?? []), ...(ev.retracted_message_uuids ?? [])])
+            if (retracted.size === 0) return
+            for (let i = pending.length - 1; i >= 0; i--) {
+              const u = (pending[i] as { uuid?: string }).uuid
+              if (u && retracted.has(u)) pending.splice(i, 1)
+            }
+            setItems((prev) => {
+              const next = prev.filter((it) => {
+                const u = (it as { uuid?: string }).uuid
+                return !(u && retracted.has(u))
+              })
+              return next.length === prev.length ? prev : next
+            })
           }
           return
         }
@@ -4181,7 +4215,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               // the text is already on screen, so a fade-in on swap flickers
               // (item 56). streamedKinds (not streamBuf, which message_stop has
               // already nulled) remembers we streamed this text.
-              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant') })
+              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid })
             } else if (block.type === 'thinking') {
               // Duration comes from the daemon (a hydra_thinking event keyed by
               // this message id, already in hand - sent before the backfill and
@@ -4197,7 +4231,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
-                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking') })
+                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking'), uuid: ev.uuid })
               }
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
@@ -4209,7 +4243,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
               const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
-                push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+                push({ kind: 'question', toolUseId: block.id, input: block.input, specs, uuid: ev.uuid })
               } else if (todos) {
                 plan.applyTodoWrite(todos)
               } else {
@@ -4221,7 +4255,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                     desc: typeof inp.description === 'string' ? inp.description : undefined,
                   })
                 }
-                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid })
               }
             }
           }
