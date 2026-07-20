@@ -13,6 +13,7 @@ import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
 import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { touchProject } from '../lib/projectRecency'
 import { useAgentNotifications } from '../lib/useAgentNotifications'
+import { useProjectFavicon } from '../lib/useProjectFavicon'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
@@ -427,6 +428,9 @@ function RootLayout() {
   const { pushStatus, syncing, handleSync, committing, handleCommit, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
   useAgentNotifications(currentProjectId, pageActive, selectedAgentId)
+  // Paint the selected project's icon into the tab, so one-tab-per-project
+  // setups are tellable apart (matches the OS notification icon).
+  useProjectFavicon(currentProjectId)
   const { refetchStatus, development, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the

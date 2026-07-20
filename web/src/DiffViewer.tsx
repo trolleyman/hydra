@@ -2843,8 +2843,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // root) so the file rows + each file's own sticky header dock just beneath it
   // (see FILE_STICKY_TOP). Only shown once a diff with files has loaded. Carries
   // the file-list show/hide toggle and the options cog (file-list grouping + diff
-  // rendering) that used to live in the Changes-bar cog.
-  const filesHeaderEl = diff && diff.files.length > 0 && (
+  // rendering) that used to live in the Changes-bar cog. Shown for any loaded
+  // diff - including an empty one, where the "No changes" note sits beneath it.
+  const filesHeaderEl = diff && (
     <div
       ref={filesHeaderRef}
       style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
@@ -2867,10 +2868,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           <button
             onClick={() => setFilesListHidden((v) => !v)}
             aria-label={filesListHidden ? 'Show file list' : 'Hide file list'}
-            className={`hidden md:flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${filesListHidden
-              ? 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-              : 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-              }`}
+            className="hidden md:flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
           >
             {filesListHidden ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
           </button>
@@ -2895,7 +2893,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // when the toolbar wraps. See the ResizeObserver above.
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
-    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff && diff.files.length > 0 ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
+    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no

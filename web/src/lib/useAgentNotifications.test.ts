@@ -20,7 +20,14 @@ vi.mock('./notifyPrefs', () => ({
   fireNotification: vi.fn(),
   dismissNotification: vi.fn(),
 }))
-import { dismissNotification } from './notifyPrefs'
+import { dismissNotification, fireNotification } from './notifyPrefs'
+
+// Resolving a real icon needs a canvas; the hook only forwards whatever URL the
+// cache holds, so stub it to a fixed one and assert the hand-off.
+vi.mock('./projectIconUrl', () => ({
+  ensureProjectIconUrl: vi.fn(() => Promise.resolve('icon-url')),
+  projectIconUrl: vi.fn(() => 'icon-url'),
+}))
 
 const PROJECT = 'proj-1'
 
@@ -55,6 +62,7 @@ beforeEach(() => {
   useAgentStore.setState(useAgentStore.getInitialState(), true)
   useProjectStore.setState({ projects: [] })
   vi.mocked(dismissNotification).mockClear()
+  vi.mocked(fireNotification).mockClear()
 })
 
 afterEach(() => {
@@ -103,6 +111,52 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
   it('suppresses the error toast when its own branch is the selected one', () => {
     runTransition('a1', AgentStatus.ERRORED)
     expect(transitionToasts()).toHaveLength(0)
+  })
+})
+
+// Out of tab (pageActive=false) the OS notification leads with "Hydra agent in
+// <project>" and carries the agent name as the body - the toast's agent-first
+// wording is the in-app case, where the project is already obvious.
+describe('useAgentNotifications - OS notification copy', () => {
+  // Same as runTransition but backgrounded, which is what lets fireNotification run.
+  function runBackgroundTransition(to: AgentStatus, agent?: AgentResponse) {
+    seedAgents([makeAgent('a1', AgentStatus.RUNNING)])
+    renderHook(() => useAgentNotifications(PROJECT, false, undefined))
+    seedAgents([agent ?? makeAgent('a1', to)])
+    return vi.mocked(fireNotification).mock.calls[0]?.[0]
+  }
+
+  it('titles a finished notification with the project id and bodies it with the agent', () => {
+    const opts = runBackgroundTransition(AgentStatus.FINISHED)
+    expect(opts?.title).toBe('Hydra agent in proj-1 finished')
+    expect(opts?.body).toBe('a1')
+  })
+
+  it('titles a needs_input notification with the project id', () => {
+    const opts = runBackgroundTransition(AgentStatus.NEEDS_INPUT)
+    expect(opts?.title).toBe('Hydra agent in proj-1 needs input')
+    expect(opts?.body).toBe('a1')
+  })
+
+  it('titles an errored notification with the project id', () => {
+    const opts = runBackgroundTransition(AgentStatus.ERRORED)
+    expect(opts?.title).toBe('Hydra agent in proj-1 hit an API error')
+  })
+
+  it('uses the agent title, not its id, as the body when it has one', () => {
+    const titled = { ...makeAgent('a1', AgentStatus.FINISHED), title: 'Fix the parser' }
+    const opts = runBackgroundTransition(AgentStatus.FINISHED, titled)
+    expect(opts?.body).toBe('Fix the parser')
+  })
+
+  it("forwards the project's icon so the tray shows which project woke you", () => {
+    const opts = runBackgroundTransition(AgentStatus.FINISHED)
+    expect(opts?.icon).toBe('icon-url')
+  })
+
+  it('stays silent while the tab is in front (the toast covers it)', () => {
+    runTransition(undefined, AgentStatus.FINISHED)
+    expect(fireNotification).not.toHaveBeenCalled()
   })
 })
 
