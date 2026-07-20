@@ -53,12 +53,13 @@ const OS_STICKY_DISMISS_MS = 120_000
 // backgrounded/unfocused case. A focused tab gets the toast only (no redundant
 // OS notification). See lib/notifyPrefs.
 //
-// Those OS notifications are titled `<project id> agent <transition>` with the
-// agent name as the body, and carry the project's icon. The toasts word it the
-// other way round (agent first) because in-app you already know the project -
-// out of tab you don't, and the project is what decides whether it's worth
-// switching away for. Project id rather than display name: it's what the routes,
-// CLI and branch names use, so it matches what you'd search for.
+// Those OS notifications are titled `Hydra agent in <project id> <transition>`
+// with the agent name as the body, and carry the project's icon. Leading with
+// "Hydra" brands them in a crowded OS tray; the project comes next because out
+// of tab it's what decides whether it's worth switching away for (the toasts
+// word it agent-first, since in-app you already know the project). Project id
+// rather than display name: it's what the routes, CLI and branch names use, so
+// it matches what you'd search for.
 //
 // `selectedAgentId` is the agent (branch) whose page is currently open. Its own
 // state-transition toasts are suppressed - you're already looking at that branch,
@@ -187,7 +188,7 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${currentProjectId} agent needs input`,
+            title: `Hydra agent in ${currentProjectId} needs input`,
             body: name,
             tag: `needs-input:${agent.id}`,
             sticky: true,
@@ -207,7 +208,7 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${currentProjectId} agent finished`,
+            title: `Hydra agent in ${currentProjectId} finished`,
             body: name,
             tag: `finished:${agent.id}`,
             sticky: false,
@@ -229,7 +230,7 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${currentProjectId} agent hit an API error`,
+            title: `Hydra agent in ${currentProjectId} hit an API error`,
             body: name,
             tag: `error:${agent.id}`,
             sticky: true,
@@ -364,7 +365,7 @@ export function useAgentNotifications(
           reqMap.set(a.reqid, id)
           if (isNewApproval && !pageActive) {
             fireNotification({
-              title: `${currentProjectId} agent needs approval`,
+              title: `Hydra agent in ${currentProjectId} needs approval`,
               // Approval keeps its summary after the agent name - unlike the
               // status notifications, *what* is being approved is the point.
               body: `${agentName} - ${a.summary}`,
@@ -427,7 +428,7 @@ export function useAgentNotifications(
           })
           if (!pageActive) {
             fireNotification({
-              title: `${pid} agent needs input`,
+              title: `Hydra agent in ${pid} needs input`,
               body: agentName,
               tag: `needs-input:${a.id}`,
               sticky: true,
@@ -478,7 +479,7 @@ export function useAgentNotifications(
           })
           if (!pageActive) {
             fireNotification({
-              title: isErr ? `${pid} agent hit an API error` : `${pid} agent finished`,
+              title: isErr ? `Hydra agent in ${pid} hit an API error` : `Hydra agent in ${pid} finished`,
               body: agentName,
               tag: `${isErr ? 'error' : 'finished'}:${a.id}`,
               sticky: isErr,

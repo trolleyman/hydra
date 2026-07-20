@@ -114,9 +114,9 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
   })
 })
 
-// Out of tab (pageActive=false) the OS notification leads with the project id and
-// carries the agent name as the body - the toast's agent-first wording is the
-// in-app case, where the project is already obvious.
+// Out of tab (pageActive=false) the OS notification leads with "Hydra agent in
+// <project>" and carries the agent name as the body - the toast's agent-first
+// wording is the in-app case, where the project is already obvious.
 describe('useAgentNotifications - OS notification copy', () => {
   // Same as runTransition but backgrounded, which is what lets fireNotification run.
   function runBackgroundTransition(to: AgentStatus, agent?: AgentResponse) {
@@ -128,19 +128,19 @@ describe('useAgentNotifications - OS notification copy', () => {
 
   it('titles a finished notification with the project id and bodies it with the agent', () => {
     const opts = runBackgroundTransition(AgentStatus.FINISHED)
-    expect(opts?.title).toBe('proj-1 agent finished')
+    expect(opts?.title).toBe('Hydra agent in proj-1 finished')
     expect(opts?.body).toBe('a1')
   })
 
   it('titles a needs_input notification with the project id', () => {
     const opts = runBackgroundTransition(AgentStatus.NEEDS_INPUT)
-    expect(opts?.title).toBe('proj-1 agent needs input')
+    expect(opts?.title).toBe('Hydra agent in proj-1 needs input')
     expect(opts?.body).toBe('a1')
   })
 
   it('titles an errored notification with the project id', () => {
     const opts = runBackgroundTransition(AgentStatus.ERRORED)
-    expect(opts?.title).toBe('proj-1 agent hit an API error')
+    expect(opts?.title).toBe('Hydra agent in proj-1 hit an API error')
   })
 
   it('uses the agent title, not its id, as the body when it has one', () => {
