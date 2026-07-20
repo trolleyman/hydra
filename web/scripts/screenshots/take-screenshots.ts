@@ -887,8 +887,10 @@ try {
       },
       // 3f. The sandbox escape hatch: the agent asks to run a command on the HOST,
       // outside its sandbox (`hydra host-run`). Loud red HOST identity, the full
-      // command shown verbatim in a red mono box, and one-shot only (no Always
-      // allow) - the most dangerous ask there is.
+      // command shown in a red mono box - chain-split (a newline per top-level
+      // ;/&&) and bash syntax-highlighted for auditability - and one-shot only (no
+      // Always allow), the most dangerous ask there is. The target is a chained
+      // command so the shot exercises the splitting + highlighting.
       {
         name: 'agent-approvals-host-command',
         path: '/settings',
@@ -899,7 +901,7 @@ try {
             { label: 'Allow once', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'host_command', target: 'osascript -e \'display notification "build done"\'', agentName: 'Wire up desktop notifications', agentId: 'agent-approval', projectId: 'sim-project' },
+          approval: { kind: 'host_command', target: 'cd "$HOME/tools" && ./gen-certs.sh --local ; security add-trusted-cert -d dev-root.pem', agentName: 'Set up local HTTPS certs', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
       // 3g. An agent running in ANOTHER project: an amber folder+project

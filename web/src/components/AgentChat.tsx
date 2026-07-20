@@ -35,6 +35,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
+import { splitBashChains } from '../lib/bashFormat'
 import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -905,49 +906,6 @@ function modelDisplayLabel(model: string): string {
     if (lower.includes(m.id)) return m.label
   }
   return model.replace(/^claude-/, '')
-}
-
-// splitBashChains inserts a newline after each top-level `;`, `&&` and `||` so
-// a chained one-liner reads as separate steps in the expanded Bash card. It is
-// deliberately optimistic: it only tracks quotes and backslash escapes, not
-// the full shell grammar, and a command that already contains newlines is left
-// exactly as written.
-function splitBashChains(cmd: string): string {
-  if (cmd.includes('\n')) return cmd
-  let out = ''
-  let inSingle = false
-  let inDouble = false
-  let escaped = false
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i]
-    out += ch
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (ch === '\\') {
-      escaped = true
-      continue
-    }
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle
-      continue
-    }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble
-      continue
-    }
-    if (inSingle || inDouble) continue
-    // `;` splits (but not `;;`, a case terminator); `&&`/`||` split after the
-    // second character. A single `|` (pipe) or `&` (background/redirect) does
-    // not.
-    const isChain = (ch === ';' && cmd[i + 1] !== ';') || ((ch === '&' || ch === '|') && cmd[i + 1] === ch)
-    if (!isChain) continue
-    if (ch !== ';') out += cmd[++i]
-    while (cmd[i + 1] === ' ') i++
-    if (i + 1 < cmd.length) out += '\n'
-  }
-  return out
 }
 
 // highlightHtml returns highlight.js token HTML, or null for plain rendering.

@@ -4,6 +4,8 @@ import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X, Triangle
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
+import hljs from '../lib/hljs'
+import { splitBashChains } from '../lib/bashFormat'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
 // tool calls). It names exactly what's being requested - a whole MCP server, a
@@ -176,14 +178,30 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   }
   if (data.kind === 'host_command') {
     // Always show the FULL command (scroll for a long one) - the user is approving
-    // arbitrary host code, so nothing may be hidden or truncated in the card.
-    return (
-      <pre className="max-h-40 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100">
-        {data.target}
-      </pre>
-    )
+    // arbitrary host code, so nothing may be hidden or truncated in the card. The
+    // command is chain-split (a newline after each top-level ;/&&/||) and bash
+    // syntax-highlighted for readability, exactly like the chat's Bash card. Both
+    // transforms are display-only and insert-only: what runs is the raw command
+    // echoed back on Allow (useAgentNotifications), never this rendered string.
+    const boxCls = 'max-h-40 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
+    const split = splitBashChains(data.target)
+    const html = highlightBash(split)
+    if (html != null) return <pre className={boxCls} dangerouslySetInnerHTML={{ __html: html }} />
+    return <pre className={boxCls}>{split}</pre>
   }
   return null
+}
+
+// highlightBash returns highlight.js bash token HTML for a command, or null when
+// highlighting fails (the caller then renders the raw text). highlight.js escapes
+// its input, so the returned HTML is safe to inject.
+function highlightBash(code: string): string | null {
+  if (!code) return null
+  try {
+    return hljs.highlight(code, { language: 'bash', ignoreIllegals: true }).value
+  } catch {
+    return null
+  }
 }
 
 // A muted caption line with a leading icon.
