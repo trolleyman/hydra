@@ -2341,10 +2341,12 @@ function ChatViewSelector({
         {currentRow.desc && <span className="max-w-44 truncate">{currentRow.desc}</span>}
         <span className="ml-auto shrink-0 flex items-center gap-1">
           {rowBusy(currentRow) && <LoaderCircle className="w-3 h-3 shrink-0" />}
-          <ChevronRight className="w-3 h-3 shrink-0" />
+          {currentRow.key === 'main' && <ChevronRight className="w-3 h-3 shrink-0" />}
         </span>
       </div>
-      <div ref={listRef} className="py-1 will-change-transform">
+      {/* No wrapper padding: collapsed, the card clips to exactly one row, so
+          the chip's edges are the row's own padding in every state. */}
+      <div ref={listRef} className="will-change-transform">
         {rows.map((r) => {
           const isCurrent = r.key === currentRow.key
           return (
@@ -2360,13 +2362,14 @@ function ChatViewSelector({
               // Collapsed, the non-current rows are clipped out of view - keep
               // them out of the tab order too.
               tabIndex={!open && !isCurrent ? -1 : undefined}
-              // The tree indent applies only when open: collapsed, the current
-              // row IS the chip, and a nested agent's chip should sit flush -
-              // the indent glides in as the row settles into its slot.
-              style={{ paddingLeft: open ? 12 + r.depth * 14 : 12 }}
-              className={`flex w-full items-center gap-1.5 pr-2.5 py-1.5 text-left cursor-pointer transition-all duration-200 text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] ${
-                open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''
-              }`}
+              // Tree indent. Only the CURRENT row flattens while collapsed (it
+              // IS the chip, and a nested agent's chip should sit flush) and
+              // glides into its indented slot on open; the other rows keep a
+              // static indent so nothing else shifts sideways during the morph.
+              style={{ paddingLeft: !open && isCurrent ? 12 : 12 + r.depth * 14 }}
+              className={`flex w-full items-center gap-1.5 pr-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] ${
+                isCurrent ? 'transition-all duration-200' : 'transition-colors'
+              } ${open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''}`}
             >
               {rowIcon(r)}
               <span className="max-w-48 shrink-0 truncate font-medium">{r.label}</span>
@@ -2375,7 +2378,7 @@ function ChatViewSelector({
                 {rowBusy(r) && (
                   <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                 )}
-                {isCurrent && (
+                {r.key === 'main' && (
                   <ChevronRight
                     className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
                   />
