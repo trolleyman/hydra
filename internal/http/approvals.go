@@ -107,6 +107,42 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	}
 	remember := request.Body.Remember != nil && *request.Body.Remember
 
+	// host_command is the sandbox escape hatch (`hydra host-run`): on allow, the
+	// DAEMON runs the command host-side and the CLI relays the result. It is handled
+	// on its own path - it is never "remembered", and on allow we kick off host-side
+	// execution before writing the decision the CLI is polling for.
+	if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok && req.Kind == "host_command" {
+		if allow {
+			// Run EXACTLY the command text the UI echoed back (what the user saw and
+			// approved), not req.Target from the head-writable request file - that echo
+			// is the TOCTOU defense. An allow with no echoed command is treated as a
+			// deny (nothing to safely run).
+			command := ""
+			if request.Body.Command != nil {
+				command = *request.Body.Command
+			}
+			if command == "" {
+				_ = gate.WriteDecision(dir, request.Reqid, gate.DecisionFile{Decision: gate.Deny})
+				s.Events.AgentsChanged(projectRoot)
+				return api.DecideAgentApproval204Response{}, nil
+			}
+			worktree := ""
+			if head.Worktree != nil {
+				worktree = *head.Worktree
+			}
+			go runApprovedHostCommand(dir, request.Reqid, worktree, command)
+		}
+		if err := gate.WriteDecision(dir, request.Reqid, gate.DecisionFile{Decision: decision}); err != nil {
+			return api.DecideAgentApproval500JSONResponse{
+				Code:    500,
+				Error:   api.ErrorResponseErrorInternalError,
+				Details: err.Error(),
+			}, nil
+		}
+		s.Events.AgentsChanged(projectRoot)
+		return api.DecideAgentApproval204Response{}, nil
+	}
+
 	// Persist a remembered "always allow" to the trusted config BEFORE writing the
 	// decision file, so the allow-list update can't be lost if the next launch
 	// races the agent unblocking. Best-effort: a persistence failure still lets

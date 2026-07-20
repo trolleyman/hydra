@@ -244,9 +244,18 @@ export function useAgentNotifications(
     lastUnread.current = nextUnread
 
     // --- 2. security-gate approval toasts ---
-    const decide = async (agentId: string, reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) => {
+    // `command` is sent only for a host_command allow: it echoes back the exact
+    // command the card displayed, and the daemon runs THAT text (never the
+    // head-writable request file), closing the TOCTOU window.
+    const decide = async (
+      agentId: string,
+      reqid: string,
+      decision: ApprovalDecisionRequest.decision,
+      remember: boolean,
+      command?: string,
+    ) => {
       await runWithToast(
-        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember }),
+        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember, command }),
         { errorPrefix: decision === ApprovalDecisionRequest.decision.ALLOW ? 'Failed to allow request' : 'Failed to deny request' },
       )
     }
@@ -309,12 +318,15 @@ export function useAgentNotifications(
           // registering it in Hydra's known-tools list, not a per-call grant) are
           // one-shot only.
           const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
+          // host_command echoes the displayed command back on allow (the TOCTOU
+          // guard); every other kind sends no command.
+          const echoCommand = a.kind === 'host_command' ? a.target : undefined
           const actions = [
             {
               label: 'Allow once',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
-                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false)
+                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false, echoCommand)
                 reqMap!.delete(a.reqid)
                 toast.dismiss(toastId, { silent: true })
               },

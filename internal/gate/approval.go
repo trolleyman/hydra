@@ -19,6 +19,11 @@ import (
 const (
 	reqSuffix      = ".req.json"
 	decisionSuffix = ".decision.json"
+	// resultSuffix carries a host-run command's outcome back into the sandbox: the
+	// daemon executes an approved host_command request host-side and writes
+	// <reqid>.result.json; the blocked `hydra host-run` CLI polls for it and relays
+	// output + exit code to the agent.
+	resultSuffix = ".result.json"
 	// grantedHostsFile holds hosts the user "always allow"ed for WebFetch during the
 	// current session. The persistent grant lands in the project config (effective
 	// next launch), but the running head's seeded policy.json is read-only, so this
@@ -70,8 +75,8 @@ func AddGrantedHost(dir, host string) error {
 type Request struct {
 	ReqID   string `json:"reqid"`
 	Tool    string `json:"tool"`
-	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash
-	Target  string `json:"target"` // server name / "<server>__<tool>" / host / "git push"
+	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash | host_command
+	Target  string `json:"target"` // server name / "<server>__<tool>" / host / command text
 	Reason  string `json:"reason"`
 	Summary string `json:"summary"`
 	// RW is the read/write classification of an mcp_tool request ("read"/"write"/""),
@@ -102,12 +107,56 @@ func WriteRequest(dir string, r Request) error {
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, r.ReqID+reqSuffix), data, 0644))
 }
 
-// RemoveRequest deletes the request and any decision file for reqid in dir, used
-// to retire a resolved approval so it stops being surfaced. Best-effort: missing
-// files are not an error.
+// RemoveRequest deletes the request and any decision/result file for reqid in
+// dir, used to retire a resolved approval so it stops being surfaced.
+// Best-effort: missing files are not an error.
 func RemoveRequest(dir, reqid string) {
 	_ = os.Remove(filepath.Join(dir, reqid+reqSuffix))
 	_ = os.Remove(filepath.Join(dir, reqid+decisionSuffix))
+	_ = os.Remove(filepath.Join(dir, reqid+resultSuffix))
+}
+
+// HostRunResult is the outcome of an approved host_command, written host-side by
+// the daemon and read in-sandbox by `hydra host-run`.
+type HostRunResult struct {
+	ExitCode int    `json:"exit_code"`
+	Output   string `json:"output"` // combined stdout+stderr, tail-capped
+	// Truncated is set when Output was capped to its final bytes.
+	Truncated bool `json:"truncated,omitempty"`
+	// TimedOut is set when the command was killed at the execution deadline.
+	TimedOut bool `json:"timed_out,omitempty"`
+	// Error describes a failure to run the command at all (as opposed to the
+	// command running and exiting non-zero).
+	Error string `json:"error,omitempty"`
+}
+
+// WriteHostRunResult records the outcome of an approved host_command for reqid.
+func WriteHostRunResult(dir, reqid string, r HostRunResult) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, reqid+resultSuffix), data, 0644))
+}
+
+// ReadHostRunResult returns the host-run result for reqid, or ok=false if the
+// daemon hasn't written one yet.
+func ReadHostRunResult(dir, reqid string) (HostRunResult, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, reqid+resultSuffix))
+	if os.IsNotExist(err) {
+		return HostRunResult{}, false, nil
+	}
+	if err != nil {
+		return HostRunResult{}, false, errtrace.Wrap(err)
+	}
+	var r HostRunResult
+	if err := json.Unmarshal(data, &r); err != nil {
+		return HostRunResult{}, false, errtrace.Wrap(err)
+	}
+	return r, true, nil
 }
 
 // ListRequests returns the pending (undecided) approval requests in dir, oldest

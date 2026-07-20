@@ -7,9 +7,11 @@ export type ToastType = 'info' | 'success' | 'error' | 'warning'
 // preview block, reason, and the toast's actions) instead of the plain message.
 export interface ApprovalToastData {
   // What is being approved: mcp (whole server), mcp_tool (one tool), webfetch,
-  // egress, bash, or tool (a tool the gate doesn't recognize).
+  // egress, bash, tool (a tool the gate doesn't recognize), or host_command (run
+  // a command on the host, outside the sandbox).
   kind: string
-  // The server name / "server__tool" / host / command the approval is about.
+  // The server name / "server__tool" / host / command the approval is about (for
+  // host_command, the full command text, shown verbatim in the card).
   target: string
   // The requesting agent's title (shown as the clickable subtitle).
   agentName?: string | null

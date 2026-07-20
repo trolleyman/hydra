@@ -1,9 +1,11 @@
 import React from 'react'
 import { Link } from '@tanstack/react-router'
-import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X } from 'lucide-react'
+import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X, TriangleAlert } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
+import hljs from '../lib/hljs'
+import { splitBashChains } from '../lib/bashFormat'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
 // tool calls). It names exactly what's being requested - a whole MCP server, a
@@ -18,13 +20,14 @@ const Badge: React.FC<{ text: string; tone: BadgeTone }> = ({ text, tone }) => (
   </span>
 )
 
-type BadgeTone = 'blue' | 'violet' | 'teal' | 'amber' | 'gray'
+type BadgeTone = 'blue' | 'violet' | 'teal' | 'amber' | 'gray' | 'red'
 const BADGE_TONES: Record<BadgeTone, string> = {
   blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300',
   violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
   teal: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300',
   amber: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   gray: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300',
+  red: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300',
 }
 
 // A monospace chip for a server / host / command reference embedded in the body.
@@ -77,6 +80,11 @@ function kindVisual(data: ApprovalToastData): {
       // A tool Hydra's gate doesn't recognize (not a known built-in, no mcp__
       // prefix) - flagged amber because it could be an un-vetted MCP/connector tool.
       return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'TOOL', tone: 'amber' } }
+    case 'host_command':
+      // The sandbox escape hatch: the agent is asking to run a command OUTSIDE its
+      // sandbox, on the host. The most dangerous ask there is, so it wears the
+      // loudest red identity to make sure it's never rubber-stamped.
+      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host (outside sandbox)', badge: { text: 'HOST', tone: 'red' } }
     default:
       return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'SHELL', tone: 'gray' } }
   }
@@ -100,6 +108,10 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
       return <>An agent wants to connect to <ChipClause><Chip>{data.target}</Chip>,</ChipClause> which isn&rsquo;t on its network allow-list.</>
     case 'tool':
       return <>An agent wants to use <ChipClause><Chip>{data.target}</Chip>,</ChipClause> a tool Hydra&rsquo;s security gate doesn&rsquo;t recognize.</>
+    case 'host_command':
+      // The command itself is shown in the mono Preview box below (it can be long),
+      // so the body line just states the ask.
+      return <>An agent wants to run this command <strong>on the host, outside its sandbox</strong>:</>
     default:
       return <>An agent wants to run <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
   }
@@ -164,7 +176,32 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
       </div>
     )
   }
+  if (data.kind === 'host_command') {
+    // Always show the FULL command (scroll for a long one) - the user is approving
+    // arbitrary host code, so nothing may be hidden or truncated in the card. The
+    // command is chain-split (a newline after each top-level ;/&&/||) and bash
+    // syntax-highlighted for readability, exactly like the chat's Bash card. Both
+    // transforms are display-only and insert-only: what runs is the raw command
+    // echoed back on Allow (useAgentNotifications), never this rendered string.
+    const boxCls = 'max-h-40 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
+    const split = splitBashChains(data.target)
+    const html = highlightBash(split)
+    if (html != null) return <pre className={boxCls} dangerouslySetInnerHTML={{ __html: html }} />
+    return <pre className={boxCls}>{split}</pre>
+  }
   return null
+}
+
+// highlightBash returns highlight.js bash token HTML for a command, or null when
+// highlighting fails (the caller then renders the raw text). highlight.js escapes
+// its input, so the returned HTML is safe to inject.
+function highlightBash(code: string): string | null {
+  if (!code) return null
+  try {
+    return hljs.highlight(code, { language: 'bash', ignoreIllegals: true }).value
+  } catch {
+    return null
+  }
 }
 
 // A muted caption line with a leading icon.
@@ -267,6 +304,11 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'tool' && (
             <Caption icon={<Shield className="w-3 h-3" />}>
               Allowing runs it just this once. If it&rsquo;s a legitimate tool, add <span className="font-mono">{data.target}</span> to Hydra&rsquo;s known-tools list so it stops prompting.
+            </Caption>
+          )}
+          {data.kind === 'host_command' && (
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
+              This runs OUTSIDE the sandbox with your full user access, just this once. Only allow if you understand exactly what the command does - the agent should reach for this only when nothing else works.
             </Caption>
           )}
         </div>

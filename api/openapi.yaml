@@ -3466,10 +3466,10 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)"
         target:
           type: string
-          description: The MCP server name, '<server>__<tool>', host, or command the approval is about
+          description: The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
         reason:
           type: string
           description: One-line explanation of why the gate parked the call
@@ -3515,6 +3515,14 @@ components:
         remember:
           type: boolean
           description: "When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again"
+        command:
+          type: string
+          description: >-
+            For a host_command approval only: the exact command text the UI
+            displayed and the user approved. The daemon runs THIS text verbatim
+            (never re-reading the head-writable request file), which closes the
+            TOCTOU window where an agent could swap the command after the user
+            saw it. Ignored for every other kind.
 
     NetworkConfig:
       type: object

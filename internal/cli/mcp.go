@@ -144,7 +144,7 @@ func requestMCPAccess(agentType, name string) (bool, string) {
 	for {
 		// Re-stamp the approval status each iteration so the UI card stays visible
 		// (the status hook may overwrite it with a plain "running" between polls).
-		writeApprovalStatus(agentType, summary)
+		writeApprovalStatus(summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision == gate.Allow {
 				return true, fmt.Sprintf("Access to MCP server %q was approved and added to your allow-list. MCP servers load at launch, so it becomes available after your session reloads - ask the user to resume/restart you to use it.", name)

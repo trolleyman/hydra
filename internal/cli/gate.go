@@ -85,7 +85,7 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		emitDeny(stdout, result.Reason)
 		return nil
 	case gate.Ask:
-		decision := resolveAsk(agentType, toolName, result)
+		decision := resolveAsk(toolName, result)
 		if decision == gate.Deny {
 			emitDeny(stdout, result.Reason+" (denied)")
 		}
@@ -109,7 +109,7 @@ func emitDeny(w io.Writer, reason string) {
 // resolveAsk parks the head for user approval: it records a request, flips the
 // status to a policy-approval wait, and blocks until the UI writes a decision or
 // the timeout elapses (defaulting to deny). It returns the final verdict.
-func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
+func resolveAsk(toolName string, result gate.Result) gate.Decision {
 	dir := os.Getenv(gate.EnvApprovalDir)
 	if dir == "" {
 		// No channel to ask over → fail closed for the cases we chose to gate
@@ -141,7 +141,7 @@ func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
 		// Re-assert the policy-approval wait each iteration: the status hook also
 		// fires on this PreToolUse and may have written a plain "running" status, so
 		// re-stamping keeps the approval card reliably visible until a decision lands.
-		writeApprovalStatus(agentType, summary)
+		writeApprovalStatus(summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision == gate.Allow {
 				return gate.Allow
@@ -192,21 +192,31 @@ type statusWrite struct {
 
 // writeApprovalStatus flips the head's status.json to a needs-input wait flagged
 // as a policy approval, so the UI surfaces the approval card immediately.
-func writeApprovalStatus(agentType, summary string) {
+func writeApprovalStatus(summary string) {
+	writeStatus(string(api.NeedsInput), "PreToolUse", summary, gate.NotificationPolicyApproval)
+}
+
+// writeRunningStatus flips the head's status.json back to plain running. Used
+// after an approval wait resolves inside a long-blocking CLI (hydra host-run),
+// where no Claude hook fires to re-stamp the status until the tool call ends.
+func writeRunningStatus(message string) {
+	writeStatus(string(api.Running), "", message, "")
+}
+
+func writeStatus(status, event, message, notificationType string) {
 	path, err := statusFilePath()
 	if err != nil {
 		return
 	}
 	data, err := json.Marshal(statusWrite{
-		Status:           string(api.NeedsInput),
-		Event:            "PreToolUse",
+		Status:           status,
+		Event:            event,
 		Timestamp:        time.Now().Format(time.RFC3339Nano),
-		LastMessage:      summary,
-		NotificationType: gate.NotificationPolicyApproval,
+		LastMessage:      message,
+		NotificationType: notificationType,
 	})
 	if err != nil {
 		return
 	}
 	_ = os.WriteFile(path, data, 0644)
-	_ = agentType
 }
