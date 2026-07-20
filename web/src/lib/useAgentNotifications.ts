@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
 import { fireNotification, dismissNotification } from './notifyPrefs'
+import { ensureProjectIconUrl, projectIconUrl } from './projectIconUrl'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
@@ -52,6 +53,13 @@ const OS_STICKY_DISMISS_MS = 120_000
 // backgrounded/unfocused case. A focused tab gets the toast only (no redundant
 // OS notification). See lib/notifyPrefs.
 //
+// Those OS notifications are titled `<project id> agent <transition>` with the
+// agent name as the body, and carry the project's icon. The toasts word it the
+// other way round (agent first) because in-app you already know the project -
+// out of tab you don't, and the project is what decides whether it's worth
+// switching away for. Project id rather than display name: it's what the routes,
+// CLI and branch names use, so it matches what you'd search for.
+//
 // `selectedAgentId` is the agent (branch) whose page is currently open. Its own
 // state-transition toasts are suppressed - you're already looking at that branch,
 // so a toast announcing what its header already shows is just noise. The out-of-
@@ -66,6 +74,14 @@ export function useAgentNotifications(
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
   const navigate = useNavigate()
+
+  // Rasterizing a project icon into a URL is async, but notifications fire from
+  // a synchronous diff - so warm the cache whenever the project list changes and
+  // read it synchronously below. A project whose icon hasn't resolved yet just
+  // gets the default Hydra mark on that one notification.
+  useEffect(() => {
+    for (const p of projects) void ensureProjectIconUrl(p.icon, p.id)
+  }, [projects])
 
   // Open an agent from an OS-notification click: select its project first (a
   // no-op for the current one), then route to it. Mirrors the toast's "View".
@@ -117,6 +133,15 @@ export function useAgentNotifications(
     if (!currentProjectId || agentsProjectId !== currentProjectId) return
 
     const toast = useToastStore.getState()
+    // OS notifications lead with the project id and carry the agent name as the
+    // detail line - out of tab, "which project?" is the part you can't infer.
+    // Read imperatively (like the toast store above): the project list changes on
+    // every cross-project count broadcast, and making it a dep would re-run this
+    // whole diff - including the approval fetches - for an icon lookup.
+    const projectIcon = projectIconUrl(
+      useProjectStore.getState().projects.find((p) => p.id === currentProjectId)?.icon,
+      currentProjectId,
+    )
 
     // --- 1. needs_input / finished transition toasts ---
     const prev = lastStatus.current
@@ -162,11 +187,12 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} needs input`,
-            body: 'The agent is blocked waiting on you.',
+            title: `${currentProjectId} agent needs input`,
+            body: name,
             tag: `needs-input:${agent.id}`,
             sticky: true,
             autoDismissMs: OS_STICKY_DISMISS_MS,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -181,10 +207,11 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} finished`,
-            body: 'The agent has completed its task.',
+            title: `${currentProjectId} agent finished`,
+            body: name,
             tag: `finished:${agent.id}`,
             sticky: false,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -202,10 +229,11 @@ export function useAgentNotifications(
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} hit an API error`,
-            body: 'The turn failed mid-response - the reply may be incomplete.',
+            title: `${currentProjectId} agent hit an API error`,
+            body: name,
             tag: `error:${agent.id}`,
             sticky: true,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -336,11 +364,14 @@ export function useAgentNotifications(
           reqMap.set(a.reqid, id)
           if (isNewApproval && !pageActive) {
             fireNotification({
-              title: `${agentName} needs approval`,
-              body: a.summary,
+              title: `${currentProjectId} agent needs approval`,
+              // Approval keeps its summary after the agent name - unlike the
+              // status notifications, *what* is being approved is the point.
+              body: `${agentName} - ${a.summary}`,
               tag: `approval:${agentId}:${a.reqid}`,
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
+              icon: projectIcon,
               onClick: () => openAgent(currentProjectId, agentId),
             })
           }
@@ -396,11 +427,12 @@ export function useAgentNotifications(
           })
           if (!pageActive) {
             fireNotification({
-              title: `${agentName} needs input`,
-              body: `In project "${projectName}" - the agent is blocked waiting on you.`,
+              title: `${pid} agent needs input`,
+              body: agentName,
               tag: `needs-input:${a.id}`,
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
+              icon: projectIconUrl(p.icon, pid),
               onClick: () => openAgent(pid, a.id),
             })
           }
@@ -446,12 +478,11 @@ export function useAgentNotifications(
           })
           if (!pageActive) {
             fireNotification({
-              title: isErr ? `${agentName} hit an API error` : `${agentName} finished`,
-              body: isErr
-                ? `In project "${projectName}" - the turn failed mid-response and the reply may be incomplete.`
-                : `In project "${projectName}" - the agent has completed its task.`,
+              title: isErr ? `${pid} agent hit an API error` : `${pid} agent finished`,
+              body: agentName,
               tag: `${isErr ? 'error' : 'finished'}:${a.id}`,
               sticky: isErr,
+              icon: projectIconUrl(p.icon, pid),
               onClick: () => openAgent(pid, a.id),
             })
           }
