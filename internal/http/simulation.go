@@ -2918,6 +2918,31 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_resumed_bg","content":[{"type":"tool_use","id":"toolu_sim_resumed_bg","name":"Task","input":{"description":"Find preview proxy code","subagent_type":"scout","prompt":"Find the preview reverse-proxy handler and where response headers are copied."}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_bg","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_resumed_bg (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>sim_sub_resumed_bg</task-id>\n<tool-use-id>toolu_sim_resumed_bg</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Find preview proxy code\" finished</summary>\n</task-notification>"}}`,
+	// A NESTED sub-agent: a background sub-agent that spawns its OWN background
+	// sub-agent. The nested spawn's Agent tool_use + launch boilerplate live in
+	// the PARENT's timeline and must upgrade into the child's SubagentCard there
+	// (not render as raw prompt JSON), with the child folded under the parent in
+	// the view selector. The notification sequence mirrors what the CLI really
+	// writes to the MAIN transcript: the parent's premature "finished" (it
+	// stopped while its child still ran), the child's completion, then the
+	// parent's real completion after the coordinator nudged it - the later
+	// parent notice supersedes the premature chip, so ONE parent chip remains.
+	`{"type":"assistant","message":{"id":"msg_sim_nest","content":[{"type":"tool_use","id":"toolu_sim_nest","name":"Agent","input":{"description":"Audit retry stack end to end","subagent_type":"general-purpose","prompt":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"text","text":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child","name":"Agent","input":{"description":"Scan config parsing","subagent_type":"scout","prompt":"Find where retry settings are parsed from config and report the file:line references."}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest_child (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2","content":[{"type":"text","text":"The config scan is running in the background - I'll fold its findings into the audit once it reports."}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"text","text":"Find where retry settings are parsed from config and report the file:line references."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child_grep","name":"Grep","input":{"pattern":"max_attempts","path":"internal/config"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child_grep","content":"internal/config/config.go:88: MaxAttempts int"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_2","content":[{"type":"text","text":"Retry settings are parsed at internal/config/config.go:88 (MaxAttempts); nothing validates a zero/negative cap."}]}}`,
+	// The parent stopped (waiting on its child) -> the harness notified
+	// "finished" prematurely. This chip is superseded by the second one below.
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest_child</task-id>\n<tool-use-id>toolu_sim_nest_child</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Scan config parsing\" finished</summary>\n</task-notification>"}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_3","content":[{"type":"text","text":"Audit complete: the uploader retries with jittered backoff (internal/artifacts/backoff.go), config caps it via MaxAttempts (internal/config/config.go:88), and the unvalidated zero cap is the one real gap."}]}}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest_resume</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
 	// A chained command with a description: the collapsed card shows the
 	// description, the expanded card the ;/&&-split highlighted script.
 	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
@@ -3057,6 +3082,21 @@ func handleSimChatWS(conn *safeConn) {
 		Description: "Find preview proxy code",
 		ToolUseID:   "toolu_sim_resumed_bg",
 	})
+	// The nested pair (see the sim_sub_nest sidechain lines): the child's meta
+	// carries ParentAgentID, folding it under the parent's card and selector row.
+	sendSubagentMeta(conn, "sim_sub_nest", &claudestream.SubagentMeta{
+		AgentType:   "general-purpose",
+		Description: "Audit retry stack end to end",
+		ToolUseID:   "toolu_sim_nest",
+		SpawnDepth:  1,
+	})
+	sendSubagentMeta(conn, "sim_sub_nest_child", &claudestream.SubagentMeta{
+		AgentType:     "scout",
+		Description:   "Scan config parsing",
+		ToolUseID:     "toolu_sim_nest_child",
+		ParentAgentID: "sim_sub_nest",
+		SpawnDepth:    2,
+	})
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
 	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
@@ -3094,6 +3134,53 @@ func handleSimChatWS(conn *safeConn) {
 		text := firstTextBlock(content)
 		if strings.HasPrefix(text, "/") {
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "nested") {
+			// A LIVE nested background run: parent Agent spawn (background), the
+			// parent spawning its OWN background child, the parent's premature
+			// "finished" notification while the child still runs (the card must
+			// read "waiting on sub-agents", not finished), the child completing,
+			// and finally the parent's real completion whose notice supersedes
+			// the premature chip.
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_lnest","content":[{"type":"tool_use","id":"toolu_sim_lnest","name":"Agent","input":{"description":"Live nested audit","subagent_type":"general-purpose","prompt":"Audit the retry stack; delegate the config scan to a scout."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_lnest (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_lnest", &claudestream.SubagentMeta{
+				AgentType:   "general-purpose",
+				Description: "Live nested audit",
+				ToolUseID:   "toolu_sim_lnest",
+				SpawnDepth:  1,
+			})
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":600,"session_id":"sim-chat"}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest","message":{"role":"user","content":[{"type":"text","text":"Audit the retry stack; delegate the config scan to a scout."}]}}`)
+			time.Sleep(800 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_1","content":[{"type":"tool_use","id":"toolu_sim_lnest_child","name":"Agent","input":{"description":"Live config scan","subagent_type":"scout","prompt":"Find where retry settings are parsed from config."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest_child","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_lnest_child (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_lnest_child", &claudestream.SubagentMeta{
+				AgentType:     "scout",
+				Description:   "Live config scan",
+				ToolUseID:     "toolu_sim_lnest_child",
+				ParentAgentID: "sim_sub_lnest",
+				SpawnDepth:    2,
+			})
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_2","content":[{"type":"text","text":"Config scan delegated - waiting on its findings."}]}}`)
+			// The parent stopped -> premature completion notification while the
+			// child is still working: parent must show "waiting on sub-agents".
+			lnestNotif1 := `<task-notification>\n<task-id>sim_sub_lnest</task-id>\n<tool-use-id>toolu_sim_lnest</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live nested audit\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestNotif1+`"}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"role":"user","content":[{"type":"text","text":"Find where retry settings are parsed from config."}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"id":"msg_sim_lnest_child_1","content":[{"type":"tool_use","id":"toolu_sim_lnest_grep","name":"Grep","input":{"pattern":"max_attempts","path":"internal/config"}}]}}`)
+			time.Sleep(2500 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest_grep","content":"internal/config/config.go:88: MaxAttempts int"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"id":"msg_sim_lnest_child_2","content":[{"type":"text","text":"Retry settings parse at internal/config/config.go:88 (MaxAttempts)."}]}}`)
+			lnestChildNotif := `<task-notification>\n<task-id>sim_sub_lnest_child</task-id>\n<tool-use-id>toolu_sim_lnest_child</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live config scan\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestChildNotif+`"}`)
+			time.Sleep(1500 * time.Millisecond)
+			// The parent resumed (nudged), folded the findings in and finished for
+			// real: this notice supersedes the premature chip above.
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_3","content":[{"type":"text","text":"Audit complete: backoff loop is sound; the config cap (config.go:88) lacks zero-value validation."}]}}`)
+			lnestNotif2 := `<task-notification>\n<task-id>sim_sub_lnest</task-id>\n<tool-use-id>toolu_sim_lnest_resume</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live nested audit\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestNotif2+`"}`)
 			return
 		}
 		if strings.Contains(strings.ToLower(text), "subagent") {

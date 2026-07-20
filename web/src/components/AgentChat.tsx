@@ -157,6 +157,12 @@ interface SubagentView {
   toolUseId?: string
   agentType?: string
   description?: string
+  // The sub-agent that spawned this one (from its meta frame) - set only for a
+  // NESTED sub-agent (a sub-agent's own Task/Agent spawn). Its card renders
+  // inside the parent's step timeline, not the main flow, and a parent whose
+  // own run has settled still reads "waiting on sub-agents" while any
+  // descendant runs (see subsAwaitingChildren).
+  parentAgentId?: string
   prompt?: string
   // 'running' until a sidechain result (or the turn's result) settles it; for a
   // Task-linked sub the parent tool_result is the more precise done signal.
@@ -1672,6 +1678,18 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   )
 })
 
+// SubagentLinks bundles what rendering NESTED sub-agents needs, threaded from
+// the pane into SubagentCard -> SubagentTimeline (and recursively down): the
+// toolUse -> sub map that upgrades an inner Task/Agent tool card into the
+// spawned sub-agent's own card, the tool lookup for its status/report, the set
+// of settled-but-waiting-on-children agents, and the open-chat-view hook.
+interface SubagentLinks {
+  subByToolUse: Record<string, SubagentView>
+  taskToolByUse: Record<string, ToolItem>
+  awaitingChildren: Set<string>
+  openSubView: (key: string) => void
+}
+
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
 // skipId drops one inner item (the assistant message shown separately as the
@@ -1681,29 +1699,48 @@ function SubagentTimeline({
   worktree,
   serif,
   skipId,
+  links,
 }: {
   sub: SubagentView
   worktree: string | null
   serif: boolean
   skipId?: number
+  links?: SubagentLinks
 }) {
   return (
     <>
-      {sub.items.map((it) =>
-        it.id === skipId ? null : it.kind === 'thinking' ? (
-          <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-        ) : it.kind === 'tool' ? (
-          it.name === 'ExitPlanMode' ? (
-            <PlanCard key={it.id} item={it} />
-          ) : (
-            <ToolCard key={it.id} item={it} worktree={worktree} />
+      {sub.items.map((it) => {
+        if (it.id === skipId) return null
+        if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+        if (it.kind === 'tool') {
+          // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
+          // spawn): upgrade it into the spawned agent's own card, exactly like
+          // the main flow upgrades its Task cards - instead of leaking the raw
+          // prompt JSON + launch boilerplate as a plain tool card.
+          const nested = links?.subByToolUse[it.toolUseId]
+          if (links && nested && nested.agentId !== sub.agentId)
+            return (
+              <SubagentCard
+                key={it.id}
+                sub={nested}
+                tool={it}
+                worktree={worktree}
+                serif={serif}
+                links={links}
+                onOpenChat={() => links.openSubView(nested.agentId)}
+              />
+            )
+          if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
+          return <ToolCard key={it.id} item={it} worktree={worktree} />
+        }
+        if (it.kind === 'assistant')
+          return (
+            <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <Markdown text={it.text} />
+            </div>
           )
-        ) : it.kind === 'assistant' ? (
-          <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-            <Markdown text={it.text} />
-          </div>
-        ) : null,
-      )}
+        return null
+      })}
     </>
   )
 }
@@ -1948,6 +1985,7 @@ const SubagentCard = memo(function SubagentCard({
   serif,
   onOpenChat,
   finishedBadge,
+  links,
 }: {
   sub: SubagentView
   tool?: ToolItem
@@ -1955,8 +1993,15 @@ const SubagentCard = memo(function SubagentCard({
   serif: boolean
   onOpenChat?: () => void
   finishedBadge?: boolean
+  links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
+  // Settled itself, but sub-agents IT spawned are still working: the harness
+  // "finishes" an agent the moment its turn ends, even mid-wait on background
+  // children, so a plain "finished" here misreads. Keep the card visually live
+  // until the whole subtree is quiet.
+  const waiting = !running && !!links?.awaitingChildren.has(sub.agentId)
+  const active = running || waiting
   // Collapsed by default so a sub-agent never dominates the main conversation
   // (#62); the user expands the card to see its prompt, steps and report.
   const [open, setOpen] = useState(false)
@@ -1966,14 +2011,14 @@ const SubagentCard = memo(function SubagentCard({
 
   const { label, desc } = subLabels(sub, tool)
   const steps = sub.items.length
-  const report = running ? null : subReport(sub, tool)
+  const report = active ? null : subReport(sub, tool)
 
   return (
     <div
       className={`rounded-lg border text-xs overflow-hidden ${
         tool?.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : running
+          : active
             ? 'border-violet-300/70 bg-violet-50/40 dark:border-violet-500/30 dark:bg-violet-500/[0.05]'
             : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
@@ -1989,7 +2034,7 @@ const SubagentCard = memo(function SubagentCard({
           <ChevronRight
             className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          {running ? (
+          {active ? (
             <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
               <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-violet-400/60" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
@@ -2003,6 +2048,11 @@ const SubagentCard = memo(function SubagentCard({
             <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
+            </span>
+          ) : waiting ? (
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              waiting on sub-agents
             </span>
           ) : finishedBadge ? (
             <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
@@ -2054,7 +2104,7 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
+                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
                 </div>
               </Expandable>
             </div>
@@ -2075,25 +2125,29 @@ function SubagentChatView({
   tool,
   worktree,
   serif,
+  links,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
   serif: boolean
+  links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
+  // Same as SubagentCard: settled itself but spawned sub-agents still working.
+  const waiting = !running && !!links?.awaitingChildren.has(sub.agentId)
   const { label, desc } = subLabels(sub, tool)
-  const report = running ? null : subReport(sub, tool)
+  const report = running || waiting ? null : subReport(sub, tool)
   return (
     <>
       <div className="flex items-baseline gap-2 pt-8 text-stone-600 dark:text-stone-300">
         <Bot className="w-4 h-4 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
         <span className="text-sm font-semibold">{label}</span>
         {desc && <span className="truncate text-xs text-stone-400 dark:text-stone-500">{desc}</span>}
-        {running ? (
+        {running || waiting ? (
           <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400/90">
             <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-            working
+            {running ? 'working' : 'waiting on sub-agents'}
           </span>
         ) : (
           <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
@@ -2113,13 +2167,13 @@ function SubagentChatView({
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
-      {running && (
+      {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
           <span className="text-[#c96442]">✳</span>
-          <span className="chat-text-shimmer font-medium">Working...</span>
+          <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -2134,12 +2188,14 @@ function ChatViewSelector({
   chatView,
   subagents,
   taskToolByUse,
+  awaitingChildren,
   onSelect,
   fadeIn,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
   taskToolByUse: Record<string, ToolItem>
+  awaitingChildren: Set<string>
   onSelect: (key: string) => void
   fadeIn: boolean
 }) {
@@ -2148,8 +2204,26 @@ function ChatViewSelector({
   // sub-agent spawning mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
   const [chipRef, chipW] = useChipWidth()
-  const subs = Object.values(subagents)
+  // List the tree in parent-first order, children indented under their parent.
+  // A sub with nothing to show yet (no meta, no prompt, no steps - a transcript
+  // file seen before any of its content) is left out until it has substance.
+  const rows: { sub: SubagentView; depth: number }[] = []
+  {
+    const all = Object.values(subagents)
+    const kids: Record<string, SubagentView[]> = {}
+    const roots: SubagentView[] = []
+    for (const sub of all) {
+      if (sub.parentAgentId && subagents[sub.parentAgentId]) (kids[sub.parentAgentId] ??= []).push(sub)
+      else roots.push(sub)
+    }
+    const walk = (sub: SubagentView, depth: number) => {
+      if (sub.agentType || sub.description || sub.prompt || sub.items.length > 0) rows.push({ sub, depth })
+      for (const c of kids[sub.agentId] ?? []) walk(c, depth + 1)
+    }
+    for (const r of roots) walk(r, 0)
+  }
   const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
+  const busy = (sub: SubagentView) => isSubRunning(sub, toolOf(sub)) || awaitingChildren.has(sub.agentId)
   const current = chatView !== 'main' ? subagents[chatView] : undefined
   const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
   // The task description disambiguates same-type sub-agents (two "Explore"s)
@@ -2179,7 +2253,7 @@ function ChatViewSelector({
         <MessageSquare className="w-3.5 h-3.5 shrink-0" />
         <span className="max-w-48 truncate font-medium">{currentLabel}</span>
         {currentDesc && <span className="max-w-44 truncate">{currentDesc}</span>}
-        {current && isSubRunning(current, toolOf(current)) && <LoaderCircle className="w-3 h-3 shrink-0" />}
+        {current && busy(current) && <LoaderCircle className="w-3 h-3 shrink-0" />}
         <ChevronRight className="w-3 h-3 shrink-0" />
       </div>
       <button
@@ -2200,7 +2274,7 @@ function ChatViewSelector({
         {currentDesc && (
           <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{currentDesc}</span>
         )}
-        {current && isSubRunning(current, toolOf(current)) && (
+        {current && busy(current) && (
           <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
         )}
         <ChevronRight
@@ -2222,20 +2296,21 @@ function ChatViewSelector({
                 <span className="font-medium">Main conversation</span>
               </button>
             )}
-            {subs.filter((sub) => sub.agentId !== chatView).map((sub) => {
+            {rows.filter(({ sub }) => sub.agentId !== chatView).map(({ sub, depth }) => {
               const tool = toolOf(sub)
               const { label, desc } = subLabels(sub, tool)
               return (
                 <button
                   key={sub.agentId}
                   onClick={() => pick(sub.agentId)}
+                  style={depth > 0 ? { paddingLeft: 12 + depth * 14 } : undefined}
                   className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
                 >
                   <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
                   <span className="shrink-0 font-medium">{label}</span>
                   {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
                   <span className="ml-auto shrink-0 flex items-center gap-1">
-                    {isSubRunning(sub, tool) && (
+                    {busy(sub) && (
                       <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                     )}
                   </span>
@@ -3425,6 +3500,19 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         flushScheduled = true
         queueMicrotask(flush)
       }
+      return id
+    }
+    // dropItem retracts a pushed item from wherever it currently lives - the
+    // un-flushed batch or the committed state. Used to supersede an interim
+    // notice (see handleTaskNotification).
+    const dropItem = (id: number) => {
+      const i = pending.findIndex((it) => it.id === id)
+      if (i >= 0) {
+        pending.splice(i, 1)
+        return
+      }
+      itemTsRef.current.delete(id)
+      setItems((prev) => prev.filter((it) => it.id !== id))
     }
 
     // Token-streaming buffer. Deltas can arrive far faster than the display
@@ -3586,11 +3674,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
-    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string) => {
+    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string, parentAgentId: string) => {
       if (!agentId) return
       const sub = ensureSubagent(agentId)
       if (agentType) sub.agentType = agentType
       if (description) sub.description = description
+      if (parentAgentId) sub.parentAgentId = parentAgentId
       if (toolUseId) {
         sub.toolUseId = toolUseId
         markBackground(sub, toolUseId)
@@ -3610,7 +3699,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // A viewer parked on the placeholder follows it to the real key.
           setChatView((cur) => (cur === phKey ? agentId : cur))
         }
-      } else if (!markedStandalone.has(agentId)) {
+      } else if (!sub.parentAgentId && (agentType || description) && !markedStandalone.has(agentId)) {
+        // No Task card to fold into AND no parent sub-agent: a standalone card
+        // in the main flow. A NESTED sub missing its tool_use link stays out of
+        // the main flow (it belongs under its parent, and is still reachable
+        // through the view selector). A frame with no meta at all is the
+        // sidecar-not-flushed-yet backfill case - pushing then would drop an
+        // unlabeled empty "Sub-agent" card that turns into a duplicate once the
+        // real meta links the sub to its Task card, so wait for that meta.
         markedStandalone.add(agentId)
         push({ kind: 'subagent', agentId })
       }
@@ -3626,9 +3722,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
           sub.items[i] = { ...it, result, isError, resultImages }
-          return
+          break
         }
       }
+      // A NESTED spawn's result lands here (the spawning Task tool_use lives in
+      // a sub-agent's own timeline, so the main flow's settle never sees it):
+      // mirror it - launch boilerplate marks the spawned sub background, a real
+      // result settles it. A non-spawn tool result matches no sub and no-ops.
+      settleSubagentByToolUse(toolUseId, result)
     }
     // noticeSubDone drops a compact "finished" notice (with a View link to the
     // sub-agent's chat) into the main flow when a sub-agent completes LIVE -
@@ -3660,7 +3761,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
           sub.status = 'done'
-          noticeSubDone(key, sub)
+          // A NESTED sub-agent's finish shows on its card inside the parent's
+          // timeline; a main-flow notice for it would just be noise.
+          if (!sub.parentAgentId) noticeSubDone(key, sub)
           scheduleSubFlush()
         }
       }
@@ -3678,6 +3781,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // created or linked later still settles (mirrors backgroundToolUses, which
     // exists for the same "signal arrives before the sub" reason).
     const completedNotifs = new Set<string>()
+    // The latest completion notice pushed per task-id: an agent that stops, is
+    // messaged/resumed, and stops again notifies more than once, and rendering
+    // every summary reads as the same agent "finishing" twice. A newer
+    // completion notice for the same task supersedes (retracts) the older chip;
+    // the conversation in between (the nudge, its replies) tells the story.
+    const noticeIdByTask = new Map<string, number>()
     // handleTaskNotification folds one <task-notification> record into the flow:
     // a compact notice, plus - for a background/async sub-agent whose completion
     // this is (its Task tool_result was only launch boilerplate, so nothing else
@@ -3714,13 +3823,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (quiet) return
       // A genuine turn-starting continuation anchors the "working" clock (item 48).
       if (ts != null) turnStartClockRef.current = ts
-      push({
+      if (!stillRunning && taskId) {
+        const superseded = noticeIdByTask.get(taskId)
+        if (superseded != null) dropItem(superseded)
+      }
+      const noticeId = push({
         kind: 'notice',
         text: decodeEntities(summary || 'Background task update'),
         taskId,
         toolUseId: noticeToolUse,
         outputFile,
       })
+      if (!stillRunning && taskId) noticeIdByTask.set(taskId, noticeId)
     }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
@@ -3782,7 +3896,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       } else if (ev.type === 'result') {
         if (sub.status === 'running') {
           sub.status = 'done'
-          noticeSubDone(agentId, sub)
+          if (!sub.parentAgentId) noticeSubDone(agentId, sub)
         }
       }
       scheduleSubFlush()
@@ -4126,9 +4240,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // below: sidechain uuids live in sub-agent transcripts, so anchoring
       // history paging on one would never resolve.
       if (ev.isSidechain || (typeof ev.parent_tool_use_id === 'string' && ev.parent_tool_use_id)) {
+        // Only the types routeSidechain actually renders may create/route into
+        // a sub: anything else (a stream_event partial delta, bookkeeping
+        // records) would ensureSubagent an empty, unlabeled placeholder card.
         // A sub-agent's partial deltas aren't token-streamed into the main
         // bubble; its complete blocks arrive via the transcript tail.
-        if (ev.type !== 'stream_event') routeSidechain(ev)
+        if (ev.type === 'user' || ev.type === 'assistant' || ev.type === 'result') routeSidechain(ev)
         return
       }
       // Snapshot the prior event's timestamp before advancing it - a replayed
@@ -4430,6 +4547,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         toolUseId?: string
         agentType?: string
         description?: string
+        parentAgentId?: string
         events?: ClaudeEvent[]
         done?: boolean
         file?: string
@@ -4475,7 +4593,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // Links a sub-agent to its Task tool_use (folding it into that card)
           // and labels it; arrives ahead of the sub's events live, and per-sub
           // during backfill. Tolerates arriving after events too.
-          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
+          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '', msg.parentAgentId ?? '')
           return
         case 'task_output': {
           // Answer to a task_output request: hand it to the waiting chip.
@@ -4604,12 +4722,36 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   }, [agentId, projectId, reconnectAttempt, autoRetry])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
-  // labels, the live/done state and the final report.
+  // labels, the live/done state and the final report. A NESTED sub-agent's
+  // spawning tool_use lives inside its parent's timeline, not the main items,
+  // so those are indexed too.
   const taskToolByUse = useMemo(() => {
     const m: Record<string, ToolItem> = {}
     for (const it of items) if (it.kind === 'tool') m[it.toolUseId] = it
+    for (const s of Object.values(subagents)) for (const it of s.items) if (it.kind === 'tool') m[it.toolUseId] = it
     return m
-  }, [items])
+  }, [items, subagents])
+
+  // Sub-agents whose own run has settled but which still have a running
+  // descendant. The harness "finishes" a sub-agent the moment its turn ends -
+  // even when it stopped to wait on background sub-agents it spawned - so a
+  // card that flipped to "finished" while its children work misreads. These
+  // ids keep their cards in a live "waiting on sub-agents" state until the
+  // whole subtree is quiet.
+  const subsAwaitingChildren = useMemo(() => {
+    const kids: Record<string, SubagentView[]> = {}
+    for (const s of Object.values(subagents)) {
+      if (s.parentAgentId) (kids[s.parentAgentId] ??= []).push(s)
+    }
+    const out = new Set<string>()
+    if (Object.keys(kids).length === 0) return out
+    const own = (s: SubagentView) => isSubRunning(s, s.toolUseId ? taskToolByUse[s.toolUseId] : undefined)
+    const treeRunning = (s: SubagentView): boolean => own(s) || (kids[s.agentId] ?? []).some(treeRunning)
+    for (const s of Object.values(subagents)) {
+      if (!own(s) && (kids[s.agentId] ?? []).some(treeRunning)) out.add(s.agentId)
+    }
+    return out
+  }, [subagents, taskToolByUse])
 
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
@@ -4629,10 +4771,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     mainScrollRef.current = null
   }, [agentId, projectId])
 
-  function openSubView(key: string) {
-    if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
-    setChatView(key)
-  }
+  // Stable identity (per chatView) so the subagentLinks memo below doesn't
+  // rebuild every render.
+  const openSubView = useCallback(
+    (key: string) => {
+      if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
+      setChatView(key)
+    },
+    [chatView],
+  )
 
   // requestTaskOutput fetches a background task's output file over the chat
   // socket (the expandable notification chip), resolving with the daemon's
@@ -4674,12 +4821,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     } else {
       const sub = subagents[chatView]
       const tool = sub?.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
-      const running = sub ? isSubRunning(sub, tool) : false
+      const running = sub ? isSubRunning(sub, tool) || subsAwaitingChildren.has(sub.agentId) : false
       pinnedRef.current = running
       setPinned(running)
       el.scrollTop = running ? el.scrollHeight : 0
     }
-  }, [chatView, subagents, taskToolByUse])
+  }, [chatView, subagents, taskToolByUse, subsAwaitingChildren])
 
   // Keep the viewport anchored across a load-older prepend (item 25): before
   // paint, grow scrollTop by however much taller the content got, so the lines
@@ -5349,6 +5496,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               tool={tool}
               worktree={worktreePath}
               serif={serif}
+              links={subagentLinks}
               onOpenChat={() => openSubView(sub.agentId)}
               finishedBadge
             />
@@ -5361,9 +5509,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const linked =
           (item.taskId ? subagents[item.taskId] : undefined) ??
           (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
+        // "finished" while the agent's own spawned sub-agents still run is the
+        // harness's stopped-notification, not the end of the work - relabel the
+        // chip until the subtree is quiet.
+        const noticeText =
+          linked && subsAwaitingChildren.has(linked.agentId)
+            ? item.text.replace(/\bfinished\b/, 'waiting on sub-agents')
+            : item.text
         return (
           <NoticePill
-            text={item.text}
+            text={noticeText}
             onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
             outputFile={item.outputFile}
             requestTaskOutput={requestTaskOutput}
@@ -5418,7 +5573,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const sub = subByToolUse[item.toolUseId]
         if (sub)
           return (
-            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
@@ -5449,7 +5604,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         // A sub-agent with no parent Task card (its meta lacked a tool_use id).
         const sub = subagents[item.agentId]
         if (!sub) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
+        // The link can land AFTER the standalone item was pushed (a meta frame
+        // that finally carried the tool_use id, or a nested sub's parent): once
+        // another card renders this sub, the standalone copy is a duplicate.
+        if (sub.parentAgentId) return null
+        if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
+        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question':
         return (
@@ -5596,6 +5756,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     return m
   }, [subagents])
 
+  // Bundle for nested sub-agent rendering (SubagentCard -> SubagentTimeline
+  // recursion): see SubagentLinks.
+  const subagentLinks = useMemo<SubagentLinks>(
+    () => ({ subByToolUse, taskToolByUse, awaitingChildren: subsAwaitingChildren, openSubView }),
+    [subByToolUse, taskToolByUse, subsAwaitingChildren, openSubView],
+  )
+
   // The sub-agent whose chat the pane currently shows (undefined = main view,
   // also the fallback while a selected key is missing mid-replay).
   const viewSub = chatView !== 'main' ? subagents[chatView] : undefined
@@ -5643,6 +5810,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             chatView={viewSub ? chatView : 'main'}
             subagents={subagents}
             taskToolByUse={taskToolByUse}
+            awaitingChildren={subsAwaitingChildren}
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
             fadeIn={liveUiRef.current}
           />
@@ -5666,7 +5834,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
-            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
           ) : (
           <>
           {!replayDone && items.length === 0 && (

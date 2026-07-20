@@ -112,10 +112,16 @@ func firstLineIsSidechain(path string) bool {
 // transcript (agent-<id>.meta.json), linking the sub-agent to the Task tool_use
 // that spawned it. The chat client uses ToolUseID to fold the sub-agent's
 // activity into that Task card and AgentType/Description to label it.
+// A NESTED sub-agent (one spawned by another sub-agent) still lands in the same
+// flat subagents/ dir; its sidecar carries ParentAgentID (the spawning
+// sub-agent) and SpawnDepth (1 = spawned by the main agent), which the chat
+// client uses to fold it under its parent's card instead of the main flow.
 type SubagentMeta struct {
-	AgentType   string `json:"agentType"`
-	Description string `json:"description"`
-	ToolUseID   string `json:"toolUseId"`
+	AgentType     string `json:"agentType"`
+	Description   string `json:"description"`
+	ToolUseID     string `json:"toolUseId"`
+	ParentAgentID string `json:"parentAgentId"`
+	SpawnDepth    int    `json:"spawnDepth"`
 }
 
 // subagentsSubdir is the per-session directory Claude Code writes sub-agent

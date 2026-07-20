@@ -93,6 +93,9 @@ type chatSubagentMetaFrame struct {
 	ToolUseID   string `json:"toolUseId,omitempty"`
 	AgentType   string `json:"agentType,omitempty"`
 	Description string `json:"description,omitempty"`
+	// The sub-agent that spawned this one (empty for a main-agent spawn): the
+	// client folds a nested sub-agent under its parent's card, not the main flow.
+	ParentAgentID string `json:"parentAgentId,omitempty"`
 }
 
 // subagentResolver emits one subagent_meta frame per distinct sidechain
@@ -133,6 +136,7 @@ func sendSubagentMeta(conn *safeConn, agentID string, meta *claudestream.Subagen
 	f := chatSubagentMetaFrame{terminalEvent: terminalEvent{Type: "subagent_meta"}, AgentID: agentID}
 	if meta != nil {
 		f.ToolUseID, f.AgentType, f.Description = meta.ToolUseID, meta.AgentType, meta.Description
+		f.ParentAgentID = meta.ParentAgentID
 	}
 	frame, err := json.Marshal(f)
 	if err != nil {
