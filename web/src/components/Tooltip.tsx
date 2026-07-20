@@ -236,12 +236,16 @@ export function Tooltip({
         ) : (
           <div
             ref={boxRef}
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg break-words border border-gray-700 dark:border-gray-600 ${
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] text-center rounded shadow-lg break-words border border-gray-700 dark:border-gray-600 ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
+            // width: max-content sizes the box to its text: a fixed-position box
+            // otherwise shrink-to-fits against the space to the RIGHT of `left`
+            // (the -translate-x-1/2 recenters only after layout), so a trigger
+            // near the right viewport edge would wrap even a short tip.
             // 320px cap normally, but never wider than the viewport (minus the 8px
             // clamp pad each side) so it can't overflow on a phone.
-            style={{ top: pos.top, left: pos.left, maxWidth: 'min(320px, calc(100vw - 1rem))' }}
+            style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: 'min(320px, calc(100vw - 1rem))' }}
           >
             {content}
             <div
