@@ -2843,8 +2843,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // root) so the file rows + each file's own sticky header dock just beneath it
   // (see FILE_STICKY_TOP). Only shown once a diff with files has loaded. Carries
   // the file-list show/hide toggle and the options cog (file-list grouping + diff
-  // rendering) that used to live in the Changes-bar cog.
-  const filesHeaderEl = diff && diff.files.length > 0 && (
+  // rendering) that used to live in the Changes-bar cog. Shown for any loaded
+  // diff - including an empty one, where the "No changes" note sits beneath it.
+  const filesHeaderEl = diff && (
     <div
       ref={filesHeaderRef}
       style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
@@ -2895,7 +2896,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // when the toolbar wraps. See the ResizeObserver above.
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
-    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff && diff.files.length > 0 ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
+    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no
