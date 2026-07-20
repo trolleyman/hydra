@@ -48,6 +48,7 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
@@ -3196,7 +3197,24 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // The composer draft (text + attachments) is restored per agent so it survives
   // switching agents/reloads (item 30): text from agentViewPrefs, attachments
   // from the in-memory chatDrafts cache.
-  const [input, setInput] = useState(() => loadAgentViewPrefs(projectId, agentId).chatDraft ?? '')
+  //
+  // Undo/redo spans BOTH the typed text and the attachment chips: an image/file
+  // paste (and its "[filename]" marker) calls preventDefault, so the browser's
+  // native textarea undo never sees it and Ctrl+Z can't walk it back. `present`
+  // is the live composer state; commit/undo/redo/reconcile/resetHistory drive the
+  // snapshot stack (see composerHistory), mirroring the spawn box.
+  const initialComposer = useRef<ReturnType<typeof makeSnapshot> | null>(null)
+  if (!initialComposer.current) {
+    initialComposer.current = makeSnapshot(
+      loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
+      loadChatAttachments(chatDraftKey(projectId, agentId)),
+      0,
+      0,
+    )
+  }
+  const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
+  const input = present.prompt
+  const attachments = present.attachments
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -3232,9 +3250,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
-  // Composer attachments (same upload flow as the spawn box), restored from the
-  // per-agent in-memory cache (item 30).
-  const [attachments, setAttachments] = useState<Attachment[]>(() => loadChatAttachments(chatDraftKey(projectId, agentId)))
+  // Composer attachments live in the undo history (`present.attachments`, above)
+  // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -4871,15 +4888,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Composer: attachments ------------------------------------------------
 
-  const attachmentsRef = useRef<Attachment[]>([])
+  const attachmentsRef = useRef<Attachment[]>(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
     // Mirror to the per-agent cache so a switch away restores them.
     saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
   }, [attachments, projectId, agentId])
+  // Every preview object URL minted this session. We can't revoke on remove (an
+  // undo can bring the chip back) or on unmount (the attachments are stashed to
+  // the cache and restored on return), so URLs live until a send consumes the
+  // draft - then we revoke them all at once (and otherwise until reload).
+  const objectUrlsRef = useRef<Set<string>>(new Set())
   // On unmount (agent switch), keep the draft's attachments alive in the cache -
   // do NOT revoke their object URLs, so returning to the agent restores working
-  // thumbnails. They're freed on send/remove, or when the page fully reloads.
+  // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
       saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
@@ -4888,17 +4910,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     [projectId, agentId],
   )
 
-  function patchAttachment(id: number, patch: Partial<Attachment>) {
-    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
-  }
-
   // addFiles queues each dropped/pasted file as an attachment and uploads it.
   // Generically-named images (image.png, or nameless pastes) are renamed
   // image1.png, image2.png, ... so each gets a stable, unique on-disk name. The
   // number is max(existing image<N> on the current attachments) + 1, computed
   // fresh here rather than from an ever-growing counter: it resets to 1 once the
   // attachments clear on send, and fills the gap after a removal (so removing #2
-  // and re-adding reuses 2, not 3).
+  // and re-adding reuses 2, not 3). Each chip is its own undo step; the async
+  // upload result patches the chip across the whole timeline (reconcile) rather
+  // than pushing a step, so undoing to an earlier snapshot still shows the
+  // settled path, not a stale "uploading...".
   function addFiles(rawFiles: File[]): string[] {
     let nextN = nextGenericImageNumber(attachmentsRef.current)
     const names: string[] = []
@@ -4911,23 +4932,42 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
       const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      setAttachments((prev) => [
-        ...prev,
-        { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true },
-      ])
+      if (previewUrl) objectUrlsRef.current.add(previewUrl)
+      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+      commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
       uploadFile(projectId, file)
-        .then((res) => patchAttachment(id, { path: res.path, uploading: false }))
-        .catch((err) => patchAttachment(id, { uploading: false, error: formatError(err) }))
+        .then((res) => reconcile(id, { path: res.path, uploading: false }))
+        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
       names.push(file.name || 'pasted-image')
     }
     return names
   }
 
+  // Removing a chip is its own undo step. Don't revoke the preview URL here - an
+  // undo can bring the chip back; URLs are freed in bulk on send (objectUrlsRef).
   function removeAttachment(id: number) {
-    setAttachments((prev) => {
-      const target = prev.find((a) => a.id === id)
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
-      return prev.filter((a) => a.id !== id)
+    commit(
+      (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
+      false,
+    )
+  }
+
+  // Insert text into the composer at the caret, as its own undo step - used for
+  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
+  // paired with the chip's own step, walks the whole paste back).
+  function insertAtCaret(insert: string) {
+    const ta = textareaRef.current
+    const start = ta?.selectionStart ?? input.length
+    const end = ta?.selectionEnd ?? input.length
+    const caret = start + insert.length
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
+      false,
+    )
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = caret
     })
   }
 
@@ -4938,19 +4978,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) {
-      const ta = textareaRef.current
-      const start = ta?.selectionStart ?? input.length
-      const end = ta?.selectionEnd ?? input.length
-      const insert = pasteMarkerText(names)
-      const caret = start + insert.length
-      setInput(input.slice(0, start) + insert + input.slice(end))
-      requestAnimationFrame(() => {
-        if (!ta) return
-        ta.focus()
-        ta.selectionStart = ta.selectionEnd = caret
-      })
-    }
+    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -4979,7 +5007,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   useEffect(() => setSlashSel(0), [slashQuery])
 
   function acceptSlash(cmd: string) {
-    setInput('/' + cmd + ' ')
+    const value = '/' + cmd + ' '
+    commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -5086,12 +5115,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
     if (!finalText || !sendUserText(finalText)) return
-    setInput('')
     setSlashDismissed(false)
-    // All attachments are consumed by the send; free their preview URLs (the
-    // unmount handler no longer revokes - it preserves them for the draft cache).
-    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
-    setAttachments([])
+    // The message is sent - free every preview URL minted this session (including
+    // ones only reachable via undo history) and reset the composer + its history.
+    objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    objectUrlsRef.current.clear()
+    resetHistory(makeSnapshot('', [], 0, 0))
     setLightboxIndex(null)
   }
 
@@ -5159,16 +5188,60 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Keyboard ----------------------------------------------------------------
 
+  // A typed edit: one coalesced undo step per typing burst, capturing the caret
+  // so undo/redo can restore it. Dismisses the slash popup like the old handler.
+  function handleInputChange(value: string) {
+    const ta = textareaRef.current
+    const selStart = ta?.selectionStart ?? value.length
+    const selEnd = ta?.selectionEnd ?? value.length
+    commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
+    setSlashDismissed(false)
+  }
+
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
-    setInput(input.slice(0, start) + '\n' + input.slice(end))
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + '\n' + prev.prompt.slice(end), prev.attachments, start + 1, start + 1),
+      false,
+    )
     requestAnimationFrame(() => {
       ta.selectionStart = ta.selectionEnd = start + 1
     })
   }
 
+  // Restore a snapshot returned by undo/redo: put the caret back where it was
+  // when that snapshot was current (after the controlled value commits, hence
+  // the rAF). The draft is re-persisted by the debounced `input` effect.
+  function restoreSnapshot(snap: ReturnType<typeof undo>) {
+    if (!snap) return
+    const ta = textareaRef.current
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = snap.selStart
+      ta.selectionEnd = snap.selEnd
+    })
+  }
+
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Undo/redo over the composer's own history (text + attachments). Our stack
+    // drives these because pastes-turned-chips call preventDefault, so the
+    // browser's native textarea undo never recorded them. Cmd/Ctrl+Z undo,
+    // +Shift redo, and Ctrl+Y redo (Windows convention).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const k = e.key.toLowerCase()
+      if (k === 'z') {
+        e.preventDefault()
+        restoreSnapshot(e.shiftKey ? redo() : undo())
+        return
+      }
+      if (k === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        restoreSnapshot(redo())
+        return
+      }
+    }
     if (slashMatches.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -5214,8 +5287,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         // raw upload paths pasted into the textarea (the send flow re-appends
         // them). Fresh ids keep them unique against later attachments.
         const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
-        setInput(body)
-        setAttachments(recalled.map((a) => ({ ...a, id: nextAttachmentId() })))
+        const restored = recalled.map((a) => ({ ...a, id: nextAttachmentId() }))
+        commit(() => makeSnapshot(body, restored, body.length, body.length), false)
         return
       }
     }
@@ -5845,10 +5918,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <HighlightedTextarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                setSlashDismissed(false)
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
