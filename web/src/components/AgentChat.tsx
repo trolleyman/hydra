@@ -2181,9 +2181,18 @@ function SubagentChatView({
 }
 
 // ChatViewSelector is the top-left dropdown listing the current agents - the
-// main conversation plus each sub-agent (Task tool run) with its live status -
-// switching which conversation the pane shows. Rendered only once sub-agents
-// exist; floats over the timeline like the jump-to-bottom button.
+// main conversation plus the sub-agent tree (children indented under the
+// sub-agent that spawned them) with live status - switching which conversation
+// the pane shows. Rendered only once sub-agents exist; floats over the
+// timeline like the jump-to-bottom button.
+//
+// There is no separate header chip: the card ALWAYS renders the full list, and
+// the collapsed state is the list clipped to just the current row (the card's
+// height is one row and the list is translated up by that row's offset).
+// Opening glides the translate to 0 while the height and width expand, so the
+// chip visually slides down into its slot in the tree as the other rows are
+// revealed around it - and picking a row morphs the card back down onto the
+// row that was just clicked.
 function ChatViewSelector({
   chatView,
   subagents,
@@ -2204,121 +2213,178 @@ function ChatViewSelector({
   // sub-agent spawning mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
   const [chipRef, chipW] = useChipWidth()
-  // List the tree in parent-first order, children indented under their parent.
-  // A sub with nothing to show yet (no meta, no prompt, no steps - a transcript
-  // file seen before any of its content) is left out until it has substance.
-  const rows: { sub: SubagentView; depth: number }[] = []
+  // The morph's collapse target. Mirrors chatView, but updates the instant a
+  // row is picked: onSelect round-trips through the parent's state, and
+  // collapsing toward the OLD row for that render would visibly start the
+  // morph at the wrong slot.
+  const [localView, setLocalView] = useState(chatView)
+  const [prevChatView, setPrevChatView] = useState(chatView)
+  if (prevChatView !== chatView) {
+    setPrevChatView(chatView)
+    setLocalView(chatView)
+  }
+  const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
+  const busy = (sub: SubagentView) => isSubRunning(sub, toolOf(sub)) || awaitingChildren.has(sub.agentId)
+  // The full tree, main conversation first, children indented under their
+  // parent. A sub with nothing to show yet (no meta, no prompt, no steps - a
+  // transcript file seen before any of its content) is left out until it has
+  // substance, unless it IS the current view (the collapse target must exist).
+  interface SelectorRow {
+    key: string
+    label: string
+    desc: string
+    depth: number
+    sub?: SubagentView
+  }
+  const rows: SelectorRow[] = [{ key: 'main', label: 'Main conversation', desc: '', depth: 0 }]
   {
-    const all = Object.values(subagents)
     const kids: Record<string, SubagentView[]> = {}
     const roots: SubagentView[] = []
-    for (const sub of all) {
+    for (const sub of Object.values(subagents)) {
       if (sub.parentAgentId && subagents[sub.parentAgentId]) (kids[sub.parentAgentId] ??= []).push(sub)
       else roots.push(sub)
     }
     const walk = (sub: SubagentView, depth: number) => {
-      if (sub.agentType || sub.description || sub.prompt || sub.items.length > 0) rows.push({ sub, depth })
+      if (sub.agentType || sub.description || sub.prompt || sub.items.length > 0 || sub.agentId === localView) {
+        const { label, desc } = subLabels(sub, toolOf(sub))
+        rows.push({ key: sub.agentId, label, desc, depth, sub })
+      }
       for (const c of kids[sub.agentId] ?? []) walk(c, depth + 1)
     }
     for (const r of roots) walk(r, 0)
   }
-  const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
-  const busy = (sub: SubagentView) => isSubRunning(sub, toolOf(sub)) || awaitingChildren.has(sub.agentId)
-  const current = chatView !== 'main' ? subagents[chatView] : undefined
-  const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
-  // The task description disambiguates same-type sub-agents (two "Explore"s)
-  // in the header chip, just like the list rows.
-  const currentDesc = current ? subLabels(current, toolOf(current)).desc : undefined
+  const currentRow = rows.find((r) => r.key === localView) ?? rows[0]
   const pick = (key: string) => {
+    setLocalView(key)
     setOpen(false)
     onSelect(key)
   }
+
+  // The morph itself, driven imperatively (like Expandable) so live re-renders
+  // can't clobber an in-flight glide: card height between one-row and
+  // full-list PIXEL endpoints, list translateY between -currentRow.offsetTop
+  // and 0. Runs every render; unchanged geometry writes nothing, geometry that
+  // shifted without an open/selection change (a sub spawning, a label landing)
+  // snaps without animating.
+  const cardRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>())
+  const lastGeom = useRef<{ h: number; y: number } | null>(null)
+  const prevMorph = useRef<{ open: boolean; view: string } | null>(null)
+  useLayoutEffect(() => {
+    const card = cardRef.current
+    const list = listRef.current
+    const row = rowRefs.current.get(currentRow.key)
+    if (!card || !list || !row) return
+    // The card is border-box; row/list heights are its content.
+    const borders = card.offsetHeight - card.clientHeight
+    const h = (open ? list.offsetHeight : row.offsetHeight) + borders
+    const y = open ? 0 : -row.offsetTop
+    const prev = prevMorph.current
+    const intent = prev == null || prev.open !== open || prev.view !== currentRow.key
+    prevMorph.current = { open, view: currentRow.key }
+    if (!intent && lastGeom.current && lastGeom.current.h === h && lastGeom.current.y === y) return
+    lastGeom.current = { h, y }
+    const animate =
+      prev != null && intent && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // Width rides the same transition (the JSX only sets the width VALUE).
+    card.style.transition = animate ? 'width 0.2s ease, height 0.22s ease' : 'width 0.2s ease'
+    list.style.transition = animate ? 'transform 0.22s ease' : ''
+    card.style.height = `${h}px`
+    list.style.transform = y ? `translateY(${y}px)` : ''
+  })
+
+  // Click-away closes: once open, the toggle has morphed down to the current
+  // row's slot, so the old muscle-memory spot (top-left) may be over a
+  // different row - clicking anywhere outside should just dismiss.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    // Capture phase: a panel that stops mousedown propagation (scroll/drag
+    // handlers) must still dismiss the dropdown.
+    document.addEventListener('mousedown', onDown, true)
+    return () => document.removeEventListener('mousedown', onDown, true)
+  }, [open])
+
+  const rowIcon = (r: SelectorRow) =>
+    r.sub ? (
+      <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+    ) : (
+      <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+    )
+  const rowBusy = (r: SelectorRow) => (r.sub ? busy(r.sub) : false)
+
   return (
-    // A floating card styled like the PlanPanel: the collapsed chip is its
-    // natural-width header, and opening glides both the width (the measured
-    // chip px -> w-72, see useChipWidth) and the height (Expandable).
-    // Corner-anchored; while open it takes the higher z so it layers over the
-    // plan panel's chip on a narrow pane instead of anything relocating.
+    // A floating card styled like the PlanPanel, corner-anchored; while open
+    // it takes the higher z so it layers over the plan panel's chip on a
+    // narrow pane instead of anything relocating. Collapsed width is the
+    // current row's natural (fit-content) width, measured off the invisible
+    // clone below (see useChipWidth).
     <div
+      ref={cardRef}
       style={{ width: open ? 288 : chipW ?? undefined }}
-      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
-      {/* Invisible clone of the header at natural width - the collapsed chip
-          width the open/close transition animates from/to. */}
+      {/* Invisible clone of the CURRENT row at natural width - the collapsed
+          width the open/close transition animates from/to. Mirrors the row's
+          flow exactly (same paddings/gaps; ml-auto resolves to 0 at w-max). */}
       <div
         aria-hidden
         ref={chipRef}
-        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 py-1.5 pr-2.5"
+        style={{ paddingLeft: 12 }}
       >
-        <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
-        {currentDesc && <span className="max-w-44 truncate">{currentDesc}</span>}
-        {current && busy(current) && <LoaderCircle className="w-3 h-3 shrink-0" />}
-        <ChevronRight className="w-3 h-3 shrink-0" />
+        {rowIcon(currentRow)}
+        <span className="max-w-48 truncate font-medium">{currentRow.label}</span>
+        {currentRow.desc && <span className="max-w-44 truncate">{currentRow.desc}</span>}
+        <span className="ml-auto shrink-0 flex items-center gap-1">
+          {rowBusy(currentRow) && <LoaderCircle className="w-3 h-3 shrink-0" />}
+          <ChevronRight className="w-3 h-3 shrink-0" />
+        </span>
       </div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Switch agent chat"
-        className={`flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors cursor-pointer ${
-          open
-            ? 'text-stone-800 dark:text-stone-100'
-            : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
-        }`}
-      >
-        {current ? (
-          <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
-        ) : (
-          <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-        )}
-        <span className="max-w-48 shrink-0 truncate font-medium">{currentLabel}</span>
-        {currentDesc && (
-          <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{currentDesc}</span>
-        )}
-        {current && busy(current) && (
-          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
-        )}
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-      </button>
-      <Expandable open={open}>
-        {/* Fixed w-72 (the open card width) so the open-height measurement is
-            width-independent - see the PlanPanel note. The list holds only the
-            OTHER views: the current one is already the header, so repeating it
-            (with a check) was noise. */}
-        <div className="w-72 pb-1">
-            {chatView !== 'main' && (
-              <button
-                onClick={() => pick('main')}
-                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
-              >
-                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-                <span className="font-medium">Main conversation</span>
-              </button>
-            )}
-            {rows.filter(({ sub }) => sub.agentId !== chatView).map(({ sub, depth }) => {
-              const tool = toolOf(sub)
-              const { label, desc } = subLabels(sub, tool)
-              return (
-                <button
-                  key={sub.agentId}
-                  onClick={() => pick(sub.agentId)}
-                  style={depth > 0 ? { paddingLeft: 12 + depth * 14 } : undefined}
-                  className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
-                >
-                  <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
-                  <span className="shrink-0 font-medium">{label}</span>
-                  {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
-                  <span className="ml-auto shrink-0 flex items-center gap-1">
-                    {busy(sub) && (
-                      <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-        </div>
-      </Expandable>
+      <div ref={listRef} className="py-1 will-change-transform">
+        {rows.map((r) => {
+          const isCurrent = r.key === currentRow.key
+          return (
+            <button
+              key={r.key}
+              ref={(el) => {
+                if (el) rowRefs.current.set(r.key, el)
+                else rowRefs.current.delete(r.key)
+              }}
+              onClick={() => (isCurrent ? setOpen((o) => !o) : pick(r.key))}
+              title={isCurrent ? 'Switch agent chat' : undefined}
+              aria-expanded={isCurrent ? open : undefined}
+              // Collapsed, the non-current rows are clipped out of view - keep
+              // them out of the tab order too.
+              tabIndex={!open && !isCurrent ? -1 : undefined}
+              // The tree indent applies only when open: collapsed, the current
+              // row IS the chip, and a nested agent's chip should sit flush -
+              // the indent glides in as the row settles into its slot.
+              style={{ paddingLeft: open ? 12 + r.depth * 14 : 12 }}
+              className={`flex w-full items-center gap-1.5 pr-2.5 py-1.5 text-left cursor-pointer transition-all duration-200 text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] ${
+                open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''
+              }`}
+            >
+              {rowIcon(r)}
+              <span className="max-w-48 shrink-0 truncate font-medium">{r.label}</span>
+              {r.desc && <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{r.desc}</span>}
+              <span className="ml-auto shrink-0 flex items-center gap-1">
+                {rowBusy(r) && (
+                  <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
+                )}
+                {isCurrent && (
+                  <ChevronRight
+                    className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+                  />
+                )}
+              </span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
