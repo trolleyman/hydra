@@ -18,6 +18,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
+import { DEFAULT_ICON_URL } from './projectIconUrl'
 
 // The browser's Notification.permission, plus a synthetic 'unsupported' for
 // environments without the API at all (some mobile/embedded webviews).
@@ -151,6 +152,12 @@ export function dismissNotification(tag: string): void {
 // stays up until the user acts, so this bounds one the user never gets to - it's
 // closed instead of sitting in the tray forever. The fired notification is
 // tracked by tag so dismissNotification can retract it early.
+//
+// `icon` is an image URL shown alongside the notification. Browsers otherwise
+// pick their own mark (often the generic browser logo rather than our favicon),
+// so callers pass the project's icon explicitly - it identifies *which* project
+// woke you, which is the thing you can't tell from an out-of-tab alert. See
+// lib/projectIconUrl for turning a project's icon into a URL.
 export function fireNotification(opts: {
   title: string
   body: string
@@ -158,12 +165,18 @@ export function fireNotification(opts: {
   sticky: boolean
   onClick: () => void
   autoDismissMs?: number
+  icon?: string
 }): void {
   const { enabled, permission } = useNotifyStore.getState()
   if (!enabled || permission !== 'granted' || !notificationsSupported()) return
   let n: Notification
   try {
-    n = new Notification(opts.title, { body: opts.body, tag: opts.tag, requireInteraction: opts.sticky })
+    n = new Notification(opts.title, {
+      body: opts.body,
+      tag: opts.tag,
+      requireInteraction: opts.sticky,
+      icon: opts.icon ?? DEFAULT_ICON_URL,
+    })
   } catch {
     // Some browsers only allow construction via a service worker; degrade silently.
     return
