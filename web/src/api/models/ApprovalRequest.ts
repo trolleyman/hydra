@@ -12,11 +12,11 @@ export type ApprovalRequest = {
      */
     tool: string;
     /**
-     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'
+     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
      */
     kind: string;
     /**
-     * The MCP server name, '<server>__<tool>', host, or command the approval is about
+     * The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
      */
     target: string;
     /**

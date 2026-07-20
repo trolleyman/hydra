@@ -49,3 +49,30 @@ func TestListRequestsMissingDir(t *testing.T) {
 		t.Fatalf("missing dir should be empty, no error: got=%v err=%v", got, err)
 	}
 }
+
+func TestHostRunResultRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	// No result until the daemon writes one.
+	if _, ok, _ := ReadHostRunResult(dir, "42"); ok {
+		t.Fatal("result should not exist yet")
+	}
+
+	want := HostRunResult{ExitCode: 3, Output: "boom\n", Truncated: true, TimedOut: false, Error: ""}
+	if err := WriteHostRunResult(dir, "42", want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := ReadHostRunResult(dir, "42")
+	if err != nil || !ok {
+		t.Fatalf("read result: ok=%v err=%v", ok, err)
+	}
+	if got != want {
+		t.Fatalf("result mismatch: got %+v want %+v", got, want)
+	}
+
+	// RemoveRequest also clears the result file.
+	RemoveRequest(dir, "42")
+	if _, ok, _ := ReadHostRunResult(dir, "42"); ok {
+		t.Fatal("result should be gone after RemoveRequest")
+	}
+}

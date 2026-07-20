@@ -333,6 +333,9 @@ type AgentStatusInfo struct {
 
 // ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
 type ApprovalDecisionRequest struct {
+	// Command For a host_command approval only: the exact command text the UI displayed and the user approved. The daemon runs THIS text verbatim (never re-reading the head-writable request file), which closes the TOCTOU window where an agent could swap the command after the user saw it. Ignored for every other kind.
+	Command *string `json:"command,omitempty"`
+
 	// Decision The user's verdict for the parked tool call
 	Decision ApprovalDecisionRequestDecision `json:"decision"`
 
@@ -353,7 +356,7 @@ type ApprovalRequest struct {
 	// ArgsPreview Compact one-line preview of an mcp_tool call's arguments.
 	ArgsPreview *string `json:"args_preview"`
 
-	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
@@ -368,7 +371,7 @@ type ApprovalRequest struct {
 	// Summary Human-readable "wants to ..." summary for the approval card
 	Summary string `json:"summary"`
 
-	// Target The MCP server name, '<server>__<tool>', host, or command the approval is about
+	// Target The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
 	Target string `json:"target"`
 
 	// Tool The tool the agent tried to use (e.g. WebFetch or an mcp__ name)

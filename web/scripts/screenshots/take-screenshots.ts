@@ -885,7 +885,24 @@ try {
           approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
-      // 3f. An agent running in ANOTHER project: an amber folder+project
+      // 3f. The sandbox escape hatch: the agent asks to run a command on the HOST,
+      // outside its sandbox (`hydra host-run`). Loud red HOST identity, the full
+      // command shown verbatim in a red mono box, and one-shot only (no Always
+      // allow) - the most dangerous ask there is.
+      {
+        name: 'agent-approvals-host-command',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'host_command', target: 'osascript -e \'display notification "build done"\'', agentName: 'Wire up desktop notifications', agentId: 'agent-approval', projectId: 'sim-project' },
+        },
+      },
+      // 3g. An agent running in ANOTHER project: an amber folder+project
       // banner. Always allow is still offered (a remembered grant is
       // scoped to the project the approval resolves in).
       {
