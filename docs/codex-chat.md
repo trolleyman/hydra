@@ -121,6 +121,88 @@ keeps rendering stable across installed Codex versions and provides history for
 events that are UI state rather than conversation items. A later recovery path
 can rebuild the log from `thread/read` when it is missing.
 
+### Checkpointed projections
+
+The visible history window must not be the source of truth for current state.
+Plans, active sub-agents, the active turn, pending interaction, model, and token
+usage are projections over the event stream: folding all relevant events from
+the beginning produces their current values. The daemon should own and persist
+those projections even when no browser is attached.
+
+Store a versioned checkpoint containing the latest materialized state plus the
+sequence number through which it was calculated. Conceptually:
+
+```json
+{
+  "version": 1,
+  "through": 1842,
+  "plan": [{ "id": "2", "status": "in_progress", "content": "Run tests" }],
+  "subagents": {
+    "agent-7": { "status": "running", "parent_item_id": "tool-4" }
+  },
+  "turn": { "id": "turn-9", "status": "running" },
+  "interaction": null,
+  "model": "gpt-5.4"
+}
+```
+
+Every normalized durable event gets a monotonically increasing per-head
+sequence number. When appending an event, the daemon applies it to its in-memory
+projection and periodically (and at important boundaries) atomically replaces
+the checkpoint. On restart it loads the checkpoint and replays only events with
+`seq > through`. This is a normal event-sourced snapshot: the event log remains
+the audit/history record while the checkpoint makes restoration bounded.
+
+Checkpoint at least on plan changes, sub-agent lifecycle changes, interactive
+requests, turn completion/failure, and clean process shutdown; also checkpoint
+after a small event/time threshold during long-running turns. Delta tokens do
+not need to trigger a checkpoint. Use a temporary file plus rename, or a single
+database transaction, so a crash cannot expose half a checkpoint. Reducers must
+be idempotent because a crash between event append and checkpoint replacement
+can legitimately replay the final event twice.
+
+On WebSocket attach, take one consistent snapshot and watermark under the same
+projection lock:
+
+1. send `state_snapshot` with the projection and its `through` sequence,
+2. send only the recent page of displayable chat events requested by the UI,
+3. send durable/live events with a sequence greater than the watermark.
+
+This removes the attach race where a plan or sub-agent changes between sending
+the snapshot and subscribing to live output. Loading older chat pages never
+mutates current projections: those events are historical display data and are
+at or below the snapshot watermark. The frontend can therefore load ten
+messages or the entire transcript and show the same current plan.
+
+The same mechanism handles partial resume. After a daemon restart, a Codex
+thread resume, or a terminal-to-chat switch, Hydra restores the checkpoint,
+replays its own short event tail, reconciles it with the provider's current
+thread/turn state, then starts forwarding new events. It does not need to replay
+the whole provider transcript before showing an accurate plan or active-agent
+panel.
+
+Not every value belongs in this projection. Persist current operational state:
+
+- plan/to-do entries and their ordering/status,
+- sub-agent identity, parent relationship, description, status, and latest
+  meaningful activity (not its complete nested transcript),
+- active turn and incomplete streamed item identifiers,
+- outstanding approval/question/elicitation,
+- selected/current model and most recent usage totals,
+- queued messages (already daemon-owned today).
+
+Keep complete messages, tool outputs, reasoning, and sub-agent transcripts in
+the paged event history. A snapshot may reference their item ids, but should not
+grow with conversation length.
+
+Claude already implements part of this idea for plans: `PlanTracker` folds live
+events into `Agent.Plan`, and `sendPlan` sends that durable state independently
+of transcript backfill. Generalize that behavior into the provider-neutral
+projection store rather than keeping the mirrored Go and TypeScript plan
+reducers. Current sub-agent state should move to the same model; today it is
+partly reconstructed from a bounded transcript tail plus special completion
+prelude records, which is more fragile than a persisted lifecycle projection.
+
 ### Status, plans, tools, and approvals
 
 Drive status directly from Codex notifications rather than waiting for hooks:
@@ -176,6 +258,10 @@ and process exit mid-turn.
 ### 3. Persistence, queues, and WebSocket
 
 - Persist the provider conversation id and normalized event log.
+- Add monotonic event sequence numbers and a versioned, atomically-written
+  projection checkpoint; restore by replaying only the post-checkpoint tail.
+- Include plan, active sub-agent graph, active turn, pending interaction, model,
+  usage summary, and queue state in the attach snapshot.
 - Split Claude transcript backfill/sub-agent tailing out of generic
   `pumpChatOutput`; Codex uses the Hydra event log.
 - Route `user_message` and `interrupt` through the selected driver.
@@ -183,6 +269,8 @@ and process exit mid-turn.
   `turn_completed`/`turn_failed`.
 - Name new outbound frames `chat_event`; continue accepting `claude_event`
   during the frontend migration.
+- Make history paging display-only: older pages must not update current plan or
+  sub-agent state in the frontend.
 
 ### 4. UI and API enablement
 
