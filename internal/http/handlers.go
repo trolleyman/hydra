@@ -2144,13 +2144,13 @@ func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) (
 	baseSHA, errBase := git.ResolveRef(projectRoot, baseBranch)
 	headSHA, errHead := git.ResolveRef(projectRoot, headBranch)
 	if errBase != nil || errHead != nil {
-		return errtrace.Wrap2(git.ListCommits(projectRoot, baseBranch, headBranch))
+		return errtrace.Wrap2(git.ListFirstParentCommits(projectRoot, baseBranch, headBranch))
 	}
 	key := strings.Join([]string{projectRoot, baseSHA, headSHA}, "\x00")
 	if v, ok := s.commitsCache.get(key); ok {
 		return v, nil
 	}
-	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
+	commits, err := git.ListFirstParentCommits(projectRoot, baseBranch, headBranch)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}

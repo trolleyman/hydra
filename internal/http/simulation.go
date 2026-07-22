@@ -3151,6 +3151,19 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"reasoning_completed", map[string]any{"message_id": "sim-hidden-reasoning", "text": ""}},
 		{"reasoning_duration", map[string]any{"message_id": "sim-hidden-reasoning", "duration_ms": 4200}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
+		// A merge commit that dragged main in: it must render as ONE collapsed chip
+		// ("Merged main - N commits") that expands to the merged-in commits, not a
+		// flood of per-commit chips.
+		{"commit_created", map[string]any{
+			"head": "aa11bb22", "sha": "aa11bb22cc33dd44ee55ff6677889900aabbccdd", "short_sha": "aa11bb2",
+			"subject": "Merge branch 'main' into hydra/codex-demo", "author_name": "Agent Codex",
+			"author_email": "codex@hydra.ai", "timestamp": simNow().Add(-2 * time.Minute).Format(time.RFC3339),
+			"is_merge": true, "merged_count": 3, "merged_commits": []map[string]any{
+				{"sha": "1111111111111111111111111111111111111111", "short_sha": "1111111", "subject": "Bump dependencies to latest patch releases", "author_name": "Maintainer", "timestamp": simNow().Add(-50 * time.Minute).Format(time.RFC3339)},
+				{"sha": "2222222222222222222222222222222222222222", "short_sha": "2222222", "subject": "Tidy up the egress proxy logging", "author_name": "Maintainer", "timestamp": simNow().Add(-55 * time.Minute).Format(time.RFC3339)},
+				{"sha": "3333333333333333333333333333333333333333", "short_sha": "3333333", "subject": "Fix a flaky terminal resize test", "author_name": "Maintainer", "timestamp": simNow().Add(-60 * time.Minute).Format(time.RFC3339)},
+			},
+		}},
 		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
 		{"user_message", map[string]any{"id": "sim-codex-interrupt-user", "content": []map[string]any{{"type": "text", "text": "Start an answer that I will interrupt."}}}},
 		{"turn_started", map[string]any{"id": "sim-codex-interrupt-turn", "status": "running"}},

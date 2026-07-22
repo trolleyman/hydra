@@ -382,7 +382,10 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 	}
 	isAncestor, ancestorErr := git.IsAncestor(w.ctx.Worktree, oldHead, newHead)
 	if oldHead != "" && ancestorErr == nil && isAncestor {
-		commits, err := git.ListCommits(w.ctx.Worktree, oldHead, newHead)
+		// Walk first parents only: a merge (e.g. the agent merging main in) then
+		// surfaces as one commit rather than replaying every merged-in commit into
+		// the chat feed. The merge's own summary carries the collapsed list.
+		commits, err := git.ListFirstParentCommits(w.ctx.Worktree, oldHead, newHead)
 		if err == nil {
 			for i := len(commits) - 1; i >= 0; i-- {
 				c := commits[i]
@@ -392,6 +395,7 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 					"author_email": c.AuthorEmail, "timestamp": c.Timestamp,
 					"causal_item_id": causalItemID,
 				}
+				w.annotateMerge(&c, payload)
 				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, "commit_created", payload); err != nil {
 					log.Printf("warn: chat events: append commit for %s: %v", id, err)
 				}
@@ -400,6 +404,38 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 		}
 	}
 	_, _ = w.store.Append("head_changed", map[string]any{"old_head": oldHead, "head": newHead})
+}
+
+// mergedCommitsCap bounds how many merged-in commits a merge chip embeds for its
+// expansion. A merge of a long-diverged base can drag in thousands; the list is a
+// convenience preview, so cap it and report the true total in merged_count.
+const mergedCommitsCap = 100
+
+// annotateMerge enriches a merge commit's payload with the commits it brought in
+// (its second parent's history not already on the first parent), so the chat can
+// render a single collapsed "Merged ... - N commits" chip that expands to the list.
+func (w *worker) annotateMerge(c *git.CommitInfo, payload map[string]any) {
+	if !c.IsMerge() || len(c.Parents) < 2 {
+		return
+	}
+	merged, err := git.ListCommits(w.ctx.Worktree, c.Parents[0], c.Parents[1])
+	if err != nil || len(merged) == 0 {
+		return
+	}
+	payload["is_merge"] = true
+	payload["merged_count"] = len(merged)
+	limit := len(merged)
+	if limit > mergedCommitsCap {
+		limit = mergedCommitsCap
+	}
+	list := make([]map[string]any, 0, limit)
+	for _, m := range merged[:limit] {
+		list = append(list, map[string]any{
+			"sha": m.SHA, "short_sha": m.ShortSHA, "subject": m.Subject,
+			"author_name": m.AuthorName, "timestamp": m.Timestamp,
+		})
+	}
+	payload["merged_commits"] = list
 }
 
 // Flush waits until every provider line queued before it has been normalized
