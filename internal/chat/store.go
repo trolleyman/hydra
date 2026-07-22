@@ -27,6 +27,7 @@ const ProjectionVersion = 1
 type Event struct {
 	Seq       uint64          `json:"seq"`
 	ID        string          `json:"id"`
+	SourceID  string          `json:"source_id,omitempty"`
 	Type      string          `json:"type"`
 	Timestamp time.Time       `json:"timestamp"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
@@ -74,8 +75,10 @@ type Store struct {
 	eventsPath     string
 	projectionPath string
 	events         []Event
+	sourceIDs      map[string]uint64
 	projection     Projection
 	now            func() time.Time
+	subscribers    map[chan Event]struct{}
 }
 
 func Open(projectRoot, id string) (*Store, error) {
@@ -83,6 +86,8 @@ func Open(projectRoot, id string) (*Store, error) {
 		eventsPath:     paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id),
 		projectionPath: paths.GetChatStateJSONFromProjectRoot(projectRoot, id),
 		now:            time.Now,
+		sourceIDs:      map[string]uint64{},
+		subscribers:    map[chan Event]struct{}{},
 		projection: Projection{
 			Version:   ProjectionVersion,
 			Subagents: map[string]SubagentState{},
@@ -135,6 +140,9 @@ func (s *Store) load() error {
 			break
 		}
 		s.events = append(s.events, ev)
+		if ev.SourceID != "" {
+			s.sourceIDs[ev.SourceID] = ev.Seq
+		}
 		validBytes += i + 1
 		if ev.Seq > s.projection.Through {
 			apply(&s.projection, ev)
@@ -154,30 +162,44 @@ func (s *Store) load() error {
 // atomically checkpoints that projection. A crash between the first two writes
 // is repaired by replaying events after Projection.Through on Open.
 func (s *Store) Append(eventType string, payload any) (Event, error) {
+	ev, _, err := s.AppendSource("", eventType, payload)
+	return ev, errtrace.Wrap(err)
+}
+
+// AppendSource is Append with a provider-stable deduplication key. It returns
+// appended=false and the original event when replay/backfill presents a source
+// item already recorded by the live stream.
+func (s *Store) AppendSource(sourceID, eventType string, payload any) (ev Event, appended bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if eventType == "" {
-		return Event{}, errtrace.Wrap(errors.New("chat event type is empty"))
+		return Event{}, false, errtrace.Wrap(errors.New("chat event type is empty"))
+	}
+	if seq, ok := s.sourceIDs[sourceID]; sourceID != "" && ok {
+		i := sort.Search(len(s.events), func(i int) bool { return s.events[i].Seq >= seq })
+		if i < len(s.events) && s.events[i].Seq == seq {
+			return s.events[i], false, nil
+		}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return Event{}, errtrace.Wrap(err)
+		return Event{}, false, errtrace.Wrap(err)
 	}
 	seq := s.projection.Through + 1
 	if n := len(s.events); n > 0 && s.events[n-1].Seq >= seq {
 		seq = s.events[n-1].Seq + 1
 	}
-	ev := Event{Seq: seq, ID: strconv.FormatUint(seq, 10), Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
+	ev = Event{Seq: seq, ID: strconv.FormatUint(seq, 10), SourceID: sourceID, Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
 	line, err := json.Marshal(ev)
 	if err != nil {
-		return Event{}, errtrace.Wrap(err)
+		return Event{}, false, errtrace.Wrap(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(s.eventsPath), 0o755); err != nil {
-		return Event{}, errtrace.Wrap(err)
+		return Event{}, false, errtrace.Wrap(err)
 	}
 	f, err := os.OpenFile(s.eventsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return Event{}, errtrace.Wrap(err)
+		return Event{}, false, errtrace.Wrap(err)
 	}
 	_, writeErr := f.Write(append(line, '\n'))
 	if writeErr == nil {
@@ -185,17 +207,28 @@ func (s *Store) Append(eventType string, payload any) (Event, error) {
 	}
 	closeErr := f.Close()
 	if writeErr != nil {
-		return Event{}, errtrace.Wrap(writeErr)
+		return Event{}, false, errtrace.Wrap(writeErr)
 	}
 	if closeErr != nil {
-		return Event{}, errtrace.Wrap(closeErr)
+		return Event{}, false, errtrace.Wrap(closeErr)
 	}
 	s.events = append(s.events, ev)
+	if sourceID != "" {
+		s.sourceIDs[sourceID] = ev.Seq
+	}
 	apply(&s.projection, ev)
 	if err := s.persistProjection(); err != nil {
-		return Event{}, errtrace.Wrap(err)
+		return Event{}, false, errtrace.Wrap(err)
 	}
-	return ev, nil
+	for ch := range s.subscribers {
+		select {
+		case ch <- ev:
+		default:
+			close(ch)
+			delete(s.subscribers, ch)
+		}
+	}
+	return ev, true, nil
 }
 
 func (s *Store) persistProjection() error {
@@ -225,6 +258,31 @@ func (s *Store) Snapshot() Projection {
 	var out Projection
 	_ = json.Unmarshal(data, &out)
 	return out
+}
+
+// Watch atomically captures the current projection watermark and subscribes to
+// every later append. A slow subscriber is closed instead of blocking provider
+// ingestion; reconnect/cursor replay recovers the missed tail.
+func (s *Store) Watch() (Projection, <-chan Event, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, _ := json.Marshal(s.projection)
+	var snapshot Projection
+	_ = json.Unmarshal(data, &snapshot)
+	ch := make(chan Event, 256)
+	s.subscribers[ch] = struct{}{}
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if _, ok := s.subscribers[ch]; ok {
+				delete(s.subscribers, ch)
+				close(ch)
+			}
+			s.mu.Unlock()
+		})
+	}
+	return snapshot, ch, cancel
 }
 
 // Before returns up to limit display events preceding the opaque cursor. An
@@ -311,6 +369,10 @@ func apply(p *Projection, ev Event) {
 		p.Interaction = nil
 	case "model_changed":
 		p.Model = v.Model
+	case "conversation_started":
+		if v.Model != "" {
+			p.Model = v.Model
+		}
 	case "usage_updated":
 		p.Usage = cloneRaw(v.Usage)
 	case "queued_message":
@@ -319,7 +381,7 @@ func apply(p *Projection, ev Event) {
 		if v.ID != "" {
 			delete(p.Queue, v.ID)
 		}
-	case "head_changed", "commit_created":
+	case "head_observed", "head_changed", "commit_created":
 		if v.Head != "" {
 			p.Head = v.Head
 		}

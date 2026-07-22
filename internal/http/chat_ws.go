@@ -14,6 +14,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -45,6 +46,10 @@ type chatClientMsg struct {
 	// load_before (infinite scroll) request - the daemon returns the batch
 	// older than it.
 	Before string `json:"before,omitempty"`
+	// Cursor is the opaque normalized-event history cursor. It coexists with
+	// Before while the Claude UUID history API is migrated.
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
 	// Content is the content-block array of a user_message, forwarded to the
 	// CLI verbatim (the client owns the block shapes; the daemon only wraps
 	// them in the stdin envelope).
@@ -80,6 +85,23 @@ type chatQueueFrame struct {
 type chatEventFrame struct {
 	terminalEvent
 	Event json.RawMessage `json:"event"`
+}
+
+type normalizedChatEventFrame struct {
+	terminalEvent
+	Event chat.Event `json:"event"`
+}
+
+type chatStateSnapshotFrame struct {
+	terminalEvent
+	State chat.Projection `json:"state"`
+}
+
+type normalizedChatHistoryFrame struct {
+	terminalEvent
+	Events     []chat.Event `json:"events"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	Done       bool         `json:"done"`
 }
 
 // chatSubagentMetaFrame links a sub-agent (Task tool) to the Task tool_use that
@@ -163,6 +185,9 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		return
 	}
 	switch msg.Type {
+	case "load_events_before":
+		s.sendNormalizedHistory(conn, sessionID, msg.Cursor, msg.Limit)
+		return
 	case "load_before":
 		// Infinite scroll: send the batch of conversation history older than the
 		// client's current oldest line (msg.Before is that line's uuid).
@@ -236,6 +261,32 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	default:
 		log.Printf("chat ws: unknown client frame type %q for %q", msg.Type, sessionID)
 	}
+}
+
+func (s *Server) sendNormalizedHistory(conn *safeConn, agentID, cursor string, limit int) {
+	if s.ChatEvents == nil {
+		return
+	}
+	events, next, done, err := s.ChatEvents.Before(agentID, cursor, limit)
+	if err != nil {
+		log.Printf("chat ws: normalized history for %q: %v", agentID, err)
+		return
+	}
+	data, err := json.Marshal(normalizedChatHistoryFrame{
+		terminalEvent: terminalEvent{Type: "chat_history"},
+		Events:        events, NextCursor: next, Done: done,
+	})
+	if err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+func sendNormalizedEvent(conn *safeConn, event chat.Event) bool {
+	data, err := json.Marshal(normalizedChatEventFrame{terminalEvent: terminalEvent{Type: "chat_event"}, Event: event})
+	if err != nil {
+		return true
+	}
+	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }
 
 // sendChatEventLine relays one stream-json line as a claude_event frame.
@@ -677,6 +728,23 @@ func claudeProjectDir(worktree string) string {
 // snapshot, then live events - merged with live sub-agent transcript growth
 // (the tail goroutine; current CLIs keep sub-agent steps off the main stdout).
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
+	var normalized <-chan chat.Event
+	if s.ChatEvents != nil {
+		if err := s.ChatEvents.Flush(agentID); err != nil {
+			log.Printf("chat ws: flush normalized events for %q: %v", agentID, err)
+		} else if snapshot, live, cancel, err := s.ChatEvents.Watch(agentID); err != nil {
+			log.Printf("chat ws: watch normalized events for %q: %v", agentID, err)
+		} else {
+			defer cancel()
+			normalized = live
+			if data, err := json.Marshal(chatStateSnapshotFrame{terminalEvent: terminalEvent{Type: "state_snapshot"}, State: snapshot}); err == nil {
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+			}
+			// The initial display window ends exactly at the snapshot watermark;
+			// live contains only events appended after it.
+			s.sendNormalizedHistory(conn, agentID, fmt.Sprintf("%d", snapshot.Through+1), 100)
+		}
+	}
 	dir := claudeProjectDir(worktree)
 	subs := newSubagentResolver(dir)
 	// Replay measured thinking durations first, so the client has them before it
@@ -740,6 +808,14 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		select {
 		case <-att.Done:
 			return
+		case ev, ok := <-normalized:
+			if !ok {
+				normalized = nil
+				continue
+			}
+			if !sendNormalizedEvent(conn, ev) {
+				return
+			}
 		case growth := <-subGrowth:
 			for _, g := range growth {
 				for _, line := range g.Lines {

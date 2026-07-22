@@ -405,6 +405,11 @@ func (b *LineBuffer) Feed(chunk []byte) [][]byte {
 // session lock, and Pending is read under the same lock (see Session.attach).
 type RingFilter struct {
 	lb LineBuffer
+	// OnLine observes every complete non-stream_event protocol line in read
+	// order. Hydra's normalized event adapter uses it to persist one canonical
+	// timeline even when no browser is attached. The callback runs under the
+	// session lock and should enqueue work rather than doing disk IO itself.
+	OnLine func(line []byte)
 	// OnAPIError, if set, is called (synchronously, once per line) with the error
 	// text whenever a complete assistant line flagged isApiErrorMessage passes
 	// through - the signal that a turn failed mid-response. It runs under the
@@ -602,6 +607,9 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 		}
 		if ok && ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && f.OnModel != nil {
 			f.OnModel(ev.Model)
+		}
+		if ok && f.OnLine != nil {
+			f.OnLine(line)
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

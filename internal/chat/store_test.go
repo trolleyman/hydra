@@ -112,3 +112,27 @@ func TestApplyIsIdempotent(t *testing.T) {
 		t.Fatalf("projection = %+v", p)
 	}
 }
+
+func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, appended, err := s.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "hi"})
+	if err != nil || !appended {
+		t.Fatalf("first append: appended=%v err=%v", appended, err)
+	}
+	again, appended, err := s.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "duplicate"})
+	if err != nil || appended || again.Seq != first.Seq {
+		t.Fatalf("duplicate append: event=%+v appended=%v err=%v", again, appended, err)
+	}
+	reopened, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, appended, err = reopened.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "after restart"})
+	if err != nil || appended {
+		t.Fatalf("restart duplicate: appended=%v err=%v", appended, err)
+	}
+}

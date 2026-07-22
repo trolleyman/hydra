@@ -45,6 +45,7 @@ type Registry struct {
 	onChatPlanSeed    func(id string) string
 	onChatPlanChange  func(id, planJSON string)
 	onChatModel       func(id, model string)
+	onChatLine        func(id string, line []byte)
 }
 
 // NewRegistry returns an empty registry.
@@ -143,6 +144,14 @@ func (r *Registry) SetOnChatPlanChange(fn func(id, planJSON string)) {
 func (r *Registry) SetOnChatModel(fn func(id, model string)) {
 	r.mu.Lock()
 	r.onChatModel = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatLine registers the ordered provider-line observer used by the
+// normalized chat event adapter. The callback must remain cheap.
+func (r *Registry) SetOnChatLine(fn func(id string, line []byte)) {
+	r.mu.Lock()
+	r.onChatLine = fn
 	r.mu.Unlock()
 }
 
@@ -302,6 +311,14 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, model)
+			}
+		}
+		ringFilter.OnLine = func(line []byte) {
+			r.mu.RLock()
+			fn := r.onChatLine
+			r.mu.RUnlock()
+			if fn != nil {
+				fn(id, line)
 			}
 		}
 		// A completed thinking block: persist its measured duration to the head's

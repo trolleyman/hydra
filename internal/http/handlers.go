@@ -20,6 +20,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -65,7 +66,10 @@ type Server struct {
 	// ChatQueues holds chat-mode heads' queued (not-yet-sent) user messages,
 	// daemon-side and disk-persisted (see heads.ChatQueueManager). nil disables
 	// queueing (messages always send straight through).
-	ChatQueues  *heads.ChatQueueManager
+	ChatQueues *heads.ChatQueueManager
+	// ChatEvents owns provider-neutral durable history and current-state
+	// projections. nil keeps legacy tests/simulation paths working.
+	ChatEvents  *chat.Manager
 	StartTime   time.Time
 	Development bool // set when running under mage dev / mage DevAutoReload
 	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
