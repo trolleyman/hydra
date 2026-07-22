@@ -860,8 +860,10 @@ try {
         toast: {
           message: '',
           type: 'warning',
+          // webfetch/egress allows are session-wide host grants, so the primary
+          // button is "Allow" (not "Allow once") - see useAgentNotifications.
           actions: [
-            { label: 'Allow once', variant: 'primary' },
+            { label: 'Allow', variant: 'primary' },
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
@@ -869,7 +871,7 @@ try {
         },
       },
       // 3e. A blocked egress host: the agent's proxy hit a host on neither the
-      // allow- nor block-list, so the connection is parked. Allow once opens it
+      // allow- nor block-list, so the connection is parked. Allow opens it
       // for the session; Always allow adds it to the network allow-list.
       {
         name: 'agent-approvals-egress',
@@ -878,7 +880,7 @@ try {
           message: '',
           type: 'warning',
           actions: [
-            { label: 'Allow once', variant: 'primary' },
+            { label: 'Allow', variant: 'primary' },
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],

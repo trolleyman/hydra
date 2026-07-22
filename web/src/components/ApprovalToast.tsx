@@ -216,8 +216,8 @@ const actionClass = (a: ToastAction): string => {
   const base = 'inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer'
   if (a.variant === 'danger') return `${base} text-red-600 border border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-500/40 dark:hover:bg-red-500/10`
   if (a.variant === 'primary') {
-    // The FIRST primary (Allow once) is the solid accent; a second primary
-    // (Always allow) is a lighter tint.
+    // The FIRST primary (Allow / Allow once) is the solid accent; a second
+    // primary (Always allow) is a lighter tint.
     return a.label.toLowerCase().startsWith('always')
       ? `${base} bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:bg-blue-500/25`
       : `${base} bg-blue-600 text-white hover:bg-blue-500`
@@ -293,12 +293,12 @@ export const ApprovalCard: React.FC<{
           )}
           {data.kind === 'webfetch' && (
             <Caption icon={<Globe className="w-3 h-3" />}>
-              Allowing trusts the whole host - every request to <span className="font-mono">{data.target}</span>, including POSTs - not just this URL.
+              Allow trusts the whole host for the rest of this session - every request to <span className="font-mono">{data.target}</span>, including POSTs - not just this URL.
             </Caption>
           )}
           {data.kind === 'egress' && (
             <Caption icon={<Network className="w-3 h-3" />}>
-              Allow once opens <span className="font-mono">{data.target}</span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
+              Allow opens <span className="font-mono">{data.target}</span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
             </Caption>
           )}
           {data.kind === 'tool' && (
