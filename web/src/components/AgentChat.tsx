@@ -23,6 +23,7 @@ import {
   MessageSquare,
   Plus,
   Search,
+  Send,
   SlidersHorizontal,
   Sparkles,
   SquareDot,
@@ -195,6 +196,11 @@ interface SubagentView {
   // boilerplate). It runs on past the turn that launched it, so the turn's
   // result must NOT settle it - only its own <task-notification> completion does.
   background?: boolean
+  // Put back to work by a SendMessage after it had already finished (the tool
+  // resumed it in the background). Its parent Task tool_result settled long ago,
+  // so that signal must stop counting as "done" or the card would read finished
+  // while the agent is running again - see reopenMessagedSubagent.
+  reopened?: boolean
   items: ChatItem[]
 }
 
@@ -208,7 +214,7 @@ type CommitChipItem = Extract<ChatItem, { kind: 'commit' }>
 // that result is ignored and we defer to the sub's own status (settled when its
 // sidechain result finally lands), keeping the "working" marker up meanwhile.
 function isSubRunning(sub: SubagentView, tool?: ToolItem): boolean {
-  if (tool) {
+  if (tool && !sub.reopened) {
     if (tool.result !== undefined && !isLaunchBoilerplate(tool.result)) return false
     if (tool.ended) return false
   }
@@ -719,7 +725,7 @@ function trimWorktreePaths(text: string, worktree: string | null): string {
 // Input fields that hold PROSE (a sentence the agent wrote), rendered in the
 // sans font on the card header rather than monospace - a ScheduleWakeup prompt
 // or an Agent brief isn't code.
-const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'description', 'prompt', 'reason'])
+const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'summary', 'description', 'prompt', 'reason'])
 
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
 // card, favouring the fields agent tools actually carry, and reports whether
@@ -735,7 +741,7 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
     const subj = typeof obj.subject === 'string' ? obj.subject : ''
     return { text: `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`, prose: true }
   }
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt', 'reason']) {
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'summary', 'description', 'prompt', 'reason']) {
     if (typeof obj[key] === 'string' && obj[key]) return { text: obj[key] as string, prose: PROSE_INPUT_KEYS.has(key) }
   }
   try {
@@ -778,6 +784,65 @@ function interactiveShellTranscript(command: string, output: string): { command:
 
 // Keep provider protocol identifiers in Raw while making MCP calls scan like
 // namespace-qualified operations in the normal card header.
+// sendMessageRecipient pulls the agent a SendMessage call is addressed to. The
+// tool echoes the id under both `to` and the legacy `recipient` (and mirrors
+// `message` as `content`) - the card shows it once and hides the duplicates.
+const SEND_MESSAGE_ECHO_KEYS = new Set(['recipient', 'content', 'type'])
+function sendMessageRecipient(input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const obj = input as Record<string, unknown>
+  for (const key of ['to', 'recipient', 'agent_id', 'agentId']) {
+    if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
+  }
+  return ''
+}
+
+// A SendMessage result is a JSON envelope, not prose:
+//   {"success":true,"message":"Agent \"<id>\" had no active task; resumed ...
+//    Output: /tmp/.../tasks/<id>.output","resumedAgentId":"<id>","pin":{...}}
+// parseSendMessageResult turns it into what the card actually shows - the
+// sentence, the recipient it names, and whether the agent was resumed (i.e. it
+// is working again, see reopenMessagedSubagent). Null for anything that isn't
+// that envelope, so an unrecognised result falls back to the plain panel.
+interface SendMessageResult {
+  ok: boolean
+  message: string
+  outputFile: string
+  recipient: string
+  resumed: boolean
+}
+function parseSendMessageResult(text?: string): SendMessageResult | null {
+  if (!text || !text.trim().startsWith('{')) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  if (typeof obj.success !== 'boolean' && typeof obj.message !== 'string') return null
+  let message = typeof obj.message === 'string' ? obj.message : ''
+  // The output-file path is machine plumbing - keep it out of the sentence (the
+  // Raw view still has it).
+  let outputFile = ''
+  const outputAt = /\s*Output:\s*(\S+)\s*$/.exec(message)
+  if (outputAt) {
+    outputFile = outputAt[1]
+    message = message.slice(0, outputAt.index).trim()
+  }
+  const resumedAgentId = typeof obj.resumedAgentId === 'string' ? obj.resumedAgentId : ''
+  const pin = obj.pin && typeof obj.pin === 'object' ? (obj.pin as Record<string, unknown>) : null
+  const pinnedId = pin && typeof pin.id === 'string' ? pin.id : ''
+  return {
+    ok: obj.success !== false,
+    message,
+    outputFile,
+    recipient: resumedAgentId || pinnedId,
+    resumed: resumedAgentId !== '',
+  }
+}
+
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
   if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
@@ -1546,6 +1611,131 @@ function TaskToolFields({ input, serif }: { input: Record<string, unknown>; seri
   )
 }
 
+// AgentChip is the recipient of a SendMessage - the sub-agent's label (and its
+// short id) as a pill that opens that agent's chat when we can resolve it.
+function AgentChip({
+  label,
+  id,
+  running,
+  onOpenChat,
+}: {
+  label: string
+  id: string
+  running?: boolean
+  onOpenChat?: () => void
+}) {
+  const body = (
+    <>
+      <Bot className="w-3 h-3 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+      <span className="truncate">{label}</span>
+      {id && <span className="shrink-0 font-mono text-[10px] text-stone-400 dark:text-stone-500">{id.slice(0, 8)}</span>}
+      {running && <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
+      {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
+    </>
+  )
+  const cls =
+    'flex max-w-full items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2 py-0.5 text-[11px] text-stone-500 dark:text-stone-400'
+  return onOpenChat ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onOpenChat() }}
+      className={`${cls} cursor-pointer hover:text-stone-700 dark:hover:text-stone-200`}
+      title="Open this agent's chat"
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={`${cls} select-none`}>{body}</span>
+  )
+}
+
+// SendMessageFields renders a SendMessage input as who it went to plus the
+// message itself, as prose - the raw JSON (with its echoed recipient/content
+// duplicates) said the same thing three times and buried the actual message.
+function SendMessageFields({
+  input,
+  serif,
+  recipientLabel,
+  recipientId,
+  recipientRunning,
+  onOpenChat,
+}: {
+  input: Record<string, unknown>
+  serif: boolean
+  recipientLabel: string
+  recipientId: string
+  recipientRunning?: boolean
+  onOpenChat?: () => void
+}) {
+  const message = typeof input.message === 'string' ? input.message : typeof input.content === 'string' ? input.content : ''
+  const summary = typeof input.summary === 'string' ? input.summary : ''
+  // Anything the tool carried beyond the fields rendered below (and the echoed
+  // duplicates) still shows, so a new field never silently disappears.
+  const extra = Object.fromEntries(
+    Object.entries(input).filter(
+      ([key]) => !SEND_MESSAGE_ECHO_KEYS.has(key) && key !== 'to' && key !== 'summary' && key !== 'message' && !key.startsWith('_'),
+    ),
+  )
+  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  return (
+    <div className="space-y-1.5">
+      {recipientId && (
+        <LabeledField label="To">
+          <AgentChip label={recipientLabel} id={recipientId} running={recipientRunning} onOpenChat={onOpenChat} />
+        </LabeledField>
+      )}
+      {summary && (
+        <LabeledField label="Summary"><div className={proseCls}><Markdown text={summary} /></div></LabeledField>
+      )}
+      {message && (
+        <LabeledField label="Message">
+          <div className={`${PANEL_CLASS} px-2.5 py-1.5 ${proseCls} text-stone-700 dark:text-stone-200`}>
+            <Markdown text={message} />
+          </div>
+        </LabeledField>
+      )}
+      {Object.keys(extra).length > 0 && <CodePanel code={JSON.stringify(extra, null, 2)} lang="json" />}
+    </div>
+  )
+}
+
+// SendMessageOutcome renders the tool's JSON reply as the one line it means:
+// whether the message landed, and (when it resumed a finished agent) a way into
+// that agent's chat to watch it work.
+function SendMessageOutcome({
+  result,
+  recipientRunning,
+  onOpenChat,
+}: {
+  result: SendMessageResult
+  recipientRunning?: boolean
+  onOpenChat?: () => void
+}) {
+  return (
+    <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1`}>
+      <div className="flex items-start gap-1.5">
+        {result.ok ? (
+          <Check className="w-3.5 h-3.5 shrink-0 mt-px text-emerald-600/80 dark:text-emerald-400/80" />
+        ) : (
+          <X className="w-3.5 h-3.5 shrink-0 mt-px text-red-500 dark:text-red-400" />
+        )}
+        <span className="break-words leading-relaxed text-stone-700 dark:text-stone-200">
+          {result.message || (result.ok ? 'Message delivered.' : 'Message failed.')}
+        </span>
+      </div>
+      {result.resumed && onOpenChat && (
+        <button
+          onClick={onOpenChat}
+          className="flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
+        >
+          {recipientRunning && <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
+          <span>{recipientRunning ? 'Working - open its chat' : 'Open its chat'}</span>
+          <MessageSquare className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 // Per-tool icons for the card header; anything unlisted gets the wrench.
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
@@ -1559,6 +1749,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Task: Bot,
   Agent: Bot,
+  SendMessage: Send,
   TaskCreate: ListPlus,
   TaskUpdate: ListChecks,
   UpdatePlan: ListChecks,
@@ -1573,7 +1764,24 @@ function LowlitPath({ path }: { path: string }) {
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
-const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
+// recipient* / openSub describe a SendMessage's target agent. They are passed
+// as primitives (plus the stable openSubView callback) so the memo comparison
+// still holds - an object prop would re-render every card on each parent render.
+const ToolCard = memo(function ToolCard({
+  item,
+  worktree,
+  recipientId = '',
+  recipientLabel = '',
+  recipientRunning = false,
+  openSub,
+}: {
+  item: Extract<ChatItem, { kind: 'tool' }>
+  worktree: string | null
+  recipientId?: string
+  recipientLabel?: string
+  recipientRunning?: boolean
+  openSub?: (key: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
@@ -1630,6 +1838,15 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const isFileChanges = Array.isArray(input?.changes)
   const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
   const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
+
+  // SendMessage: a note to another agent, so the card reads as who it went to +
+  // what was said, and its JSON reply becomes a sentence (items: rich message
+  // card). The recipient's label/liveness are resolved by the caller.
+  const isSendMessage = item.name === 'SendMessage' && input != null
+  const messageTo = isSendMessage ? sendMessageRecipient(input) || recipientId : ''
+  const messageResult = isSendMessage ? parseSendMessageResult(visibleResult) : null
+  const openRecipientChat = openSub && recipientId ? () => openSub(recipientId) : undefined
+  const recipientName = recipientLabel || (messageTo ? messageTo.slice(0, 8) : 'agent')
 
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
@@ -1707,6 +1924,17 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
           <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
+          {/* Who a message went to belongs in the collapsed header - it is the
+              first thing you want to know about a SendMessage. */}
+          {isSendMessage && messageTo && (
+            <span className="shrink-0 flex items-baseline gap-1 text-stone-400 dark:text-stone-500">
+              <span aria-hidden>-&gt;</span>
+              <span className="max-w-40 truncate text-stone-500 dark:text-stone-400">{recipientName}</span>
+            </span>
+          )}
+          {isSendMessage && recipientRunning && (
+            <LoaderCircle className="w-3 h-3 shrink-0 self-center animate-spin text-violet-500/80 dark:text-violet-400/80" />
+          )}
           {isPathSummary ? (
             <span className="truncate">
               {summaryPaths.map((path, index) => <span key={`${path}:${index}`}>{index > 0 && <span className="text-stone-400 dark:text-stone-500">, </span>}<LowlitPath path={path} /></span>)}
@@ -1767,6 +1995,15 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   lang={fileLang}
                   replaceAll={input!.replace_all === true}
                 />
+              ) : isSendMessage && input ? (
+                <SendMessageFields
+                  input={input}
+                  serif={serif}
+                  recipientLabel={recipientName}
+                  recipientId={messageTo}
+                  recipientRunning={recipientRunning}
+                  onOpenChat={openRecipientChat}
+                />
               ) : isTaskTool && input ? (
                 <TaskToolFields input={input} serif={serif} />
               ) : hideInput ? null : (
@@ -1807,7 +2044,9 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                     </div>
                   )}
 					{renderedResult !== undefined && !(renderedResult === '' && item.resultImages?.length) && (
-                    mem && !item.isError
+                    messageResult && !item.isError
+                      ? <SendMessageOutcome result={messageResult} recipientRunning={recipientRunning} onOpenChat={openRecipientChat} />
+                    : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
 							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
@@ -4167,6 +4406,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
+    // SendMessage tool_use id -> the agent it addressed, so its result (which
+    // may name the agent only as `resumedAgentId`) can reopen the right sub.
+    const messageTargetByUse = new Map<string, string>()
+    // reopenMessagedSubagent puts a sub-agent back into the "working" state when
+    // a SendMessage resumed it. Without this the sub keeps the finished state its
+    // Task tool_result gave it long ago, so the UI claims it is done while it is
+    // in fact running again - and the steps it streams land in a card that reads
+    // as settled. Its next <task-notification> settles it again as usual.
+    const reopenMessagedSubagent = (toolUseId: string, result: string) => {
+      const parsed = parseSendMessageResult(result)
+      if (!parsed || !parsed.ok || !parsed.resumed) return
+      const agentId = parsed.recipient || messageTargetByUse.get(toolUseId) || ''
+      const sub = agentId ? subLocal[agentId] : undefined
+      if (!sub) return
+      sub.status = 'running'
+      sub.reopened = true
+      // It was resumed in the BACKGROUND: it outlives the turn that messaged it,
+      // so neither the turn's result nor the end-of-replay sweep may settle it -
+      // only its next <task-notification>. Its earlier completion is stale now,
+      // so forget it (the sweeps replay recorded completions).
+      sub.background = true
+      completedNotifs.delete(sub.agentId)
+      if (sub.toolUseId) completedNotifs.delete(sub.toolUseId)
+      scheduleSubFlush()
+    }
     const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string, parentAgentId: string, prompt = '') => {
       if (!agentId) return
       const sub = ensureSubagent(agentId)
@@ -4887,6 +5151,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
+              if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
               if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
             }
           }
@@ -4962,6 +5227,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 plan.applyTodoWrite(todos)
               } else {
                 plan.applyTaskTool(block.name, block.input, block.id)
+                if (block.name === 'SendMessage') {
+                  const to = sendMessageRecipient(block.input)
+                  if (to) messageTargetByUse.set(block.id, to)
+                }
                 if (block.name === 'Task' || block.name === 'Agent') {
                   const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
                   taskInputByUse.set(block.id, {
@@ -6576,6 +6845,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               />
             )
           }
+        }
+        // A SendMessage knows which agent it addressed: resolve that sub-agent so
+        // the card can name it, show whether it is working, and link into its
+        // chat.
+        if (item.name === 'SendMessage') {
+          const to = sendMessageRecipient(item.input) || parseSendMessageResult(item.result)?.recipient || ''
+          const target = to ? subagents[to] : undefined
+          const targetTool = target?.toolUseId ? taskToolByUse[target.toolUseId] : undefined
+          const labels = target ? subLabels(target, targetTool) : null
+          return (
+            <ToolCard
+              item={item}
+              worktree={worktreePath}
+              recipientId={target?.agentId ?? to}
+              recipientLabel={labels ? labels.desc || labels.label : ''}
+              recipientRunning={target ? isSubRunning(target, targetTool) : false}
+              openSub={target ? openSubView : undefined}
+            />
+          )
         }
         return <ToolCard item={item} worktree={worktreePath} />
       }

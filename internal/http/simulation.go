@@ -2918,6 +2918,13 @@ var simChatEvents = []string{
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
+	// A SendMessage back to that (now finished) sub-agent: the card renders the
+	// recipient, summary and message as prose - not the raw JSON, which echoes
+	// the same id/message three times - and its JSON reply as one sentence. The
+	// reply resumed the agent, so the sub goes back to "working" (its Task card
+	// settled long ago, hence SubagentView.reopened) until it notifies again.
+	`{"type":"assistant","message":{"id":"msg_sim_sendmsg","content":[{"type":"tool_use","id":"toolu_sim_sendmsg","name":"SendMessage","input":{"to":"sim_sub_1","summary":"Also check the artifacts uploader's giving-up path","message":"One more thing before you write up: check whether internal/artifacts asserts the giving-up path anywhere (all attempts exhausted, last error surfaced), and include file:line references in your report.","type":"message","recipient":"sim_sub_1","content":"One more thing before you write up: check whether internal/artifacts a…"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sendmsg","content":"{\"success\":true,\"message\":\"Agent \\\"sim_sub_1\\\" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: /tmp/claude-sim/tasks/sim_sub_1.output\",\"resumedAgentId\":\"sim_sub_1\",\"pin\":{\"id\":\"sim_sub_1\",\"name\":\"sim_sub_1\",\"ref\":\"acf68b\"}}"}]}}`,
 	// A second sub-agent marked the way CURRENT CLIs mark live stdout lines:
 	// parent_tool_use_id only (no isSidechain/agentId, and no meta frame). The
 	// chat must fold it into its Task card via the placeholder route instead of
