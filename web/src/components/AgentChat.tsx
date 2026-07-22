@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -1436,7 +1436,7 @@ function TaskToolFields({ input, serif }: { input: Record<string, unknown>; seri
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
   Read: FileText,
-  Edit: SquareDot,
+  Edit: FilePen,
   Write: FilePen,
   NotebookEdit: FilePen,
   Grep: Search,
@@ -1584,7 +1584,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          {!isFileChanges && <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />}
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
           <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
           {isFileChanges && (
@@ -2987,9 +2987,15 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  const copyWithoutBlockPadding = (event: ClipboardEvent<HTMLDivElement>) => {
+    const selected = window.getSelection()?.toString() ?? ''
+    if (!selected || !/\n+$/.test(selected)) return
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', selected.replace(/\n+$/, ''))
+  }
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`} onCopy={copyWithoutBlockPadding}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -4149,7 +4155,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
       const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
       const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
-      if (outputFile && taskId) backgroundCommandTaskIDs.add(taskId)
+      const linkedAgent = Object.values(subLocal).some((sub) =>
+        (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse))
+      const agentNotification = linkedAgent || /^Agent\b/i.test(decodeEntities(summary ?? ''))
+      if (outputFile && taskId && !agentNotification) backgroundCommandTaskIDs.add(taskId)
       const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
       if (seenNotif.has(dedupKey)) return
       seenNotif.add(dedupKey)
@@ -6171,13 +6180,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // render time (by the notification's task-id / tool-use-id) - clicking
         // opens that agent's chat. A background command's notice (it carried an
         // <output-file>) expands to show the command's output.
-        // An output file is authoritative evidence this is a background
-        // command. Do not let a coincidentally-created task/sub-agent lookup
-        // turn its output dropdown into a link to an empty agent view.
-        const linked = item.outputFile
-          ? undefined
-          : (item.taskId ? subagents[item.taskId] : undefined) ??
-            (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
+        const linked = (item.taskId ? subagents[item.taskId] : undefined) ??
+          (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
         // "finished" while the agent's own spawned sub-agents still run is the
         // harness's stopped-notification, not the end of the work - relabel the
         // chip until the subtree is quiet.
@@ -6189,7 +6193,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <NoticePill
             text={noticeText}
             onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
-            outputFile={item.outputFile}
+            outputFile={linked ? undefined : item.outputFile}
             requestTaskOutput={requestTaskOutput}
           />
         )
