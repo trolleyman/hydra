@@ -17,7 +17,8 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
-import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
+import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
+import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -678,6 +679,10 @@ export function AgentDetail({
   onRefresh?: () => void
 }) {
   const [killing, setKilling] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  // Bumped after a successful process restart to tell AgentTerminal to reconnect
+  // its agent tab onto the fresh session.
+  const [restartSignal, setRestartSignal] = useState(0)
   const [merging, setMerging] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
@@ -902,7 +907,10 @@ export function AgentDetail({
         setKilling(true)
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
-          useToastStore.getState().show({ message: `Agent "${agent.id}" killed`, type: 'info' })
+          useToastStore.getState().show({
+            type: 'info',
+            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' }),
+          })
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next
           // archived-list refetch (which only happens on a project switch).
@@ -934,6 +942,41 @@ export function AgentDetail({
     })()
   }
 
+  // handleRestart restarts just the agent's CLI process (claude/codex/...): it
+  // stops the running process and relaunches it in a fresh sandbox, resuming the
+  // same conversation. The worktree, branch and diff are untouched - this is not
+  // Kill. On success we bump restartSignal so the terminal reconnects onto the
+  // new session.
+  function handleRestart() {
+    useDialogStore.getState().show({
+      title: 'Restart this agent?',
+      message: `Stops the running ${agentTypeLabel(agent.agent_type)} process and starts it again, continuing the same conversation. Your worktree, branch and changes are kept.`,
+      type: 'confirm',
+      variant: 'restart',
+      confirmLabel: 'Restart agent',
+      onConfirm: async () => {
+        setRestarting(true)
+        try {
+          await api.default.restartAgentSession(projectId ?? '', agent.id)
+          setRestartSignal((n) => n + 1)
+          const name = agent.title || agent.id
+          useToastStore.getState().show({
+            type: 'info',
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'restarting', before: '' }),
+          })
+        } catch (err) {
+          useDialogStore.getState().show({
+            title: 'Restart Failed',
+            message: `Failed to restart agent: ${formatError(err)}`,
+            type: 'error',
+          })
+        } finally {
+          setRestarting(false)
+        }
+      },
+    })
+  }
+
   // executeMerge runs the actual merge POST (optionally force, bypassing the test
   // gate - PLAN #68). On a tests_failing/tests_errored 409 from a non-force merge
   // (e.g. a stale verdict that re-ran red), it offers a force-merge follow-up.
@@ -946,19 +989,17 @@ export function AgentDetail({
     // name + status pill), matching the status-update notifications.
     const name = agent.title || agent.id
     const toastId = useToastStore.getState().show({
-      message: `Merging agent "${name}" into ${agent.base_branch}...`,
       type: 'info',
       duration: 0,
-      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`...` },
+      ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`...` }),
     })
     try {
       await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined, !keepOpen)
       useToastStore.getState().dismiss(toastId)
       if (keepOpen) {
         useToastStore.getState().show({
-          message: `Agent "${name}" merged into ${agent.base_branch} - still running`,
           type: 'success',
-          agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` - agent kept running` },
+          ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` - agent kept running` }),
         })
         // Stay on the page: the base branch just absorbed the head's commits, so
         // the diff (base...head) and any artifact comparison need a refetch.
@@ -968,9 +1009,8 @@ export function AgentDetail({
         return
       }
       useToastStore.getState().show({
-        message: `Agent "${name}" merged into ${agent.base_branch}`,
         type: 'success',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` },
+        ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` }),
       })
       useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
       onKilled(agent.id)
@@ -1060,9 +1100,8 @@ export function AgentDetail({
       const name = agent.title || agent.id
       const toBranch = agent.base_branch || 'base'
       useToastStore.getState().show({
-        message: `Will merge "${name}" into ${toBranch} when it finishes and its tests pass`,
         type: 'info',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
+        ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` }),
       })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
@@ -1637,6 +1676,7 @@ export function AgentDetail({
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
+          { label: 'Restart', icon: <RotateCcw className="w-4 h-4" />, onClick: handleRestart, variant: 'segment', disabled: merging || killing || restarting },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
@@ -1730,6 +1770,7 @@ export function AgentDetail({
                   isEphemeral={agent.ephemeral}
                   chatMode={agent.chat_mode === true}
                   fill
+                  reconnectSignal={restartSignal}
                   onRefresh={onRefresh}
                   onDiffRefresh={handleDiffRefresh}
                   onSelectCommit={handleSelectCommit}
@@ -1825,6 +1866,7 @@ export function AgentDetail({
                 isEphemeral={agent.ephemeral}
                 chatMode={agent.chat_mode === true}
                 fill
+                reconnectSignal={restartSignal}
                 onRefresh={onRefresh}
                 onDiffRefresh={handleDiffRefresh}
                 onSelectCommit={handleSelectCommit}

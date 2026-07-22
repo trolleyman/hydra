@@ -1850,6 +1850,9 @@ type ServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Restart just the agent process (keeps the worktree, branch and conversation)
+	// (POST /api/projects/{project_id}/agents/{id}/restart-session)
+	RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Resume an archived (killed/merged) agent, restoring its conversation
 	// (POST /api/projects/{project_id}/agents/{id}/resume)
 	ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -3251,6 +3254,40 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// RestartAgentSession operation middleware
+func (siw *ServerInterfaceWrapper) RestartAgentSession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartAgentSession(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ResumeAgent operation middleware
 func (siw *ServerInterfaceWrapper) ResumeAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -4227,6 +4264,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart-session", wrapper.RestartAgentSession)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/resume", wrapper.ResumeAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/tests", wrapper.GetAgentTests)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
@@ -5567,6 +5605,50 @@ func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.Res
 	return json.NewEncoder(w).Encode(response)
 }
 
+type RestartAgentSessionRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type RestartAgentSessionResponseObject interface {
+	VisitRestartAgentSessionResponse(w http.ResponseWriter) error
+}
+
+type RestartAgentSession204Response struct {
+}
+
+func (response RestartAgentSession204Response) VisitRestartAgentSessionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RestartAgentSession404JSONResponse ErrorResponse
+
+func (response RestartAgentSession404JSONResponse) VisitRestartAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgentSession409JSONResponse ErrorResponse
+
+func (response RestartAgentSession409JSONResponse) VisitRestartAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgentSession500JSONResponse ErrorResponse
+
+func (response RestartAgentSession500JSONResponse) VisitRestartAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ResumeAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -6523,6 +6605,9 @@ type StrictServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Restart just the agent process (keeps the worktree, branch and conversation)
+	// (POST /api/projects/{project_id}/agents/{id}/restart-session)
+	RestartAgentSession(ctx context.Context, request RestartAgentSessionRequestObject) (RestartAgentSessionResponseObject, error)
 	// Resume an archived (killed/merged) agent, restoring its conversation
 	// (POST /api/projects/{project_id}/agents/{id}/resume)
 	ResumeAgent(ctx context.Context, request ResumeAgentRequestObject) (ResumeAgentResponseObject, error)
@@ -7581,6 +7666,33 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, pr
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
 		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartAgentSession operation middleware
+func (sh *strictHandler) RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request RestartAgentSessionRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartAgentSession(ctx, request.(RestartAgentSessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartAgentSession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartAgentSessionResponseObject); ok {
+		if err := validResponse.VisitRestartAgentSessionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

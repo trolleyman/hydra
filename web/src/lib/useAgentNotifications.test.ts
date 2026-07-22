@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
+import { isValidElement, type ReactElement } from 'react'
 import { useAgentNotifications } from './useAgentNotifications'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
-import { useToastStore } from '../stores/toastStore'
+import { useToastStore, type Toast } from '../stores/toastStore'
+import type { AgentTransitionSpec } from './agentToast'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
 
@@ -54,8 +56,12 @@ function seedAgents(agents: AgentResponse[]) {
   })
 }
 
+// Agent-transition toasts carry a rich element `message` (the AgentTransitionRow
+// from lib/agentToast); plain toasts have a string message. So an element message
+// identifies a transition toast, and its props are the AgentTransitionSpec.
 const transitionToasts = () =>
-  useToastStore.getState().toasts.filter((t) => t.agentTransition !== undefined)
+  useToastStore.getState().toasts.filter((t) => isValidElement(t.message))
+const specOf = (t: Toast) => (t.message as ReactElement<AgentTransitionSpec>).props
 
 beforeEach(() => {
   useToastStore.setState(useToastStore.getInitialState(), true)
@@ -82,7 +88,7 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
   it('pops a finished transition toast when a different branch is selected', () => {
     runTransition('other-agent', AgentStatus.FINISHED)
     expect(transitionToasts()).toHaveLength(1)
-    expect(transitionToasts()[0].agentTransition?.agentId).toBe('a1')
+    expect(specOf(transitionToasts()[0]).agentId).toBe('a1')
   })
 
   it('pops a needs_input transition toast when no branch is selected', () => {
@@ -104,7 +110,7 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
     runTransition('other-agent', AgentStatus.ERRORED)
     const toasts = transitionToasts()
     expect(toasts).toHaveLength(1)
-    expect(toasts[0].agentTransition?.status).toBe('errored')
+    expect(specOf(toasts[0]).status).toBe('errored')
     expect(toasts[0].type).toBe('error')
   })
 

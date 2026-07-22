@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
 import { useToastStore } from './toastStore'
+import { agentTransitionToast } from '../lib/agentToast'
 import { deepEqual, reconcileList } from '../lib/deepEqual'
 
 // Default lifetime of an optimistic status override. Comfortably longer than
@@ -136,16 +137,14 @@ function notifyBackgroundMerges(prev: AgentResponse[], next: AgentResponse[], pr
   for (const agent of prev) {
     if (agent.merge_when_green && !nextIds.has(agent.id)) {
       const name = agent.title || agent.id
+      // The agent-transition card (matching the status-update toasts); the
+      // backticks render the branch as a mono pill.
       useToastStore.getState().show({
-        message: `Agent "${name}" merged into ${agent.base_branch || 'its base branch'}`,
         type: 'success',
-        // Rendered as the agent-transition card (matching the status-update
-        // toasts); the message is only the fallback for non-card surfaces. The
-        // backticks render the branch as a mono pill.
-        agentTransition: {
+        ...agentTransitionToast({
           agentName: name, agentId: agent.id, projectId, status: 'merged',
           before: '', after: agent.base_branch ? `into \`${agent.base_branch}\`` : 'into its base branch',
-        },
+        }),
       })
     }
   }

@@ -6,6 +6,7 @@ import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
 import { fireNotification, dismissNotification } from './notifyPrefs'
+import { agentTransitionToast } from './agentToast'
 import { ensureProjectIconUrl, projectIconUrl } from './projectIconUrl'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
@@ -180,10 +181,9 @@ export function useAgentNotifications(
       if (status === 'needs_input' && notifType !== 'policy_approval') {
         if (!isSelected) {
           toast.show({
-            message: `"${name}" transitioned to needs input`,
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
@@ -200,10 +200,9 @@ export function useAgentNotifications(
       } else if (status === 'finished') {
         if (!isSelected) {
           toast.show({
-            message: `"${name}" transitioned to finished`,
             type: 'success',
             duration: FINISHED_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
@@ -222,10 +221,9 @@ export function useAgentNotifications(
         // toast + sticky OS notification), but as an error.
         if (!isSelected) {
           toast.show({
-            message: `"${name}" hit an API error`,
             type: 'error',
             duration: NEEDS_INPUT_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
@@ -431,12 +429,11 @@ export function useAgentNotifications(
           toast.show({
             // One toast per agent (no plural copy); the key dedups a re-fetch.
             key: `bg-needs-input:${a.id}`,
-            message: `Agent "${agentName}" in project "${projectName}" transitioned to needs input`,
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
             // Cross-project: the label still links through (its onClick selects the
             // project first), and projectName draws the cross-project banner.
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName, projectIcon: p.icon },
+            ...agentTransitionToast({ agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName, projectIcon: p.icon }),
           })
           if (!pageActive) {
             fireNotification({
@@ -482,12 +479,9 @@ export function useAgentNotifications(
           const isErr = status === 'errored'
           toast.show({
             key: `bg-${status}:${a.id}`,
-            message: isErr
-              ? `Agent "${agentName}" in project "${projectName}" hit an API error`
-              : `Agent "${agentName}" in project "${projectName}" transitioned to finished`,
             type: isErr ? 'error' : 'success',
             duration: isErr ? NEEDS_INPUT_TOAST_MS : FINISHED_TOAST_MS,
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon },
+            ...agentTransitionToast({ agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon }),
           })
           if (!pageActive) {
             fireNotification({

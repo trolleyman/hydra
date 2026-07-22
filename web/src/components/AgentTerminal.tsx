@@ -678,6 +678,11 @@ interface Props {
   // all artifacts of being a window inside a scroll column, so they're inert
   // here. Omitted -> the classic fixed-height dragged window.
   fill?: boolean
+  // reconnectSignal: bumping this number from the parent reconnects the agent
+  // tab's socket, the same way the title bar's Refresh button does. Used after
+  // restarting the agent process, so the pane attaches to the new session
+  // instead of sitting on the closed one.
+  reconnectSignal?: number
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
@@ -690,7 +695,7 @@ interface Props {
 // so those ticks skip the whole tab strip + xterm/chat subtree.
 export const AgentTerminal = memo(AgentTerminalImpl)
 
-function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
+function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reconnectSignal, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -846,6 +851,13 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, onRe
     setReconnectKeys(prev => ({ ...prev, [activeTabId]: (prev[activeTabId] ?? 0) + 1 }))
     onRefresh?.()
   }
+
+  // Parent-driven reconnect (e.g. after restarting the agent process): folded
+  // into the agent tab's reconnect count so bumping it remounts that pane - it
+  // drops the closed socket and re-attaches to the fresh session (which replays
+  // scrollback). Only the 'terminal' tab is the agent process; bash tabs are
+  // unaffected. Derived rather than an effect so it can't cascade renders.
+  const terminalReconnect = (reconnectKeys.terminal ?? 0) + (reconnectSignal ?? 0)
 
   const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   const isNeedsInput = status === AgentStatus.NEEDS_INPUT
@@ -1039,7 +1051,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, onRe
               agentType={agentType}
               projectId={projectId}
               active={activeTabId === tab.id}
-              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              reconnectAttempt={terminalReconnect}
               onStatusUpdate={handleStatusUpdate}
               onDiffRefresh={onDiffRefresh}
               onSelectCommit={onSelectCommit}
@@ -1052,7 +1064,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, onRe
               sandboxed={tab.sandboxed}
               shellId={tab.id}
               active={activeTabId === tab.id}
-              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              reconnectAttempt={tab.id === 'terminal' ? terminalReconnect : (reconnectKeys[tab.id] ?? 0)}
               onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
               onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
               onMetrics={reportMetrics}

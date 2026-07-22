@@ -1967,6 +1967,58 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	return api.RestartAgent200JSONResponse(agentResponse(*newHead)), nil
 }
 
+// RestartAgentSession restarts only the agent's CLI process: it stops the live
+// session, waits for it to exit, and resumes it (re-seeding from the current
+// config) so it continues from its transcript via --continue. Nothing else is
+// touched - no worktree, branch, DB row or transcript teardown - which is what
+// separates it from RestartAgent (a full kill + fresh respawn). Same primitive
+// the MCP-grant auto-relaunch uses; see heads.RestartHead.
+func (s *Server) RestartAgentSession(ctx context.Context, request api.RestartAgentSessionRequestObject) (api.RestartAgentSessionResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: restart agent session request: id=%q, project=%q", request.Id, projectRoot)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.RestartAgentSession404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	// An archived head has no worktree to relaunch into - reviving one is
+	// ResumeAgent's job, not this button's.
+	if head.Archived || head.Worktree == nil {
+		return api.RestartAgentSession409JSONResponse{
+			Code:    409,
+			Error:   api.ErrorResponseErrorConflict,
+			Details: "agent has no live worktree to restart into",
+		}, nil
+	}
+
+	// Restart synchronously: the client reconnects its terminal/chat pane on the
+	// response, so returning only once the new session is live means it attaches
+	// to that one rather than racing the dying process.
+	rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+	if err := heads.RestartHead(s.Sessions, s.DB, projectRoot, *head, rows, cols); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			return api.RestartAgentSession409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: "operation already in progress",
+			}, nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	s.notifyAgentsChanged(projectRoot, false)
+	return api.RestartAgentSession204Response{}, nil
+}
+
 // ResumeAgent revives an archived (killed/merged) agent: it recreates the
 // worktree+branch off the current base, un-archives the record, and relaunches
 // the agent so it continues from its saved conversation transcript. Unlike

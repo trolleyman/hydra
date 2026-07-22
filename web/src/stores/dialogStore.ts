@@ -3,11 +3,11 @@ import { create } from 'zustand'
 export type DialogType = 'info' | 'error' | 'warning' | 'confirm'
 
 // Confirmation layout. 'generic' is the default text dialog (icon + title +
-// message). 'merge', 'kill' and 'updateBase' render bespoke panels (an icon
-// tile, a stacked title/description and a details chip) matching the
+// message). 'merge', 'kill', 'restart' and 'updateBase' render bespoke panels
+// (an icon tile, a stacked title/description and a details chip) matching the
 // agent-action redesign. They flow through the same store so the single mounted
 // <Dialog/> and every `isOpen` guard around the app keep working unchanged.
-export type DialogVariant = 'generic' | 'merge' | 'kill' | 'updateBase' | 'mergeGate'
+export type DialogVariant = 'generic' | 'merge' | 'kill' | 'restart' | 'updateBase' | 'mergeGate'
 
 // Extra structured content for the rich variants, filled in (and patched in
 // asynchronously via `update`) by the merge/kill handlers.

@@ -1,4 +1,5 @@
-import { useToastStore, type ToastType, type ApprovalToastData, type AgentTransitionToastData } from '../stores/toastStore'
+import { useToastStore, type ToastType, type ApprovalToastData } from '../stores/toastStore'
+import { agentTransitionToast, type AgentTransitionSpec } from './agentToast'
 import { StorageKeys } from './storage'
 
 // Spec for a harness-driven toast. Mirrors the real toast shape but with action
@@ -6,14 +7,14 @@ import { StorageKeys } from './storage'
 // needs them rendered, not wired, and functions can't cross the page.evaluate
 // boundary anyway.
 interface HarnessToastSpec {
-  message: string
+  message?: string
   type?: ToastType
   duration?: number
   actions?: { label: string; variant?: 'primary' | 'danger' }[]
   // When set, the rich security-gate approval card is rendered.
   approval?: ApprovalToastData
-  // When set, the "<agent> transitioned to <status>" row is rendered.
-  agentTransition?: AgentTransitionToastData
+  // When set, the agent-transition card is rendered (built via agentTransitionToast).
+  agentTransition?: AgentTransitionSpec
 }
 
 // installToastHarness exposes a tiny hook on window for driving the toast store
@@ -36,12 +37,12 @@ export function installToastHarness() {
     reset: () => useToastStore.setState({ toasts: [] }),
     show: (spec: HarnessToastSpec) =>
       useToastStore.getState().show({
-        message: spec.message,
         type: spec.type,
         duration: spec.duration ?? 0,
         actions: spec.actions?.map((a) => ({ label: a.label, variant: a.variant, onClick: () => {} })),
         approval: spec.approval,
-        agentTransition: spec.agentTransition,
+        // agentTransition builds message + icon + accent; else fall back to the string.
+        ...(spec.agentTransition ? agentTransitionToast(spec.agentTransition) : { message: spec.message ?? '' }),
       }),
   }
 }

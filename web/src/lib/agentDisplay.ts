@@ -29,6 +29,9 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
   // toasts. Green (success), unlike the sidebar's muted archived chip
   // (archivedEndStateBadge), which deliberately stays quiet.
   merged: { label: 'merged', badge: 'green' },
+  // Not live statuses either - the pills on the restart / kill action toasts.
+  restarting: { label: 'restarting', badge: 'blue' },
+  killed: { label: 'killed', badge: 'red' },
   ended: { label: 'ended', badge: 'muted' },
   exited: { label: 'exited', badge: 'red' },
   killing: { label: 'killing', badge: 'faint', dot: 'redSoft' },
@@ -118,6 +121,25 @@ export function agentTypePill(agentType: string): string {
       return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-700/50 dark:text-zinc-200'
     default:
       return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  }
+}
+
+// Human-facing name for an agent type, used in prose (e.g. "Stops the running
+// Claude process..."). Falls back to the raw type for anything unmapped.
+export function agentTypeLabel(agentType: string): string {
+  switch (agentType) {
+    case 'claude':
+      return 'Claude'
+    case 'gemini':
+      return 'Gemini'
+    case 'copilot':
+      return 'Copilot'
+    case 'codex':
+      return 'Codex'
+    case 'bash':
+      return 'shell'
+    default:
+      return agentType || 'agent'
   }
 }
 

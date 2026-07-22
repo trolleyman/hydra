@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, FolderSync, X, Clock, LoaderCircle, Bot } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
@@ -88,6 +88,21 @@ export const Dialog: React.FC = () => {
           onCancel={handleCancel}
         >
           <KillDetails details={details} />
+        </RichConfirmPanel>
+      ) : variant === 'restart' ? (
+        <RichConfirmPanel
+          tone="amber"
+          icon={<RotateCcw className="w-5 h-5" />}
+          title={title}
+          description={message}
+          confirmLabel={confirmLabel ?? 'Restart agent'}
+          confirmIcon={<RotateCcw className="w-4 h-4" />}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        >
+          {details?.note ? (
+            <p className="text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">{details.note}</p>
+          ) : null}
         </RichConfirmPanel>
       ) : variant === 'updateBase' ? (
         <UpdateBasePanel

@@ -675,6 +675,12 @@ func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, 
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
+// RestartAgentSession succeeds (rather than 501) so the UI's restart flow -
+// confirm dialog, toast, terminal reconnect - can be exercised in simulation.
+func (s *SimulationServer) RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }

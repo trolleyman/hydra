@@ -1,6 +1,29 @@
 import { create } from 'zustand'
+import { createContext, type ReactNode } from 'react'
 
 export type ToastType = 'info' | 'success' | 'error' | 'warning'
+
+// A toast's body content. A plain string renders as the message paragraph (with
+// `backtick` spans as inline branch pills). Any other ReactNode renders verbatim,
+// so rich toasts (e.g. the agent-transition row from lib/agentToast) are just a
+// node passed through `message` - no per-variant field on the store. Content that
+// needs to close its own toast (e.g. a link that navigates then dismisses) reads
+// the bound dismiss from ToastDismissContext rather than threading the id around.
+export type ToastContent = ReactNode
+
+// Bound to each live toast's dismiss by the renderer, so rich `message` content
+// can tear its own toast down (default is a no-op for content shown elsewhere).
+export const ToastDismissContext = createContext<() => void>(() => {})
+
+// Accent override for a toast's icon tile + countdown bar. Omitted, both follow
+// the toast `type` (blue for info, green for success, ...). Set it when a toast
+// wants an identity off the type palette - e.g. the emerald "merge queued" card.
+export interface ToastAccent {
+  // Tailwind classes for the 9x9 icon tile (bg + text), e.g. the emerald tint.
+  wrap: string
+  // Tailwind class for the countdown bar fill, e.g. 'bg-emerald-500'.
+  bar: string
+}
 
 // Structured payload for a security-gate approval toast. When present on a toast,
 // the renderer draws the rich approval card (icon, kind/RW badge, task + target,
@@ -31,37 +54,6 @@ export interface ApprovalToastData {
   crossProject?: string | null
 }
 
-// Structured payload for an agent status-transition toast (an agent crossing
-// into needs_input / finished) - also reused by the merge-lifecycle toasts
-// (queued / merging / merged), which want the same visual identity. The renderer
-// draws a "<bot> <agent> <before> <status pill> <after>" row whose agent label
-// links through to the agent - so there's no separate "View" button.
-export interface AgentTransitionToastData {
-  // The agent's title (the clickable label) + where it lives (for the link).
-  agentName: string
-  agentId: string
-  projectId: string
-  // The status rendered as the standard status pill (also 'merged', which only
-  // exists as a pill on these toasts). Omit it for a text-only row.
-  status?: string
-  // Icon-tile override: 'merge-queued' swaps the bot for the emerald Clock the
-  // armed merge pill / queue-merge button use. Defaults to the bot.
-  icon?: 'merge-queued'
-  // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
-  // the pill ("[merging] into `main`..."). Like `message`, `backtick` spans render
-  // as inline mono branch pills.
-  before?: string
-  // Copy after the pill, e.g. the merge target ("into `main`").
-  after?: string
-  // Set when the agent runs in a DIFFERENT project than the one in view - shown
-  // as the neutral (gray) project banner across the card's top, the calm sibling
-  // of the approval card's amber one.
-  projectName?: string | null
-  // The project's custom icon string (the same value the project switcher uses),
-  // rendered in the banner instead of the plain folder. Omit for the folder.
-  projectIcon?: string | null
-}
-
 // Project context for a plain toast whose work belongs to a specific project
 // (e.g. a sync started for project A). The renderer draws the neutral project
 // header ONLY while a DIFFERENT project is in view - so the toast reads as "this
@@ -87,9 +79,14 @@ export interface ToastAction {
 
 export interface Toast {
   id: number
-  // The toast copy. `backtick` spans render as inline mono branch pills
-  // ("Synced with `origin/main`"); unpaired backticks stay literal.
-  message: string
+  // The toast body. A string renders as the message paragraph (`backtick` spans
+  // become inline mono branch pills); any other node renders verbatim.
+  message: ToastContent
+  // Tile glyph override (a lucide icon element). Omitted, the tile shows the
+  // `type` icon; rich toasts pass e.g. <Bot/> to identify as an agent.
+  icon?: ReactNode
+  // Icon-tile + countdown-bar accent override; omitted, both follow `type`.
+  accent?: ToastAccent
   // Optional raw technical detail (a JSON error body, a stack trace) rendered
   // verbatim in a monospace code block under the message - so code-like error
   // text reads as code instead of being run into the headline sentence.
@@ -125,9 +122,6 @@ export interface Toast {
   // When set, the renderer draws the rich security-gate approval card using this
   // structured data (the `message` is then only a fallback for non-approval UIs).
   approval?: ApprovalToastData
-  // When set, the renderer draws the "<agent> transitioned to <status>" row
-  // (the `message` is then only a fallback for non-visual surfaces).
-  agentTransition?: AgentTransitionToastData
   // When set, a plain toast can show a neutral project header - but the renderer
   // only draws it while a DIFFERENT project is in view (see ToastProjectContext).
   projectContext?: ToastProjectContext
@@ -142,7 +136,7 @@ interface ToastState {
   // Returns the new (or replaced) toast's id, so callers showing a persistent
   // toast (duration: 0) can later dismiss() it - e.g. a "Merging..." indicator.
   show: (options: {
-    message: string
+    message: ToastContent
     code?: string
     codeLang?: string
     type?: ToastType
@@ -150,8 +144,9 @@ interface ToastState {
     actions?: ToastAction[]
     onDismiss?: () => void
     key?: string
+    icon?: ReactNode
+    accent?: ToastAccent
     approval?: ApprovalToastData
-    agentTransition?: AgentTransitionToastData
     projectContext?: ToastProjectContext
   }) => number
   // silent: skip the toast's onDismiss callback. Used when the toast is being
@@ -203,7 +198,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, code, codeLang, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition, projectContext }) => {
+  show: ({ message, code, codeLang, type = 'info', duration = 3000, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -212,7 +207,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, code, codeLang, type, duration, actions, onDismiss, approval, agentTransition, projectContext, createdAt: Date.now() }
+              ? { ...t, message, code, codeLang, type, duration, actions, onDismiss, icon, accent, approval, projectContext, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -224,7 +219,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, code, codeLang, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition, projectContext },
+        { id, message, code, codeLang, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, icon, accent, approval, projectContext },
       ],
     }))
     if (duration > 0) {

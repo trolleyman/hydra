@@ -13,25 +13,25 @@ type eventSpec struct {
 }
 
 type claudeEnvelope struct {
-	Type            string  `json:"type"`
-	Subtype         string  `json:"subtype,omitempty"`
-	UUID            string  `json:"uuid,omitempty"`
-	SessionID       string  `json:"session_id,omitempty"`
-	Model           string  `json:"model,omitempty"`
+	Type            string   `json:"type"`
+	Subtype         string   `json:"subtype,omitempty"`
+	UUID            string   `json:"uuid,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	Model           string   `json:"model,omitempty"`
 	SlashCommands   []string `json:"slash_commands,omitempty"`
 	APIKeySource    string   `json:"apiKeySource,omitempty"`
-	IsError         bool    `json:"is_error,omitempty"`
-	IsAPIError      bool    `json:"isApiErrorMessage,omitempty"`
-	Result          string  `json:"result,omitempty"`
-	RequestID       string  `json:"request_id,omitempty"`
-	IsMeta          bool    `json:"isMeta,omitempty"`
-	IsSidechain     bool    `json:"isSidechain,omitempty"`
-	AgentID         string  `json:"agentId,omitempty"`
-	ParentToolUseID string  `json:"parent_tool_use_id,omitempty"`
-	Content         string  `json:"content,omitempty"`
-	DurationMS      int64   `json:"duration_ms,omitempty"`
-	MessageID       string  `json:"message_id,omitempty"`
-	TotalCostUSD    float64 `json:"total_cost_usd,omitempty"`
+	IsError         bool     `json:"is_error,omitempty"`
+	IsAPIError      bool     `json:"isApiErrorMessage,omitempty"`
+	Result          string   `json:"result,omitempty"`
+	RequestID       string   `json:"request_id,omitempty"`
+	IsMeta          bool     `json:"isMeta,omitempty"`
+	IsSidechain     bool     `json:"isSidechain,omitempty"`
+	AgentID         string   `json:"agentId,omitempty"`
+	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
+	Content         string   `json:"content,omitempty"`
+	DurationMS      int64    `json:"duration_ms,omitempty"`
+	MessageID       string   `json:"message_id,omitempty"`
+	TotalCostUSD    float64  `json:"total_cost_usd,omitempty"`
 	Message         struct {
 		ID         string          `json:"id,omitempty"`
 		Content    json.RawMessage `json:"content,omitempty"`
