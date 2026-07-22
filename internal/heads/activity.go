@@ -241,7 +241,7 @@ func describeActivity(tool string, input map[string]interface{}) string {
 			return "$ " + truncate(cmd, 80)
 		}
 		return "Running a command"
-	case "Edit", "MultiEdit", "Write", "Update", "NotebookEdit", "replace", "write_file":
+	case "Edit", "MultiEdit", "Write", "Update", "NotebookEdit", "replace", "write_file", "apply_patch":
 		if p := get("file_path", "path", "absolute_path"); p != "" {
 			return "Editing " + escapeMarkdown(filepath.Base(p))
 		}

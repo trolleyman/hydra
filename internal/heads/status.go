@@ -5,9 +5,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -24,6 +26,25 @@ func ReadAgentStatus(projectDir, id string) *api.AgentStatusInfo {
 		return nil
 	}
 	return &s
+}
+
+// MarkPromptSubmitted records the provider-neutral lifecycle edge that a user
+// submitted a terminal prompt. Claude/Gemini hooks report the same transition,
+// but Codex has no equivalent hook in terminal mode; recording it at the PTY
+// boundary prevents a working head remaining durably labelled "waiting".
+func MarkPromptSubmitted(store *db.Store, projectRoot, id string) error {
+	ts := time.Now().Format(time.RFC3339Nano)
+	event := "prompt_submit"
+	info := &api.AgentStatusInfo{Status: api.Running, Event: &event, Timestamp: ts}
+	if err := WriteAgentStatus(projectRoot, id, info); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if store != nil {
+		if err := store.UpdateAgentStatus(id, string(api.Running), ts, false); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
 }
 
 // WriteAgentStatus writes the agent hook status to <projectId>/.hydra/status/<id>.json.

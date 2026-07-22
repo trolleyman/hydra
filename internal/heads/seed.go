@@ -264,7 +264,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		}
 
 	case sandbox.AgentTypeCodex:
-		// Codex has no --append-system-prompt and no hook system we wire up; it
+		// Codex has no --append-system-prompt; it
 		// reads standing guidance from AGENTS.md files. Deliver the pre-prompt as
 		// the global ~/.codex/AGENTS.md (merged over the host's), which applies to
 		// every Codex session regardless of the repo's own AGENTS.md.
@@ -276,6 +276,16 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			}
 			res.Binds = append(res.Binds, sandbox.Bind{Source: agentsHost, Target: path.Join(home, ".codex", "AGENTS.md")})
 		}
+
+		hooksHost := filepath.Join(cacheDir, "codex-hooks.json")
+		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(home, ".codex", "hooks.json")), stableHydraBin)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err := os.WriteFile(hooksHost, hooks, 0o644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json")})
 	}
 
 	return res, nil
