@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/trolleyman/hydra/internal/codexstream"
 )
 
 type codexMessage struct {
@@ -127,7 +129,10 @@ func normalizeCodex(line []byte) []eventSpec {
 	default:
 		// Server-initiated requests carry an id. Preserve them as an interaction
 		// projection even when a newer Codex version adds an unfamiliar method.
-		if len(msg.ID) > 0 && string(msg.ID) != "null" {
+		// Approval prompts are answered by the controller, so recording them as
+		// a pending interaction would leave the chat state waiting on a decision
+		// that has already been made.
+		if len(msg.ID) > 0 && string(msg.ID) != "null" && !codexstream.AutoApproved(msg.Method) {
 			return []eventSpec{{sourceID: "", eventType: "interaction_requested", payload: map[string]any{"interaction": map[string]any{"method": msg.Method, "request_id": msg.ID, "params": json.RawMessage(msg.Params)}, "provider": "codex"}}}
 		}
 	}

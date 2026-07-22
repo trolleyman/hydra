@@ -221,6 +221,17 @@ func (c *Controller) OnLine(line []byte) {
 		if c.opts.OnTurnEnd != nil {
 			c.opts.OnTurnEnd(params.Turn.ID)
 		}
+	case hasID && AutoApproved(msg.Method):
+		// Hydra runs Codex with approvals disabled, so an approval prompt only
+		// appears when that policy did not reach the thread. Nothing in the web
+		// UI can answer one, and app-server blocks the turn until it is
+		// answered, so accept here instead of wedging the head forever.
+		if err := c.sendMessage(struct {
+			ID     json.RawMessage `json:"id"`
+			Result any             `json:"result"`
+		}{ID: msg.ID, Result: map[string]any{"decision": "accept"}}); err != nil {
+			c.fail(err)
+		}
 	case hasID && msg.Method != "":
 		key := requestKey(msg.ID)
 		c.mu.Lock()
@@ -263,6 +274,19 @@ func modelFromList(raw json.RawMessage, requested string) string {
 	return ""
 }
 
+// AutoApproved reports whether a server-initiated request is a
+// command/patch approval prompt that Hydra answers itself. These all take a
+// bare {"decision": ...} response. item/permissions/requestApproval is
+// deliberately excluded: its response is a permission profile, not a decision,
+// and it cannot fire while the thread runs with sandbox "danger-full-access".
+func AutoApproved(method string) bool {
+	switch method {
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "applyPatchApproval", "execCommandApproval":
+		return true
+	}
+	return false
+}
+
 func (c *Controller) startThread(model string) {
 	c.mu.Lock()
 	c.modelListID = 0
@@ -272,12 +296,18 @@ func (c *Controller) startThread(model string) {
 	if model != "" && c.opts.OnModel != nil {
 		c.opts.OnModel(model)
 	}
+	// thread/resume accepts the same cwd/approval/sandbox overrides as
+	// thread/start and, without them, falls back to the on-disk Codex defaults
+	// (ask-for-approval + workspace-write). Codex cannot build its own sandbox
+	// inside Hydra's, so a resumed thread would then block on an approval
+	// prompt for its first command. Send the policy on both paths.
 	params := map[string]any{"cwd": c.opts.CWD, "approvalPolicy": "never", "sandbox": "danger-full-access"}
 	method := "thread/start"
 	if threadID != "" {
 		method = "thread/resume"
-		params = map[string]any{"threadId": threadID}
-	} else if model != "" {
+		params["threadId"] = threadID
+	}
+	if model != "" {
 		params["model"] = model
 	}
 	id, err := c.send(method, params)

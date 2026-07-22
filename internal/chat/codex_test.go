@@ -62,7 +62,13 @@ func TestNormalizeCodexDeltaAndRequest(t *testing.T) {
 	if len(got) != 1 || got[0].eventType != "assistant_delta" {
 		t.Fatalf("delta = %+v", got)
 	}
+	// Approval prompts are accepted by the controller, so they must not leave a
+	// pending interaction behind in the chat state.
 	got = normalizeCodex([]byte(`{"id":9,"method":"item/commandExecution/requestApproval","params":{"reason":"why"}}`))
+	if len(got) != 0 {
+		t.Fatalf("approval request = %+v", got)
+	}
+	got = normalizeCodex([]byte(`{"id":9,"method":"item/tool/requestUserInput","params":{"questions":[]}}`))
 	if len(got) != 1 || got[0].eventType != "interaction_requested" {
 		t.Fatalf("request = %+v", got)
 	}
