@@ -33,6 +33,11 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 				log.Printf("warn: mark Codex turn running for %s: %v", id, err)
 			}
 		},
+		OnActivity: func() {
+			if err := MarkPromptSubmitted(store, projectRoot, id); err != nil {
+				log.Printf("warn: mark Codex item activity running for %s: %v", id, err)
+			}
+		},
 		OnTurnEnd: func(string) {
 			reg.ChatTurnEnded(id)
 		},

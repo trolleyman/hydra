@@ -78,7 +78,7 @@ func TestNormalizeCodexFriendlyToolPayloads(t *testing.T) {
 		key  string
 	}{
 		{`{"method":"item/completed","params":{"item":{"id":"w1","type":"webSearch","query":"Hydra docs","status":"completed"}}}`, "WebSearch", "query"},
-		{`{"method":"item/completed","params":{"item":{"id":"f1","type":"fileChange","changes":[{"path":"x.go","kind":{"type":"update"},"diff":"package x"}],"status":"completed"}}}`, "Edit Files", "changes"},
+		{`{"method":"item/completed","params":{"item":{"id":"f1","type":"fileChange","changes":[{"path":"x.go","kind":{"type":"update"},"diff":"package x"}],"status":"completed"}}}`, "Edit", "changes"},
 		{`{"method":"item/started","params":{"item":{"id":"v1","type":"imageView","path":"shot.png"}}}`, "View Image", "path"},
 	}
 	for _, tc := range tests {
@@ -90,6 +90,24 @@ func TestNormalizeCodexFriendlyToolPayloads(t *testing.T) {
 		input, _ := payload["input"].(map[string]any)
 		if payload["name"] != tc.name || input[tc.key] == nil {
 			t.Errorf("payload = %+v, want name %q and input %q", payload, tc.name, tc.key)
+		}
+	}
+}
+
+func TestCodexFileChangeName(t *testing.T) {
+	tests := []struct {
+		changes string
+		want    string
+	}{
+		{`[{"kind":{"type":"add"}}]`, "Write"},
+		{`[{"kind":{"type":"update"}}]`, "Edit"},
+		{`[{"kind":{"type":"delete"}}]`, "Delete"},
+		{`[{"kind":{"type":"move"}}]`, "Move"},
+		{`[{"kind":{"type":"add"}},{"kind":{"type":"update"}}]`, "Edit"},
+	}
+	for _, tc := range tests {
+		if got := codexFileChangeName(json.RawMessage(tc.changes)); got != tc.want {
+			t.Errorf("codexFileChangeName(%s) = %q, want %q", tc.changes, got, tc.want)
 		}
 	}
 }

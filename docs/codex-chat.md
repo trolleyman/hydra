@@ -428,6 +428,28 @@ and process exit mid-turn.
   Codex CLI versions in the field are heterogeneous. At startup, report a clear
   error when `app-server` or required protocol methods are unavailable.
 
+### Rich item presentation
+
+The normalized item layer keeps provider payloads available to the Raw view,
+but normal cards display only semantic fields. Codex `fileChange` items are
+classified as Write, Edit, Move, or Delete cards and render each affected path
+as a syntax-highlighted unified diff. Web search intentionally begins with an
+unknown query because app-server supplies it on `item/completed`; the existing
+card is patched in place when that metadata arrives instead of exposing the
+temporary item id or protocol JSON.
+
+Codex Agent items use their spawning tool id as a temporary sub-agent identity.
+When app-server reports the child thread id, the reducer merges that placeholder
+into the durable sub-agent projection. Thus live display, reconnect replay, and
+completion notices all refer to one rich card rather than a raw Agent card plus
+a second standalone result.
+
+Head lifecycle follows both `turn/started` and `item/started`. The latter is a
+bounded fallback for resumed or version-skewed app-server streams where item
+activity becomes visible before the corresponding turn notification; it keeps
+the durable head status running (and Stop available) while work is demonstrably
+still arriving.
+
 ## Important design decisions
 
 - **Use one app-server process per chat head.** This matches Hydra's current

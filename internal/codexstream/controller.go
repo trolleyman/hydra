@@ -25,6 +25,7 @@ type Options struct {
 	Send           SendFunc
 	OnConversation func(string)
 	OnTurnStart    func(string)
+	OnActivity     func()
 	OnTurnEnd      func(string)
 	OnHistoryLine  func([]byte)
 	OnError        func(error)
@@ -118,6 +119,13 @@ func (c *Controller) OnLine(line []byte) {
 	initializeID, threadRequestID, readRequestID := c.initializeID, c.threadRequestID, c.readRequestID
 	c.mu.Unlock()
 	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
+	// Some app-server versions/reattached streams can expose item activity
+	// before Hydra observes the matching turn/started notification. Treat a new
+	// item as a provider-neutral running edge as well; this is deliberately not
+	// called for token deltas, so status persistence is bounded per item.
+	if msg.Method == "item/started" && c.opts.OnActivity != nil {
+		c.opts.OnActivity()
+	}
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
 	switch {
 	case msg.Method == "" && numericID != 0 && numericID == initializeID:

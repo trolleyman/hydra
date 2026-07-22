@@ -92,6 +92,16 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 	}
 }
 
+func TestControllerItemActivityMarksRunning(t *testing.T) {
+	activity := 0
+	c := New(Options{OnActivity: func() { activity++ }})
+	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"a","type":"agentMessage"}}}`))
+	c.OnLine([]byte(`{"method":"item/agentMessage/delta","params":{"delta":"hello"}}`))
+	if activity != 1 {
+		t.Fatalf("activity callbacks = %d, want 1", activity)
+	}
+}
+
 func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
 	var sent []map[string]any
 	var recovered [][]byte

@@ -293,7 +293,7 @@ func codexToolPayload(item codexItem) map[string]any {
 		name = "Bash"
 		input = map[string]any{"command": item.Command, "cwd": item.CWD, "_raw": item}
 	case "fileChange", "file_change":
-		name = "Edit Files"
+		name = codexFileChangeName(item.Changes)
 		input = map[string]any{"changes": item.Changes, "_raw": item}
 		if output == "" {
 			output = "Files updated"
@@ -316,5 +316,32 @@ func codexToolPayload(item codexItem) map[string]any {
 		"output": output, "status": item.Status, "exit_code": item.ExitCode,
 		"duration_ms": item.DurationMS, "changes": item.Changes, "arguments": item.Arguments, "input": input,
 		"query": item.Query, "path": item.Path, "item": item,
+	}
+}
+
+func codexFileChangeName(changes json.RawMessage) string {
+	var parsed []struct {
+		Kind struct {
+			Type string `json:"type"`
+		} `json:"kind"`
+	}
+	if json.Unmarshal(changes, &parsed) != nil || len(parsed) == 0 {
+		return "Edit"
+	}
+	kind := strings.ToLower(parsed[0].Kind.Type)
+	for _, change := range parsed[1:] {
+		if strings.ToLower(change.Kind.Type) != kind {
+			return "Edit"
+		}
+	}
+	switch kind {
+	case "add", "create", "write":
+		return "Write"
+	case "delete", "remove":
+		return "Delete"
+	case "move", "rename":
+		return "Move"
+	default:
+		return "Edit"
 	}
 }

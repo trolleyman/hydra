@@ -455,7 +455,14 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
   const p = ev.payload ?? {}
   const base = {
     timestamp: ev.timestamp,
-    uuid: typeof p.uuid === 'string' && p.uuid ? p.uuid : `normalized:${ev.seq}`,
+    // Hydra user events retain the client-generated id. Matching optimistic
+    // bubbles by this id avoids a repeated same-text message replacing the
+    // wrong bubble (and visibly flashing during Codex send reconciliation).
+    uuid: typeof p.uuid === 'string' && p.uuid
+      ? p.uuid
+      : ev.type === 'user_message' && typeof p.id === 'string' && p.id
+        ? p.id
+        : `normalized:${ev.seq}`,
     isSidechain: p.sidechain === true,
     agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
     parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
@@ -1179,8 +1186,49 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
-        return <div key={`${path}:${i}`}><div className="mb-0.5 text-[10px] font-medium text-stone-500 dark:text-stone-400"><span className="capitalize">{kind}</span> {path}</div>{diff && <CodePanel code={diff} lang={langFromPath(path)} />}</div>
+        return (
+          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
+            <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
+              <FileText className="h-3 w-3 shrink-0 text-blue-500" />
+              <span className="min-w-0 flex-1 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+              <span className="shrink-0 capitalize text-[10px] text-stone-400 dark:text-stone-500">{kind}</span>
+            </div>
+            {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} />}
+          </div>
+        )
       })}
+    </div>
+  )
+}
+
+function UnifiedDiffPanel({ diff, lang }: { diff: string; lang: string }) {
+  const rows = useMemo(() => {
+    let oldLine = 0
+    let newLine = 0
+    return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
+      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+      if (hunk) {
+        oldLine = Number(hunk[1])
+        newLine = Number(hunk[2])
+        return []
+      }
+      const added = line.startsWith('+') && !line.startsWith('+++')
+      const removed = line.startsWith('-') && !line.startsWith('---')
+      const oldNo = added ? '' : String(oldLine++)
+      const newNo = removed ? '' : String(newLine++)
+      return [{ text: (added || removed || line.startsWith(' ')) ? line.slice(1) : line, added, removed, oldNo, newNo }]
+    })
+  }, [diff])
+  const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
+  return (
+    <div className="max-h-72 overflow-y-auto bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
+      {rows.map((row, i) => (
+        <div key={i} className={`grid grid-cols-[2.25rem_2.25rem_1fr] ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
+          <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>
+          <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>
+          <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
+        </div>
+      ))}
     </div>
   )
 }
@@ -1435,7 +1483,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // Task tools carry a prose subject, not a path/command - shown in the header.
   const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
   const isWebSearch = item.name === 'WebSearch'
-  const isFileChanges = item.name === 'Edit Files' && Array.isArray(input?.changes)
+  const isFileChanges = Array.isArray(input?.changes)
   const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
   const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
 
@@ -1443,17 +1491,22 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
-  const summarized = summarizeToolInput(item.input)
+  const summarized = summarizeToolInput(input)
+  const changedPaths = isFileChanges
+    ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
+    : []
   const summary = mem
     ? `memory ${mem}`
-    : collapseHome(trimWorktreePaths(isBash ? description || displayedCommand.replace(/\n/g, ' ') : summarized.text, worktree))
+    : isFileChanges
+      ? changedPaths.join(', ')
+      : collapseHome(trimWorktreePaths(isBash ? description || displayedCommand.replace(/\n/g, ' ') : summarized.text, worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
     !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryMono = !mem && !isPathSummary && !isTaskTool && !(isBash && description) && !summarized.prose
+  const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -1526,8 +1579,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
             <>
               {isBash ? (
                 <CodePanel code={trimWorktreePaths(displayedCommand, worktree)} lang="bash" />
-              ) : isWebSearch && typeof input?.query === 'string' ? (
+              ) : isWebSearch && typeof input?.query === 'string' && input.query.trim() ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
+              ) : isWebSearch && pending ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-400 dark:text-stone-500`}>Preparing search…</div>
               ) : isGlob ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
               ) : isWebFetch ? (
@@ -3525,7 +3580,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
-  const optimisticTextsRef = useRef<string[]>([])
+  const optimisticTextsRef = useRef<{ clientId: string; text: string }[]>([])
   // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
   // real echo can supersede it. null when none is pending.
   const optimisticModelIdRef = useRef<number | null>(null)
@@ -4324,7 +4379,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean) => {
+    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '') => {
       // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
       // in a `user` envelope but was never typed - route it to a skill/meta card
       // off the isMeta flag rather than the content-sniffing below. It doesn't
@@ -4432,15 +4487,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
       // it for placement would put the user message below its own reply.
-      const oi = optimisticTextsRef.current.indexOf(text)
+      const oi = optimisticTextsRef.current.findIndex((pending) =>
+        (clientId !== '' && pending.clientId === clientId) || (clientId === '' && pending.text === text))
       if (oi >= 0) {
         markTurnStart()
+        const optimisticText = optimisticTextsRef.current[oi].text
         optimisticTextsRef.current.splice(oi, 1)
         setItems((prev) => {
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && it.text === text) {
+            if (it.kind === 'user' && it.sending && it.text === optimisticText) {
               j = k
               break
             }
@@ -4587,12 +4644,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs, ev.isMeta)
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '')
             return
           }
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs, ev.isMeta)
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
@@ -4678,6 +4735,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     type: typeof inp.subagent_type === 'string' ? inp.subagent_type : undefined,
                     desc: typeof inp.description === 'string' ? inp.description : undefined,
                   })
+                  if (block.name === 'Agent') {
+                    // Codex may not reveal the child thread id until the spawn
+                    // item completes. Give the spawn card a linked placeholder
+                    // immediately; handleSubagentMeta merges it into the real
+                    // child when that id arrives, so raw Agent JSON never flashes
+                    // before the rich sub-agent card.
+                    const placeholder = ensureSubagent('tool:' + block.id)
+                    placeholder.toolUseId = block.id
+                    toolUseToSub.set(block.id, placeholder.agentId)
+                    placeholder.agentType = typeof inp.subagent_type === 'string' ? inp.subagent_type : 'Sub-agent'
+                    placeholder.description = typeof inp.description === 'string' ? inp.description : ''
+                    placeholder.prompt = typeof inp.prompt === 'string' ? inp.prompt : placeholder.description
+                    scheduleSubFlush()
+                  }
                 }
                 push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid })
               }
@@ -4924,7 +4995,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               typeof sub.parent_id === 'string' ? sub.parent_id : '',
               typeof sub.prompt === 'string' ? sub.prompt : '',
             )
-            if (subID && normalized.type === 'subagent_completed') ensureSubagent(subID).status = 'done'
+            if (subID && normalized.type === 'subagent_completed') {
+              const completedSub = ensureSubagent(subID)
+              const wasRunning = completedSub.status === 'running'
+              completedSub.status = 'done'
+              if (wasRunning && !completedSub.parentAgentId) noticeSubDone(subID, completedSub)
+            }
             scheduleSubFlush()
             return
           }
@@ -5646,7 +5722,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // the thinking/response it triggers (item 26); the CLI's echo (which can
       // arrive after that response) is deduped by optimisticTextsRef.
       setItems((prev) => [...prev, { kind: 'user', id: optimisticIdRef.current--, text, sending: true }])
-      optimisticTextsRef.current.push(text)
+      optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
       if (status !== AgentStatus.NEEDS_INPUT) {
