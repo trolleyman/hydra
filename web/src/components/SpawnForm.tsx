@@ -195,7 +195,7 @@ const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
   { id: 'off', label: 'Off', desc: 'Full .git access.' },
   { id: 'refs', label: 'Refs read-only', desc: "No branch switch; commit via tool." },
   { id: 'readonly', label: 'Read-only .git', desc: 'No .git writes; commit host-side.' },
-  { id: 'clone', label: 'Isolated clone', desc: 'Own repo (readonly until built).' },
+  { id: 'clone', label: 'Isolated clone', desc: 'Own standalone repo; full native git.' },
 ]
 
 // SpawnOptionsMenu is the "..." kebab on the spawn box that groups the per-spawn

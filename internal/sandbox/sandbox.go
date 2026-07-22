@@ -93,10 +93,10 @@ const (
 	// write .git at all (no commit, add, stash, or object destruction). Staging and
 	// commit are host-mediated. Anti-rogue; costs in-sandbox git add / history edit.
 	GitIsolationReadonly GitIsolationMode = "readonly"
-	// GitIsolationClone gives the head its own repo borrowing main's objects
-	// read-only via git alternates: full native git, a rogue agent can only trash
-	// its own private store, and the daemon mirrors the branch back. FOLLOW-UP: the
-	// lifecycle rework is not yet implemented (see GIT_ISOLATION.md).
+	// GitIsolationClone gives the head its own standalone repo borrowing main's
+	// objects read-only via git alternates: full native git, a rogue agent can only
+	// trash its own private store, and the daemon mirrors the branch back into the
+	// main repo (see docs/git-isolation.md).
 	GitIsolationClone GitIsolationMode = "clone"
 )
 

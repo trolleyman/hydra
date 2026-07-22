@@ -195,9 +195,13 @@ The guardrails (own-branch-only, inside-worktree) that today live in the in-sand
 
 ## Rollout / status
 
-1. `off` stays the default.
-2. `refs` + `readonly` ship together (one bind knob + the host-commit watcher).
-   Dogfood per head.
-3. `clone` is the end state for repos that need full native git (hunk staging,
-   history cleanup, husky/LFS/submodules): a standalone `git clone --shared` per
-   head with a mirror-back into the main repo (see the `clone` section).
+All four modes are implemented. `off` stays the default; the stricter modes are
+opt-in per head (spawn override) or per agent type (config default), so they can be
+dogfooded gradually.
+
+1. `off` - the default, unchanged behaviour.
+2. `refs` + `readonly` - one bind knob plus the host-commit watcher
+   (`internal/http/commit_watcher.go`).
+3. `clone` - for repos that need full native git (hunk staging, history cleanup,
+   husky/LFS/submodules): a standalone `git clone --shared` per head with a
+   mirror-back into the main repo (see the `clone` section).

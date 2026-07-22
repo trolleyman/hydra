@@ -1246,7 +1246,7 @@ type SpawnAgentRequest struct {
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`
 
-	// GitIsolation How much of the repo's shared .git this head may write (see GIT_ISOLATION.md). "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the head its own repo (falls back to readonly until built). Omitted inherits the agent-type policy default.
+	// GitIsolation How much of the repo's shared .git this head may write (see docs/git-isolation.md). "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the head its own standalone repo with full native git, mirrored back into the main repo. Omitted inherits the agent-type policy default.
 	GitIsolation *string `json:"git_isolation,omitempty"`
 
 	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3... suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
