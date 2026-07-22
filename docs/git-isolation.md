@@ -205,3 +205,115 @@ dogfooded gradually.
 3. `clone` - for repos that need full native git (hunk staging, history cleanup,
    husky/LFS/submodules): a standalone `git clone --shared` per head with a
    mirror-back into the main repo (see the `clone` section).
+
+## Design direction (proposed - not yet built)
+
+Everything above ships today. This section records where we want to take it next;
+none of it is implemented yet.
+
+### Trim to `off` + `clone`
+
+The four-mode ladder is more surface than the threat model justifies, and the value
+is lopsided:
+
+- `off` (default) plus the decision gate already turns "commits to the wrong
+  branch" from a live risk into a caught one.
+- `clone` earns its complexity: full native git (zero casualties), genuine
+  isolation, and a branch that is not worktree-locked (see tracking, below). It pays
+  for itself twice.
+- `refs` / `readonly` are the awkward middle. They upgrade the gate's heuristic to
+  an OS-hard boundary, but the practical delta is small - accidents are already
+  gated, and object-store destruction is rare and recoverable (`git fetch` from
+  origin). The cost is not small: a polling host-commit watcher plus a list of
+  broken in-sandbox git operations (`add -p`, `stash`, `rebase -i`, husky/LFS). More
+  UX tax than `off`, less capability and safety than `clone`.
+
+Proposed: keep only `off` and `clone`. Removing `refs`/`readonly` also removes the
+entire host-mediated commit machinery (`internal/http/commit_watcher.go`,
+`RunCommitWatcher`, `HYDRA_COMMIT_DIR`, the host-mediated path in
+`internal/cli/mcp.go`, `paths.GetCommitDirFromProjectRoot`) - the bulk of the
+complexity, which exists only to serve those two modes. `mcp__hydra__git_commit`
+then always commits in-sandbox again. Because the feature is unmerged to `main`,
+this is a clean cut, not a deprecation.
+
+### `clone` as the default?
+
+Appealing - it makes the good path (isolation + full native git + a checkout-able
+branch) the default. The cost to weigh: `clone` puts the mirror watcher
+(`RunCloneMirrorWatcher`) on the critical path for *every* head, where `off` is a
+plain linked worktree that cannot really go wrong. So any mirror bug, the ~1s commit
+lag, or the "`git gc --prune` on `main` while heads are live" hazard would then
+affect everyone.
+
+Recommendation: `clone`-default is the right destination, but flip the default only
+once the mirror has been dogfooded. Ship off/clone with `off` still the default, run
+`clone` in anger for a while, then flip - keeping `off` as the "zero machinery"
+escape hatch.
+
+### Tracking an agent's branch from the main repo
+
+Goal: from the user's own checkout, follow a head's branch with a plain `git pull`
+as the agent commits.
+
+The obstacle: a head works in a *linked worktree*, so `refs/heads/hydra/<id>`
+physically lives in the main repo's `.git` (shared common dir) and the agent's
+commits land there live - but the branch is **worktree-locked**, so
+`git checkout hydra/<id>` in the main repo is refused ("already checked out at
+..."). (In `clone` mode the branch is a daemon-updated mirror instead, not
+worktree-locked, but then it force-moves under anyone who checks it out directly.)
+
+The clean model is **Hydra as a git remote**: expose the `hydra/*` branches through
+a remote namespace and let git's remote-tracking machinery do the work. A
+remote-tracking ref is exactly "a ref someone else keeps force-moving that I follow
+at my own pace" - your working branch only moves when *you* pull, and history
+rewrites show up as a harmless "forced update" on fetch instead of a wall. It needs
+no changes to how Hydra names or manages branches:
+
+```bash
+git remote add agents .          # the repo is its own remote (url ".")
+git config remote.agents.fetch '+refs/heads/hydra/*:refs/remotes/agents/*'
+git fetch agents
+git checkout -t agents/<id>       # local branch tracking agents/<id>
+                                  # or: git switch -c review --track agents/<id>
+git pull                          # fast-forwards as the agent commits
+```
+
+`git checkout -t <ref>` (`--track`) creates a local branch - named after the part
+after the remote, i.e. `<id>` - whose *upstream* is the remote-tracking ref, which
+is what makes a bare `git pull` and the `git status` ahead/behind counts work.
+
+**Do not name the remote `hydra`.** The agent branches are real local branches at
+`refs/heads/hydra/<id>`; a remote named `hydra` puts remote-tracking refs at
+`refs/remotes/hydra/<id>`, and the shorthand `hydra/<id>` then matches both.
+Verified behaviour of that collision:
+
+- commands resolving to a commit (`git merge hydra/<id>`, `git rev-parse
+  hydra/<id>`) print `warning: refname 'hydra/<id>' is ambiguous` and silently pick
+  the **local** branch - gitrevisions precedence is `refs/` -> `refs/tags/` ->
+  `refs/heads/` -> `refs/remotes/`, so `refs/heads` wins;
+- commands needing a symbolic ref (`git rev-parse --symbolic-full-name`) hard-**error**
+  with `refname ... is ambiguous`;
+- worst, `git checkout -t hydra/<id>` resolves to the *local* branch and tracks
+  that, silently defeating the point.
+
+Naming the remote anything else (e.g. `agents`) keeps `agents/<id>` unambiguous and
+leaves plain `hydra/<id>` meaning the local branch, so everything Hydra does
+internally is untouched. (The pre-existing `origin/hydra/*` remote-tracking refs are
+fine for the same reason - the `origin/` prefix avoids the collision.)
+
+Two follow-ons:
+
+- **Track affordance:** a "Track branch" button on the agent page that runs or
+  copies the commands above for the head in view, so nobody has to remember the
+  refspec.
+- **Branch-split alternative (considered, not preferred):** move the worktree onto
+  `hydra-internal/<id>` and leave `hydra/<id>` as a plain, non-worktree-locked
+  branch the user checks out directly - optionally with `branch.hydra/<id>.remote =
+  .` and `.merge = refs/heads/hydra-internal/<id>` so `git pull` fast-forwards it
+  locally with no remote configured at all. This gives a stable, user-owned
+  `hydra/<id>` that only the user moves, but at the cost of a medium refactor: every
+  internal use of `hydra/<id>` (spawn, merge-to-main, diff, conflict, kill, and the
+  clone mirror) has to move to the internal name, and it tangles with `clone` mode.
+  The `agents/` remote prefix delivers the same separation the split is after, for
+  free, so the remote is preferred unless a bare `git checkout hydra/<id>` is judged
+  worth the churn.
