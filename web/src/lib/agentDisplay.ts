@@ -29,6 +29,9 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
   // toasts. Green (success), unlike the sidebar's muted archived chip
   // (archivedEndStateBadge), which deliberately stays quiet.
   merged: { label: 'merged', badge: 'green' },
+  // Not live statuses either - the pills on the restart / kill action toasts.
+  restarting: { label: 'restarting', badge: 'blue' },
+  killed: { label: 'killed', badge: 'red' },
   ended: { label: 'ended', badge: 'muted' },
   exited: { label: 'exited', badge: 'red' },
   killing: { label: 'killing', badge: 'faint', dot: 'redSoft' },

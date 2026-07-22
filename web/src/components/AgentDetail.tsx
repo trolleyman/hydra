@@ -908,7 +908,11 @@ export function AgentDetail({
         setKilling(true)
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
-          useToastStore.getState().show({ message: `Agent "${agent.id}" killed`, type: 'info' })
+          useToastStore.getState().show({
+            message: `Agent "${agent.title || agent.id}" killed`,
+            type: 'info',
+            agentTransition: { agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' },
+          })
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next
           // archived-list refetch (which only happens on a project switch).
@@ -957,7 +961,12 @@ export function AgentDetail({
         try {
           await api.default.restartAgentSession(projectId ?? '', agent.id)
           setRestartSignal((n) => n + 1)
-          useToastStore.getState().show({ message: `Agent "${agent.title || agent.id}" restarting...`, type: 'info' })
+          const name = agent.title || agent.id
+          useToastStore.getState().show({
+            message: `Agent "${name}" restarting...`,
+            type: 'info',
+            agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'restarting', before: '' },
+          })
         } catch (err) {
           useDialogStore.getState().show({
             title: 'Restart Failed',
