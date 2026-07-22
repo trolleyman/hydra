@@ -6120,9 +6120,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // render time (by the notification's task-id / tool-use-id) - clicking
         // opens that agent's chat. A background command's notice (it carried an
         // <output-file>) expands to show the command's output.
-        const linked =
-          (item.taskId ? subagents[item.taskId] : undefined) ??
-          (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
+        // An output file is authoritative evidence this is a background
+        // command. Do not let a coincidentally-created task/sub-agent lookup
+        // turn its output dropdown into a link to an empty agent view.
+        const linked = item.outputFile
+          ? undefined
+          : (item.taskId ? subagents[item.taskId] : undefined) ??
+            (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
         // "finished" while the agent's own spawned sub-agents still run is the
         // harness's stopped-notification, not the end of the work - relabel the
         // chip until the subtree is quiet.
