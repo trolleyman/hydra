@@ -992,6 +992,12 @@ const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku' },
   { id: 'fable', label: 'Fable' },
 ]
+const CODEX_MODELS = [
+  { id: 'gpt-5.6', label: 'GPT-5.6' },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.4', label: 'GPT-5.4' },
+  { id: 'gpt-5.3-codex-spark', label: 'Codex Spark' },
+]
 
 // Effective context window (tokens) for a model, used to turn a turn's prompt
 // size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
@@ -1021,6 +1027,7 @@ function modelDisplayLabel(model: string): string {
   for (const m of CLAUDE_MODELS) {
     if (lower.includes(m.id)) return m.label
   }
+  for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
   return model.replace(/^claude-/, '')
 }
 
@@ -1429,6 +1436,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
   const isWebSearch = item.name === 'WebSearch'
   const isFileChanges = item.name === 'Edit Files' && Array.isArray(input?.changes)
+  const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
+  const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
 
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
@@ -1519,6 +1528,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                 <CodePanel code={trimWorktreePaths(displayedCommand, worktree)} lang="bash" />
               ) : isWebSearch && typeof input?.query === 'string' ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
+              ) : isGlob ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
+              ) : isWebFetch ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline">{input!.url as string}</a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
               ) : isFileChanges ? (
                 <FileChangesPanel changes={input?.changes} worktree={worktree} />
               ) : isWrite ? (
@@ -1576,6 +1589,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
                         : isWebSearch && !item.isError
                           ? <WebSearchOutput text={visibleResult} serif={serif} />
+                        : isWebFetch && !item.isError
+                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
                         : isRead && !item.isError
 								? <ReadOutputPanel text={visibleResult} lang={outputLang} />
 								: <OutputPanel text={visibleResult} lang={outputLang} isError={item.isError} />
@@ -6548,7 +6563,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setModelMenuOpen(false)} />
                       <div className="absolute bottom-full right-0 mb-1 z-20 w-36 rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
-                        {CLAUDE_MODELS.map((m) => (
+                        {(agentType === 'codex' ? CODEX_MODELS : CLAUDE_MODELS).map((m) => (
                           <button
                             key={m.id}
                             onClick={() => changeModel(m.id)}

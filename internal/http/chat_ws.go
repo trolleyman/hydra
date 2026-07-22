@@ -235,6 +235,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			log.Printf("chat ws: set_model without a model for %q", sessionID)
 			return
 		}
+		if err := s.Sessions.SetChatModel(sessionID, msg.Model); err == nil {
+			if s.ChatEvents != nil {
+				_, _ = s.ChatEvents.Append(sessionID, "model_changed", map[string]any{"model": msg.Model})
+			}
+			return
+		}
 		id := fmt.Sprintf("hydra-set-model-%d", chatInterruptSeq.Add(1))
 		if err := s.Sessions.Write(sessionID, claudestream.SetModelLine(id, msg.Model)); err != nil {
 			log.Printf("chat ws: write set_model to %q: %v", sessionID, err)
@@ -862,11 +868,6 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		case data, ok := <-att.Output:
 			if !ok {
 				return
-			}
-			if normalizedMode && s.ChatEvents != nil {
-				for _, line := range lb.Feed(data) {
-					s.ChatEvents.ObserveProviderLine(agentID, "claude", line)
-				}
 			}
 			// Live stream (post replay_done): results arrive in order, so keep them.
 			if !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {

@@ -36,6 +36,26 @@ func TestControllerFreshThreadAndInitialTurn(t *testing.T) {
 	}
 }
 
+func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{ConversationID: "thr", Model: "gpt-old", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	if err := c.SetModel("gpt-new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendText("hello"); err != nil {
+		t.Fatal(err)
+	}
+	params := sent[0]["params"].(map[string]any)
+	if params["model"] != "gpt-new" {
+		t.Fatalf("turn params = %+v", params)
+	}
+}
+
 func TestControllerResumeAndInterrupt(t *testing.T) {
 	var sent []map[string]any
 	var started, ended string

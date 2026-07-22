@@ -41,6 +41,7 @@ type Controller struct {
 	requests        map[string]pendingRequest
 	initializeID    uint64
 	threadRequestID uint64
+	model           string
 }
 
 type pendingRequest struct {
@@ -50,7 +51,7 @@ type pendingRequest struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, requests: map[string]pendingRequest{}}
+	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, model: opts.Model, requests: map[string]pendingRequest{}}
 }
 
 func (c *Controller) nextID() uint64 { return c.seq.Add(1) }
@@ -245,8 +246,27 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 		return nil
 	}
 	c.mu.Unlock()
-	_, err := c.send("turn/start", map[string]any{"threadId": threadID, "input": input})
+	c.mu.Lock()
+	model := c.model
+	c.mu.Unlock()
+	params := map[string]any{"threadId": threadID, "input": input}
+	if model != "" {
+		params["model"] = model
+	}
+	_, err := c.send("turn/start", params)
 	return errtrace.Wrap(err)
+}
+
+// SetModel applies to subsequent turn/start requests; an active turn is not
+// mutated underneath the model that is already producing it.
+func (c *Controller) SetModel(model string) error {
+	if strings.TrimSpace(model) == "" {
+		return errtrace.Wrap(fmt.Errorf("Codex model is empty"))
+	}
+	c.mu.Lock()
+	c.model = model
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *Controller) Interrupt() error {

@@ -253,7 +253,7 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 			}
 		}
 	}
-	if w.store.HasType("conversation_started") || w.ctx.Worktree == "" {
+	if w.ctx.Worktree == "" {
 		return
 	}
 	home, err := os.UserHomeDir()

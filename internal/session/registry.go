@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -247,6 +248,25 @@ func (r *Registry) RespondChat(id string, response json.RawMessage) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(r.Write(id, line))
+}
+
+// SetChatModel changes the model used by subsequent turns when the installed
+// provider driver supports it. Claude's stream-json fallback is handled by the
+// caller because it uses a control-request line instead of a driver.
+func (r *Registry) SetChatModel(id, model string) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver == nil {
+		return errtrace.Wrap(errors.New("chat provider does not support driver model switching"))
+	}
+	return errtrace.Wrap(driver.SetModel(model))
 }
 
 // Start builds the sandbox command, launches it under a PTY, and registers the

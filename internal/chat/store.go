@@ -353,6 +353,7 @@ func apply(p *Projection, ev Event) {
 		p.Plan = cloneRaw(v.Plan)
 	case "subagent_started", "subagent_updated", "subagent_completed":
 		cur := p.Subagents[v.ID]
+		terminal := cur.Status == "completed" || cur.Status == "failed" || cur.Status == "cancelled"
 		cur.ID = v.ID
 		if v.ParentID != "" {
 			cur.ParentID = v.ParentID
@@ -369,7 +370,7 @@ func apply(p *Projection, ev Event) {
 		if v.Prompt != "" {
 			cur.Prompt = v.Prompt
 		}
-		if v.Status != "" {
+		if v.Status != "" && !(terminal && ev.Type != "subagent_completed") {
 			cur.Status = v.Status
 		}
 		if v.Activity != "" {

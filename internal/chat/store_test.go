@@ -125,6 +125,15 @@ func TestApplyIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestLateSubagentStartDoesNotReopenCompletion(t *testing.T) {
+	p := Projection{Version: ProjectionVersion, Subagents: map[string]SubagentState{}, Queue: map[string]QueuedState{}}
+	apply(&p, Event{Seq: 1, Type: "subagent_completed", Payload: json.RawMessage(`{"id":"sub","status":"completed"}`)})
+	apply(&p, Event{Seq: 2, Type: "subagent_started", Payload: json.RawMessage(`{"id":"sub","status":"running","description":"late sidecar"}`)})
+	if got := p.Subagents["sub"]; got.Status != "completed" || got.Description != "late sidecar" {
+		t.Fatalf("subagent projection = %+v", got)
+	}
+}
+
 func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 	root := t.TempDir()
 	s, err := Open(root, "head")

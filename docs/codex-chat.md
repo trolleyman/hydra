@@ -101,6 +101,25 @@ Hydra status updates behave as they do today.
 
 ### Persistence and replay
 
+#### Implemented state (July 2026)
+
+Hydra persists a provider-neutral sequenced event log and versioned projection
+for Claude and Codex. The projection owns plan, sub-agent, turn, interaction,
+model, usage, queue, and Git-head state; the browser loads that snapshot with a
+bounded recent page and requests older pages by `seq`. Provider object ids stay
+inside payloads; `seq` is the event's sole wire/cursor identity.
+
+The session registry ingests provider output even with no browser attached.
+WebSocket pumps must not ingest the same stream again: token deltas have no
+stable provider id, so double observation duplicates live text and destabilizes
+bottom-follow rendering.
+
+Codex model selection is held by the app-server controller and included in the
+next `turn/start`; an active turn is not mutated. Claude retains its stream-json
+`set_model` control request. Claude recovery should incrementally reconcile its
+transcript by provider source ids, while Codex recovery should use documented
+`thread/read` and feed returned items through the live normalizer.
+
 Add a provider conversation id to the agent record (for example,
 `conversation_id`; avoid a Claude- or Codex-named column). A thread id is part of
 head identity and must survive daemon and mode restarts.
