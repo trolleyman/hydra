@@ -21,7 +21,14 @@ type CommitInfo struct {
 	AuthorName  string
 	AuthorEmail string
 	Timestamp   string
+	// Parents holds the full SHAs of this commit's parents. A commit with two or
+	// more parents is a merge; callers use this to collapse a merge (which drags
+	// in every commit from the merged-in branch) into a single summary entry.
+	Parents []string
 }
+
+// IsMerge reports whether the commit has more than one parent.
+func (c CommitInfo) IsMerge() bool { return len(c.Parents) > 1 }
 
 // DiffLineType describes the type of a diff line.
 type DiffLineType string
@@ -72,22 +79,24 @@ type UncommittedSummary struct {
 
 // gitLogFormat uses ASCII control characters as separators to avoid collisions
 // with commit message content. %x1e = record separator, %x1f = field separator.
-const gitLogFormat = "--format=%x1e%H%x1f%aN%x1f%aE%x1f%aI%x1f%B"
+// %B (raw body) stays last so an embedded separator in the message can't shift
+// the other fields. %P (parent hashes, space-separated) precedes it.
+const gitLogFormat = "--format=%x1e%H%x1f%aN%x1f%aE%x1f%aI%x1f%P%x1f%B"
 
 func parseCommitRecord(record string) (CommitInfo, bool) {
 	record = strings.TrimRight(record, "\n")
 	if record == "" {
 		return CommitInfo{}, false
 	}
-	parts := strings.SplitN(record, "\x1f", 5)
-	if len(parts) < 5 {
+	parts := strings.SplitN(record, "\x1f", 6)
+	if len(parts) < 6 {
 		return CommitInfo{}, false
 	}
 	hash := strings.TrimSpace(parts[0])
 	if len(hash) < 7 {
 		return CommitInfo{}, false
 	}
-	body := strings.TrimRight(parts[4], "\n")
+	body := strings.TrimRight(parts[5], "\n")
 	subject := strings.SplitN(body, "\n", 2)[0]
 	return CommitInfo{
 		SHA:         hash,
@@ -97,14 +106,16 @@ func parseCommitRecord(record string) (CommitInfo, bool) {
 		AuthorName:  parts[1],
 		AuthorEmail: parts[2],
 		Timestamp:   parts[3],
+		Parents:     strings.Fields(parts[4]),
 	}, true
 }
 
-// ListCommits returns commits reachable from headBranch but not baseBranch, newest first.
-func ListCommits(projectRoot, baseBranch, headBranch string) ([]CommitInfo, error) {
-	out, err := gitOutput(projectRoot, "log", baseBranch+".."+headBranch, gitLogFormat)
+// logCommits runs `git log <args> <format>` and parses the record stream. args
+// carries the revision range plus any traversal flags (e.g. --first-parent).
+func logCommits(dir string, args ...string) []CommitInfo {
+	out, err := gitOutput(dir, append(append([]string{"log"}, args...), gitLogFormat)...)
 	if err != nil {
-		return []CommitInfo{}, nil // branch doesn't exist or no commits
+		return []CommitInfo{} // branch doesn't exist or no commits
 	}
 	var commits []CommitInfo
 	for _, record := range strings.Split(out, "\x1e") {
@@ -112,7 +123,22 @@ func ListCommits(projectRoot, baseBranch, headBranch string) ([]CommitInfo, erro
 			commits = append(commits, c)
 		}
 	}
-	return commits, nil
+	return commits
+}
+
+// ListCommits returns commits reachable from headBranch but not baseBranch, newest
+// first. This walks the full ancestry, so a merge commit on headBranch also brings
+// in every commit it merged; use ListFirstParentCommits for a head's own timeline.
+func ListCommits(projectRoot, baseBranch, headBranch string) ([]CommitInfo, error) {
+	return logCommits(projectRoot, baseBranch+".."+headBranch), nil
+}
+
+// ListFirstParentCommits returns the commits headBranch added over baseBranch
+// following only first parents, newest first. Merging baseBranch into headBranch
+// therefore surfaces as a single merge commit rather than the whole merged-in
+// history - the right unit for a review timeline and the chat commit feed.
+func ListFirstParentCommits(projectRoot, baseBranch, headBranch string) ([]CommitInfo, error) {
+	return logCommits(projectRoot, "--first-parent", baseBranch+".."+headBranch), nil
 }
 
 // GetCommitInfo retrieves information about a single commit by ref.

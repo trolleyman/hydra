@@ -72,3 +72,6 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `*_windows.go` stubs, ConPTY, AppContainer, WSL2) ->
   [docs/windows-support.md](docs/windows-support.md) (audit of the Windows
   stubs + phased implementation plan)
+- **Improving the diff review workflow** (per-file "viewed" state, "reviewed up
+  to" marker) -> [docs/diff-review-state.md](docs/diff-review-state.md) (proposed,
+  unbuilt design + build order)

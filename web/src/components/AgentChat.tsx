@@ -13,6 +13,7 @@ import {
   FilePen,
   FileText,
   GitCommitHorizontal,
+  GitMerge,
   Globe,
   History,
   Info,
@@ -105,6 +106,94 @@ interface ChatProjectionSnapshot {
 // common properties, losing each variant's own fields).
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
+// One commit dragged in by a merge, shown in the merge chip's expanded list.
+interface MergedCommit { sha: string; shortSha: string; subject: string }
+
+// mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
+// (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
+// before the annotation existed - both render as a plain commit chip.
+function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged'> {
+  if (payload.is_merge !== true) return {}
+  const raw = Array.isArray(payload.merged_commits) ? payload.merged_commits : []
+  const merged: MergedCommit[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const m = entry as Record<string, unknown>
+    const sha = typeof m.sha === 'string' ? m.sha : ''
+    if (!sha) continue
+    merged.push({
+      sha,
+      shortSha: typeof m.short_sha === 'string' ? m.short_sha : sha.slice(0, 7),
+      subject: typeof m.subject === 'string' ? m.subject : '',
+    })
+  }
+  const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
+  return { isMerge: true, mergedCount, merged }
+}
+
+// mergeChipLabel renders "Merged <ref> - N commits", extracting the merged ref
+// name from a standard git merge subject and falling back to the raw subject.
+function mergeChipLabel(subject: string, count: number): string {
+  const m = subject.match(/^Merge (?:remote-tracking )?branch '([^']+)'/)
+  const n = `${count} commit${count === 1 ? '' : 's'}`
+  return m ? `Merged ${m[1]} - ${n}` : `${subject} - ${n}`
+}
+
+// Shared styling for commit/merge pills - the same centered notification look as
+// notice/cmdout chips.
+const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none'
+const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
+
+// MergeCommitChip renders a merge as a single pill that expands to list the commits
+// it dragged in. Its own useState survives row re-renders (the row is memo'd on the
+// stable chip item), so expansion needs no plumbing through the transcript.
+function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSelectCommit?: (sha: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const clickable = !!onSelectCommit
+  const count = item.mergedCount ?? item.merged?.length ?? 0
+  const label = mergeChipLabel(item.subject, count)
+  const shown = item.merged?.length ?? 0
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-[90%]`}
+        title={expanded ? 'Hide merged commits' : 'Show merged commits'}
+      >
+        {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+        <GitMerge className="w-3 h-3 shrink-0" />
+        <span className="truncate">{label}</span>
+      </button>
+      {expanded && shown > 0 && (
+        <div className="flex w-full max-w-[90%] flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
+          {item.merged!.map((m) => (
+            <div
+              key={m.sha}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
+              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+              title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
+            >
+              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+              <span className="font-mono shrink-0">{m.shortSha}</span>
+              <span className="truncate">{m.subject}</span>
+            </div>
+          ))}
+          {shown < count && (
+            <div className="px-1 py-0.5 text-[11px] italic text-stone-400 dark:text-stone-500">
+              ... and {count - shown} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
   // the instant it's sent - above the thinking/response it triggers - and the
@@ -170,7 +259,9 @@ type ChatItem =
   // commits endpoint and are interleaved into the transcript by `ts` (the
   // commit's author date, epoch ms) against the items' stamped times (see
   // mergedItems). Clicking one points the diff viewer at just that commit.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; noEntrance?: boolean }
+  // A merge chip (isMerge) collapses the commits it brought in: mergedCount is the
+  // true total, merged is a capped preview list the chip expands to show.
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -5454,6 +5545,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
         ts: Date.parse(normalized.timestamp) || Date.now(),
         noEntrance: replaying || undefined,
+        ...mergeFieldsFromPayload(payload),
       }
       st.cache.set(sha, chip)
       setCommitChips((prev) => [...prev, chip])
@@ -6829,7 +6921,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       case 'commit': {
         // A commit chip: the same centered notification-pill look as
-        // notice/cmdout, clickable to show just this commit in the diff view.
+        // notice/cmdout, clickable to show just this commit in the diff view. A
+        // merge chip is its own component so it can own its expand/collapse state.
+        if (item.isMerge) {
+          return (
+            <div className="flex justify-center">
+              <MergeCommitChip item={item} onSelectCommit={onSelectCommit} />
+            </div>
+          )
+        }
         const clickable = !!onSelectCommit
         const activate = () => onSelectCommit?.(item.sha)
         return (
@@ -6839,9 +6939,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               tabIndex={clickable ? 0 : undefined}
               onClick={clickable ? activate : undefined}
               onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-              className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none ${
-                clickable ? 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors' : ''
-              }`}
+              className={`${COMMIT_PILL} max-w-[90%] ${clickable ? COMMIT_HOVER : ''}`}
               title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
