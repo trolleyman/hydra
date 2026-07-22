@@ -1,6 +1,10 @@
 package chat
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeClaudeAssistantBlocks(t *testing.T) {
 	line := []byte(`{"type":"assistant","uuid":"u1","message":{"id":"m1","content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","id":"tool1","name":"Bash","input":{"command":"git commit"}},{"type":"text","text":"done"}]}}`)
@@ -68,5 +72,17 @@ func TestNormalizeClaudeTaskNotificationSettlesSubagent(t *testing.T) {
 	payload := got[1].payload.(map[string]any)
 	if payload["id"] != "agent-7" || payload["status"] != "completed" {
 		t.Fatalf("completion payload = %+v", payload)
+	}
+}
+
+func TestNormalizeClaudeAgentResultDropsContinuationTrailer(t *testing.T) {
+	got := normalizeClaude([]byte(`{"type":"user","uuid":"u4","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":[{"type":"text","text":"Useful report"},{"type":"text","text":"agentId: child-1 (use SendMessage...)\n<usage>subagent_tokens: 12</usage>"}]}]}}`))
+	if len(got) != 1 || got[0].eventType != "tool_completed" {
+		t.Fatalf("events = %+v", got)
+	}
+	payload := got[0].payload.(map[string]any)
+	content, _ := payload["content"].(json.RawMessage)
+	if strings.Contains(string(content), "agentId:") || !strings.Contains(string(content), "Useful report") {
+		t.Fatalf("content = %s", content)
 	}
 }

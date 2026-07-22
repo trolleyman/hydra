@@ -2056,8 +2056,8 @@ function isLaunchBoilerplate(s: string): boolean {
 // the message so it is not shown twice.
 function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
   const res = tool?.result?.trim()
-  if (tool?.isError && res) return { text: tool!.result!, isError: true }
-  if (res && !isLaunchBoilerplate(res)) return { text: tool!.result!, isError: false }
+  if (tool?.isError && res) return { text: cleanSubagentReport(tool!.result!), isError: true }
+  if (res && !isLaunchBoilerplate(res)) return { text: cleanSubagentReport(tool!.result!), isError: false }
   for (let i = sub.items.length - 1; i >= 0; i--) {
     const it = sub.items[i]
     if (it.kind === 'assistant' && it.text.trim()) return { text: it.text, isError: false, itemId: it.id }
@@ -6079,24 +6079,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'notice': {
-        // A "sub-agent finished" notice: when it links to a sub-agent we have,
-        // re-surface it at completion time (so the user needn't scroll up to the
-        // launch card) using the same SubagentCard as the launch, with a
-        // "finished" badge (#62, item 4). Other notices (background-task
-        // completions etc.) stay as a compact pill.
+        // Completion is a compact link back to the canonical launch card/chat;
+        // rendering the entire SubagentCard here duplicated prompt and report.
         const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
         if (sub) {
           const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
+          const { label, desc } = subLabels(sub, tool)
           return (
-            <SubagentCard
-              sub={sub}
-              tool={tool}
-              worktree={worktreePath}
-              serif={serif}
-              links={subagentLinks}
-              onOpenChat={() => openSubView(sub.agentId)}
-              finishedBadge
-            />
+            <div className="flex justify-center">
+              <button onClick={() => openSubView(sub.agentId)} className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer">
+                <Bot className="h-3 w-3 text-violet-500" />
+                <span className="truncate">{label} finished{desc ? `: ${desc}` : ''}</span>
+                <MessageSquare className="h-3 w-3 shrink-0" />
+              </button>
+            </div>
           )
         }
         // A background sub-agent's completion notice resolves its sub-agent at

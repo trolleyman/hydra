@@ -104,7 +104,7 @@ func normalizeClaude(line []byte) []eventSpec {
 			out := make([]eventSpec, 0, len(blocks))
 			for i, block := range blocks {
 				if block.Type == "tool_result" {
-					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, map[string]any{"id": block.ToolUseID, "content": block.Content, "is_error": block.IsError})})
+					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError})})
 				}
 			}
 			if len(out) > 0 {
@@ -142,6 +142,32 @@ func normalizeClaude(line []byte) []eventSpec {
 		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": textFromClaudeContent(ev.Attachment.Prompt)})}}
 	}
 	return nil
+}
+
+// cleanClaudeToolResult removes the machine continuation trailer Claude adds
+// as a separate text block to Agent results. The child id and usage remain in
+// Hydra's sub-agent events/projection; exposing this transport block as report
+// prose both leaks protocol detail and prevents report de-duplication.
+func cleanClaudeToolResult(raw json.RawMessage) json.RawMessage {
+	var blocks []claudeBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		return raw
+	}
+	kept := blocks[:0]
+	for _, block := range blocks {
+		if block.Type == "text" && strings.HasPrefix(strings.TrimSpace(block.Text), "agentId:") && strings.Contains(block.Text, "<usage>") {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	if len(kept) == len(blocks) {
+		return raw
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func taskNotificationField(text, field string) string {
