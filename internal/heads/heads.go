@@ -626,7 +626,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		if bgCtx == nil {
 			bgCtx = context.Background()
 		}
-		generateTitleAsync(bgCtx, store, opts.ID, opts.Prompt, opts.OnTitleChange)
+		generateTitleAsync(bgCtx, store, projectRoot, opts.ID, opts.Prompt, opts.OnTitleChange)
 	}
 
 	return &Head{
