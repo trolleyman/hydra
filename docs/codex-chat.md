@@ -503,6 +503,20 @@ history/live catch-up. Replay also suppresses the redundant agent notification
 found in logs written before this rule, so existing conversations converge to
 the same one-chip rendering as new ones.
 
+Hydra persists a submitted user message before handing it to a provider. Claude
+can later repeat that message through `--replay-user-messages` with a different
+UUID. Ingestion pairs that echo with the pending Hydra event and persists a
+`user_message_echoed` reconciliation marker rather than a second visible
+message. The marker makes repeated identical messages unambiguous after a
+restart. The client also performs the same one-to-one pairing while reading
+older logs created before the marker existed.
+
+Reasoning text and reasoning duration are separate normalized events. Some
+Claude models expose an empty reasoning block but still provide a measured
+duration. Replay pairs those events in either order and renders the
+duration-only block as `Thought for Xs`, so hidden reasoning remains visible
+without inventing thought content.
+
 The shared presentation reducer also keeps Claude partial content on one active
 stream until its completed message arrives. Claude's machine-readable
 sub-agent continuation and usage trailer is removed from the visible report,

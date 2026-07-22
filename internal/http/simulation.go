@@ -3130,6 +3130,10 @@ func handleSimCodexChatWS(conn *safeConn) {
 		// output-file must keep it out of the sub-agent projection on replay.
 		{"notice", map[string]any{"text": "<task-notification><task-id>sim-background-command</task-id><status>completed</status><summary>Background command completed</summary><output-file>/tmp/sim-background-command.log</output-file></task-notification>"}},
 		{"subagent_completed", map[string]any{"id": "sim-background-command", "status": "completed"}},
+		// Opus can report a real measured reasoning span without exposing any
+		// reasoning text. The UI must still render its duration-only thought.
+		{"reasoning_completed", map[string]any{"message_id": "sim-hidden-reasoning", "text": ""}},
+		{"reasoning_duration", map[string]any{"message_id": "sim-hidden-reasoning", "duration_ms": 4200}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
 		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
 		{"user_message", map[string]any{"id": "sim-codex-interrupt-user", "content": []map[string]any{{"type": "text", "text": "Start an answer that I will interrupt."}}}},

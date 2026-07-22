@@ -85,6 +85,7 @@ interface ChatProps {
 
 interface NormalizedChatEvent {
   seq: number
+  source_id?: string
   type: string
   timestamp: string
   payload?: Record<string, unknown>
@@ -462,6 +463,15 @@ function contentText(content: unknown): string {
   return ''
 }
 
+function stableContentKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableContentKey).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableContentKey(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'undefined'
+}
+
 // Claude appends a machine-oriented continuation/usage trailer to completed
 // side-agent text. It belongs to the transport, not the human-readable report.
 function cleanSubagentReport(text: string): string {
@@ -474,7 +484,7 @@ function cleanSubagentReport(text: string): string {
 // Bridge the provider-neutral backend timeline into the mature presentation
 // reducer while Claude's legacy wire format is being retired. Provider details
 // stop at this boundary; paging and live delivery use the same conversion.
-function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
+function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
   const p = ev.payload ?? {}
   const base = {
     timestamp: ev.timestamp,
@@ -502,7 +512,7 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
     case 'assistant_message':
       return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }], stop_reason: typeof p.stop_reason === 'string' ? p.stop_reason : undefined, usage: p.usage as TokenUsage } }] : []
     case 'reasoning_completed':
-      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
+      return text.trim() || showEmptyReasoning ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
     case 'tool_started': {
       const name = typeof p.name === 'string' ? p.name : 'tool'
       const input = p.input ?? p.item ?? (typeof p.command === 'string' ? { command: p.command, cwd: p.cwd } : p)
@@ -5148,6 +5158,64 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       seenNormalizedSeq.add(event.seq)
       return true
     }
+    // Hydra persists a user message before writing it to the provider. Claude's
+    // replay-user-messages mode later echoes the same content with an unrelated
+    // UUID. New logs carry a user_message_echoed marker; this one-to-one content
+    // matcher also repairs older logs which already contain both visible events.
+    const pendingHydraUserEchoes = new Map<string, number>()
+    const pendingClaudeUserEchoes = new Map<string, number>()
+    const keepNormalizedUserEvent = (event: NormalizedChatEvent): boolean => {
+      if (event.type !== 'user_message' && event.type !== 'user_message_echoed') return true
+      const key = stableContentKey(event.payload?.content ?? null)
+      if (key === 'null') return event.type === 'user_message'
+      const hydraCount = pendingHydraUserEchoes.get(key) ?? 0
+      if (event.type === 'user_message_echoed') {
+        if (hydraCount > 0) pendingHydraUserEchoes.set(key, hydraCount - 1)
+        return false
+      }
+      if (event.source_id?.startsWith('claude:')) {
+        if (hydraCount > 0) {
+          pendingHydraUserEchoes.set(key, hydraCount - 1)
+          return false
+        }
+        pendingClaudeUserEchoes.set(key, (pendingClaudeUserEchoes.get(key) ?? 0) + 1)
+        return true
+      }
+      const claudeCount = pendingClaudeUserEchoes.get(key) ?? 0
+      if (claudeCount > 0) {
+        pendingClaudeUserEchoes.set(key, claudeCount - 1)
+        return false
+      }
+      pendingHydraUserEchoes.set(key, hydraCount + 1)
+      return true
+    }
+    // Opus can spend measurable time in a hidden reasoning block whose final
+    // text is empty. Pair the semantic completion and duration regardless of
+    // which one was imported first, then synthesize the empty thinking block
+    // only when its duration proves that real reasoning occurred.
+    const emptyNormalizedReasoning = new Map<string, NormalizedChatEvent>()
+    const normalizedReasoningDurations = new Set<string>()
+    const normalizedPresentationEvents = (event: NormalizedChatEvent): ProviderEvent[] => {
+      const messageID = typeof event.payload?.message_id === 'string' ? event.payload.message_id : ''
+      if (event.type === 'reasoning_completed' && !contentText(event.payload?.text).trim()) {
+        if (messageID && normalizedReasoningDurations.has(messageID)) {
+          return normalizedToProviderEvents(event, true)
+        }
+        if (messageID) emptyNormalizedReasoning.set(messageID, event)
+        return []
+      }
+      if (event.type === 'reasoning_duration' && messageID) {
+        normalizedReasoningDurations.add(messageID)
+        const converted = normalizedToProviderEvents(event)
+        const completed = emptyNormalizedReasoning.get(messageID)
+        if (completed) {
+          emptyNormalizedReasoning.delete(messageID)
+          converted.push(...normalizedToProviderEvents(completed, true))
+        }
+        return converted
+      }
+      return normalizedToProviderEvents(event)
+    }
     const replayedAssistantTexts = new Set<string>()
     // Codex often reveals semantic tool fields only on tool_completed. Keep the
     // richest payload by id so an older tool_started page can be enriched before
@@ -5267,7 +5335,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
-          if (!normalized || !firstNormalizedDelivery(normalized)) return
+          if (!normalized || !firstNormalizedDelivery(normalized) || !keepNormalizedUserEvent(normalized)) return
           // Status frames and normalized chat events travel independently. A
           // completed turn is already durable by the time this event arrives,
           // so settle the selected head immediately instead of waiting for the
@@ -5289,7 +5357,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (handleNormalizedSubagent(normalized)) {
             const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
             if (normalized.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
-              for (const converted of normalizedToProviderEvents(normalized)) handleProviderEvent(converted)
+              for (const converted of normalizedPresentationEvents(normalized)) handleProviderEvent(converted)
             }
             return
           }
@@ -5348,7 +5416,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (text && replayedAssistantTexts.has(text)) return
             if (text) replayedAssistantTexts.add(text)
           }
-          for (const converted of normalizedToProviderEvents(normalized)) handleProviderEvent(converted)
+          for (const converted of normalizedPresentationEvents(normalized)) handleProviderEvent(converted)
           if (settlesNormalizedStream) {
             // Commit the completed message and remove its streamed preview in
             // one React batch. Clearing first and flushing the settled item in
@@ -5365,6 +5433,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
             .filter(firstNormalizedDelivery)
+            .filter(keepNormalizedUserEvent)
           oldestEventCursorRef.current = msg.next_cursor ?? null
           for (const event of normalized) {
             recordNormalizedCommit(event)
@@ -5376,7 +5445,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               if (handleNormalizedSubagent(rawEvent)) {
                 const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
                 if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
-                  main.push(...normalizedToProviderEvents(rawEvent))
+                  main.push(...normalizedPresentationEvents(rawEvent))
                 }
                 continue
               }
@@ -5387,9 +5456,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
                   if (toolID && toolName && 'input' in event.payload) patchToolMetadata(toolID, toolName, event.payload.input)
                 }
-                for (const converted of normalizedToProviderEvents(event)) handleProviderEvent(converted)
+                for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
               } else {
-                main.push(...normalizedToProviderEvents(event))
+                main.push(...normalizedPresentationEvents(event))
               }
             }
             handleHistoryBefore(main, msg.done === true)
@@ -5398,7 +5467,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               if (handleNormalizedSubagent(rawEvent)) {
                 const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
                 if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
-                  for (const converted of normalizedToProviderEvents(rawEvent)) handleProviderEvent(converted)
+                  for (const converted of normalizedPresentationEvents(rawEvent)) handleProviderEvent(converted)
                 }
                 continue
               }
@@ -5420,7 +5489,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   patchToolMetadata(toolID, toolName, event.payload.input)
                 }
               }
-              for (const converted of normalizedToProviderEvents(event)) handleProviderEvent(converted)
+              for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
             }
             if (msg.done === true) setAllHistoryLoaded(true)
           }
