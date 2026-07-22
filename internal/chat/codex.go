@@ -200,6 +200,9 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		if completed && codexCollabTool(item.Tool) == "spawnagent" && len(item.Result) == 0 {
 			out[0].payload.(map[string]any)["output"] = "Async agent launched successfully. The agent is working in the background."
 		}
+		if completed && codexCollabTool(item.Tool) == "closeagent" && !isError {
+			out[0].payload.(map[string]any)["output"] = "Agent closed"
+		}
 		return out
 	case "sleep":
 		kind := "tool_started"

@@ -228,6 +228,15 @@ function subLabels(sub: SubagentView, tool?: ToolItem): { label: string; desc: s
   return { label, desc }
 }
 
+function subCardLabels(sub: SubagentView, tool?: ToolItem): { label: string; desc: string } {
+  const original = subLabels(sub, tool)
+  const kind = original.label === 'Sub-agent' ? '' : original.label
+  return {
+    label: kind.toLowerCase() === 'codex' ? 'Agent' : 'Sub-agent',
+    desc: [kind, original.desc].filter(Boolean).join(': '),
+  }
+}
+
 // A message handed to the socket but not yet echoed back by the CLI
 // (--replay-user-messages echoes a user turn when it is *processed*, so a
 // message sent mid-turn stays here - visibly queued - until the turn ends).
@@ -1289,6 +1298,11 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
 
 function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
   const rows = useMemo(() => {
+    // Codex uses the same field for two distinct representations: updates are
+    // unified diffs, while add/delete items contain the complete file text.
+    // Only unified-diff mode has a structural prefix to remove. Inferring that
+    // from each line corrupts full files whose content begins with space/+/-.
+    const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
     let oldLine = kind === 'delete' ? 1 : 0
     let newLine = kind === 'add' ? 1 : 0
     return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
@@ -1298,11 +1312,13 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
         newLine = Number(hunk[2])
         return []
       }
-      const added = kind === 'add' || (line.startsWith('+') && !line.startsWith('+++'))
-      const removed = kind === 'delete' || (line.startsWith('-') && !line.startsWith('---'))
+      const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
+      const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
+      const added = kind === 'add' || hasAddedMarker
+      const removed = kind === 'delete' || hasRemovedMarker
       const oldNo = added ? '' : String(oldLine++)
       const newNo = removed ? '' : String(newLine++)
-      return [{ text: (added || removed || line.startsWith(' ')) ? line.slice(1) : line, added, removed, oldNo, newNo }]
+      return [{ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo }]
     })
   }, [diff, kind])
   const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
@@ -1542,9 +1558,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     | Record<string, unknown>
     | null
 	const input = useMemo(() => {
-		if (!rawInput || !('_raw' in rawInput)) return rawInput
+		if (!rawInput || (!('_raw' in rawInput) && !('_raw_events' in rawInput))) return rawInput
 		const visible = { ...rawInput }
 		delete visible._raw
+		delete visible._raw_events
 		return visible
 	}, [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
@@ -2349,7 +2366,7 @@ const SubagentCard = memo(function SubagentCard({
   // view); the user expands it to inspect the sub-agent's inner work.
   const [stepsOpen, setStepsOpen] = useState(false)
 
-  const { label, desc } = subLabels(sub, tool)
+  const { label, desc } = subCardLabels(sub, tool)
   const steps = sub.items.length
   const report = active ? null : subReport(sub, tool)
 
@@ -6341,12 +6358,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
         if (sub) {
           const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
-          const { label, desc } = subLabels(sub, tool)
+          const { desc } = subLabels(sub, tool)
           return (
             <div className="flex justify-center">
               <button onClick={() => openSubView(sub.agentId)} className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer">
-                <Bot className="h-3 w-3 text-violet-500" />
-                <span className="truncate">{label} finished{desc ? `: ${desc}` : ''}</span>
+                <span className="truncate">Sub-agent finished{desc ? `: ${desc}` : ''}</span>
                 <MessageSquare className="h-3 w-3 shrink-0" />
               </button>
             </div>

@@ -102,6 +102,11 @@ func TestNormalizeCodexCamelCaseAgentControls(t *testing.T) {
 		if name := got[0].payload.(map[string]any)["name"]; name != tc.name {
 			t.Errorf("%s name = %v, want %s", tc.tool, name, tc.name)
 		}
+		if tc.tool == "closeAgent" {
+			if output := got[0].payload.(map[string]any)["output"]; output != "Agent closed" {
+				t.Errorf("%s output = %v, want Agent closed", tc.tool, output)
+			}
+		}
 	}
 }
 

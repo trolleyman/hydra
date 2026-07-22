@@ -3111,6 +3111,10 @@ func handleSimCodexChatWS(conn *safeConn) {
 			map[string]any{"path": "TOOL_DEMO.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-draft\n+complete\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "output": "File updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "docs/sim-added.md", "kind": map[string]any{"type": "add"}, "diff": "# Added document\n First character and indentation preserved\n+literal plus preserved\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-write", "name": "Write", "output": "File updated", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "input": map[string]any{"prompt": "Inspect chat replay and report the key invariant.", "description": "Inspect chat replay", "_raw": map[string]any{"tool": "spawnAgent"}}}},
 		{"subagent_started", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "description": "Inspect chat replay", "prompt": "Inspect chat replay and report the key invariant.", "status": "running"}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-child-report", "agent_id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "sidechain": true, "text": "Replay uses the same sequenced normalized events as live delivery."}},
@@ -3118,7 +3122,7 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"subagent_completed", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "status": "completed"}},
 		{"tool_completed", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "output": "completed", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "input": map[string]any{"agent_id": "sim-codex-child", "_raw": map[string]any{"tool": "closeAgent"}}}},
-		{"tool_completed", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "output": "completed", "status": "completed"}},
+		{"tool_completed", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "output": "Agent closed", "status": "completed"}},
 		// Compatibility regression: old Claude logs incorrectly followed a
 		// background-command notice with this lifecycle event. The notice's
 		// output-file must keep it out of the sub-agent projection on replay.
