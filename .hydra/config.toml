@@ -75,7 +75,7 @@ artifact_concurrency = 2
 ##     ~/.local/share/kotlin - Kotlin compiler cache
 ##     ~/.local/share/JetBrains - JetBrains toolbox
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
-writable_paths = ["~/.cache/go", "~/.npm", "~/.local/share/aube", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", ""]
+writable_paths = ["~/.cache/go", "~/.npm", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", "~/.local/share/aube"]
 
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]

@@ -68,3 +68,7 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Working on macOS/darwin support** (`internal/sandbox/darwin.go`, Seatbelt
   profile, config seeding on macOS) -> [docs/macos-support.md](docs/macos-support.md)
   (audit of the darwin backend + phased implementation plan)
+- **Working on Windows support** (`internal/sandbox/windows.go` and the other
+  `*_windows.go` stubs, ConPTY, AppContainer, WSL2) ->
+  [docs/windows-support.md](docs/windows-support.md) (audit of the Windows
+  stubs + phased implementation plan)

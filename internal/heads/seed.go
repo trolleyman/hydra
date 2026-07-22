@@ -306,11 +306,14 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		KnownTools:       p.KnownTools,
 	}
 	// WebFetch host-gating is derived from the sandbox network policy rather than a
-	// dedicated list: WebFetch content is fetched provider-side (it does not go
-	// through the egress proxy), so the gate is the only place to enforce which
-	// hosts it may reach - and it should honour the same allow-list as the network.
-	// Filtering off (unrestricted/off) ⇒ no gating; filtering on (hard/advisory) ⇒
-	// allow the default hosts unioned with the user's allowed_hosts, minus blocked.
+	// dedicated list: the fetch runs inside the sandbox, so its traffic also
+	// crosses the egress boundary and must honour the same allow-list as the
+	// network. Gating it at the tool layer too is still worthwhile - the user gets
+	// prompted with the full URL before the tool runs - and a granted host is
+	// shared with the egress proxy via granted-hosts.json so one allow never
+	// prompts twice. Filtering off (unrestricted/off) ⇒ no gating; filtering on
+	// (hard/advisory) ⇒ allow the default hosts unioned with the user's
+	// allowed_hosts, minus blocked.
 	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(agentType)
 	if net.FilterHosts {
 		pol.WebFetchFilter = true

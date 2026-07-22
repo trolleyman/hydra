@@ -185,7 +185,10 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	// additionally persisted it above). Resolve every OTHER parked WebFetch/egress
 	// request for the same host, so a parallel WebFetch + shell request cannot show
 	// two identical prompts or leave one half of the tool batch blocked. The seeded
-	// gate policy is read-only, so granted-hosts.json is its live session overlay.
+	// gate policy is read-only, so granted-hosts.json is its live session overlay -
+	// read by the in-sandbox gate hook AND by the egress approver before parking a
+	// connection, so allowing a WebFetch prompt also pre-clears the fetch's actual
+	// connection at the proxy (and vice versa).
 	if grantedHost != "" {
 		grantHostForSession(dir, request.Reqid, grantedHost)
 	}
@@ -246,9 +249,9 @@ func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
 // [sandbox.network] allowed_hosts - one shared list applied to every agent, since
 // the egress allow-list is a project-wide posture, not a per-agent capability. An
 // egress host also goes live for the current session in the running proxy's
-// allow-list (handled where the proxy reads the Allow decision), and a WebFetch host
-// goes live via gate.AddGrantedHost (see the caller). Any other kind is one-shot and
-// not persisted (default case).
+// allow-list (handled where the proxy reads the Allow decision), and any host goes
+// live for both network layers via gate.AddGrantedHost (see the caller). Any other
+// kind is one-shot and not persisted (default case).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil
