@@ -3134,7 +3134,9 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"turn_started", map[string]any{"id": "sim-codex-interrupt-turn", "status": "running"}},
 		{"assistant_delta", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible"}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible", "partial": true}},
-		{"turn_interrupted", map[string]any{"id": "sim-codex-interrupt-turn", "status": "interrupted"}},
+		// Legacy compatibility: older normalized logs retained the cancellation
+		// status but labelled this event turn_completed.
+		{"turn_completed", map[string]any{"id": "sim-codex-interrupt-turn", "status": "cancelled"}},
 	}
 	for i, event := range events {
 		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)

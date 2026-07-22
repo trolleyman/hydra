@@ -571,8 +571,16 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
       return []
     }
     case 'turn_completed':
-    case 'turn_failed':
+    case 'turn_failed': {
+      // Compatibility for logs written before cancellation got its own event
+      // type: the adapter labelled them completed/failed but retained Codex's
+      // cancellation status or error in the payload.
+      const terminal = `${typeof p.status === 'string' ? p.status : ''} ${contentText(p.error)}`.toLowerCase()
+      if (/interrupt|cancel/.test(terminal)) {
+        return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
+      }
       return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
+    }
     case 'turn_interrupted':
       return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
     default:
