@@ -128,6 +128,9 @@ export function useAgentNotifications(
   // agentId → status timestamp we last fetched approvals for, so we only refetch
   // when the gate bumps the timestamp (a new park / a resolution).
   const approvalStamp = useRef<Map<string, string>>(new Map())
+  // agentIds with an in-flight listAgentApprovals fetch, so overlapping ticks
+  // don't double-fetch (matters for lingering cards, which refetch every tick).
+  const approvalFetching = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     // The store's agent list belongs to `agentsProjectId`; ignore runs where it
@@ -258,57 +261,100 @@ export function useAgentNotifications(
       )
     }
 
-    // Drop tracked toasts for agents that have left the approval wait (or the
-    // list). They resolved elsewhere, so tear them down silently (no deny).
-    const approvalAgentIds = new Set(
+    // A parked request lives on disk for the whole approval window, and
+    // listAgentApprovals reads it directly - so a card's lifetime is tied to its
+    // REQUEST (decided or withdrawn), NOT to the head's momentary status. A head
+    // routinely leaves the policy_approval status while a connection is still
+    // parked: the in-sandbox client (curl/git/Claude's fetch) gives up on the held
+    // connection long before the ~5-min server window, and the agent's own
+    // PostToolUse hook then rewrites status to "running" (see the egress approver
+    // in internal/heads/egress.go). The connection is dead by then, but the host
+    // can still be granted - "Always allow" persists it so the agent's retry
+    // sails through - so we keep the card up until its request actually resolves,
+    // instead of dismissing it the instant the status flips (which used to make
+    // the card vanish seconds after appearing).
+    const agentById = new Map(agents.map((a) => [a.id, a]))
+    const parkedAgentIds = new Set(
       agents.filter((a) => a.agent_status?.notification_type === 'policy_approval').map((a) => a.id),
     )
+    // Drop tracked cards only for agents that have vanished from the list entirely
+    // (killed/merged): their requests can never resolve, so tear down silently.
+    // A head that merely LEFT the approval wait keeps its cards - they're
+    // reconciled against the on-disk request below.
     for (const [agentId, reqMap] of approvalToasts.current) {
-      if (approvalAgentIds.has(agentId)) continue
+      if (agentById.has(agentId)) continue
       for (const [reqid, toastId] of reqMap) {
         toast.dismiss(toastId, { silent: true })
-        // The gate wait is over, so retract its OS notification too.
+        // The head is gone, so retract its OS notification too.
         dismissNotification(`approval:${agentId}:${reqid}`)
       }
       approvalToasts.current.delete(agentId)
       approvalStamp.current.delete(agentId)
     }
 
-    // For each agent waiting on the gate, fetch its parked calls when the status
-    // timestamp has changed since we last looked, then reconcile toasts.
-    for (const agent of agents) {
-      if (agent.agent_status?.notification_type !== 'policy_approval') continue
+    // Reconcile approvals for every head that is parked now OR still shows a card
+    // we're tracking - so a lingering card keeps polling until its request is
+    // withdrawn/decided, even after the head's status moved off policy_approval.
+    const reconcileIds = new Set([...parkedAgentIds, ...approvalToasts.current.keys()])
+    for (const agentId of reconcileIds) {
+      const agent = agentById.get(agentId)
+      if (!agent) continue
+      if (approvalFetching.current.has(agentId)) continue // a fetch is already in flight
       const stamp = agent.agent_status?.timestamp ?? ''
-      if (approvalStamp.current.get(agent.id) === stamp) continue
-      approvalStamp.current.set(agent.id, stamp)
+      const parked = parkedAgentIds.has(agentId)
+      // Stamp-gate parked heads (skip refetching the same still-parked set every
+      // tick). A head that already left the wait but still shows a card must be
+      // refetched regardless, so we notice its request being withdrawn at timeout
+      // even though its status has stopped changing.
+      if (parked && approvalStamp.current.get(agentId) === stamp) continue
+      approvalStamp.current.set(agentId, stamp)
+      approvalFetching.current.add(agentId)
 
-      const agentId = agent.id
       const agentName = agent.title || agent.id
       void (async () => {
         let approvals: ApprovalRequest[]
         try {
           approvals = (await api.default.listAgentApprovals(currentProjectId, agentId)).approvals ?? []
         } catch {
-          // Leave existing toasts in place; a later stamp bump will retry.
+          // Leave existing toasts in place; a later tick will retry.
           return
+        } finally {
+          approvalFetching.current.delete(agentId)
         }
-        // A newer status transition may have resolved/withdrawn this approval
-        // while the request was in flight. Never let an older HTTP response
-        // resurrect the just-dismissed card (seen as a quick identical popup).
-        if (approvalStamp.current.get(agentId) !== stamp) return
         let reqMap = approvalToasts.current.get(agentId)
         if (!reqMap) {
           reqMap = new Map()
           approvalToasts.current.set(agentId, reqMap)
         }
         const liveReqids = new Set(approvals.map((a) => a.reqid))
-        // Withdrawn requests (gone from the fetch) → silent teardown.
+        // Withdrawn/decided requests (gone from the fetch) → silent teardown. Runs
+        // for parked and lingering heads alike; a lingering head polls precisely
+        // so its card disappears once the park times out or resolves elsewhere.
         for (const [reqid, toastId] of reqMap) {
           if (liveReqids.has(reqid)) continue
           toast.dismiss(toastId, { silent: true })
           dismissNotification(`approval:${agentId}:${reqid}`)
           reqMap.delete(reqid)
         }
+        // A head that has LEFT the approval wait only ever tears its cards down -
+        // it never surfaces a new one here (a genuinely new park flips the head
+        // back into policy_approval, handled by the parked branch below). This
+        // also means a stale in-flight fetch can only remove a card, never
+        // resurrect a just-decided one - so the stale-response guard below is
+        // needed only on the parked path.
+        if (!parked) {
+          if (reqMap.size === 0) {
+            approvalToasts.current.delete(agentId)
+            approvalStamp.current.delete(agentId)
+          }
+          return
+        }
+        // A newer status transition may have resolved/withdrawn one of these
+        // approvals while the request was in flight. Never let an older HTTP
+        // response resurrect a just-dismissed card (seen as a quick identical
+        // popup). (A lingering head keeps the same stamp across refetches, so this
+        // would be a no-op there - hence the parked-only placement.)
+        if (approvalStamp.current.get(agentId) !== stamp) return
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
         // dedups so a repeat fetch (or StrictMode double-run) reuses the toast.
         for (const a of approvals) {

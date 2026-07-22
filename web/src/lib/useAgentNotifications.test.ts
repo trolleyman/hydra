@@ -6,8 +6,20 @@ import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useToastStore, type Toast } from '../stores/toastStore'
 import type { AgentTransitionSpec } from './agentToast'
-import type { AgentResponse } from '../api'
+import type { AgentResponse, ApprovalRequest } from '../api'
 import { AgentStatus } from '../api'
+
+// The approval-lifetime tests drive the gate's parked-request fetch. Mock the API
+// client so we control exactly what listAgentApprovals returns each tick.
+vi.mock('../stores/apiClient', () => ({
+  api: {
+    default: {
+      listAgentApprovals: vi.fn(),
+      decideAgentApproval: vi.fn(() => Promise.resolve({})),
+    },
+  },
+}))
+import { api } from '../stores/apiClient'
 
 // react-router's useNavigate touches a live router context we don't set up here;
 // the transition-toast path only needs it to exist, so stub it to a no-op.
@@ -69,6 +81,7 @@ beforeEach(() => {
   useProjectStore.setState({ projects: [] })
   vi.mocked(dismissNotification).mockClear()
   vi.mocked(fireNotification).mockClear()
+  vi.mocked(api.default.listAgentApprovals).mockReset()
 })
 
 afterEach(() => {
@@ -197,5 +210,88 @@ describe('useAgentNotifications - retract OS notifications when state clears', (
     seedAgents([makeAgent('a1', AgentStatus.FINISHED, true)])
 
     expect(dismissNotification).not.toHaveBeenCalledWith('finished:a1')
+  })
+})
+
+// A parked network/gate request lives on disk for the whole approval window and
+// listAgentApprovals reads it directly, so a card's lifetime follows its REQUEST -
+// not the head's momentary status. The head routinely leaves the policy_approval
+// wait mid-park (the in-sandbox client times out the held connection and the
+// agent's own hook rewrites status to "running"), and the card must survive that
+// so the user still gets to grant the host (which persists it for the retry).
+describe('useAgentNotifications - approval cards outlive the policy_approval status', () => {
+  // A head parked on the gate: needs_input with a policy_approval notification.
+  function parkedAgent(id: string, timestamp = 'park-1'): AgentResponse {
+    return {
+      ...makeAgent(id, AgentStatus.NEEDS_INPUT),
+      agent_status: { status: AgentStatus.NEEDS_INPUT, timestamp, notification_type: 'policy_approval' },
+    }
+  }
+  // The same head after its own hook rewrote status off the wait (client gave up).
+  function runningAgent(id: string, timestamp: string): AgentResponse {
+    return { ...makeAgent(id, AgentStatus.RUNNING), agent_status: { status: AgentStatus.RUNNING, timestamp } }
+  }
+  function egressReq(reqid: string, target = 'example.com'): ApprovalRequest {
+    return { reqid, tool: 'egress', kind: 'egress', target, summary: `wants to connect to "${target}"` }
+  }
+  const mockApprovals = (reqs: ApprovalRequest[]) =>
+    vi.mocked(api.default.listAgentApprovals).mockResolvedValue({ approvals: reqs })
+  // Cards that are actually visible (a dismiss flags `exiting` before the removal
+  // animation, so filter those out - they're on their way off screen).
+  const visibleCards = () =>
+    useToastStore.getState().toasts.filter((t) => t.approval?.kind === 'egress' && !t.exiting)
+  // Let the effect's async listAgentApprovals fetch settle.
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+  it('surfaces an egress approval card while the head is parked', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+  })
+
+  it('keeps the card up after the head leaves the wait while the request is still parked', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // The agent's PostToolUse hook rewrites status to running, but the egress
+    // connection is still parked server-side (the request is still returned).
+    seedAgents([runningAgent('a1', 'run-1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+  })
+
+  it('tears the card down once the parked request is withdrawn (timeout/decided)', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    seedAgents([runningAgent('a1', 'run-1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // The approval window elapses: the proxy withdraws the request. Any later
+    // re-render re-polls the lingering card and finds it gone.
+    mockApprovals([])
+    seedAgents([runningAgent('a1', 'run-2')])
+    await settle()
+    expect(visibleCards()).toHaveLength(0)
+  })
+
+  it('tears the card down when the head disappears from the list entirely', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // Killed/merged: gone from the agent list, so its card is torn down silently.
+    seedAgents([])
+    await settle()
+    expect(visibleCards()).toHaveLength(0)
   })
 })
