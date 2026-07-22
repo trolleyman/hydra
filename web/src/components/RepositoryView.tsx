@@ -26,6 +26,7 @@ import {
   type DiffSide,
 } from '../DiffViewer'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
+import { scrollCardToTop } from '../lib/diffScroll'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
@@ -1264,7 +1265,8 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     else diffFileRefs.current.delete(path)
   }
   const scrollToDiffFile = (path: string) => {
-    diffFileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = diffFileRefs.current.get(path)
+    if (el) scrollCardToTop(el)
   }
 
   // Clicking a changed file in the sidebar: in one-file mode it selects the file

@@ -24,7 +24,7 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop } from './lib/collapseScroll'
+import { pinCardToTop, scrollCardToTop } from './lib/diffScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
@@ -981,7 +981,14 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   return (
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
-      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 8px)` }}
+      data-file-card={file.path}
+      // Dock target for jump-to-file. FILE_STICKY_TOP subtracts 16px (the scroll
+      // container's pt-4) so the header PINS flush at the bar bottom while
+      // reading; that same -16 must be added back here or the card lands 16px
+      // too high and the pinned header floats down over the first content line
+      // (scrolls "too far"). +16 lands the card border exactly at the sticky
+      // bar stack's bottom edge, so the header sits flush and line 1 is visible.
+      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 16px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
@@ -2405,7 +2412,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [handleShowFile])
 
   const scrollToFile = useCallback((path: string) => {
-    fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = fileRefs.current.get(path)
+    if (el) scrollCardToTop(el)
   }, [])
 
   const handleFileClick = useCallback((path: string) => {
@@ -2414,7 +2422,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (idx >= 0) setSingleFileIdx(idx)
     } else {
       if (collapsedFiles.has(path)) toggleFileCollapse(path)
-      setTimeout(() => scrollToFile(path), 50)
+      // No wait for the expand to render: scrollCardToTop re-measures every
+      // frame, so it rides out the 200ms collapse glide (and the lazy bodies
+      // mounting along the way) rather than trusting one stale measurement.
+      scrollToFile(path)
     }
   }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
@@ -2755,7 +2766,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           transition: isResizing ? undefined : 'width 240ms ease, margin-right 240ms ease',
         }}
       >
-        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
         {/* Width drag handle: invisible strip, shared pill on hover (the
             unified resize affordance). Hidden while the column is collapsed. */}
         {!filesListHidden && (
@@ -2813,7 +2824,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             />
           </>
         ) : (
-          diff.files.map((f) => {
+          // Render the stacked cards in the SAME order the sidebar lists them
+          // (orderedFiles = tree depth-first / grouped / flat), not diff.files'
+          // raw order - otherwise the tree/grouped sidebar and the diff column
+          // disagree and clicking a file scrolls to a card in a different spot.
+          orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
             <FileDiff key={f.path} file={f} sideBySide={sideBySide}
