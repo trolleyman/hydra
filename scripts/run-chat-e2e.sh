@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Replace the disposable chat E2E checkout with a detached worktree at the
-# current development branch, build it, and run an isolated Hydra server.
+# Update the chat E2E detached worktree to the current development branch,
+# build it, and run an isolated Hydra server. Existing runtime state under
+# .hydra/local is retained between runs.
 source_checkout="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
 git_common_dir="$(git -C "$source_checkout" rev-parse --path-format=absolute --git-common-dir)"
 repository="$(dirname "$git_common_dir")"
 target="/home/callum/code/hydra-chat-e2e"
 branch="hydra/hey-could-you-look-at-how-i-could"
 
-if [[ "$target" != "/home/callum/code/hydra-chat-e2e" ]]; then
-  echo "Refusing to replace unexpected target: $target" >&2
+if [[ -d "$target/.git" || -f "$target/.git" ]]; then
+  if ! git -C "$target" diff --quiet || ! git -C "$target" diff --cached --quiet; then
+    echo "Refusing to update $target: it has tracked local changes." >&2
+    echo "Commit or discard them, then run this script again." >&2
+    exit 1
+  fi
+  git -C "$target" checkout --detach "$branch"
+elif [[ -e "$target" ]]; then
+  echo "Refusing to replace existing non-worktree path: $target" >&2
   exit 1
+else
+  git -C "$repository" worktree add --detach "$target" "$branch"
 fi
-
-# Remove it through Git when it is already a registered worktree. A previous
-# standalone clone is not registered, so remove only the exact disposable path.
-git -C "$repository" worktree remove --force "$target" 2>/dev/null || true
-if [[ -e "$target" || -L "$target" ]]; then
-  rm -rf -- "$target"
-fi
-
-git -C "$repository" worktree prune
-git -C "$repository" worktree add --detach "$target" "$branch"
 
 cd "$target/web"
 bun install
