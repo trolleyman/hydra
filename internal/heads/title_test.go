@@ -1,6 +1,8 @@
 package heads
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,6 +39,71 @@ func TestDeriveTitleTruncates(t *testing.T) {
 	if !strings.HasSuffix(got, "...") {
 		t.Errorf("expected truncated title to end with ellipsis, got %q", got)
 	}
+}
+
+func TestInlineUploadRefs(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	textPath := write("123-pasted-text-1.txt", "Fix the scaling on the main monitor when it wakes from sleep")
+	imgPath := write("456-screenshot.png", "\x89PNG\x00binary")
+
+	t.Run("inlines pasted text", func(t *testing.T) {
+		prompt := "Look at this\n\n" + textPath
+		got := inlineUploadRefs(prompt, dir)
+		want := "Look at this\n\nFix the scaling on the main monitor when it wakes from sleep"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("reduces image path to filename", func(t *testing.T) {
+		got := inlineUploadRefs("See\n\n"+imgPath, dir)
+		want := "See\n\n456-screenshot.png"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("leaves non-upload paths untouched", func(t *testing.T) {
+		prompt := "Edit /etc/hosts and src/main.go please"
+		if got := inlineUploadRefs(prompt, dir); got != prompt {
+			t.Errorf("got %q, want unchanged %q", got, prompt)
+		}
+	})
+
+	t.Run("missing upload falls back to filename", func(t *testing.T) {
+		missing := filepath.Join(dir, "789-gone.txt")
+		got := inlineUploadRefs("do it\n\n"+missing, dir)
+		want := "do it\n\n789-gone.txt"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("truncates a large paste", func(t *testing.T) {
+		big := write("999-big.txt", strings.Repeat("x", maxInlineUploadBytes*2))
+		got := inlineUploadRefs(big, dir)
+		if !strings.HasSuffix(got, "\n...") {
+			t.Errorf("expected truncation marker, got tail %q", got[len(got)-10:])
+		}
+		if len(got) > maxInlineUploadBytes+len("\n...") {
+			t.Errorf("snippet not bounded: %d bytes", len(got))
+		}
+	})
+
+	t.Run("empty uploads dir is a no-op", func(t *testing.T) {
+		prompt := "hello\n\n" + textPath
+		if got := inlineUploadRefs(prompt, ""); got != prompt {
+			t.Errorf("got %q, want unchanged", got)
+		}
+	})
 }
 
 func TestSanitizeGeneratedTitle(t *testing.T) {
