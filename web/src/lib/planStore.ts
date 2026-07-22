@@ -38,7 +38,26 @@ function parseEntries(raw: string | null | undefined): PlanEntry[] {
 // parseServerPlan turns a server plan JSON string (AgentResponse.plan or a
 // chat "plan" frame) into plan entries.
 export function parseServerPlan(planJSON: string | null | undefined): PlanEntry[] {
-  return parseEntries(planJSON)
+  const parsed = parseEntries(planJSON)
+  return parsed.flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object') return []
+    const raw = entry as unknown as Record<string, unknown>
+    const content = typeof raw.content === 'string' ? raw.content : typeof raw.step === 'string' ? raw.step : ''
+    if (!content) return []
+    const status = raw.status === 'completed'
+      ? 'completed'
+      : raw.status === 'in_progress' || raw.status === 'inProgress'
+        ? 'in_progress'
+        : 'pending'
+    return [{
+      key: typeof raw.key === 'string' && raw.key ? raw.key : `plan:${index}`,
+      content,
+      status,
+      activeForm: typeof raw.activeForm === 'string' ? raw.activeForm : undefined,
+      description: typeof raw.description === 'string' ? raw.description : undefined,
+      order: typeof raw.order === 'number' ? raw.order : index + 1,
+    }]
+  })
 }
 
 export function loadPlan(projectId: string | null, agentId: string): PlanEntry[] {

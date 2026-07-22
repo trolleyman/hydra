@@ -405,10 +405,11 @@ func (b *LineBuffer) Feed(chunk []byte) [][]byte {
 // session lock, and Pending is read under the same lock (see Session.attach).
 type RingFilter struct {
 	lb LineBuffer
-	// OnLine observes every complete non-stream_event protocol line in read
-	// order. Hydra's normalized event adapter uses it to persist one canonical
-	// timeline even when no browser is attached. The callback runs under the
-	// session lock and should enqueue work rather than doing disk IO itself.
+	// OnLine observes every complete protocol line in read order, including
+	// stream_event token deltas. Hydra's normalized adapter needs those deltas
+	// for live rendering even though the scrollback ring intentionally retains
+	// only completed events. The callback runs under the session lock and should
+	// enqueue work rather than doing disk IO itself.
 	OnLine func(line []byte)
 	// OnAPIError, if set, is called (synchronously, once per line) with the error
 	// text whenever a complete assistant line flagged isApiErrorMessage passes
@@ -576,6 +577,9 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 	var out []byte
 	for _, line := range f.lb.Feed(chunk) {
 		ev, ok := ParseEvent(line)
+		if f.OnLine != nil && len(bytes.TrimSpace(line)) > 0 {
+			f.OnLine(line)
+		}
 		if ok && ev.Type == "stream_event" {
 			// stream_event partials aren't persisted, but they carry the thinking
 			// block timing: measure it here and, on completion, queue a synthetic
@@ -607,9 +611,6 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 		}
 		if ok && ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && f.OnModel != nil {
 			f.OnModel(ev.Model)
-		}
-		if f.OnLine != nil && len(bytes.TrimSpace(line)) > 0 {
-			f.OnLine(line)
 		}
 		out = append(out, line...)
 		out = append(out, '\n')

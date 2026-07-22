@@ -80,7 +80,7 @@ func (m *Manager) store(id string) (*Store, error) {
 		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
 	}
 	if len(s.Snapshot().Plan) == 0 && ctx.Plan != "" && json.Valid([]byte(ctx.Plan)) {
-		_, _, _ = s.AppendSource("hydra:initial-plan", "plan_updated", JSONPayload(map[string]any{}, "plan", []byte(ctx.Plan)))
+		_, _, _ = s.AppendSource("hydra:initial-plan", "plan_updated", JSONPayload(map[string]any{"provider": ctx.AgentType}, "plan", []byte(ctx.Plan)))
 	}
 	if s.Snapshot().Head == "" && ctx.Worktree != "" {
 		if head, err := git.ResolveRef(ctx.Worktree, "HEAD"); err == nil {

@@ -488,6 +488,27 @@ Raw. A completed normalized message replaces its streamed preview in the same
 render batch so the preview cannot briefly disappear before the final Markdown
 is committed.
 
+Claude token deltas require a slightly different retention rule from completed
+events. `stream_event` lines remain excluded from the legacy scrollback ring,
+but the normalized adapter observes them before that filter. Live clients thus
+receive `assistant_delta`/`reasoning_delta`, while reconnect rendering settles
+on the completed semantic message. Provider content-boundary notifications are
+state hints rather than a second set of presentation events: the first delta
+opens the live block and the completed message closes and replaces it atomically.
+
+`plan_updated` is both a durable projection checkpoint and a plan-panel input.
+Codex `{step,status}` entries are normalized to the shared `PlanEntry` shape.
+Claude's tracker emits checkpoints after TaskCreate and TaskUpdate, but those
+checkpoints do not render synthetic Update Plan cards because the original Task
+cards already provide the timeline. Codex plan notifications retain a visible
+Update Plan card because app-server does not emit a separate plan tool item.
+
+Tool output already renders common ANSI SGR colours. Full terminal emulation
+(cursor motion and reconstructing every interactive-shell stdin write) remains
+out of scope: when Codex reports only an interactive shell transcript, Hydra
+labels the first echoed command as inferred terminal input and keeps the
+complete provider envelopes under Raw.
+
 Head lifecycle follows both `turn/started` and `item/started`. The latter is a
 bounded fallback for resumed or version-skewed app-server streams where item
 activity becomes visible before the corresponding turn notification; it keeps

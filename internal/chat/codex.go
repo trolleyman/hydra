@@ -98,7 +98,7 @@ func normalizeCodex(line []byte) []eventSpec {
 	case "item/plan/delta":
 		return []eventSpec{{eventType: "plan_delta", payload: map[string]any{"id": params.ItemID, "text": params.Delta}}}
 	case "turn/plan/updated":
-		return []eventSpec{{eventType: "plan_updated", payload: map[string]any{"plan": params.Plan}}}
+		return []eventSpec{{eventType: "plan_updated", payload: map[string]any{"provider": "codex", "plan": params.Plan}}}
 	case "thread/tokenUsage/updated":
 		usage := params.Usage
 		if len(params.TokenUsage) > 0 {
@@ -158,7 +158,7 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 				}
 				plan = entries
 			}
-			return []eventSpec{{sourceID: source + ":completed", eventType: "plan_updated", payload: map[string]any{"plan": plan}}}
+			return []eventSpec{{sourceID: source + ":completed", eventType: "plan_updated", payload: map[string]any{"provider": "codex", "plan": plan}}}
 		}
 	case "user_message", "userMessage":
 		return nil // recorded at Hydra's input/queue boundary with its client id

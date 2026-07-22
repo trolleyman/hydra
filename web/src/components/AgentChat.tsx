@@ -503,6 +503,11 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
       return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed' }] } }]
     }
     case 'plan_updated': {
+      // Claude exposes its TaskCreate/TaskUpdate calls as ordinary tool cards;
+      // its tracker-generated plan events are state checkpoints, not a second
+      // visible UpdatePlan invocation. Codex's turn/plan/updated notification
+      // has no separate tool item, so retain its useful timeline card.
+      if (p.provider !== 'codex') return []
       const plan = Array.isArray(p.plan) ? p.plan : []
       const completed = plan.filter((entry) => entry && typeof entry === 'object' && (entry as { status?: unknown }).status === 'completed').length
       const summary = `${plan.length} task${plan.length === 1 ? '' : 's'} · ${completed} completed`
@@ -519,9 +524,14 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
       return key ? [{ ...base, type: 'hydra_subagent_completed', isSidechain: false, agentId: undefined, parent_tool_use_id: null, subagentNotice: { key, label, description } }] : []
     }
     case 'content_stream_started':
-      return [{ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: p.kind === 'reasoning' ? 'thinking' : String(p.kind ?? 'text') } } }]
+      // The first normalized delta opens the presentation stream. Forwarding
+      // this provider boundary as well opened it twice and reset Claude's
+      // partially rendered response when its first token arrived.
+      return []
     case 'content_stream_completed':
-      return [{ type: 'stream_event', event: { type: 'message_stop' } }]
+      // The completed semantic message closes the stream atomically with the
+      // settled item, avoiding an empty gap between preview and final content.
+      return []
     case 'usage_updated': {
       const usage = p.usage as TokenUsage
       return typeof p.message_id === 'string'
@@ -676,6 +686,7 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
   if (input == null) return { text: '', prose: false }
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
+  if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
   // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
   if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
     const status = typeof obj.status === 'string' ? obj.status : ''
@@ -1655,7 +1666,14 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           ) : (
             <>
               {isBash ? (
-                <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
+                <div>
+                  {interactiveTranscript && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Terminal input (inferred from echo)
+                    </div>
+                  )}
+                  <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
+                </div>
               ) : isWebSearch && typeof input?.query === 'string' && input.query.trim() ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
               ) : isWebSearch && pending ? (
@@ -5199,7 +5217,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
             return
           }
-          const streamID = explicitStreamID || (normalized.type === 'assistant_message' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream)
+          const activeStreamID = normalized.type === 'assistant_message' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream
+          // Claude's token envelopes do not carry the final message id, while
+          // its completed assistant envelope does. Prefer an explicitly open
+          // id (Codex), otherwise settle the provider's active anonymous stream.
+          const streamID = explicitStreamID && normalizedStreams.has(explicitStreamID) ? explicitStreamID : activeStreamID
           const settlesNormalizedStream =
             (normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)
           if (normalized.type === 'plan_updated') {

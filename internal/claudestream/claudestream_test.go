@@ -1,6 +1,7 @@
 package claudestream
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -272,6 +273,19 @@ func TestRingFilterOnAPIError(t *testing.T) {
 	}
 	if len(kept) == 0 {
 		t.Error("api-error line should still be persisted to the ring")
+	}
+}
+
+func TestRingFilterObservesStreamEventsWithoutPersistingThem(t *testing.T) {
+	var lines [][]byte
+	f := &RingFilter{OnLine: func(line []byte) { lines = append(lines, append([]byte(nil), line...)) }}
+	stream := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}` + "\n")
+	kept, _ := f.Filter(stream)
+	if len(kept) != 0 {
+		t.Fatalf("stream event persisted in scrollback ring: %q", kept)
+	}
+	if len(lines) != 1 || !bytes.Contains(lines[0], []byte(`"text":"hello"`)) {
+		t.Fatalf("OnLine observed %q, want one stream delta", lines)
 	}
 }
 

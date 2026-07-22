@@ -209,7 +209,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if err := store.UpdateAgentPlan(id, planJSON); err != nil {
 			log.Printf("warn: persist plan for %s: %v", id, err)
 		}
-		if _, err := chatEvents.Append(id, "plan_updated", chat.JSONPayload(map[string]any{}, "plan", []byte(planJSON))); err != nil {
+		if _, err := chatEvents.Append(id, "plan_updated", chat.JSONPayload(map[string]any{"provider": "claude"}, "plan", []byte(planJSON))); err != nil {
 			log.Printf("warn: persist normalized plan for %s: %v", id, err)
 		}
 	})
