@@ -55,6 +55,56 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	}
 }
 
+func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return time.Unix(123, 0) }
+	mustAppend := func(kind string, payload any) {
+		if _, err := s.Append(kind, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A settled message, then a response still streaming its text block.
+	mustAppend("user_message", map[string]any{"id": "m1", "content": "hi"})
+	mustAppend("content_stream_started", map[string]any{"kind": "text"})
+	mustAppend("assistant_delta", map[string]any{"text": "Hello "})
+	mustAppend("usage_updated", map[string]any{"usage": map[string]any{"output_tokens": 3}})
+	mustAppend("assistant_delta", map[string]any{"text": "there"})
+
+	snap, _, cancel := s.Watch()
+	cancel()
+	if snap.Stream == nil || snap.Stream.Kind != "text" || snap.Stream.Text != "Hello there" {
+		t.Fatalf("pending stream = %+v", snap.Stream)
+	}
+
+	// History must not leak the stream-only delta/boundary events.
+	page, _, done, err := s.Before("", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done {
+		t.Fatalf("expected fully-paged history, done=%v", done)
+	}
+	for _, ev := range page {
+		if streamOnly(ev.Type) {
+			t.Fatalf("history leaked stream-only event %q: %+v", ev.Type, page)
+		}
+	}
+
+	// Once the block settles, nothing is pending.
+	if _, err := s.Append("assistant_message", map[string]any{"text": "Hello there"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _, cancel = s.Watch()
+	cancel()
+	if snap.Stream != nil {
+		t.Fatalf("expected no pending stream after settle, got %+v", snap.Stream)
+	}
+}
+
 func TestEventUsesSequenceAsSoleWireIdentity(t *testing.T) {
 	event := Event{Seq: 7, Type: "notice", Timestamp: time.Unix(123, 0), Payload: json.RawMessage(`{"text":"hi"}`)}
 	raw, err := json.Marshal(event)

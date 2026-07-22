@@ -54,6 +54,18 @@ type QueuedState struct {
 	Content json.RawMessage `json:"content"`
 }
 
+// StreamState is the block a response is in the middle of producing: the text
+// accumulated from every delta no completed message has settled yet. It is
+// derived on read (see pendingStream) rather than applied and checkpointed, so
+// it never bloats the persisted projection - its only job is to let a client
+// attaching mid-response render the whole partial block instead of just the
+// tail it happens to catch live.
+type StreamState struct {
+	Kind      string `json:"kind"` // "text" or "thinking"
+	MessageID string `json:"message_id,omitempty"`
+	Text      string `json:"text"`
+}
+
 // Projection is bounded current operational state. Full messages and tool
 // output remain in the event log and are intentionally absent here.
 type Projection struct {
@@ -68,6 +80,9 @@ type Projection struct {
 	Queue       map[string]QueuedState   `json:"queue,omitempty"`
 	Head        string                   `json:"head,omitempty"`
 	Imports     map[string]int64         `json:"imports,omitempty"`
+	// Read-only: filled on the copies Watch/Snapshot hand out, never applied or
+	// persisted (see StreamState).
+	Stream *StreamState `json:"stream,omitempty"`
 }
 
 // Store serializes appends and projection updates for one head.
@@ -310,6 +325,9 @@ func (s *Store) Watch() (Projection, <-chan Event, func()) {
 	data, _ := json.Marshal(s.projection)
 	var snapshot Projection
 	_ = json.Unmarshal(data, &snapshot)
+	// The subscriber's live channel starts after Through, so the partial block
+	// in flight at this instant reaches it only as its remaining deltas.
+	snapshot.Stream = s.pendingStream()
 	ch := make(chan Event, 256)
 	s.subscribers[ch] = struct{}{}
 	var once sync.Once
@@ -324,6 +342,20 @@ func (s *Store) Watch() (Projection, <-chan Event, func()) {
 		})
 	}
 	return snapshot, ch, cancel
+}
+
+// streamOnly reports whether an event exists purely to drive the in-flight
+// preview. Such events render as nothing on their own - the completed message
+// that settles them carries the content - so history pages skip them: a single
+// long response emits hundreds of token deltas, which would otherwise fill the
+// whole window and leave a client that attached mid-response looking at a blank
+// conversation until it paged back.
+func streamOnly(eventType string) bool {
+	switch eventType {
+	case "assistant_delta", "reasoning_delta", "tool_delta", "content_stream_started", "content_stream_completed":
+		return true
+	}
+	return false
 }
 
 // Before returns up to limit display events preceding the opaque cursor. An
@@ -342,17 +374,65 @@ func (s *Store) Before(cursor string, limit int) ([]Event, string, bool, error) 
 			return nil, "", false, errtrace.Wrap(fmt.Errorf("invalid chat cursor: %w", err))
 		}
 	}
-	i := sort.Search(len(s.events), func(i int) bool { return s.events[i].Seq >= before })
-	start := i - limit
-	if start < 0 {
-		start = 0
+	start := sort.Search(len(s.events), func(i int) bool { return s.events[i].Seq >= before })
+	out := make([]Event, 0, limit)
+	for start > 0 && len(out) < limit {
+		start--
+		if streamOnly(s.events[start].Type) {
+			continue
+		}
+		out = append(out, s.events[start])
 	}
-	out := append([]Event(nil), s.events[start:i]...)
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
 	next := ""
 	if len(out) > 0 {
 		next = strconv.FormatUint(out[0].Seq, 10)
 	}
 	return out, next, start == 0, nil
+}
+
+// pendingStream reconstructs the block currently being produced from the tail
+// of the log: the run of deltas after the last event that would have settled or
+// abandoned it. Callers must hold s.mu.
+func (s *Store) pendingStream() *StreamState {
+	i := len(s.events)
+	// usage_updated is bookkeeping a provider can emit in the middle of a block
+	// (Codex reports running token usage), so it must not cut the run short.
+	for i > 0 && (streamOnly(s.events[i-1].Type) || s.events[i-1].Type == "usage_updated") {
+		i--
+	}
+	var pending *StreamState
+	for _, ev := range s.events[i:] {
+		kind := ""
+		switch ev.Type {
+		case "assistant_delta":
+			kind = "text"
+		case "reasoning_delta":
+			kind = "thinking"
+		default:
+			continue
+		}
+		var v struct {
+			Text      string `json:"text"`
+			MessageID string `json:"message_id"`
+			Sidechain bool   `json:"sidechain"`
+		}
+		if json.Unmarshal(ev.Payload, &v) != nil || v.Sidechain {
+			continue
+		}
+		// A kind switch inside the run (reasoning that ran straight into text
+		// without a completed message between) starts a fresh block.
+		if pending == nil || pending.Kind != kind || pending.MessageID != v.MessageID {
+			pending = &StreamState{Kind: kind, MessageID: v.MessageID}
+		}
+		pending.Text += v.Text
+	}
+	if pending == nil || pending.Text == "" {
+		return nil
+	}
+	return pending
 }
 
 type statePayload struct {

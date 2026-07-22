@@ -3094,7 +3094,14 @@ func handleSimCodexChatWS(conn *safeConn) {
 	// Deliberately override the settled REST state first: only the later
 	// normalized terminal turn event can return this live connection to finished.
 	sendStatusUpdate(conn, "running")
-	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{"subagents": map[string]any{}}})
+	// Mid-response attach: the daemon reports the block already in flight in its
+	// snapshot; the live stream below only carries this block's remaining
+	// deltas. The seeded prefix must render immediately and the continuation
+	// must land in the SAME bubble, settling to one message.
+	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{
+		"subagents": map[string]any{},
+		"stream":    map[string]any{"kind": "text", "message_id": "sim-codex-seed", "text": "This reply began before you attached"},
+	}})
 	_ = conn.WriteMessage(websocket.TextMessage, state)
 	events := []struct {
 		typ string
@@ -3102,6 +3109,8 @@ func handleSimCodexChatWS(conn *safeConn) {
 	}{
 		{"conversation_started", map[string]any{"model": ""}},
 		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
+		{"assistant_delta", map[string]any{"message_id": "sim-codex-seed", "text": " and finished after."}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
 		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "input": map[string]any{"changes": []any{
