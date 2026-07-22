@@ -48,6 +48,10 @@ type worker struct {
 	codexThread string
 	codexSpawns []codexSpawn
 	codexSubs   map[string]codexSpawn
+	// Codex may end an interrupted response without an item/completed agent
+	// message. Keep its durable deltas until the turn boundary so an interrupt
+	// can settle the partial reply into one replayable assistant_message.
+	codexAssistantDeltas map[string]string
 }
 
 type codexSpawn struct {
@@ -74,7 +78,7 @@ func (m *Manager) store(id string) (*Store, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}}
+	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}, codexAssistantDeltas: pendingCodexAssistantDeltas(s.events)}
 	m.workers[id] = w
 	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
 		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
@@ -173,6 +177,9 @@ func (w *worker) run(id string) {
 		default:
 			continue
 		}
+		if item.provider == "codex" {
+			specs = w.settleCodexPartialOnInterrupt(specs)
+		}
 		for _, spec := range specs {
 			if _, _, err := w.store.AppendSource(spec.sourceID, spec.eventType, spec.payload); err != nil {
 				log.Printf("warn: chat events: append %s event for %s: %v", item.provider, id, err)
@@ -182,6 +189,57 @@ func (w *worker) run(id string) {
 			}
 		}
 	}
+}
+
+func (w *worker) settleCodexPartialOnInterrupt(specs []eventSpec) []eventSpec {
+	out := make([]eventSpec, 0, len(specs)+len(w.codexAssistantDeltas))
+	for _, spec := range specs {
+		payload, _ := spec.payload.(map[string]any)
+		messageID, _ := payload["message_id"].(string)
+		switch spec.eventType {
+		case "assistant_delta":
+			if payload["sidechain"] != true && messageID != "" {
+				if text, ok := payload["text"].(string); ok {
+					w.codexAssistantDeltas[messageID] += text
+				}
+			}
+		case "assistant_message":
+			delete(w.codexAssistantDeltas, messageID)
+		case "turn_interrupted":
+			for id, text := range w.codexAssistantDeltas {
+				if strings.TrimSpace(text) != "" {
+					out = append(out, eventSpec{sourceID: "codex:partial:" + id, eventType: "assistant_message", payload: map[string]any{"message_id": id, "text": text, "partial": true}})
+				}
+			}
+			clear(w.codexAssistantDeltas)
+		case "turn_completed", "turn_failed":
+			clear(w.codexAssistantDeltas)
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+func pendingCodexAssistantDeltas(events []Event) map[string]string {
+	pending := map[string]string{}
+	for _, event := range events {
+		var payload map[string]any
+		_ = json.Unmarshal(event.Payload, &payload)
+		messageID, _ := payload["message_id"].(string)
+		switch event.Type {
+		case "assistant_delta":
+			if payload["sidechain"] != true && messageID != "" {
+				if text, ok := payload["text"].(string); ok {
+					pending[messageID] += text
+				}
+			}
+		case "assistant_message":
+			delete(pending, messageID)
+		case "turn_completed", "turn_failed", "turn_interrupted":
+			clear(pending)
+		}
+	}
+	return pending
 }
 
 func codexLineThreads(line []byte) (threadID, startedThread string) {

@@ -134,6 +134,15 @@ func TestLateSubagentStartDoesNotReopenCompletion(t *testing.T) {
 	}
 }
 
+func TestProjectionKeepsInterruptedTurnOverProtocolFailure(t *testing.T) {
+	p := Projection{Version: ProjectionVersion, Subagents: map[string]SubagentState{}, Queue: map[string]QueuedState{}}
+	apply(&p, Event{Seq: 1, Type: "turn_interrupted", Payload: json.RawMessage(`{"id":"turn","status":"interrupted"}`)})
+	apply(&p, Event{Seq: 2, Type: "turn_failed", Payload: json.RawMessage(`{"id":"turn","status":"failed"}`)})
+	if p.Turn == nil || p.Turn.Status != "interrupted" || p.Through != 2 {
+		t.Fatalf("projection = %+v", p)
+	}
+}
+
 func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 	root := t.TempDir()
 	s, err := Open(root, "head")

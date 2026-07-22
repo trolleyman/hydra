@@ -38,6 +38,13 @@ func TestNormalizeClaudeUserEchoIsIgnored(t *testing.T) {
 	}
 }
 
+func TestNormalizeClaudeInterruptEcho(t *testing.T) {
+	got := normalizeClaude([]byte(`{"type":"user","uuid":"interrupt","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`))
+	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+		t.Fatalf("events = %+v", got)
+	}
+}
+
 func TestNormalizeClaudeRichEvents(t *testing.T) {
 	tests := []struct {
 		line string

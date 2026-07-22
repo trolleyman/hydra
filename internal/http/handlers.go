@@ -2439,6 +2439,19 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if request.Params.HeadRef != nil && *request.Params.HeadRef != "" {
 		headRef = *request.Params.HeadRef
 	}
+	// A head can be interrupted before its named branch ref is created (or the
+	// ref may disappear while the retained worktree still has a valid detached
+	// HEAD). The default agent comparison should use that worktree commit rather
+	// than exposing git's ambiguous-revision error in the Files panel. Explicit
+	// caller-supplied refs still fail normally so typos are not hidden.
+	if request.Params.HeadRef == nil || *request.Params.HeadRef == "" {
+		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
+			headRef = resolved
+		} else {
+			empty := api.DiffResponse{Files: []api.DiffFile{}, BaseRef: baseRef, HeadRef: headRef}
+			return api.GetAgentDiff200JSONResponse(empty), nil
+		}
+	}
 
 	ignoreWhitespace := false
 	if request.Params.IgnoreWhitespace != nil {
@@ -2595,6 +2608,18 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		BehindCount:        &behindCount,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
+}
+
+func resolveDefaultAgentHead(projectRoot string, worktree *string, headRef string) (string, bool) {
+	if _, err := git.ResolveRef(projectRoot, headRef); err == nil {
+		return headRef, true
+	}
+	if worktree != nil {
+		if worktreeHead, err := git.ResolveRef(*worktree, "HEAD"); err == nil {
+			return worktreeHead, true
+		}
+	}
+	return headRef, false
 }
 
 func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiffFilesRequestObject) (api.GetAgentDiffFilesResponseObject, error) {

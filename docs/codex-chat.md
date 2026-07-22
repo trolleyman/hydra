@@ -97,7 +97,12 @@ an explicit "steer now" action instead of silently changing queue behavior.
 For Ctrl+C, call `turn/interrupt` with the active thread and turn ids. This
 replaces Claude's stdin `control_request` interrupt. Treat the resulting
 `turn/completed` cancellation status as a turn boundary so queue draining and
-Hydra status updates behave as they do today.
+Hydra status updates behave as they do today. Hydra normalizes cancelled,
+canceled, and interrupted statuses (including failed turns whose error identifies
+a cancellation) to a durable `turn_interrupted` event. If app-server ends a
+delta-only assistant item without `item/completed`, the backend first settles
+the accumulated text as a partial `assistant_message`; replay therefore retains
+both what the user saw before Ctrl+C and the explicit interruption boundary.
 
 ### Persistence and replay
 

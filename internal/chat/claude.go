@@ -111,6 +111,9 @@ func normalizeClaude(line []byte) []eventSpec {
 				return out
 			}
 		}
+		if strings.HasPrefix(strings.TrimSpace(textFromClaudeContent(ev.Message.Content)), "[Request interrupted by user") {
+			return []eventSpec{{sourceID: base, eventType: "turn_interrupted", payload: map[string]any{"status": "interrupted"}}}
+		}
 		// Hydra records submitted user messages (and their stable client ids) at
 		// the queue/input boundary. Claude echoes them here; emitting the echo too
 		// would duplicate the bubble and lose queue reconciliation identity.

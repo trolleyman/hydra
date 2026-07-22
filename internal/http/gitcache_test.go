@@ -1,9 +1,32 @@
 package http
 
 import (
+	"os"
+	"os/exec"
 	"strconv"
 	"testing"
 )
+
+func TestResolveDefaultAgentHeadFallsBackToWorktreeHEAD(t *testing.T) {
+	repo := t.TempDir()
+	cmd := exec.Command("git", "-C", repo, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(repo+"/file", []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "file"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"}} {
+		cmd = exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	resolved, ok := resolveDefaultAgentHead(repo, &repo, "hydra/missing-interrupted-head")
+	if !ok || resolved == "" || resolved == "hydra/missing-interrupted-head" {
+		t.Fatalf("resolved = %q, ok = %v", resolved, ok)
+	}
+}
 
 // TestImmutableCacheByteBudget verifies that the cache evicts by total bytes, not
 // just entry count: a stream of moderately-sized entries is held to the byte

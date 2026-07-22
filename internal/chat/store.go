@@ -396,7 +396,12 @@ func apply(p *Projection, ev Event) {
 		}
 		p.Subagents[v.ID] = cur
 	case "turn_started", "turn_completed", "turn_failed", "turn_interrupted":
-		p.Turn = &TurnState{ID: v.ID, Status: v.Status}
+		// Claude follows its explicit interrupt echo with a protocol-level failed
+		// result. Keep the more meaningful terminal state until the next turn
+		// starts instead of letting that implementation detail overwrite it.
+		if !(ev.Type == "turn_failed" && p.Turn != nil && p.Turn.Status == "interrupted") {
+			p.Turn = &TurnState{ID: v.ID, Status: v.Status}
+		}
 	case "interaction_requested":
 		p.Interaction = cloneRaw(v.Interaction)
 	case "interaction_resolved":

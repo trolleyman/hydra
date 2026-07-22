@@ -22,6 +22,24 @@ func TestNormalizeCodexTurnAndItems(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexInterruptedTurn(t *testing.T) {
+	for _, status := range []string{"interrupted", "cancelled", "canceled"} {
+		line := strings.Replace(`{"method":"turn/completed","params":{"turn":{"id":"t1","status":"STATUS"}}}`, "STATUS", status, 1)
+		got := normalizeCodex([]byte(line))
+		if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+			t.Errorf("%s => %+v", status, got)
+		}
+	}
+	got := normalizeCodex([]byte(`{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed","error":{"message":"Turn interrupted by user"}}}}`))
+	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+		t.Fatalf("failed interrupt => %+v", got)
+	}
+	got = normalizeCodex([]byte(`{"method":"error","params":{"error":{"message":"Turn cancelled"}}}`))
+	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+		t.Fatalf("cancel error => %+v", got)
+	}
+}
+
 func TestNormalizeCodexTodoList(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/completed","params":{"item":{"id":"p1","type":"todoList","items":[{"text":"inspect","completed":true},{"text":"fix","completed":false}]}}}`))
 	if len(got) != 1 || got[0].eventType != "plan_updated" {

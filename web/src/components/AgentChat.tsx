@@ -573,6 +573,8 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
     case 'turn_completed':
     case 'turn_failed':
       return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
+    case 'turn_interrupted':
+      return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
     default:
       return []
   }
@@ -4640,6 +4642,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return
       }
       if (text.startsWith('[Request interrupted by user')) {
+        // Codex can be interrupted before it emits item/completed. Preserve
+        // everything received so far as the assistant's partial response
+        // before closing the presentation stream and adding the boundary.
+        if (streamBuf?.text.trim()) {
+          push(streamBuf.kind === 'assistant'
+            ? { kind: 'assistant', text: streamBuf.text, noEntrance: true }
+            : { kind: 'thinking', text: streamBuf.text, noEntrance: true })
+        }
+        clearStream()
         push({ kind: 'interrupted' })
         interruptPending = true
         endPendingTools()

@@ -3130,6 +3130,11 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"subagent_completed", map[string]any{"id": "sim-background-command", "status": "completed"}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
 		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
+		{"user_message", map[string]any{"id": "sim-codex-interrupt-user", "content": []map[string]any{{"type": "text", "text": "Start an answer that I will interrupt."}}}},
+		{"turn_started", map[string]any{"id": "sim-codex-interrupt-turn", "status": "running"}},
+		{"assistant_delta", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible"}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible", "partial": true}},
+		{"turn_interrupted", map[string]any{"id": "sim-codex-interrupt-turn", "status": "interrupted"}},
 	}
 	for i, event := range events {
 		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)

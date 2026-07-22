@@ -85,7 +85,11 @@ func normalizeCodex(line []byte) []eventSpec {
 		if status == "" {
 			status = "completed"
 		}
-		if status == "failed" {
+		normalizedStatus := strings.ToLower(status)
+		if normalizedStatus == "cancelled" || normalizedStatus == "canceled" || normalizedStatus == "interrupted" ||
+			strings.Contains(strings.ToLower(string(params.Turn.Error)), "interrupt") || strings.Contains(strings.ToLower(string(params.Turn.Error)), "cancel") {
+			kind, status = "turn_interrupted", "interrupted"
+		} else if normalizedStatus == "failed" {
 			kind = "turn_failed"
 		}
 		return []eventSpec{{sourceID: "codex:turn:" + params.Turn.ID + ":completed", eventType: kind, payload: map[string]any{"id": params.Turn.ID, "status": status, "error": params.Turn.Error, "usage": params.Turn.Usage}}}
@@ -106,6 +110,10 @@ func normalizeCodex(line []byte) []eventSpec {
 		}
 		return []eventSpec{{eventType: "usage_updated", payload: map[string]any{"usage": usage}}}
 	case "error":
+		errorText := strings.ToLower(string(params.Error))
+		if strings.Contains(errorText, "interrupt") || strings.Contains(errorText, "cancel") {
+			return []eventSpec{{eventType: "turn_interrupted", payload: map[string]any{"status": "interrupted", "error": params.Error}}}
+		}
 		return []eventSpec{{eventType: "turn_error", payload: map[string]any{"error": params.Error}}}
 	case "serverRequest/resolved":
 		return []eventSpec{{eventType: "interaction_resolved", payload: map[string]any{"interaction": params}}}

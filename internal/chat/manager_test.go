@@ -152,3 +152,35 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 		t.Fatalf("commit payload = %+v", payload)
 	}
 }
+
+func TestCodexInterruptSettlesDeltaOnlyAssistantMessage(t *testing.T) {
+	w := worker{codexAssistantDeltas: map[string]string{}}
+	delta := eventSpec{eventType: "assistant_delta", payload: map[string]any{"message_id": "message-1", "text": "partial reply"}}
+	if got := w.settleCodexPartialOnInterrupt([]eventSpec{delta}); len(got) != 1 {
+		t.Fatalf("delta events = %+v", got)
+	}
+	interrupted := eventSpec{eventType: "turn_interrupted", payload: map[string]any{"id": "turn-1", "status": "interrupted"}}
+	got := w.settleCodexPartialOnInterrupt([]eventSpec{interrupted})
+	if len(got) != 2 || got[0].eventType != "assistant_message" || got[1].eventType != "turn_interrupted" {
+		t.Fatalf("interrupt events = %+v", got)
+	}
+	payload := got[0].payload.(map[string]any)
+	if payload["text"] != "partial reply" || payload["partial"] != true {
+		t.Fatalf("partial payload = %+v", payload)
+	}
+}
+
+func TestPendingCodexAssistantDeltasRebuildsAfterRestart(t *testing.T) {
+	events := []Event{
+		{Type: "assistant_delta", Payload: json.RawMessage(`{"message_id":"message-1","text":"partial "}`)},
+		{Type: "assistant_delta", Payload: json.RawMessage(`{"message_id":"message-1","text":"reply"}`)},
+	}
+	got := pendingCodexAssistantDeltas(events)
+	if got["message-1"] != "partial reply" {
+		t.Fatalf("pending = %+v", got)
+	}
+	events = append(events, Event{Type: "assistant_message", Payload: json.RawMessage(`{"message_id":"message-1","text":"partial reply"}`)})
+	if got := pendingCodexAssistantDeltas(events); len(got) != 0 {
+		t.Fatalf("settled pending = %+v", got)
+	}
+}
