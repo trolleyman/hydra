@@ -345,22 +345,6 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   background-image: linear-gradient(90deg, #78716c 35%, #e7e5e4 50%, #78716c 65%);
 }
 
-/* Streamed-reply fade-in: each newly-arrived word of the in-flight assistant
-   reply eases from transparent to solid, so tokens gently appear as they stream
-   instead of snapping in. Words already on screen keep their (completed) state -
-   only spans that just mounted animate - so the reply builds up smoothly rather
-   than the whole block re-fading. Applied only to the live stream node (see the
-   rehypeWordFade plugin + streamFade prop in MarkdownRenderer); the settled
-   block that replaces it on completion is crisp and, since that swap no longer
-   re-animates (noEntrance/streamedKinds), the two read as one continuous reveal. */
-@keyframes chat-word-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.chat-stream-fade .sfw {
-  animation: chat-word-fade 0.4s ease-out both;
-}
-
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }
@@ -378,10 +362,6 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
     animation: none;
     background-image: none;
     color: inherit;
-  }
-  /* Show every streamed token at full opacity immediately. */
-  .chat-stream-fade .sfw {
-    animation: none;
   }
 }
 

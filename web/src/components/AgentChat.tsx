@@ -6488,11 +6488,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               auto-updating as tokens arrive. It's the current turn's response,
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
-              no blinking caret is appended here - it reflowed as text wrapped
-              and read as visual jitter (item 56). */}
+              no blinking caret or per-word opacity animation is applied here:
+              either one makes reparsed Markdown visibly flicker as delimiters
+              arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'assistant' && (
             <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} streamFade />
+              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
