@@ -4,7 +4,7 @@ import { formatBashForDisplay, unwrapBashLoginCommand } from './bashFormat'
 describe('Codex bash display', () => {
   it('unwraps a login-shell command and formats its chains', () => {
     expect(formatBashForDisplay('/usr/bin/bash -lc "rg -n \\"queue\\" web/src && git status; echo done"')).toBe(
-      'rg -n "queue" web/src &&\ngit status;\necho done',
+      'rg -n "queue" web/src &&\ngit status\necho done',
     )
   })
 
@@ -40,6 +40,23 @@ describe('Codex bash display', () => {
 
   it('leaves a backslash-newline inside single quotes alone', () => {
     expect(formatBashForDisplay(`printf 'a\\\nb'\n`)).toBe(`printf 'a\\\nb'`)
+  })
+
+  it('drops a redundant semicolon at the end of the command', () => {
+    expect(formatBashForDisplay('echo done;')).toBe('echo done')
+  })
+
+  it('drops the semicolon a chain split turned into a line break', () => {
+    expect(formatBashForDisplay('sleep 2; echo hi')).toBe('sleep 2\necho hi')
+  })
+
+  it('keeps a semicolon inside quotes', () => {
+    expect(formatBashForDisplay("echo 'foo;'")).toBe("echo 'foo;'")
+  })
+
+  it('does not break a case terminator', () => {
+    const command = 'case $x in\n  a) echo a ;;\nesac'
+    expect(formatBashForDisplay(command)).toBe(command)
   })
 
   it('renders a bare command as the same shell script', () => {
