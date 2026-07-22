@@ -254,7 +254,7 @@ func simAgentCodex() api.AgentResponse {
 		Id: "agent-chat-codex", Title: ptr("Exercise Codex chat events"), AgentType: "codex",
 		BaseBranch: "main", BranchName: ptr("hydra/sim-codex-chat"), SessionPid: 1007,
 		SessionStatus: "running", CreatedAt: &createdAt, Prompt: simAgentCodexPrompt,
-		ChatMode: ptr(true), Model: ptr("gpt-5.4"),
+		ChatMode: ptr(true), Model: ptr(""),
 		AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 	}
 }
@@ -3091,14 +3091,16 @@ func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, pay
 // and a later closeAgent control that must remain an ordinary tool rather than
 // creating an empty child conversation.
 func handleSimCodexChatWS(conn *safeConn) {
-	sendStatusUpdate(conn, "finished")
+	// Deliberately override the settled REST state first: only the later
+	// normalized terminal turn event can return this live connection to finished.
+	sendStatusUpdate(conn, "running")
 	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{"subagents": map[string]any{}}})
 	_ = conn.WriteMessage(websocket.TextMessage, state)
 	events := []struct {
 		typ string
 		p   map[string]any
 	}{
-		{"conversation_started", map[string]any{"model": "gpt-5.4"}},
+		{"conversation_started", map[string]any{"model": ""}},
 		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
 		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},

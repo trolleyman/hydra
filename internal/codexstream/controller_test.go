@@ -62,7 +62,7 @@ func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
 func TestControllerResumeAndInterrupt(t *testing.T) {
 	var sent []map[string]any
 	var started, ended string
-	c := New(Options{ConversationID: "thr-old", OnTurnStart: func(id string) { started = id }, OnTurnEnd: func(id string) { ended = id }, Send: func(line []byte) error {
+	c := New(Options{ConversationID: "thr-old", Model: "gpt-restored", OnTurnStart: func(id string) { started = id }, OnTurnEnd: func(id string) { ended = id }, Send: func(line []byte) error {
 		var value map[string]any
 		_ = json.Unmarshal(line, &value)
 		sent = append(sent, value)
@@ -76,6 +76,14 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 		t.Fatalf("sent = %+v", sent)
 	}
 	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"turns":[]}}}`))
+	if err := c.SendText("resumed"); err != nil {
+		t.Fatal(err)
+	}
+	turnParams := sent[len(sent)-1]["params"].(map[string]any)
+	if turnParams["model"] != "gpt-restored" {
+		t.Fatalf("resumed turn params = %+v", turnParams)
+	}
 	c.OnLine([]byte(`{"method":"turn/started","params":{"turn":{"id":"turn-1"}}}`))
 	if started != "turn-1" {
 		t.Fatalf("started = %q", started)

@@ -125,6 +125,10 @@ next `turn/start`; an active turn is not mutated. Claude retains its stream-json
 stores a crash-safe transcript byte watermark and deduplicates by provider
 source id. Codex resume calls documented `thread/read`, translates returned
 items through the live normalizer, and only then drains a queued resumed turn.
+The persisted Codex model is also restored into the resumed controller. When
+no model was explicitly selected, Hydra labels the selector `Default`: an
+omitted app-server model intentionally uses the user's Codex configuration, and
+the thread lifecycle does not echo a concrete replacement model id.
 
 Add a provider conversation id to the agent record (for example,
 `conversation_id`; avoid a Claude- or Codex-named column). A thread id is part of
@@ -236,6 +240,11 @@ Drive status directly from Codex notifications rather than waiting for hooks:
 - completed turn -> `finished` (or `waiting` after a user interrupt)
 - failed turn / top-level error -> `errored`
 - server request requiring user input -> `needs_input`
+
+The daemon persists the same transition at the turn boundary. A connected chat
+also consumes the live normalized `turn_started` and terminal turn events so
+the sidebar and Stop control settle immediately, without waiting for the next
+project-status refresh. Replayed history cannot change current head status.
 
 Map Codex plan-update items into the existing persisted plan model. Map command,
 file-change, MCP, web-search, and other item variants to generic tool cards; keep

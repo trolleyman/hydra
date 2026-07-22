@@ -1104,7 +1104,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		return errtrace.Wrap(err)
 	}
 	if head.ChatMode && head.AgentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, "", head.ConversationID, ""); err != nil {
+		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, head.ConversationID, ""); err != nil {
 			return errtrace.Wrap(err)
 		}
 	}

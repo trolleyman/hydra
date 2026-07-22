@@ -1130,7 +1130,11 @@ function contextInputTokens(u: TokenUsage | undefined): number {
 // modelDisplayLabel shortens a full model id ("claude-fable-5") to its alias
 // label ("Fable") for the dropdown trigger.
 function modelDisplayLabel(model: string): string {
-  if (!model) return 'Model'
+  // An empty Codex model is meaningful: app-server interprets an omitted
+  // model as the user's configured default and does not echo its concrete id
+  // in thread lifecycle responses. Say that explicitly instead of suggesting
+  // Hydra failed to load the selector state.
+  if (!model) return 'Default'
   const lower = model.toLowerCase()
   for (const m of CLAUDE_MODELS) {
     if (lower.includes(m.id)) return m.label
@@ -5259,6 +5263,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
           if (!normalized || !firstNormalizedDelivery(normalized)) return
+          // Status frames and normalized chat events travel independently. A
+          // completed turn is already durable by the time this event arrives,
+          // so settle the selected head immediately instead of waiting for the
+          // slower project-status refresh. Historical pages use chat_history,
+          // not this live-only branch, and therefore cannot overwrite status.
+          if (normalized.payload?.sidechain !== true) {
+            if (normalized.type === 'turn_started') {
+              onStatusUpdateRef.current?.(AgentStatus.RUNNING)
+            } else if (
+              normalized.type === 'turn_completed' ||
+              normalized.type === 'turn_failed' ||
+              normalized.type === 'turn_interrupted'
+            ) {
+              const childStillRunning = Object.values(subLocal).some((sub) => sub.status === 'running')
+              onStatusUpdateRef.current?.(childStillRunning ? AgentStatus.RUNNING : AgentStatus.FINISHED)
+            }
+          }
           rememberNormalizedToolMetadata(normalized)
           if (handleNormalizedSubagent(normalized)) {
             const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
