@@ -146,7 +146,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if err != nil || agent == nil {
 			return chat.HeadContext{}, false
 		}
-		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt}
+		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt, AgentType: agent.AgentType, Plan: agent.Plan}
 		return ctx, true
 	})
 	chatQueues.SetEventSink(func(id, eventType string, payload any) {
@@ -168,6 +168,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			return // unknown or archived head - nothing to record.
 		}
 		heads.RecordThinkingDuration(agent.ProjectPath, id, messageID, durationMS)
+		if _, err := chatEvents.Append(id, "reasoning_duration", map[string]any{"message_id": messageID, "duration_ms": durationMS}); err != nil {
+			log.Printf("warn: persist normalized thinking duration for %s: %v", id, err)
+		}
 	})
 	// Auto-approve the ExitPlanMode plan gate for chat heads: with
 	// --permission-prompt-tool stdio it arrives as a can_use_tool control_request

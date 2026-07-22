@@ -90,6 +90,7 @@ interface NormalizedChatEvent {
 interface ChatProjectionSnapshot {
   plan?: unknown
   turn?: { id?: string; status?: string }
+  subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; status?: string; activity?: string }>
 }
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
@@ -453,28 +454,71 @@ function contentText(content: unknown): string {
 // stop at this boundary; paging and live delivery use the same conversion.
 function normalizedAsClaude(ev: NormalizedChatEvent): ClaudeEvent[] {
   const p = ev.payload ?? {}
-  const base = { timestamp: ev.timestamp, uuid: `normalized:${ev.seq}` }
+  const base = {
+    timestamp: ev.timestamp,
+    uuid: typeof p.uuid === 'string' && p.uuid ? p.uuid : `normalized:${ev.seq}`,
+    isSidechain: p.sidechain === true,
+    agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
+    parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
+  }
   const text = typeof p.text === 'string' ? p.text : contentText(p.content)
   const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : ev.id
   switch (ev.type) {
+    case 'conversation_started':
+      return [{ type: 'system', subtype: 'init', model: typeof p.model === 'string' ? p.model : undefined, slash_commands: Array.isArray(p.slash_commands) ? p.slash_commands.filter((v): v is string => typeof v === 'string') : undefined, apiKeySource: typeof p.api_key_source === 'string' ? p.api_key_source : undefined }]
     case 'user_message':
-      return text.trim() ? [{ ...base, type: 'user', message: { content: text } }] : []
+      return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+    case 'context_message':
+      return [{ ...base, type: 'user', isMeta: true, message: { content: p.content as ClaudeContentBlock[] | string } }]
     case 'assistant_message':
-      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }] } }] : []
+      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }], stop_reason: typeof p.stop_reason === 'string' ? p.stop_reason : undefined, usage: p.usage as TokenUsage } }] : []
     case 'reasoning_completed':
       return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
     case 'tool_started': {
       const name = typeof p.name === 'string' ? p.name : 'tool'
-      const input = p.item ?? (typeof p.command === 'string' ? { command: p.command } : p)
+      const input = p.input ?? p.item ?? (typeof p.command === 'string' ? { command: p.command, cwd: p.cwd } : p)
       return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input }] } }]
     }
     case 'tool_completed': {
-      const result = typeof p.output === 'string' ? p.output : typeof p.status === 'string' ? p.status : ''
-      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.status === 'failed' }] } }]
+      const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
+      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed' }] } }]
+    }
+    case 'content_stream_started':
+      return [{ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: p.kind === 'reasoning' ? 'thinking' : String(p.kind ?? 'text') } } }]
+    case 'content_stream_completed':
+      return [{ type: 'stream_event', event: { type: 'message_stop' } }]
+    case 'usage_updated': {
+      const usage = p.usage as TokenUsage
+      return typeof p.message_id === 'string'
+        ? [{ type: 'stream_event', event: { type: 'message_start', message: { usage } } }]
+        : [{ type: 'stream_event', event: { type: 'message_delta', usage } }]
+    }
+    case 'reasoning_duration':
+      return [{ type: 'hydra_thinking', message_id: typeof p.message_id === 'string' ? p.message_id : '', duration_ms: typeof p.duration_ms === 'number' ? p.duration_ms : 0 }]
+    case 'messages_retracted':
+      return [{ type: 'system', subtype: 'model_refusal_fallback', retractedMessageUuids: Array.isArray(p.message_ids) ? p.message_ids.filter((v): v is string => typeof v === 'string') : [] }]
+    case 'notice':
+      return [{ ...base, type: 'queue-operation', content: text }]
+    case 'interaction_requested': {
+      const interaction = p.interaction && typeof p.interaction === 'object' ? p.interaction as Record<string, unknown> : {}
+      if (p.provider === 'claude') {
+        return [{ type: 'control_request', request_id: typeof p.request_id === 'string' ? p.request_id : '', request: interaction as ClaudeEvent['request'] }]
+      }
+      const params = interaction.params && typeof interaction.params === 'object' ? interaction.params as Record<string, unknown> : {}
+      if (interaction.method === 'item/tool/requestUserInput') {
+        const toolID = typeof params.itemId === 'string' ? params.itemId : id
+        const requestID = String(interaction.request_id ?? '')
+        const input = { questions: Array.isArray(params.questions) ? params.questions : [] }
+        return [
+          { ...base, type: 'assistant', message: { id: `question:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'AskUserQuestion', input }] } },
+          { type: 'control_request', request_id: requestID, request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', tool_use_id: toolID, input } },
+        ]
+      }
+      return []
     }
     case 'turn_completed':
     case 'turn_failed':
-      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) }]
+      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
     default:
       return []
   }
@@ -3190,6 +3234,7 @@ const SettledMessages = memo(
 )
 
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+  const usesNormalizedEvents = agentType === 'claude' || agentType === 'codex'
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -3219,7 +3264,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   })
   const fetchCommitsRef = useRef<() => void>(() => {})
   const fetchCommits = useCallback(() => {
-    if (agentType === 'codex') return
+    if (usesNormalizedEvents) return
     const st = chipStateRef.current
     if (st.inflight) {
       st.again = true
@@ -3262,7 +3307,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           fetchCommitsRef.current()
         }
       })
-  }, [agentId, agentType, projectId])
+  }, [agentId, projectId, usesNormalizedEvents])
   fetchCommitsRef.current = fetchCommits
   useEffect(() => {
     fetchCommits()
@@ -3452,6 +3497,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const normalizedAvailableRef = useRef(false)
   // Pending task_output requests (the expandable background-command chip
   // fetching its output file), resolved by the matching task_output frame.
   const taskOutputWaitersRef = useRef(new Map<string, (res: { content?: string; error?: string }) => void>())
@@ -3536,6 +3582,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   useEffect(() => {
     setItems([])
+    normalizedAvailableRef.current = false
     itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
@@ -4716,22 +4763,45 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           onDiffRefreshRef.current?.(msg.head_moved ?? false)
           // HEAD moved = a commit landed (or the branch was rewritten): refresh
           // the commit chips so the new one appears within the poll interval.
-          if (msg.head_moved && agentType !== 'codex') fetchCommitsRef.current()
+          if (msg.head_moved && !usesNormalizedEvents) fetchCommitsRef.current()
           return
         case 'claude_event':
-          if (msg.event) handleClaudeEvent(msg.event)
+          // Compatibility-only frame. Structured providers consume the
+          // sequenced backend event stream instead.
+          if (!normalizedAvailableRef.current && msg.event) handleClaudeEvent(msg.event)
           return
         case 'state_snapshot': {
-          if (agentType !== 'codex') return
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
           const rawPlan = msg.state?.plan
           const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
           if (entries.length) plan.adoptServer(entries)
+          for (const [key, sub] of Object.entries(msg.state?.subagents ?? {})) {
+            const subID = sub.id || key
+            handleSubagentMeta(subID, sub.parent_item_id ?? '', sub.agent_type ?? '', sub.description ?? '', sub.parent_id ?? '')
+            if (sub.status && sub.status !== 'running') ensureSubagent(subID).status = 'done'
+          }
           return
         }
         case 'chat_event': {
-          if (agentType !== 'codex') return
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
           if (!normalized) return
+          if (normalized.type === 'subagent_started' || normalized.type === 'subagent_updated' || normalized.type === 'subagent_completed') {
+            const sub = normalized.payload ?? {}
+            const subID = typeof sub.id === 'string' ? sub.id : ''
+            handleSubagentMeta(
+              subID,
+              typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',
+              typeof sub.agent_type === 'string' ? sub.agent_type : '',
+              typeof sub.description === 'string' ? sub.description : '',
+              typeof sub.parent_id === 'string' ? sub.parent_id : '',
+            )
+            if (subID && normalized.type === 'subagent_completed') ensureSubagent(subID).status = 'done'
+            scheduleSubFlush()
+            return
+          }
           const streamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : normalized.id
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
             const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
@@ -4756,7 +4826,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_history': {
-          if (agentType !== 'codex') return
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
           oldestEventCursorRef.current = msg.next_cursor ?? null
           for (const event of normalized) recordNormalizedCommit(event)
@@ -4777,6 +4848,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'notification_backfill': {
+          if (normalizedAvailableRef.current) return
           // A <task-notification> record from BEFORE the backfill window,
           // relayed so a long-finished background task/agent still settles on
           // reconnect. Settle-only: no notice chip (its place in the
@@ -4793,6 +4865,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'subagent_meta':
+          if (normalizedAvailableRef.current) return
           // Links a sub-agent to its Task tool_use (folding it into that card)
           // and labels it; arrives ahead of the sub's events live, and per-sub
           // during backfill. Tolerates arriving after events too.
@@ -4884,6 +4957,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           reconcileQueue(msg.messages ?? [])
           return
         case 'history_before':
+          if (normalizedAvailableRef.current) return
           // A load-older page (item 25): older conversation events to prepend.
           handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
@@ -4922,7 +4996,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, usesNormalizedEvents])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -5160,13 +5234,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
-    const anchor = agentType === 'codex' ? oldestEventCursorRef.current : oldestUuidRef.current
+    const normalized = usesNormalizedEvents && normalizedAvailableRef.current
+    const anchor = normalized ? oldestEventCursorRef.current : oldestUuidRef.current
     if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !anchor) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     loadingOlderRef.current = true
     setLoadingOlder(true)
-    ws.send(agentType === 'codex'
+    ws.send(normalized
       ? JSON.stringify({ type: 'load_events_before', cursor: anchor, limit: 100 })
       : JSON.stringify({ type: 'load_before', before: anchor }))
   }

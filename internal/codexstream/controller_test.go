@@ -68,3 +68,23 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 		t.Fatalf("ended = %q", ended)
 	}
 }
+
+func TestControllerRespondsToUserInputRequest(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	c.OnLine([]byte(`{"id":42,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which?"}]}}`))
+	response := json.RawMessage(`{"request_id":"42","response":{"behavior":"allow","updatedInput":{"answers":{"Which?":"A, B"}}}}`)
+	if err := c.Respond(response); err != nil {
+		t.Fatal(err)
+	}
+	result := sent[0]["result"].(map[string]any)
+	answers := result["answers"].(map[string]any)
+	if _, ok := answers["q1"]; !ok {
+		t.Fatalf("response = %+v", sent[0])
+	}
+}

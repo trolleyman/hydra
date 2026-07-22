@@ -4,15 +4,22 @@ import (
 	"braces.dev/errtrace"
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 type HeadContext struct {
 	ProjectRoot string
 	Worktree    string
 	Prompt      string
+	AgentType   string
+	Plan        string
 }
 
 // ContextResolver maps the globally-unique head id carried by session
@@ -34,9 +41,10 @@ type observedLine struct {
 }
 
 type worker struct {
-	store *Store
-	in    chan observedLine
-	ctx   HeadContext
+	store    *Store
+	in       chan observedLine
+	ctx      HeadContext
+	imported bool
 }
 
 func NewManager(resolve ContextResolver) *Manager {
@@ -61,6 +69,9 @@ func (m *Manager) store(id string) (*Store, error) {
 	m.workers[id] = w
 	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
 		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
+	}
+	if len(s.Snapshot().Plan) == 0 && ctx.Plan != "" && json.Valid([]byte(ctx.Plan)) {
+		_, _, _ = s.AppendSource("hydra:initial-plan", "plan_updated", JSONPayload(map[string]any{}, "plan", []byte(ctx.Plan)))
 	}
 	if s.Snapshot().Head == "" && ctx.Worktree != "" {
 		if head, err := git.ResolveRef(ctx.Worktree, "HEAD"); err == nil {
@@ -93,6 +104,22 @@ func (m *Manager) ObserveProviderLine(id, provider string, line []byte) {
 	w.in <- observedLine{provider: provider, line: append([]byte(nil), line...)}
 }
 
+func (m *Manager) ObserveClaudeSidechain(id, agentID string, meta *claudestream.SubagentMeta, line []byte) {
+	w, err := m.worker(id)
+	if err != nil {
+		return
+	}
+	payload := map[string]any{"id": agentID, "agent_type": "claude", "status": "running"}
+	if meta != nil {
+		payload["agent_type"] = meta.AgentType
+		payload["description"] = meta.Description
+		payload["parent_id"] = meta.ParentAgentID
+		payload["parent_item_id"] = meta.ToolUseID
+	}
+	_, _, _ = w.store.AppendSource("claude:subagent:"+agentID, "subagent_started", payload)
+	w.in <- observedLine{provider: "claude_history", line: addClaudeSidechain(line, agentID, meta)}
+}
+
 func (w *worker) run(id string) {
 	for item := range w.in {
 		if item.done != nil {
@@ -103,6 +130,8 @@ func (w *worker) run(id string) {
 		switch item.provider {
 		case "claude":
 			specs = normalizeClaude(item.line)
+		case "claude_history":
+			specs = normalizeClaudeHistory(item.line)
 		case "codex":
 			specs = normalizeCodex(item.line)
 		default:
@@ -166,10 +195,92 @@ func (m *Manager) Flush(id string) error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	if !w.imported && w.ctx.AgentType == "claude" {
+		w.imported = true
+		m.importClaudeHistory(id, w)
+	}
 	done := make(chan struct{})
 	w.in <- observedLine{done: done}
 	<-done
 	return nil
+}
+
+func (m *Manager) importClaudeHistory(id string, w *worker) {
+	if data, err := os.ReadFile(paths.GetChatThinkingJsonFromProjectRoot(w.ctx.ProjectRoot, id)); err == nil {
+		var durations map[string]int64
+		if json.Unmarshal(data, &durations) == nil {
+			for messageID, durationMS := range durations {
+				_, _, _ = w.store.AppendSource("claude:thinking:"+messageID, "reasoning_duration", map[string]any{"message_id": messageID, "duration_ms": durationMS})
+			}
+		}
+	}
+	if w.store.HasType("conversation_started") || w.ctx.Worktree == "" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(w.ctx.Worktree))
+	transcript := claudestream.LatestTranscript(dir)
+	if transcript == "" {
+		return
+	}
+	lines, _, err := claudestream.TailTranscript(transcript, 0)
+	if err == nil {
+		skippedSeed := false
+		for _, line := range lines {
+			if !skippedSeed && w.ctx.Prompt != "" && claudeHistoryUserText(line) == w.ctx.Prompt {
+				skippedSeed = true
+				continue
+			}
+			w.in <- observedLine{provider: "claude_history", line: line}
+		}
+	}
+	sessionID := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
+	subs, _ := claudestream.TailSubagentTranscripts(dir, sessionID, 0)
+	for _, sub := range subs {
+		meta := sub.Meta
+		payload := map[string]any{"id": sub.AgentID, "agent_type": "claude", "status": "running"}
+		if meta != nil {
+			payload["agent_type"] = meta.AgentType
+			payload["description"] = meta.Description
+			payload["parent_id"] = meta.ParentAgentID
+			payload["parent_item_id"] = meta.ToolUseID
+		}
+		_, _, _ = w.store.AppendSource("claude:subagent:"+sub.AgentID, "subagent_started", payload)
+		for _, line := range sub.Lines {
+			w.in <- observedLine{provider: "claude_history", line: addClaudeSidechain(line, sub.AgentID, meta)}
+		}
+	}
+}
+
+func claudeHistoryUserText(line []byte) string {
+	var value struct {
+		Type    string `json:"type"`
+		IsMeta  bool   `json:"isMeta"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &value) != nil || value.Type != "user" || value.IsMeta {
+		return ""
+	}
+	return textFromClaudeContent(value.Message.Content)
+}
+
+func addClaudeSidechain(line []byte, agentID string, meta *claudestream.SubagentMeta) []byte {
+	var value map[string]any
+	if json.Unmarshal(line, &value) != nil {
+		return line
+	}
+	value["isSidechain"] = true
+	value["agentId"] = agentID
+	if meta != nil && meta.ToolUseID != "" {
+		value["parent_tool_use_id"] = meta.ToolUseID
+	}
+	out, _ := json.Marshal(value)
+	return out
 }
 
 func (m *Manager) Append(id, eventType string, payload any) (Event, error) {

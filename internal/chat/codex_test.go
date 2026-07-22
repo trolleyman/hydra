@@ -48,3 +48,25 @@ func TestNormalizeCodexDeltaAndRequest(t *testing.T) {
 		t.Fatalf("request = %+v", got)
 	}
 }
+
+func TestNormalizeCodexRichItems(t *testing.T) {
+	tests := []struct{ line, kind string }{
+		{`{"method":"item/completed","params":{"item":{"id":"f1","type":"fileChange","status":"completed","changes":[{"path":"x.go","kind":"update"}]}}}`, "tool_completed"},
+		{`{"method":"item/completed","params":{"item":{"id":"m1","type":"mcpToolCall","server":"docs","tool":"search","status":"completed","result":{"content":[]}}}}`, "tool_completed"},
+		{`{"method":"item/commandExecution/outputDelta","params":{"itemId":"c1","delta":"ok"}}`, "tool_delta"},
+		{`{"method":"error","params":{"error":{"message":"nope"}}}`, "turn_error"},
+	}
+	for _, tc := range tests {
+		got := normalizeCodex([]byte(tc.line))
+		if len(got) != 1 || got[0].eventType != tc.kind {
+			t.Errorf("%s => %+v, want %s", tc.line, got, tc.kind)
+		}
+	}
+}
+
+func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
+	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"a1","type":"collabToolCall","tool":"spawn_agent","status":"inProgress","senderThreadId":"root","newThreadId":"child","prompt":"inspect"}}}`))
+	if len(got) != 2 || got[0].eventType != "tool_started" || got[1].eventType != "subagent_started" {
+		t.Fatalf("events = %+v", got)
+	}
+}

@@ -33,3 +33,29 @@ func TestNormalizeClaudeUserEchoIsIgnored(t *testing.T) {
 		t.Fatalf("events = %+v", got)
 	}
 }
+
+func TestNormalizeClaudeRichEvents(t *testing.T) {
+	tests := []struct {
+		line string
+		want string
+	}{
+		{`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}`, "assistant_delta"},
+		{`{"type":"hydra_thinking","message_id":"m1","duration_ms":1200}`, "reasoning_duration"},
+		{`{"type":"system","subtype":"model_refusal_fallback","retractedMessageUuids":["u1"]}`, "messages_retracted"},
+		{`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}`, "interaction_requested"},
+		{`{"type":"user","uuid":"meta","isMeta":true,"message":{"content":[{"type":"text","text":"context"}]}}`, "context_message"},
+	}
+	for _, tc := range tests {
+		got := normalizeClaude([]byte(tc.line))
+		if len(got) != 1 || got[0].eventType != tc.want {
+			t.Errorf("%s => %+v, want %s", tc.line, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeClaudeHistoryIncludesPlainUser(t *testing.T) {
+	got := normalizeClaudeHistory([]byte(`{"type":"user","uuid":"u3","message":{"content":[{"type":"text","text":"hello"}]}}`))
+	if len(got) != 1 || got[0].eventType != "user_message" || got[0].sourceID != "claude:u3" {
+		t.Fatalf("events = %+v", got)
+	}
+}

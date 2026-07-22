@@ -109,6 +109,7 @@ type Session struct {
 type ChatDriver interface {
 	SendUser(content json.RawMessage) error
 	Interrupt() error
+	Respond(response json.RawMessage) error
 }
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before

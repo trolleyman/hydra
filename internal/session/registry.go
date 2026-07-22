@@ -229,6 +229,26 @@ func (r *Registry) InterruptChat(id string) error {
 	return errtrace.Wrap(r.Write(id, claudestream.InterruptLine(interruptID)))
 }
 
+func (r *Registry) RespondChat(id string, response json.RawMessage) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.Respond(response))
+	}
+	line, err := claudestream.ControlResponseLine(response)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(r.Write(id, line))
+}
+
 // Start builds the sandbox command, launches it under a PTY, and registers the
 // session. It returns ErrExists if a live session with the same ID exists.
 func (r *Registry) Start(opts StartOptions) (*Session, error) {

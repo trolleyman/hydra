@@ -242,12 +242,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	case "control_response":
 		// The client answers a CLI control_request (AskUserQuestion) with a
 		// payload the daemon forwards verbatim.
-		line, err := claudestream.ControlResponseLine(msg.Response)
-		if err != nil {
-			log.Printf("chat ws: bad control_response for %q: %v", sessionID, err)
-			return
-		}
-		if err := s.Sessions.Write(sessionID, line); err != nil {
+		if err := s.Sessions.RespondChat(sessionID, msg.Response); err != nil {
 			log.Printf("chat ws: write control_response to %q: %v", sessionID, err)
 		}
 	case "resize":
@@ -723,6 +718,7 @@ func claudeProjectDir(worktree string) string {
 // (the tail goroutine; current CLIs keep sub-agent steps off the main stdout).
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
 	var normalized <-chan chat.Event
+	normalizedMode := false
 	if s.ChatEvents != nil {
 		if err := s.ChatEvents.Flush(agentID); err != nil {
 			log.Printf("chat ws: flush normalized events for %q: %v", agentID, err)
@@ -731,6 +727,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		} else {
 			defer cancel()
 			normalized = live
+			normalizedMode = true
 			if data, err := json.Marshal(chatStateSnapshotFrame{terminalEvent: terminalEvent{Type: "state_snapshot"}, State: snapshot}); err == nil {
 				_ = conn.WriteMessage(websocket.TextMessage, data)
 			}
@@ -743,12 +740,19 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	subs := newSubagentResolver(dir)
 	// Replay measured thinking durations first, so the client has them before it
 	// builds the thinking items the transcript backfill is about to produce.
-	emitThinkingDurations(conn, projectRoot, agentID)
-	skip := backfillChatHistory(conn, agentID, dir, subs)
+	if !normalizedMode {
+		emitThinkingDurations(conn, projectRoot, agentID)
+	}
+	var skip map[string]struct{}
+	if !normalizedMode {
+		skip = backfillChatHistory(conn, agentID, dir, subs)
+	}
 	if skip == nil {
 		skip = map[string]struct{}{}
 	}
-	s.sendPlan(conn, agentID)
+	if !normalizedMode {
+		s.sendPlan(conn, agentID)
+	}
 
 	lb := &claudestream.LineBuffer{}
 	// Per-connection token-delta cadence tracer (HYDRA_CHAT_STREAM_DEBUG); nil-safe
@@ -763,7 +767,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
 		// before Attach returned) - drop its misplaced past-turn result footers.
 		// nil timer: replayed history isn't live streaming, so don't trace it.
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil) {
+		if ok && !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil) {
 			return
 		}
 	default:
@@ -812,6 +816,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			}
 		case growth := <-subGrowth:
 			for _, g := range growth {
+				meta, _ := claudestream.ReadSubagentMeta(dir, g.SessionID, g.AgentID)
 				for _, line := range g.Lines {
 					ev, ok := claudestream.ParseEvent(line)
 					if !ok {
@@ -823,10 +828,13 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 						}
 						skip[ev.UUID] = struct{}{}
 					}
-					if !subs.resolve(conn, g.AgentID, g.SessionID) {
+					if !normalizedMode && !subs.resolve(conn, g.AgentID, g.SessionID) {
 						return
 					}
-					if !sendChatEventLine(conn, line, agentID) {
+					if s.ChatEvents != nil {
+						s.ChatEvents.ObserveClaudeSidechain(agentID, g.AgentID, meta, line)
+					}
+					if !normalizedMode && !sendChatEventLine(conn, line, agentID) {
 						return
 					}
 				}
@@ -844,7 +852,10 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 					}
 					skip[ev.UUID] = struct{}{}
 				}
-				if !sendChatEventLine(conn, line, agentID) {
+				if s.ChatEvents != nil {
+					s.ChatEvents.ObserveProviderLine(agentID, "claude", line)
+				}
+				if !normalizedMode && !sendChatEventLine(conn, line, agentID) {
 					return
 				}
 			}
@@ -853,7 +864,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 				return
 			}
 			// Live stream (post replay_done): results arrive in order, so keep them.
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
+			if !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
 				return
 			}
 		}

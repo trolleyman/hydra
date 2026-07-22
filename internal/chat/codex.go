@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type codexMessage struct {
@@ -21,10 +22,12 @@ type codexParams struct {
 		ID     string          `json:"id"`
 		Status string          `json:"status,omitempty"`
 		Error  json.RawMessage `json:"error,omitempty"`
+		Usage  json.RawMessage `json:"usage,omitempty"`
 	} `json:"turn"`
 	Item   json.RawMessage `json:"item,omitempty"`
 	ItemID string          `json:"itemId,omitempty"`
 	Delta  string          `json:"delta,omitempty"`
+	Error  json.RawMessage `json:"error,omitempty"`
 }
 
 type codexItem struct {
@@ -35,6 +38,24 @@ type codexItem struct {
 	Command          string          `json:"command,omitempty"`
 	AggregatedOutput string          `json:"aggregatedOutput,omitempty"`
 	Plan             json.RawMessage `json:"plan,omitempty"`
+	Summary          []string        `json:"summary,omitempty"`
+	Content          json.RawMessage `json:"content,omitempty"`
+	CWD              string          `json:"cwd,omitempty"`
+	ExitCode         *int            `json:"exitCode,omitempty"`
+	DurationMS       *int64          `json:"durationMs,omitempty"`
+	Changes          json.RawMessage `json:"changes,omitempty"`
+	Server           string          `json:"server,omitempty"`
+	Tool             string          `json:"tool,omitempty"`
+	Arguments        json.RawMessage `json:"arguments,omitempty"`
+	Result           json.RawMessage `json:"result,omitempty"`
+	Error            json.RawMessage `json:"error,omitempty"`
+	Query            string          `json:"query,omitempty"`
+	Path             string          `json:"path,omitempty"`
+	SenderThreadID   string          `json:"senderThreadId,omitempty"`
+	ReceiverThreadID string          `json:"receiverThreadId,omitempty"`
+	NewThreadID      string          `json:"newThreadId,omitempty"`
+	Prompt           string          `json:"prompt,omitempty"`
+	AgentStatus      json.RawMessage `json:"agentStatus,omitempty"`
 	Items            []struct {
 		Text      string `json:"text"`
 		Completed bool   `json:"completed"`
@@ -62,11 +83,19 @@ func normalizeCodex(line []byte) []eventSpec {
 		if status == "failed" {
 			kind = "turn_failed"
 		}
-		return []eventSpec{{sourceID: "codex:turn:" + params.Turn.ID + ":completed", eventType: kind, payload: map[string]any{"id": params.Turn.ID, "status": status, "error": params.Turn.Error}}}
+		return []eventSpec{{sourceID: "codex:turn:" + params.Turn.ID + ":completed", eventType: kind, payload: map[string]any{"id": params.Turn.ID, "status": status, "error": params.Turn.Error, "usage": params.Turn.Usage}}}
 	case "item/agentMessage/delta":
 		return []eventSpec{{eventType: "assistant_delta", payload: map[string]any{"message_id": params.ItemID, "text": params.Delta}}}
 	case "item/reasoning/delta", "item/reasoning/summaryTextDelta":
 		return []eventSpec{{eventType: "reasoning_delta", payload: map[string]any{"message_id": params.ItemID, "text": params.Delta}}}
+	case "item/commandExecution/outputDelta":
+		return []eventSpec{{eventType: "tool_delta", payload: map[string]any{"id": params.ItemID, "text": params.Delta}}}
+	case "item/plan/delta":
+		return []eventSpec{{eventType: "plan_delta", payload: map[string]any{"id": params.ItemID, "text": params.Delta}}}
+	case "error":
+		return []eventSpec{{eventType: "turn_error", payload: map[string]any{"error": params.Error}}}
+	case "serverRequest/resolved":
+		return []eventSpec{{eventType: "interaction_resolved", payload: map[string]any{"interaction": params}}}
 	case "item/started", "item/completed":
 		var item codexItem
 		if json.Unmarshal(params.Item, &item) != nil || item.ID == "" {
@@ -78,7 +107,7 @@ func normalizeCodex(line []byte) []eventSpec {
 		// Server-initiated requests carry an id. Preserve them as an interaction
 		// projection even when a newer Codex version adds an unfamiliar method.
 		if len(msg.ID) > 0 && string(msg.ID) != "null" {
-			return []eventSpec{{sourceID: "", eventType: "interaction_requested", payload: map[string]any{"interaction": map[string]any{"method": msg.Method, "params": params}}}}
+			return []eventSpec{{sourceID: "", eventType: "interaction_requested", payload: map[string]any{"interaction": map[string]any{"method": msg.Method, "request_id": msg.ID, "params": json.RawMessage(msg.Params)}, "provider": "codex"}}}
 		}
 	}
 	return nil
@@ -97,7 +126,11 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		if completed {
 			kind = "reasoning_completed"
 		}
-		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"message_id": item.ID, "text": item.Text}}}
+		text := item.Text
+		if text == "" && len(item.Summary) > 0 {
+			text = strings.Join(item.Summary, "\n")
+		}
+		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"message_id": item.ID, "text": text, "content": item.Content}}}
 	case "plan", "todo_list", "todoList":
 		if completed {
 			plan := any(item.Plan)
@@ -116,12 +149,68 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		}
 	case "user_message", "userMessage":
 		return nil // recorded at Hydra's input/queue boundary with its client id
+	case "collabToolCall":
+		kind := "tool_started"
+		if completed {
+			kind = "tool_completed"
+		}
+		out := []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"id": item.ID, "name": "collab:" + item.Tool, "input": item, "status": item.Status}}}
+		subID := item.NewThreadID
+		if subID == "" {
+			subID = item.ReceiverThreadID
+		}
+		if subID != "" {
+			subKind := "subagent_started"
+			status := codexAgentStatus(item.AgentStatus)
+			if completed && status != "running" {
+				subKind = "subagent_completed"
+			}
+			out = append(out, eventSpec{sourceID: source + ":" + subKind, eventType: subKind, payload: map[string]any{"id": subID, "parent_id": item.SenderThreadID, "parent_item_id": item.ID, "agent_type": "codex", "description": item.Prompt, "status": status}})
+		}
+		return out
 	default:
 		kind := "tool_started"
 		if completed {
 			kind = "tool_completed"
 		}
-		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"id": item.ID, "name": typ, "command": item.Command, "output": item.AggregatedOutput, "status": item.Status, "item": item}}}
+		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: codexToolPayload(item)}}
 	}
 	return nil
+}
+
+func codexAgentStatus(raw json.RawMessage) string {
+	var status string
+	if json.Unmarshal(raw, &status) == nil {
+		return status
+	}
+	var value struct {
+		Status string `json:"status"`
+		Type   string `json:"type"`
+	}
+	_ = json.Unmarshal(raw, &value)
+	if value.Status != "" {
+		return value.Status
+	}
+	return value.Type
+}
+
+func codexToolPayload(item codexItem) map[string]any {
+	output := any(item.AggregatedOutput)
+	if item.Type == "mcpToolCall" {
+		if len(item.Error) > 0 && string(item.Error) != "null" {
+			output = item.Error
+		} else {
+			output = item.Result
+		}
+	}
+	name := item.Type
+	if item.Type == "mcpToolCall" {
+		name = item.Server + ":" + item.Tool
+	}
+	return map[string]any{
+		"id": item.ID, "name": name, "command": item.Command, "cwd": item.CWD,
+		"output": output, "status": item.Status, "exit_code": item.ExitCode,
+		"duration_ms": item.DurationMS, "changes": item.Changes, "arguments": item.Arguments,
+		"query": item.Query, "path": item.Path, "item": item,
+	}
 }

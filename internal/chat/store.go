@@ -260,6 +260,17 @@ func (s *Store) Snapshot() Projection {
 	return out
 }
 
+func (s *Store) HasType(eventType string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, event := range s.events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
 // Watch atomically captures the current projection watermark and subscribes to
 // every later append. A slow subscriber is closed instead of blocking provider
 // ingestion; reconnect/cursor replay recovers the missed tail.
