@@ -26,6 +26,7 @@ type Options struct {
 	OnConversation func(string)
 	OnTurnStart    func(string)
 	OnTurnEnd      func(string)
+	OnHistoryLine  func([]byte)
 	OnError        func(error)
 }
 
@@ -35,12 +36,14 @@ type Controller struct {
 
 	mu              sync.Mutex
 	threadID        string
+	threadReady     bool
 	turnID          string
 	initialPrompt   string
 	pending         []json.RawMessage
 	requests        map[string]pendingRequest
 	initializeID    uint64
 	threadRequestID uint64
+	readRequestID   uint64
 	model           string
 }
 
@@ -112,7 +115,7 @@ func (c *Controller) OnLine(line []byte) {
 		return
 	}
 	c.mu.Lock()
-	initializeID, threadRequestID := c.initializeID, c.threadRequestID
+	initializeID, threadRequestID, readRequestID := c.initializeID, c.threadRequestID, c.readRequestID
 	c.mu.Unlock()
 	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
@@ -158,17 +161,31 @@ func (c *Controller) OnLine(line []byte) {
 		if prompt != "" {
 			c.pending = append([]json.RawMessage{mustJSON([]map[string]any{{"type": "text", "text": prompt}})}, c.pending...)
 		}
-		pending := append([]json.RawMessage(nil), c.pending...)
-		c.pending = nil
 		c.mu.Unlock()
 		if c.opts.OnConversation != nil {
 			c.opts.OnConversation(result.Thread.ID)
 		}
-		for _, content := range pending {
-			if err := c.SendUser(content); err != nil {
+		if c.opts.ConversationID != "" {
+			id, err := c.send("thread/read", map[string]any{"threadId": result.Thread.ID, "includeTurns": true})
+			if err != nil {
 				c.fail(err)
+				return
 			}
+			c.mu.Lock()
+			c.readRequestID = id
+			c.mu.Unlock()
+			return
 		}
+		c.mu.Lock()
+		c.threadReady = true
+		c.mu.Unlock()
+		c.drainPending()
+	case msg.Method == "" && numericID != 0 && numericID == readRequestID:
+		c.emitThreadHistory(msg.Result)
+		c.mu.Lock()
+		c.threadReady = true
+		c.mu.Unlock()
+		c.drainPending()
 	case msg.Method == "turn/started":
 		var params struct {
 			Turn struct {
@@ -201,6 +218,40 @@ func (c *Controller) OnLine(line []byte) {
 		c.mu.Lock()
 		c.requests[key] = pendingRequest{id: append(json.RawMessage(nil), msg.ID...), method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
 		c.mu.Unlock()
+	}
+}
+
+func (c *Controller) drainPending() {
+	c.mu.Lock()
+	pending := append([]json.RawMessage(nil), c.pending...)
+	c.pending = nil
+	c.mu.Unlock()
+	for _, content := range pending {
+		if err := c.SendUser(content); err != nil {
+			c.fail(err)
+		}
+	}
+}
+
+func (c *Controller) emitThreadHistory(raw json.RawMessage) {
+	if c.opts.OnHistoryLine == nil {
+		return
+	}
+	var result struct {
+		Thread struct {
+			Turns []struct {
+				Items []json.RawMessage `json:"items"`
+			} `json:"turns"`
+		} `json:"thread"`
+	}
+	if json.Unmarshal(raw, &result) != nil {
+		return
+	}
+	for _, turn := range result.Thread.Turns {
+		for _, item := range turn.Items {
+			line, _ := json.Marshal(map[string]any{"method": "item/completed", "params": map[string]any{"item": json.RawMessage(item)}})
+			c.opts.OnHistoryLine(line)
+		}
 	}
 }
 
@@ -239,8 +290,8 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 		return errtrace.Wrap(fmt.Errorf("empty Codex turn input"))
 	}
 	c.mu.Lock()
-	threadID := c.threadID
-	if threadID == "" {
+	threadID, ready := c.threadID, c.threadReady
+	if threadID == "" || !ready {
 		c.pending = append(c.pending, append(json.RawMessage(nil), content...))
 		c.mu.Unlock()
 		return nil

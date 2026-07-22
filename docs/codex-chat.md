@@ -116,9 +116,10 @@ bottom-follow rendering.
 
 Codex model selection is held by the app-server controller and included in the
 next `turn/start`; an active turn is not mutated. Claude retains its stream-json
-`set_model` control request. Claude recovery should incrementally reconcile its
-transcript by provider source ids, while Codex recovery should use documented
-`thread/read` and feed returned items through the live normalizer.
+`set_model` control request behind the same registry operation. Claude recovery
+stores a crash-safe transcript byte watermark and deduplicates by provider
+source id. Codex resume calls documented `thread/read`, translates returned
+items through the live normalizer, and only then drains a queued resumed turn.
 
 Add a provider conversation id to the agent record (for example,
 `conversation_id`; avoid a Claude- or Codex-named column). A thread id is part of

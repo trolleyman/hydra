@@ -265,7 +265,8 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 	if transcript == "" {
 		return
 	}
-	lines, _, err := claudestream.TailTranscript(transcript, 0)
+	offset := w.store.ImportOffset("claude:" + transcript)
+	lines, nextOffset, err := claudestream.TranscriptLinesAfter(transcript, offset)
 	if err == nil {
 		skippedSeed := false
 		for _, line := range lines {
@@ -275,6 +276,10 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 			}
 			w.in <- observedLine{provider: "claude_history", line: line}
 		}
+		done := make(chan struct{})
+		w.in <- observedLine{done: done}
+		<-done
+		_ = w.store.SetImportOffset("claude:"+transcript, nextOffset)
 	}
 	sessionID := strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
 	subs, _ := claudestream.TailSubagentTranscripts(dir, sessionID, 0)

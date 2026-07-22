@@ -136,7 +136,7 @@ type ChatItem =
   // as the queued-user-bubble case above.
   // uuid is the conversation-record id of the assistant block this item was built
   // from, stamped so a model_refusal_fallback retraction can evict it (see
-  // ClaudeEvent.retractedMessageUuids). Only set on live assistant-produced items.
+  // ProviderEvent.retractedMessageUuids). Only set on live assistant-produced items.
   | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean; uuid?: string }
   // durationMs is the thinking time the daemon measured for this block (delivered
   // as a hydra_thinking event keyed by msgId); absent for old history recorded
@@ -259,7 +259,7 @@ interface TokenUsage {
   cache_read_input_tokens?: number
 }
 
-interface ClaudeEvent {
+interface ProviderEvent {
   type: string
   subtype?: string
   // ISO-8601 wall-clock time the entry was recorded. Only transcript lines
@@ -320,7 +320,7 @@ interface ClaudeEvent {
   // A background/async sub-agent's completion <task-notification> is written to
   // the main transcript not as a user turn but as bookkeeping records the chat
   // socket relays live: a queue-operation (XML on top-level `content`) and an
-  // attachment (XML on `attachment.prompt`). handleClaudeEvent settles the sub
+  // attachment (XML on `attachment.prompt`). handleProviderEvent settles the sub
   // off whichever carries it (see handleTaskNotification).
   content?: string
   // attachment.prompt is a string for <task-notification> records, and an array
@@ -353,7 +353,7 @@ interface ClaudeEvent {
 
 // parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
 // null when absent/unparseable (live stdout lines have none).
-function parseEventTs(ev: ClaudeEvent): number | null {
+function parseEventTs(ev: ProviderEvent): number | null {
   if (typeof ev.timestamp !== 'string') return null
   const t = Date.parse(ev.timestamp)
   return Number.isFinite(t) ? t : null
@@ -451,7 +451,7 @@ function contentText(content: unknown): string {
 // Bridge the provider-neutral backend timeline into the mature presentation
 // reducer while Claude's legacy wire format is being retired. Provider details
 // stop at this boundary; paging and live delivery use the same conversion.
-function normalizedAsClaude(ev: NormalizedChatEvent): ClaudeEvent[] {
+function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
   const p = ev.payload ?? {}
   const base = {
     timestamp: ev.timestamp,
@@ -501,7 +501,7 @@ function normalizedAsClaude(ev: NormalizedChatEvent): ClaudeEvent[] {
     case 'interaction_requested': {
       const interaction = p.interaction && typeof p.interaction === 'object' ? p.interaction as Record<string, unknown> : {}
       if (p.provider === 'claude') {
-        return [{ type: 'control_request', request_id: typeof p.request_id === 'string' ? p.request_id : '', request: interaction as ClaudeEvent['request'] }]
+        return [{ type: 'control_request', request_id: typeof p.request_id === 'string' ? p.request_id : '', request: interaction as ProviderEvent['request'] }]
       }
       const params = interaction.params && typeof interaction.params === 'object' ? interaction.params as Record<string, unknown> : {}
       if (interaction.method === 'item/tool/requestUserInput') {
@@ -563,7 +563,7 @@ function isTaskNotification(text: string): boolean {
 // is the message's only durable trace - so replay must rebuild the user bubble
 // from it or the message vanishes on the next reattach. (A message consumed
 // while the CLI is idle gets a real user event and never reaches this path.)
-function queuedCommandText(ev: ClaudeEvent): string | null {
+function queuedCommandText(ev: ProviderEvent): string | null {
   const att = ev.attachment
   if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
   const prompt = att.prompt
@@ -3011,7 +3011,7 @@ function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
 // assistant text/thinking/tool_use/question blocks with tool_result patching,
 // and result footers. A TodoWrite is dropped (the plan panel already holds the
 // latest state, not this older one). allocId hands out ids for the batch.
-function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>): ChatItem[] {
+function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>): ChatItem[] {
   const items: ChatItem[] = []
   // The current event's transcript timestamp, carried forward over entries
   // without one - stamped per pushed item (tsOut) for the commit-chip interleave.
@@ -4083,7 +4083,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // main user/assistant handling, minus the specialisations that can't occur
     // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
     // the queue) - those render as plain items or are ignored.
-    const routeSidechain = (ev: ClaudeEvent) => {
+    const routeSidechain = (ev: ProviderEvent) => {
       const parentTool = typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : ''
       // Transcript lines name their sub-agent; a live stdout line carries only
       // the spawning Task tool_use - land it in the linked sub if the meta
@@ -4287,7 +4287,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // events, snapshot the scroll height so the viewport can be re-anchored
     // after the prepend (a layout effect does the adjust), advance the oldest
     // anchor, and mark the end reached.
-    const handleHistoryBefore = (events: ClaudeEvent[], done: boolean) => {
+    const handleHistoryBefore = (events: ProviderEvent[], done: boolean) => {
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
@@ -4485,7 +4485,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       queuedCmdTexts.push(text)
     }
 
-    const handleClaudeEvent = (ev: ClaudeEvent) => {
+    const handleProviderEvent = (ev: ProviderEvent) => {
       // A background/async sub-agent's completion arrives NOT as a user turn but
       // as a <task-notification> bookkeeping record the chat socket relays live
       // off the main transcript: a queue-operation (XML on `content`) or an
@@ -4858,14 +4858,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         type?: string
         status?: string
         head_moved?: boolean
-        event?: ClaudeEvent
+        event?: ProviderEvent
         messages?: { id?: string; content?: unknown }[]
         agentId?: string
         toolUseId?: string
         agentType?: string
         description?: string
         parentAgentId?: string
-        events?: ClaudeEvent[]
+        events?: ProviderEvent[]
         done?: boolean
         file?: string
         content?: string
@@ -4893,7 +4893,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         case 'claude_event':
           // Compatibility-only frame. Structured providers consume the
           // sequenced backend event stream instead.
-          if (!normalizedAvailableRef.current && msg.event) handleClaudeEvent(msg.event)
+          if (!normalizedAvailableRef.current && msg.event) handleProviderEvent(msg.event)
           return
         case 'state_snapshot': {
           if (!usesNormalizedEvents) return
@@ -4933,14 +4933,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
             if (!normalizedStreams.has(streamID)) {
               normalizedStreams.add(streamID)
-              handleClaudeEvent({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } } })
+              handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } } })
             }
             const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
-            handleClaudeEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
+            handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
             return
           }
           if ((normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)) {
-            handleClaudeEvent({ type: 'stream_event', event: { type: 'message_stop' } })
+            handleProviderEvent({ type: 'stream_event', event: { type: 'message_stop' } })
           }
           if (normalized.type === 'plan_updated') {
             const rawPlan = normalized.payload?.plan
@@ -4961,7 +4961,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 						return
 					}
           recordNormalizedCommit(normalized)
-          for (const converted of normalizedAsClaude(normalized)) handleClaudeEvent(converted)
+          for (const converted of normalizedToProviderEvents(normalized)) handleProviderEvent(converted)
           return
         }
         case 'chat_history': {
@@ -4971,7 +4971,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           oldestEventCursorRef.current = msg.next_cursor ?? null
           for (const event of normalized) recordNormalizedCommit(event)
           if (loadingOlderRef.current) {
-            const converted = normalized.flatMap(normalizedAsClaude)
+            const converted = normalized.flatMap(normalizedToProviderEvents)
             handleHistoryBefore(converted, msg.done === true)
           } else {
             for (const event of normalized) {
@@ -4980,7 +4980,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
                 if (entries.length) plan.adoptServer(entries)
               }
-              for (const converted of normalizedAsClaude(event)) handleClaudeEvent(converted)
+              for (const converted of normalizedToProviderEvents(event)) handleProviderEvent(converted)
             }
             if (msg.done === true) setAllHistoryLoaded(true)
           }

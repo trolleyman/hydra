@@ -138,6 +138,24 @@ func TestHistoryBefore(t *testing.T) {
 	}
 }
 
+func TestTranscriptLinesAfterUsesCompleteByteWatermark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("one\ntwo\npartial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, offset, err := TranscriptLinesAfter(path, 0)
+	if err != nil || len(lines) != 2 || string(lines[1]) != "two" || offset != int64(len("one\ntwo\n")) {
+		t.Fatalf("lines=%q offset=%d err=%v", lines, offset, err)
+	}
+	if err := os.WriteFile(path, []byte("one\ntwo\npartial-three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, next, err := TranscriptLinesAfter(path, offset)
+	if err != nil || len(lines) != 1 || string(lines[0]) != "partial-three" || next <= offset {
+		t.Fatalf("lines=%q next=%d err=%v", lines, next, err)
+	}
+}
+
 func TestBackfillIncludesQueuedCommands(t *testing.T) {
 	// A queued message consumed INTO a running turn is recorded only as a
 	// queued_command attachment (no plain user event) - both the attach-time

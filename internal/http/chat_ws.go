@@ -235,15 +235,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			log.Printf("chat ws: set_model without a model for %q", sessionID)
 			return
 		}
-		if err := s.Sessions.SetChatModel(sessionID, msg.Model); err == nil {
-			if s.ChatEvents != nil {
-				_, _ = s.ChatEvents.Append(sessionID, "model_changed", map[string]any{"model": msg.Model})
-			}
+		if err := s.Sessions.SetChatModel(sessionID, msg.Model); err != nil {
+			log.Printf("chat ws: write set_model to %q: %v", sessionID, err)
 			return
 		}
-		id := fmt.Sprintf("hydra-set-model-%d", chatInterruptSeq.Add(1))
-		if err := s.Sessions.Write(sessionID, claudestream.SetModelLine(id, msg.Model)); err != nil {
-			log.Printf("chat ws: write set_model to %q: %v", sessionID, err)
+		if s.ChatEvents != nil {
+			_, _ = s.ChatEvents.Append(sessionID, "model_changed", map[string]any{"model": msg.Model})
 		}
 	case "control_response":
 		// The client answers a CLI control_request (AskUserQuestion) with a

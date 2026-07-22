@@ -38,19 +38,22 @@ func TestControllerFreshThreadAndInitialTurn(t *testing.T) {
 
 func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
 	var sent []map[string]any
-	c := New(Options{ConversationID: "thr", Model: "gpt-old", Send: func(line []byte) error {
+	c := New(Options{Model: "gpt-old", Send: func(line []byte) error {
 		var value map[string]any
 		_ = json.Unmarshal(line, &value)
 		sent = append(sent, value)
 		return nil
 	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr"}}}`))
 	if err := c.SetModel("gpt-new"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.SendText("hello"); err != nil {
 		t.Fatal(err)
 	}
-	params := sent[0]["params"].(map[string]any)
+	params := sent[len(sent)-1]["params"].(map[string]any)
 	if params["model"] != "gpt-new" {
 		t.Fatalf("turn params = %+v", params)
 	}
@@ -86,6 +89,30 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 	c.OnLine([]byte(`{"method":"turn/completed","params":{"turn":{"id":"turn-1"}}}`))
 	if ended != "turn-1" {
 		t.Fatalf("ended = %q", ended)
+	}
+}
+
+func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
+	var sent []map[string]any
+	var recovered [][]byte
+	c := New(Options{ConversationID: "thr-old", OnHistoryLine: func(line []byte) { recovered = append(recovered, line) }, Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	if err := c.SendText("queued"); err != nil {
+		t.Fatal(err)
+	}
+	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr-old"}}}`))
+	if sent[len(sent)-1]["method"] != "thread/read" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"turns":[{"items":[{"id":"m1","type":"agentMessage","text":"old"}]}]}}}`))
+	if len(recovered) != 1 || sent[len(sent)-1]["method"] != "turn/start" {
+		t.Fatalf("recovered=%q sent=%+v", recovered, sent)
 	}
 }
 

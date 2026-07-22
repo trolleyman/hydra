@@ -472,6 +472,31 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 	return errtrace.Wrap3(tailTranscript(path, maxBytes, false))
 }
 
+// TranscriptLinesAfter returns complete JSONL records appended at or after a
+// durable byte offset and the next safe offset. A truncated file restarts at 0.
+func TranscriptLinesAfter(path string, offset int64) ([][]byte, int64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, offset, errtrace.Wrap(err)
+	}
+	if offset < 0 || offset > int64(len(data)) {
+		offset = 0
+	}
+	tail := data[offset:]
+	last := bytes.LastIndexByte(tail, '\n')
+	if last < 0 {
+		return nil, offset, nil
+	}
+	complete := tail[:last]
+	lines := make([][]byte, 0)
+	for line := range bytes.SplitSeq(complete, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			lines = append(lines, append([]byte(nil), line...))
+		}
+	}
+	return lines, offset + int64(last) + 1, nil
+}
+
 // TailTranscriptAndPrelude is TailTranscript plus the transcript's PRE-WINDOW
 // <task-notification> records (oldest-first): every bookkeeping record that
 // fell before the tail window. A byte-dense conversation (image reads) can push

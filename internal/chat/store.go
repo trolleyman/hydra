@@ -67,6 +67,7 @@ type Projection struct {
 	Usage       json.RawMessage          `json:"usage,omitempty"`
 	Queue       map[string]QueuedState   `json:"queue,omitempty"`
 	Head        string                   `json:"head,omitempty"`
+	Imports     map[string]int64         `json:"imports,omitempty"`
 }
 
 // Store serializes appends and projection updates for one head.
@@ -92,6 +93,7 @@ func Open(projectRoot, id string) (*Store, error) {
 			Version:   ProjectionVersion,
 			Subagents: map[string]SubagentState{},
 			Queue:     map[string]QueuedState{},
+			Imports:   map[string]int64{},
 		},
 	}
 	if err := s.load(); err != nil {
@@ -114,6 +116,9 @@ func (s *Store) load() error {
 	}
 	if s.projection.Queue == nil {
 		s.projection.Queue = map[string]QueuedState{}
+	}
+	if s.projection.Imports == nil {
+		s.projection.Imports = map[string]int64{}
 	}
 
 	data, err := os.ReadFile(s.eventsPath)
@@ -156,6 +161,19 @@ func (s *Store) load() error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) ImportOffset(source string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.projection.Imports[source]
+}
+
+func (s *Store) SetImportOffset(source string, offset int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projection.Imports[source] = offset
+	return errtrace.Wrap(s.persistProjection())
 }
 
 // Append durably writes an event, applies it to the current projection, then

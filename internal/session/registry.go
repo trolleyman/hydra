@@ -2,7 +2,6 @@ package session
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -167,6 +166,17 @@ func (r *Registry) SetOnChatLine(fn func(id, provider string, line []byte)) {
 	r.mu.Unlock()
 }
 
+// ObserveChatLine feeds a provider-recovered history line through the same
+// durable normalization callback as process stdout.
+func (r *Registry) ObserveChatLine(id, provider string, line []byte) {
+	r.mu.RLock()
+	fn := r.onChatLine
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(id, provider, line)
+	}
+}
+
 // ChatPlanJSON returns the current incrementally-tracked plan for a session
 // ("" when the session or its plan doesn't exist). Exited sessions still
 // answer while they remain registered.
@@ -264,7 +274,8 @@ func (r *Registry) SetChatModel(id, model string) error {
 	driver := s.chatDriver
 	s.mu.Unlock()
 	if driver == nil {
-		return errtrace.Wrap(errors.New("chat provider does not support driver model switching"))
+		requestID := fmt.Sprintf("hydra-set-model-%d", time.Now().UnixNano())
+		return errtrace.Wrap(r.Write(id, claudestream.SetModelLine(requestID, model)))
 	}
 	return errtrace.Wrap(driver.SetModel(model))
 }
