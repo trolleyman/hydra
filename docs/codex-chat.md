@@ -268,6 +268,65 @@ cannot be recovered reliably. Backfill their commit chips as legacy state (or
 approximately by committer time) and guarantee exact ordering only from the
 first backend-sequenced event onward.
 
+Commit events participate in the same history pagination as messages and tool
+events. `load_before` should use an opaque event cursor (internally the per-head
+sequence number), not a provider UUID, and return the preceding displayable
+events in sequence order. A page may therefore naturally contain:
+
+```text
+assistant_message
+tool_started
+tool_completed
+commit_created
+assistant_message
+```
+
+The frontend prepends that page as one ordered batch. It must not fetch or merge
+commit chips separately, and it deduplicates every event by its durable event id
+so the boundary between the initial window, an older page, and live delivery is
+safe. `done` means the durable event log's beginning was reached, not merely the
+beginning of provider-message history.
+
+Paging old events remains display-only. A historical `plan_updated`,
+`subagent_started`, or `head_changed` event in an older page renders its
+historical card when appropriate but never rewinds the current-state projection
+received in `state_snapshot`. This is the separation that lets a user scroll to
+the beginning while a live turn continues without the current plan or active
+sub-agent panel jumping backward.
+
+Queued messages follow the same state/history boundary. While a message is
+queued, it exists only in the checkpointed queue projection and is included in
+`state_snapshot` with its stable client-generated id, enqueue sequence/time, and
+content. It must not also appear in history: the provider has not received a
+user turn yet. Dequeue removes it from the projection and emits no conversation
+event.
+
+When the queue drains, persist one atomic logical transition:
+
+1. append a durable `user_message` event carrying the same client message id,
+2. remove that id from the queue projection,
+3. advance the projection watermark,
+4. deliver the provider turn (with retry/idempotency bookkeeping if the process
+   write can fail).
+
+The frontend reconciles the pending bubble into the historical/live user
+message by client id instead of rendering a second bubble. Afterward the message
+pages normally with the rest of the ordered event log. On reconnect, a message
+is consequently observed either in the queue snapshot or as a durable event
+(and during recoverable delivery, as a marked sending entry), never as neither
+or both. Loading an older page cannot disturb the current queued-message tray.
+
+The production implementation needs a small delivery state (`queued`,
+`sending`, `accepted`) rather than treating the stdin write as an infallible
+atomic operation. Recovery may safely retry only when the provider protocol has
+an idempotency/client id it honors; otherwise surface an uncertain delivery
+state instead of silently sending a possibly duplicated user turn.
+
+If history retention later compacts old events, write a history checkpoint at
+the compaction boundary and make the cursor response explicit about the retained
+start. Never silently synthesize current commits into an arbitrary older page;
+that would lose causal ordering again.
+
 ## Implementation sequence
 
 ### 1. Protocol spike and fixtures
@@ -315,6 +374,12 @@ and process exit mid-turn.
   during the frontend migration.
 - Make history paging display-only: older pages must not update current plan or
   sub-agent state in the frontend.
+- Replace provider-UUID history paging with an opaque normalized-event cursor;
+  page messages, tools, commits, and other display events from one ordered log,
+  with durable event-id deduplication across page/live boundaries.
+- Give queued messages stable client ids and persisted delivery states; reconcile
+  a drained queue item into its durable `user_message` by that id, without a
+  duplicate across snapshot, replay, pagination, or live delivery.
 - Reconcile Git HEAD after mutating item completions and turn boundaries, emit
   sequenced `commit_created`/`head_changed` events, and use the existing HEAD
   watcher only as an out-of-band fallback.
