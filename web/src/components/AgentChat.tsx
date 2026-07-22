@@ -95,6 +95,7 @@ interface NormalizedChatEvent {
 
 interface ChatProjectionSnapshot {
   plan?: unknown
+  slash_commands?: string[]
   turn?: { id?: string; status?: string }
   // The block being produced right now, accumulated from the deltas that landed
   // before this client attached (see seedStream).
@@ -4162,6 +4163,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [slashCommands, setSlashCommands] = useState<string[]>([])
   const [slashSel, setSlashSel] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
+  // The currently-highlighted row in the slash popup, so keyboard nav can keep
+  // it in view when the (now scrollable, uncapped) list overflows.
+  const selectedSlashRef = useRef<HTMLButtonElement | null>(null)
   // The user-dragged minimum composer height, in whole rows (item 9): content
   // grows the box line by line up to MAX_ROWS regardless. Persisted per agent
   // like the terminal height (item 23).
@@ -5724,6 +5728,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         case 'state_snapshot': {
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
+          // Persisted "/" autocomplete list, so old heads whose system:init has
+          // scrolled past the replayed history window still populate the popup.
+          if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {
+            setSlashCommands(msg.state.slash_commands.filter((c): c is string => typeof c === 'string'))
+          }
           const rawPlan = msg.state?.plan
           const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
           if (entries.length) plan.adoptServer(entries)
@@ -6476,9 +6485,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const slashMatches = useMemo(() => {
     if (slashQuery == null || slashDismissed || slashCommands.length === 0) return []
     const q = slashQuery.toLowerCase()
-    return slashCommands.filter((c) => c.toLowerCase().startsWith(q)).slice(0, 8)
+    // No cap: the popup is scrollable, so bare "/" can page through every
+    // advertised command instead of an arbitrary first-8 subset.
+    return slashCommands.filter((c) => c.toLowerCase().startsWith(q))
   }, [slashQuery, slashDismissed, slashCommands])
   useEffect(() => setSlashSel(0), [slashQuery])
+  // Keep the highlighted row visible as the selection moves through a list
+  // taller than the popup's max height.
+  useEffect(() => {
+    selectedSlashRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [slashSel])
 
   function acceptSlash(cmd: string) {
     const value = '/' + cmd + ' '
@@ -7398,10 +7414,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         </div>
         <div className="relative mx-auto max-w-5xl">
           {slashMatches.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+            <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
               {slashMatches.map((c, i) => (
                 <button
                   key={c}
+                  ref={i === slashSel ? selectedSlashRef : undefined}
                   onClick={() => acceptSlash(c)}
                   onMouseEnter={() => setSlashSel(i)}
                   className={`flex w-full items-center px-3 py-1.5 text-left text-xs font-mono cursor-pointer transition-colors ${
