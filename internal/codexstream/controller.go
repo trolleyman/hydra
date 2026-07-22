@@ -44,7 +44,7 @@ type Controller struct {
 }
 
 type pendingRequest struct {
-	id     uint64
+	id     json.RawMessage
 	method string
 	params json.RawMessage
 }
@@ -89,7 +89,7 @@ func (c *Controller) Start() error {
 }
 
 type message struct {
-	ID     uint64          `json:"id,omitempty"`
+	ID     json.RawMessage `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *struct {
@@ -113,8 +113,10 @@ func (c *Controller) OnLine(line []byte) {
 	c.mu.Lock()
 	initializeID, threadRequestID := c.initializeID, c.threadRequestID
 	c.mu.Unlock()
+	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
+	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
 	switch {
-	case msg.Method == "" && msg.ID != 0 && msg.ID == initializeID:
+	case msg.Method == "" && numericID != 0 && numericID == initializeID:
 		if err := c.notify("initialized", map[string]any{}); err != nil {
 			c.fail(err)
 			return
@@ -138,7 +140,7 @@ func (c *Controller) OnLine(line []byte) {
 		c.mu.Lock()
 		c.threadRequestID = id
 		c.mu.Unlock()
-	case msg.Method == "" && msg.ID != 0 && msg.ID == threadRequestID:
+	case msg.Method == "" && numericID != 0 && numericID == threadRequestID:
 		var result struct {
 			Thread struct {
 				ID string `json:"id"`
@@ -193,12 +195,20 @@ func (c *Controller) OnLine(line []byte) {
 		if c.opts.OnTurnEnd != nil {
 			c.opts.OnTurnEnd(params.Turn.ID)
 		}
-	case msg.ID != 0 && msg.Method != "":
-		key := strconv.FormatUint(msg.ID, 10)
+	case hasID && msg.Method != "":
+		key := requestKey(msg.ID)
 		c.mu.Lock()
-		c.requests[key] = pendingRequest{id: msg.ID, method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
+		c.requests[key] = pendingRequest{id: append(json.RawMessage(nil), msg.ID...), method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
 		c.mu.Unlock()
 	}
+}
+
+func requestKey(id json.RawMessage) string {
+	var text string
+	if json.Unmarshal(id, &text) == nil {
+		return text
+	}
+	return string(id)
 }
 
 func (c *Controller) SendText(text string) error {
@@ -297,7 +307,10 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 	} else {
 		result["decision"] = "decline"
 	}
-	return errtrace.Wrap(c.sendMessage(map[string]any{"id": request.id, "result": result}))
+	return errtrace.Wrap(c.sendMessage(struct {
+		ID     json.RawMessage `json:"id"`
+		Result any             `json:"result"`
+	}{ID: request.id, Result: result}))
 }
 
 func (c *Controller) fail(err error) {

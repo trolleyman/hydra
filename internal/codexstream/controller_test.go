@@ -88,3 +88,21 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 		t.Fatalf("response = %+v", sent[0])
 	}
 }
+
+func TestControllerRespondsToZeroIDUserInputRequest(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	c.OnLine([]byte(`{"id":0,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which?"}]}}`))
+	response := json.RawMessage(`{"request_id":"0","response":{"behavior":"allow","updatedInput":{"answers":{"Which?":"A"}}}}`)
+	if err := c.Respond(response); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent[0]["id"]; got != float64(0) {
+		t.Fatalf("response id = %#v, want 0", got)
+	}
+}

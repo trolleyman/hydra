@@ -80,6 +80,25 @@ func TestHeadContextEnv(t *testing.T) {
 	}
 }
 
+func TestAgentEnvReplacesInheritedTempPaths(t *testing.T) {
+	t.Setenv("TMPDIR", "/host/project/.hydra/test-tmp")
+	t.Setenv("TMP", "/host/tmp")
+	t.Setenv("TEMP", "/host/temp")
+	got := agentEnv("/home/test", "test", "", "")
+	values := map[string]string{}
+	for _, entry := range got {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if values[key] != "/tmp" {
+			t.Errorf("%s = %q, want /tmp", key, values[key])
+		}
+	}
+}
+
 func TestReadPreSpawnEnv(t *testing.T) {
 	// Empty path (no persisted file / no TmpDir): nil, no read.
 	if got := readPreSpawnEnv(""); got != nil {

@@ -43,6 +43,7 @@ type SubagentState struct {
 	ParentItemID string `json:"parent_item_id,omitempty"`
 	AgentType    string `json:"agent_type,omitempty"`
 	Description  string `json:"description,omitempty"`
+	Prompt       string `json:"prompt,omitempty"`
 	Status       string `json:"status,omitempty"`
 	Activity     string `json:"activity,omitempty"`
 }
@@ -331,6 +332,7 @@ type statePayload struct {
 	ParentItemID string          `json:"parent_item_id,omitempty"`
 	AgentType    string          `json:"agent_type,omitempty"`
 	Description  string          `json:"description,omitempty"`
+	Prompt       string          `json:"prompt,omitempty"`
 	Activity     string          `json:"activity,omitempty"`
 	Model        string          `json:"model,omitempty"`
 	Head         string          `json:"head,omitempty"`
@@ -363,6 +365,9 @@ func apply(p *Projection, ev Event) {
 		}
 		if v.Description != "" {
 			cur.Description = v.Description
+		}
+		if v.Prompt != "" {
+			cur.Prompt = v.Prompt
 		}
 		if v.Status != "" {
 			cur.Status = v.Status

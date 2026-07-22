@@ -9,7 +9,11 @@ describe('Codex bash display', () => {
   })
 
   it('prepends a non-default working directory', () => {
-    expect(formatBashForDisplay("bash -lc 'pwd'", 'packages/chat ui')).toBe("cd 'packages/chat ui' &&\npwd")
+    expect(formatBashForDisplay("bash -lc 'pwd'", 'packages/chat ui')).toBe("cd 'packages/chat ui'\npwd")
+  })
+
+  it('does not duplicate an explicit cd', () => {
+    expect(formatBashForDisplay("bash -lc 'cd web && bun test'", '/repo')).toBe('cd web &&\nbun test')
   })
 
   it('leaves ambiguous launchers untouched', () => {

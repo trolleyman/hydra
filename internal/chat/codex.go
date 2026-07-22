@@ -193,7 +193,7 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 			if completed && item.Tool == "spawn_agent" && status == "running" {
 				out[0].payload.(map[string]any)["output"] = "Async agent launched successfully. The agent is working in the background."
 			}
-			out = append(out, eventSpec{sourceID: source + ":" + subKind, eventType: subKind, payload: map[string]any{"id": subID, "parent_id": item.SenderThreadID, "parent_item_id": item.ID, "agent_type": "codex", "description": item.Prompt, "status": status}})
+			out = append(out, eventSpec{sourceID: source + ":" + subKind, eventType: subKind, payload: map[string]any{"id": subID, "parent_id": item.SenderThreadID, "parent_item_id": item.ID, "agent_type": "codex", "description": item.Prompt, "prompt": item.Prompt, "status": status}})
 		}
 		return out
 	case "sleep":

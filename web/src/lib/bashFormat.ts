@@ -72,6 +72,6 @@ function quoteShellPath(path: string): string {
 
 export function formatBashForDisplay(command: string, cwd?: string): string {
   const script = splitBashChains(unwrapBashLoginCommand(command))
-  if (!cwd || cwd === '.') return script
-  return `cd ${quoteShellPath(cwd)} &&\n${script}`
+  if (!cwd || cwd === '.' || /^\s*cd(?:\s|$)/.test(script)) return script
+  return `cd ${quoteShellPath(cwd)}\n${script}`
 }

@@ -89,7 +89,7 @@ interface NormalizedChatEvent {
 interface ChatProjectionSnapshot {
   plan?: unknown
   turn?: { id?: string; status?: string }
-  subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; status?: string; activity?: string }>
+  subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; prompt?: string; status?: string; activity?: string }>
 }
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
@@ -1350,6 +1350,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
+  const displayedCommand = isBash ? formatBashForDisplay(command, commandCwd === worktree ? '' : commandCwd) : ''
   const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
@@ -1375,6 +1376,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 
   // Task tools carry a prose subject, not a path/command - shown in the header.
   const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
+  const isWebSearch = item.name === 'WebSearch'
 
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
@@ -1383,7 +1385,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const summarized = summarizeToolInput(item.input)
   const summary = mem
     ? `memory ${mem}`
-    : collapseHome(trimWorktreePaths(isBash ? description || command : summarized.text, worktree))
+    : collapseHome(trimWorktreePaths(isBash ? description || displayedCommand.replace(/\n/g, ' ') : summarized.text, worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
   // description / task subject / prose input field (a ScheduleWakeup prompt)
@@ -1462,7 +1464,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           ) : (
             <>
               {isBash ? (
-                <CodePanel code={trimWorktreePaths(formatBashForDisplay(command, commandCwd), worktree)} lang="bash" />
+                <CodePanel code={trimWorktreePaths(displayedCommand, worktree)} lang="bash" />
               ) : isWrite ? (
                 <NumberedCodePanel code={trimWorktreePaths(input!.content as string, worktree)} lang={fileLang} />
               ) : isEdit ? (
@@ -1516,6 +1518,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 						? <MemoryPanel text={visibleResult} />
                       : isTaskTool && !item.isError
 							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
+                        : isWebSearch && !item.isError
+                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
                         : isRead && !item.isError
 								? <ReadOutputPanel text={visibleResult} lang={outputLang} />
 								: <OutputPanel text={visibleResult} lang={outputLang} isError={item.isError} />
@@ -3835,11 +3839,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
-    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string, parentAgentId: string) => {
+    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string, parentAgentId: string, prompt = '') => {
       if (!agentId) return
       const sub = ensureSubagent(agentId)
       if (agentType) sub.agentType = agentType
       if (description) sub.description = description
+      if (prompt) sub.prompt = prompt
       if (parentAgentId) sub.parentAgentId = parentAgentId
       if (toolUseId) {
         sub.toolUseId = toolUseId
@@ -4569,7 +4574,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 plan.applyTodoWrite(todos)
               } else {
                 plan.applyTaskTool(block.name, block.input, block.id)
-                if (block.name === 'Task') {
+                if (block.name === 'Task' || block.name === 'Agent') {
                   const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
                   taskInputByUse.set(block.id, {
                     type: typeof inp.subagent_type === 'string' ? inp.subagent_type : undefined,
@@ -4800,7 +4805,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (entries.length) plan.adoptServer(entries)
           for (const [key, sub] of Object.entries(msg.state?.subagents ?? {})) {
             const subID = sub.id || key
-            handleSubagentMeta(subID, sub.parent_item_id ?? '', sub.agent_type ?? '', sub.description ?? '', sub.parent_id ?? '')
+            handleSubagentMeta(subID, sub.parent_item_id ?? '', sub.agent_type ?? '', sub.description ?? '', sub.parent_id ?? '', sub.prompt ?? '')
             if (sub.status && sub.status !== 'running') ensureSubagent(subID).status = 'done'
           }
           return
@@ -4819,6 +4824,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               typeof sub.agent_type === 'string' ? sub.agent_type : '',
               typeof sub.description === 'string' ? sub.description : '',
               typeof sub.parent_id === 'string' ? sub.parent_id : '',
+              typeof sub.prompt === 'string' ? sub.prompt : '',
             )
             if (subID && normalized.type === 'subagent_completed') ensureSubagent(subID).status = 'done'
             scheduleSubFlush()

@@ -516,6 +516,13 @@ var envKeysHydraOwns = map[string]bool{
 	"HYDRA_WORKTREE":     true,
 	"HYDRA_BRANCH":       true,
 	"HYDRA_BASE_BRANCH":  true,
+	// A daemon may itself be launched with a project-local TMPDIR (notably an
+	// isolated test server). That host path is not the head's temp directory and
+	// is normally read-only in its sandbox. Every Linux head instead gets a
+	// private directory bound at /tmp, so always give child tools that path.
+	"TMPDIR": true,
+	"TMP":    true,
+	"TEMP":   true,
 }
 
 // headContextEnv returns the HYDRA_* environment variables describing the head
@@ -608,6 +615,9 @@ func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []str
 		"LANG=C.UTF-8",
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
+		"TMPDIR=/tmp",
+		"TMP=/tmp",
+		"TEMP=/tmp",
 	)
 	if gitAuthorName != "" {
 		env = append(env,
