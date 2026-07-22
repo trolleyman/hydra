@@ -917,6 +917,29 @@ func BuildGoDeps() error {
 	return nil
 }
 
+// webPMOnce guards the one-time PATH lookup behind webPM.
+var (
+	webPMOnce sync.Once
+	webPMName string
+)
+
+// webPM returns the Node package manager used to install deps and run the
+// frontend's package.json scripts: aube when it is on PATH, else npm.
+//
+// Both drive the committed web/package-lock.json (aube reads and writes npm's
+// lockfile in place), so the choice never shows up in the repo - it only buys
+// a faster install for developers who have aube. npm is the documented
+// baseline because it ships with Node, so a fresh checkout always builds.
+func webPM() string {
+	webPMOnce.Do(func() {
+		webPMName = "npm"
+		if _, err := exec.LookPath("aube"); err == nil {
+			webPMName = "aube"
+		}
+	})
+	return webPMName
+}
+
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
 	isDev := os.Getenv("HYDRA_DEV_BUILD") == "1"
@@ -944,8 +967,8 @@ func BuildWeb() error {
 		return nil
 	}
 
-	// Run bun install + build
-	if err := runInDirV("web", "bun", "install"); err != nil {
+	// Run install + build
+	if err := runInDirV("web", webPM(), "install"); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -956,7 +979,7 @@ func BuildWeb() error {
 		buildArgs = append(buildArgs, "--", "--mode", "development")
 	}
 
-	if err := runInDirWithEnvV("web", env, "bun", buildArgs...); err != nil {
+	if err := runInDirWithEnvV("web", env, webPM(), buildArgs...); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -1146,8 +1169,8 @@ func DevFast() error {
 	}
 
 	startVite := func() (*exec.Cmd, error) {
-		printCmdBackground("bun", "run", "dev")
-		cmd := exec.Command("bun", "run", "dev")
+		printCmdBackground(webPM(), "run", "dev")
+		cmd := exec.Command(webPM(), "run", "dev")
 		cmd.Dir = "web"
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -1228,8 +1251,8 @@ func DevAutoReload() error {
 	}
 
 	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
-	printCmdBackground("bun", "run", "dev")
-	viteCmd := exec.Command("bun", "run", "dev")
+	printCmdBackground(webPM(), "run", "dev")
+	viteCmd := exec.Command(webPM(), "run", "dev")
 	viteCmd.Dir = "web"
 	viteCmd.Stdout = os.Stdout
 	viteCmd.Stderr = os.Stderr
@@ -1420,8 +1443,8 @@ func Demo() error {
 	// Start the Vite dev server once (frontend with HMR on http://localhost:5173).
 	// It stays up across backend restarts - HMR handles frontend edits live, and
 	// the reload button only needs to rebuild + relaunch the Go sim server.
-	printCmdBackground("bun", "run", "dev")
-	viteCmd := exec.Command("bun", "run", "dev")
+	printCmdBackground(webPM(), "run", "dev")
+	viteCmd := exec.Command(webPM(), "run", "dev")
 	viteCmd.Dir = "web"
 	viteCmd.Stdout = os.Stdout
 	viteCmd.Stderr = os.Stderr

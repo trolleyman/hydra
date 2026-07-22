@@ -41,7 +41,15 @@ Use "hydra [command] --help" for more information about a command.
 - [Go](https://go.dev/)
 - [Docker](https://www.docker.com/)
 - [Mage](https://magefile.org/)
-- [Bun](https://bun.sh/) (for frontend)
+- [Node.js](https://nodejs.org/) 24+ (for the frontend; runs the build scripts directly via its native TypeScript support)
+- [npm](https://www.npmjs.com/) (ships with Node) or, optionally, [aube](https://github.com/jdx/aube) - see below
+
+The frontend's package installs and `package.json` scripts run through **npm** by
+default, since it ships with Node and needs no extra setup. If [aube](https://github.com/jdx/aube)
+is on your `PATH`, `mage` uses it instead for a faster install - it reads and
+writes the same `web/package-lock.json`, so the choice never affects the repo.
+Any npm-compatible package manager (aube, pnpm, yarn, bun) works if you run the
+web build by hand; only npm and aube are auto-detected.
 
 ### Running
 

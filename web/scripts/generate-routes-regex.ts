@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // Parses routeTree.gen.ts to extract route paths and generates a combined regex.
 // This avoids loading React/browser dependencies at build time.
-// Run directly with: bun scripts/generate-routes-regex.ts (from web/ directory)
+// Run directly with: node scripts/generate-routes-regex.ts (from web/ directory)
 import fs from 'fs/promises'
 
 const source = await fs.readFile('src/routeTree.gen.ts', 'utf-8')

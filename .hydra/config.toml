@@ -17,15 +17,15 @@
 ## extra instructions appended to every agent's system prompt. Layers combine:
 ## a user-config pre_prompt stays in force and a project's is appended after it.
 pre_prompt = '''
-- Use bun instead of npm, and bun x instead of npx
+- Use aube if it is available, otherwise npm (and npx for one-off tools). Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
 - Check using mage build before committing
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
-- After changing web code, run `cd web && bun run lint` (eslint) and fix the errors AND warnings you introduced
+- After changing web code, run `cd web && npm run lint` (eslint) and fix the errors AND warnings you introduced
 - After changing Go code, run `go test ./...` and make sure it passes
 - Verify web UI changes end-to-end (real rendered app, console + DOM, not just tests) by booting the simulation server and driving it with Playwright:
-  - `cd web && bun run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
+  - `cd web && npm run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
   - Useful pages: /project/sim-project/agent/agent-1 (8-file diff, largest, incl. a >1000-changed-lines hidden "Load diff" file), agent-2 (small diff incl. a plaintext .txt file, tests panel data), agent-md (markdown / running-tests states).
-  - Playwright scripts MUST live under web/ (bun resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers with `cd web && bun x playwright install chromium` (never bare `bun x playwright install` outside web/ - it GCs the pinned revision).
+  - Playwright scripts MUST live under web/ (node resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers from web/ with `cd web && npx playwright install chromium` (playwright is a devDependency, so this runs the pinned local version).
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available, /api/auth/status.
 '''
@@ -56,9 +56,9 @@ artifact_concurrency = 2
 # even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
 # checksum-db tree head there when fetching a new module, so without it fetching a
 # tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
-# The web build's `generate-openapi` uses `bun x openapi-typescript-codegen`, whose
-# fetch cache lands under the already-writable ~/.bun/install/cache - so no ~/.npm
-# entry is needed here (npm/npx moved out of the built-in defaults).
+# The web build installs deps and runs `generate-openapi` via `npx` (or aube), so
+# their caches/stores must be writable: ~/.npm for npm/npx, and ~/.local/share/aube
+# for aube's global content-addressed store. Hence those two entries below.
 ## extra paths made writable in the sandbox, unioned on top of the built-in
 ## defaults below AND across config layers (this list in ~/.config/hydra/
 ## config.toml applies to every project; a project's own list adds to it).
@@ -75,7 +75,7 @@ artifact_concurrency = 2
 ##     ~/.local/share/kotlin - Kotlin compiler cache
 ##     ~/.local/share/JetBrains - JetBrains toolbox
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
-writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", ""]
+writable_paths = ["~/.cache/go", "~/.npm", "~/.local/share/aube", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", ""]
 
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
@@ -238,7 +238,7 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 # in bitexact mode) so the video diff viewer is exercised too - see the [artifacts.<name>]
 # docs above on why video must be lossless. Building Go + the frontend is slow, so
 # allow a generous timeout (results are cached per resolved ref).
-command = "cd web && bun install && bun scripts/screenshots/take-screenshots.ts"
+command = "cd web && npm install && node scripts/screenshots/take-screenshots.ts"
 timeout_sec = 900
 
 [artifacts.demo]
@@ -250,7 +250,7 @@ timeout_sec = 900
 # after that transparently respawns it. The frontend build dominates spawn
 # time, hence the generous ready timeout.
 type = "server"
-command = "cd web && bun install && bun run build && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
+command = "cd web && npm install && npm run build && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
 ## [services.<name>]: per-project long-running commands the daemon supervises while
@@ -354,7 +354,7 @@ type = "stdout"
 # eslint-report.ts emits fail markers for errors (which gate the merge like a
 # failing test) and ⚠ warn markers for warnings (informational only). Lint runs
 # only once the specs pass (the merge is already blocked when they don't).
-command = "cd web && bun install && bun x vitest run --reporter=./scripts/hydra-reporter.ts && bun scripts/eslint-report.ts"
+command = "cd web && npm install && npx vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts"
 timeout_sec = 600
 type = "stdout"
 

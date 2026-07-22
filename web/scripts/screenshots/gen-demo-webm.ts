@@ -2,7 +2,7 @@
 // One-off generator (NOT committed): renders two small animated .webm clips with
 // the bundled Chromium's MediaRecorder - a "before" and a slightly different
 // "after" - and prints them as base64 so they can be embedded in the simulation
-// server as a demo video artifact. Run: bun gen-demo-webm.ts
+// server as a demo video artifact. Run: node gen-demo-webm.ts
 import { writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 

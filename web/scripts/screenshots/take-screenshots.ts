@@ -21,13 +21,13 @@
 // grid sizes a tile by its logical width (physical px ÷ dpi), so dpi 2 lays out the
 // same as dpi 1, only sharper. Absent ⇒ 1.
 //
-// Run with: bun scripts/screenshots/take-screenshots.ts  (from web/)
+// Run with: node scripts/screenshots/take-screenshots.ts  (from web/)
 //
 // Progress: each major step emits a one-line "::hydra:progress::" marker (build
 // phases and, during capture, "<name>.png <n>/<total>"). Hydra strips the prefix
 // and surfaces the rest as the live progress header - and, once it sees a marker,
 // stops treating ordinary stdout as progress, so the noisy subprocess output
-// (bun install, vite build) below can't hijack the header. Keep markers short and
+// (the install, vite build) below can't hijack the header. Keep markers short and
 // human-readable; everything still lands in the full build log.
 //
 // Streaming: right after writing each "<name>.png" (and its .meta sidecar) we emit
@@ -44,8 +44,9 @@ import { chromium } from 'playwright'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
-// scripts below. storage.ts is dependency-free, so it imports cleanly under bun.
-import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib/storage'
+// scripts below. storage.ts is dependency-free, so it imports cleanly under Node's
+// type stripping. The '.ts' extension is required - Node ESM does not guess it.
+import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib/storage.ts'
 
 // Identifiers seeded by the simulation server (internal/http/simulation.go),
 // named where they feed the shared key builders above.
@@ -116,7 +117,7 @@ const PASTED_HTML_DEMO = [
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root three
 // levels up from this script (web/scripts/screenshots/) so it also works by hand.
-const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dir, '..', '..', '..')
+const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dirname, '..', '..', '..')
 const REF = process.env.HYDRA_ARTIFACT_REF || '(unknown)'
 
 function required(name: string): string {
@@ -362,14 +363,19 @@ console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
 //    must happen before the go build. We invoke vite + the routes-regex
-//    generator directly rather than `bun run build` to skip the tsc typecheck
+//    generator directly rather than `npm run build` to skip the tsc typecheck
 //    (a type error in some checkout shouldn't block a screenshot) and the
 //    openapi/router codegen (their outputs are committed).
+//
+//    Install with aube when it is on PATH (much faster), else npm. Both read the
+//    committed package-lock.json, so node_modules comes out the same either way.
+//    Mirrors webPM() in magefiles/magefile.go.
 const webDir = join(SRC, 'web')
+const pm = spawnSync('aube', ['--version'], { stdio: 'ignore' }).status === 0 ? 'aube' : 'npm'
 progress('building frontend')
-run('bun', ['install'], webDir)
-run('bun', ['x', 'vite', 'build'], webDir)
-run('bun', ['scripts/generate-routes-regex.ts'], webDir)
+run(pm, ['install'], webDir)
+run('npx', ['vite', 'build'], webDir)
+run('node', ['scripts/generate-routes-regex.ts'], webDir)
 
 // 2. Build the hydra binary from the checkout into a throwaway dir.
 progress('building hydra binary')

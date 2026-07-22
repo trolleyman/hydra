@@ -33,8 +33,8 @@ entry here — not attach an image file.** Concretely:
   user/project/config.local.toml layers; a legacy-array file replaces the list
   wholesale.
 
-Run the screenshot generator locally with: `cd web && bun install
-&& bun scripts/screenshots/take-screenshots.ts` (it needs `HYDRA_ARTIFACT_OUTPUT` set
+Run the screenshot generator locally with: `cd web && npm install
+&& node scripts/screenshots/take-screenshots.ts` (it needs `HYDRA_ARTIFACT_OUTPUT` set
 to a directory to write into). Playwright + ffmpeg-static are devDependencies of `web`. Renders do **not** need to be byte-identical: hydra compares the
 **decoded pixels** (PNG/JPEG/GIF), and for `.webm` it compares per-frame pixel
 hashes via ffmpeg (see `internal/artifacts` `Manager.Compare`), so cosmetic

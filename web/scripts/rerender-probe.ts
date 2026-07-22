@@ -9,12 +9,12 @@
 // it prints commits + per-component render counts - so you can see what a 1s
 // store tick or a keystroke actually re-renders, and whether a memo() holds.
 //
-// Usage (needs a dev build - `bun x vite build --mode development` - so component
+// Usage (needs a dev build - `npx vite build --mode development` - so component
 // names aren't minified, and a running server on $PORT):
-//   PORT=26600 bun scripts/rerender-probe.ts <path> [--type <selector>] [--secs N]
+//   PORT=26600 node scripts/rerender-probe.ts <path> [--type <selector>] [--secs N]
 // Examples:
-//   PORT=26600 bun scripts/rerender-probe.ts /project/sim-project/agent/agent-1
-//   PORT=26600 bun scripts/rerender-probe.ts /project/sim-project --type 'textarea' --secs 3
+//   PORT=26600 node scripts/rerender-probe.ts /project/sim-project/agent/agent-1
+//   PORT=26600 node scripts/rerender-probe.ts /project/sim-project --type 'textarea' --secs 3
 //
 // CAVEAT: the PerformedWork flag over-counts for a few wrapper/forwardRef fibers
 // (e.g. a lucide icon can show renders even when its memo'd parent bailed). Treat

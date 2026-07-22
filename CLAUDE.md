@@ -22,7 +22,10 @@ Use `mage` for development tasks.
 ## Development Workflow
 
 1.  **Backend**: Go 1.22+ is used. Follow standard Go idioms.
-2.  **Frontend**: React + TypeScript + Vite. Uses `bun` for package management.
+2.  **Frontend**: React + TypeScript + Vite. Uses `npm` (or `aube`, if on PATH) for
+    package management against `web/package-lock.json`. Build scripts under
+    `web/scripts/` and `web/e2e/` run directly with `node` (Node 24+ strips the TS
+    types), not a separate TS runner.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
 ## Conventions
