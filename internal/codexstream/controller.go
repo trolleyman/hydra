@@ -24,6 +24,7 @@ type Options struct {
 	InitialPrompt  string
 	Send           SendFunc
 	OnConversation func(string)
+	OnModel        func(string)
 	OnTurnStart    func(string)
 	OnActivity     func()
 	OnTurnEnd      func(string)
@@ -43,6 +44,7 @@ type Controller struct {
 	pending         []json.RawMessage
 	requests        map[string]pendingRequest
 	initializeID    uint64
+	modelListID     uint64
 	threadRequestID uint64
 	readRequestID   uint64
 	model           string
@@ -111,14 +113,21 @@ func (c *Controller) OnLine(line []byte) {
 	if json.Unmarshal(bytes.TrimSpace(line), &msg) != nil {
 		return
 	}
+	c.mu.Lock()
+	initializeID, modelListID, threadRequestID, readRequestID := c.initializeID, c.modelListID, c.threadRequestID, c.readRequestID
+	c.mu.Unlock()
+	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
 	if msg.Error != nil {
+		// model/list is newer than the initial app-server protocol. Preserve
+		// compatibility with an older installed CLI by falling back to its prior
+		// model-selection behavior rather than failing the whole chat handshake.
+		if numericID != 0 && numericID == modelListID {
+			c.startThread(c.opts.Model)
+			return
+		}
 		c.fail(fmt.Errorf("codex app-server error %d: %s", msg.Error.Code, msg.Error.Message))
 		return
 	}
-	c.mu.Lock()
-	initializeID, threadRequestID, readRequestID := c.initializeID, c.threadRequestID, c.readRequestID
-	c.mu.Unlock()
-	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
 	// Some app-server versions/reattached streams can expose item activity
 	// before Hydra observes the matching turn/started notification. Treat a new
 	// item as a provider-neutral running edge as well; this is deliberately not
@@ -133,25 +142,16 @@ func (c *Controller) OnLine(line []byte) {
 			c.fail(err)
 			return
 		}
-		params := map[string]any{"cwd": c.opts.CWD, "approvalPolicy": "never", "sandbox": "danger-full-access"}
-		if c.opts.Model != "" {
-			params["model"] = c.opts.Model
-		}
-		method := "thread/start"
-		c.mu.Lock()
-		if c.threadID != "" {
-			method = "thread/resume"
-			params = map[string]any{"threadId": c.threadID}
-		}
-		c.mu.Unlock()
-		id, err := c.send(method, params)
+		id, err := c.send("model/list", map[string]any{"limit": 100, "includeHidden": false})
 		if err != nil {
 			c.fail(err)
 			return
 		}
 		c.mu.Lock()
-		c.threadRequestID = id
+		c.modelListID = id
 		c.mu.Unlock()
+	case msg.Method == "" && numericID != 0 && numericID == modelListID:
+		c.startThread(modelFromList(msg.Result, c.opts.Model))
 	case msg.Method == "" && numericID != 0 && numericID == threadRequestID:
 		var result struct {
 			Thread struct {
@@ -227,6 +227,67 @@ func (c *Controller) OnLine(line []byte) {
 		c.requests[key] = pendingRequest{id: append(json.RawMessage(nil), msg.ID...), method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
 		c.mu.Unlock()
 	}
+}
+
+func modelFromList(raw json.RawMessage, requested string) string {
+	var result struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Model     string `json:"model"`
+			IsDefault bool   `json:"isDefault"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &result) != nil {
+		return requested
+	}
+	if requested != "" {
+		for _, entry := range result.Data {
+			model := entry.Model
+			if model == "" {
+				model = entry.ID
+			}
+			if requested == entry.ID || requested == model || (requested == "gpt-5.6" && model == "gpt-5.6-sol") {
+				return model
+			}
+		}
+		return requested
+	}
+	for _, entry := range result.Data {
+		if entry.IsDefault {
+			if entry.Model != "" {
+				return entry.Model
+			}
+			return entry.ID
+		}
+	}
+	return ""
+}
+
+func (c *Controller) startThread(model string) {
+	c.mu.Lock()
+	c.modelListID = 0
+	c.model = model
+	threadID := c.threadID
+	c.mu.Unlock()
+	if model != "" && c.opts.OnModel != nil {
+		c.opts.OnModel(model)
+	}
+	params := map[string]any{"cwd": c.opts.CWD, "approvalPolicy": "never", "sandbox": "danger-full-access"}
+	method := "thread/start"
+	if threadID != "" {
+		method = "thread/resume"
+		params = map[string]any{"threadId": threadID}
+	} else if model != "" {
+		params["model"] = model
+	}
+	id, err := c.send(method, params)
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	c.mu.Lock()
+	c.threadRequestID = id
+	c.mu.Unlock()
 }
 
 func (c *Controller) drainPending() {

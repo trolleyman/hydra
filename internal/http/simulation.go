@@ -3139,6 +3139,15 @@ func handleSimCodexChatWS(conn *safeConn) {
 		// Legacy compatibility: older normalized logs retained the cancellation
 		// status but labelled this event turn_completed.
 		{"turn_completed", map[string]any{"id": "sim-codex-interrupt-turn", "status": "cancelled"}},
+		{"turn_started", map[string]any{"id": "sim-codex-error-turn", "status": "running"}},
+		{"turn_error", map[string]any{"error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
+		{"turn_failed", map[string]any{"id": "sim-codex-error-turn", "status": "failed", "error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
 	}
 	for i, event := range events {
 		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)

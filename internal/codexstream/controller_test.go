@@ -21,11 +21,12 @@ func TestControllerFreshThreadAndInitialTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.OnLine([]byte(`{"id":1,"result":{"userAgent":"test"}}`))
-	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr-1"}}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-test","model":"gpt-test","isDefault":true}]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-1"}}}`))
 	if conversation != "thr-1" {
 		t.Fatalf("conversation = %q", conversation)
 	}
-	methods := []string{"initialize", "initialized", "thread/start", "turn/start"}
+	methods := []string{"initialize", "initialized", "model/list", "thread/start", "turn/start"}
 	if len(sent) != len(methods) {
 		t.Fatalf("sent = %+v", sent)
 	}
@@ -46,7 +47,8 @@ func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
 	}})
 	_ = c.Start()
 	c.OnLine([]byte(`{"id":1,"result":{}}`))
-	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr"}}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-old","model":"gpt-old"}]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr"}}}`))
 	if err := c.SetModel("gpt-new"); err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +58,59 @@ func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
 	params := sent[len(sent)-1]["params"].(map[string]any)
 	if params["model"] != "gpt-new" {
 		t.Fatalf("turn params = %+v", params)
+	}
+}
+
+func TestControllerResolvesAccountDefaultAndAliasFromModelList(t *testing.T) {
+	var sent []map[string]any
+	resolved := ""
+	c := New(Options{Model: "gpt-5.6", OnModel: func(model string) { resolved = model }, Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-5.6-sol","model":"gpt-5.6-sol","isDefault":true}]}}`))
+	params := sent[len(sent)-1]["params"].(map[string]any)
+	if params["model"] != "gpt-5.6-sol" || resolved != "gpt-5.6-sol" {
+		t.Fatalf("thread params=%+v resolved=%q", params, resolved)
+	}
+}
+
+func TestControllerUsesAccountDefaultWhenNoModelWasRequested(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"old","model":"old"},{"id":"sol","model":"gpt-5.6-sol","isDefault":true}]}}`))
+	params := sent[len(sent)-1]["params"].(map[string]any)
+	if params["model"] != "gpt-5.6-sol" {
+		t.Fatalf("thread params = %+v", params)
+	}
+}
+
+func TestControllerFallsBackWhenModelListIsUnsupported(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Model: "gpt-legacy", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"error":{"code":-32601,"message":"Method not found"}}`))
+	last := sent[len(sent)-1]
+	params := last["params"].(map[string]any)
+	if last["method"] != "thread/start" || params["model"] != "gpt-legacy" {
+		t.Fatalf("sent = %+v", sent)
 	}
 }
 
@@ -72,11 +127,12 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.OnLine([]byte(`{"id":1,"result":{}}`))
-	if sent[2]["method"] != "thread/resume" {
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-restored","model":"gpt-restored","isDefault":true}]}}`))
+	if sent[3]["method"] != "thread/resume" {
 		t.Fatalf("sent = %+v", sent)
 	}
-	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr-old"}}}`))
-	c.OnLine([]byte(`{"id":3,"result":{"thread":{"turns":[]}}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"turns":[]}}}`))
 	if err := c.SendText("resumed"); err != nil {
 		t.Fatal(err)
 	}
@@ -121,14 +177,15 @@ func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
 	}})
 	_ = c.Start()
 	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-default","model":"gpt-default","isDefault":true}]}}`))
 	if err := c.SendText("queued"); err != nil {
 		t.Fatal(err)
 	}
-	c.OnLine([]byte(`{"id":2,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
 	if sent[len(sent)-1]["method"] != "thread/read" {
 		t.Fatalf("sent = %+v", sent)
 	}
-	c.OnLine([]byte(`{"id":3,"result":{"thread":{"turns":[{"items":[{"id":"m1","type":"agentMessage","text":"old"}]}]}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"turns":[{"items":[{"id":"m1","type":"agentMessage","text":"old"}]}]}}}`))
 	if len(recovered) != 1 || sent[len(sent)-1]["method"] != "turn/start" {
 		t.Fatalf("recovered=%q sent=%+v", recovered, sent)
 	}

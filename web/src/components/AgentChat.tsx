@@ -59,6 +59,7 @@ import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../li
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { providerErrorText } from '../lib/providerError'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -579,8 +580,10 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
       if (/interrupt|cancel/.test(terminal)) {
         return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
       }
-      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
+      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: providerErrorText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
     }
+    case 'turn_error':
+      return [{ ...base, type: 'result', subtype: 'error', is_error: true, result: providerErrorText(p.error) }]
     case 'turn_interrupted':
       return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
     default:
@@ -1095,16 +1098,18 @@ const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 // Claude model aliases offered by the in-chat model dropdown. Sent verbatim to
 // the CLI's set_model control request, so these must be aliases it accepts.
 const CLAUDE_MODELS = [
+  { id: 'fable', label: 'Fable' },
   { id: 'opus', label: 'Opus' },
   { id: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', label: 'Haiku' },
-  { id: 'fable', label: 'Fable' },
 ]
 const CODEX_MODELS = [
-  { id: 'gpt-5.6', label: 'GPT-5.6' },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
   { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+  { id: 'gpt-5.5', label: 'GPT-5.5' },
   { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.3-codex-spark', label: 'Codex Spark' },
+  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
 ]
 
 // Effective context window (tokens) for a model, used to turn a turn's prompt
