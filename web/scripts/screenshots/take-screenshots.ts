@@ -374,7 +374,9 @@ const webDir = join(SRC, 'web')
 const pm = spawnSync('aube', ['--version'], { stdio: 'ignore' }).status === 0 ? 'aube' : 'npm'
 progress('building frontend')
 run(pm, ['install'], webDir)
-run('npx', ['vite', 'build'], webDir)
+// aubx / npx here resolve the locally-installed vite bin (install just ran);
+// neither needs to fetch from the registry.
+run(pm === 'aube' ? 'aubx' : 'npx', ['vite', 'build'], webDir)
 run('node', ['scripts/generate-routes-regex.ts'], webDir)
 
 // 2. Build the hydra binary from the checkout into a throwaway dir.

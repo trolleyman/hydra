@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "generate-tanstack-router": "tsr generate",
-    "generate-openapi": "npx openapi-typescript-codegen --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
+    "generate-openapi": "openapi --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
     "generate-routes-regex": "node scripts/generate-routes-regex.ts",
     "prebuild": "npm run generate-openapi && npm run generate-tanstack-router",
     "build": "tsc -b && vite build",
@@ -51,6 +51,7 @@
     "ffmpeg-static": "^5.3.0",
     "globals": "^16.5.0",
     "jsdom": "^29.1.1",
+    "openapi-typescript-codegen": "^0.31.0",
     "playwright": "1.60.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
