@@ -982,7 +982,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
       data-file-card={file.path}
-      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 8px)` }}
+      // Dock target for jump-to-file. FILE_STICKY_TOP subtracts 16px (the scroll
+      // container's pt-4) so the header PINS flush at the bar bottom while
+      // reading; that same -16 must be added back here or the card lands 16px
+      // too high and the pinned header floats down over the first content line
+      // (scrolls "too far"). +16 lands the card border exactly at the sticky
+      // bar stack's bottom edge, so the header sits flush and line 1 is visible.
+      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 16px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
