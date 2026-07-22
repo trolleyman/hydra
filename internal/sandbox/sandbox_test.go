@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -163,4 +165,33 @@ func TestExpandAllDedupes(t *testing.T) {
 			t.Errorf("expandAll[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
+}
+
+func TestEnsureWritableDir(t *testing.T) {
+	home := t.TempDir()
+
+	// A HOME-anchored path that does not exist yet is created (including parents).
+	nested := filepath.Join(home, ".local", "share", "aube")
+	ensureWritableDir(nested, home)
+	if fi, err := os.Stat(nested); err != nil || !fi.IsDir() {
+		t.Errorf("ensureWritableDir did not create HOME-anchored path %q: err=%v", nested, err)
+	}
+
+	// An existing path is left untouched (no error, still a dir).
+	ensureWritableDir(nested, home)
+	if fi, err := os.Stat(nested); err != nil || !fi.IsDir() {
+		t.Errorf("ensureWritableDir disturbed existing path %q: err=%v", nested, err)
+	}
+
+	// A path OUTSIDE HOME is never created, so a config typo cannot litter the
+	// wider filesystem.
+	outside := filepath.Join(t.TempDir(), "not-under-home")
+	ensureWritableDir(outside, home)
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Errorf("ensureWritableDir created a non-HOME path %q (err=%v); want it left missing", outside, err)
+	}
+
+	// Empty inputs are no-ops (must not panic or create anything).
+	ensureWritableDir("", home)
+	ensureWritableDir(nested, "")
 }

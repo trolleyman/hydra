@@ -17,7 +17,7 @@
 ## extra instructions appended to every agent's system prompt. Layers combine:
 ## a user-config pre_prompt stays in force and a project's is appended after it.
 pre_prompt = '''
-- Use aube if it is available, otherwise npm (and npx for one-off tools). Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
+- Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
 - Check using mage build before committing
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && npm run lint` (eslint) and fix the errors AND warnings you introduced

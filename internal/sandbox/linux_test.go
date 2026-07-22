@@ -46,7 +46,7 @@ func TestBuildSpecLinux(t *testing.T) {
 		AgentType:     AgentTypeClaude,
 		WorktreePath:  work,
 		Home:          home,
-		WritablePaths: []string{"~/.cache", "~/.does-not-exist"},
+		WritablePaths: []string{"~/.cache", "~/.created-on-demand", "/hydra-nonexistent-abs"},
 		MaskedPaths:   []string{"~/.ssh", "~/.config"},
 		RestoreRO:     []string{"~/.config/git"},
 		Network:       NetworkPolicy{Enabled: false},
@@ -72,12 +72,25 @@ func TestBuildSpecLinux(t *testing.T) {
 	if !hasPair(args, "--bind", work, work) {
 		t.Error("worktree not bound writable")
 	}
-	// Existing writable path bound; non-existent one skipped.
+	// Existing writable path bound.
 	if !hasPair(args, "--bind", cache, cache) {
 		t.Error("~/.cache not bound writable")
 	}
-	if argIndex(args, filepath.Join(home, ".does-not-exist")) != -1 {
-		t.Error("non-existent writable path should be skipped")
+	// A missing HOME-anchored writable path is auto-created on demand, then bound
+	// (so a freshly-configured cache like ~/.local/share/aube works first time).
+	created := filepath.Join(home, ".created-on-demand")
+	if fi, err := os.Stat(created); err != nil || !fi.IsDir() {
+		t.Errorf("missing HOME-anchored writable path not created: err=%v", err)
+	}
+	if !hasPair(args, "--bind", created, created) {
+		t.Error("auto-created writable path not bound writable")
+	}
+	// A missing path OUTSIDE HOME is never created, so it stays skipped.
+	if _, err := os.Stat("/hydra-nonexistent-abs"); !os.IsNotExist(err) {
+		t.Error("non-HOME writable path should not have been created")
+	}
+	if argIndex(args, "/hydra-nonexistent-abs") != -1 {
+		t.Error("non-existent non-HOME writable path should be skipped")
 	}
 	// Masked dir -> tmpfs.
 	if !hasPair2(args, "--tmpfs", secret) {

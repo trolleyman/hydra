@@ -237,6 +237,10 @@ func BuildSpec(opts Options) (*Spec, error) {
 		if _, ok := cowDests[filepath.Clean(p)]; ok {
 			continue
 		}
+		// Create a HOME-anchored writable_path that doesn't exist yet, so a
+		// freshly-configured cache/store (e.g. ~/.local/share/aube) is bound
+		// instead of silently skipped by addRWDir's exists-check.
+		ensureWritableDir(p, home)
 		addRWDir(p)
 	}
 
