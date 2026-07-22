@@ -62,3 +62,6 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Adding a screenshot or artifact** (or working on `take-screenshots.ts` /
   `internal/artifacts`) -> [docs/screenshots.md](docs/screenshots.md); the
   user-facing artifacts feature is [docs/artifacts.md](docs/artifacts.md)
+- **Working on macOS/darwin support** (`internal/sandbox/darwin.go`, Seatbelt
+  profile, config seeding on macOS) -> [docs/macos-support.md](docs/macos-support.md)
+  (audit of the darwin backend + phased implementation plan)
