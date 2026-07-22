@@ -49,6 +49,29 @@ The command is given:
 Results are cached per commit under `.hydra/local/artifacts/out/<name>/<version-key>`
 (gitignored, never committed), so re-viewing a diff is free.
 
+## Streaming outputs (`::hydra:artifact::`)
+
+By default every output is collected when the command **exits**, so all the tiles
+appear (and get diffed) at once. A command can instead stream them **as they
+render**, like the tests panel's `::hydra:test:*::` markers: right after writing a
+file (and its `.meta` sidecar), print a line on stdout —
+
+```sh
+echo "::hydra:artifact:: home-dark.png"
+```
+
+— where the path is relative to `$HYDRA_ARTIFACT_OUTPUT`. Hydra scans just that one
+file (hash + pixel size + sidecar), diffs it against the other side the moment both
+sides know it (the counterpart has the file, or has already settled without it — so
+each tile is pixel-diffed exactly once), and streams the tile straight into the
+panel while the rest of the run continues.
+
+The marker is **optional and additive**: emit none and every output is still
+collected by the post-exit scan, which also reconciles anything the markers missed.
+Emit it only **once the file is fully written** — a marker for a not-yet-flushed
+file is ignored (the final scan catches it). Print `::hydra:progress:: <text>` to
+set the live progress header shown while the command runs.
+
 ## How files are compared
 
 Each output file is matched by name across the two sides and classified as
@@ -116,3 +139,28 @@ plain tags are free-form. When a set mixes images and video, a built-in
 above); a non-positive value is ignored with a warning. Both keys are optional —
 omit either, or skip the sidecar entirely. A malformed sidecar is reported as a
 build warning and otherwise ignored.
+
+## Caching (live `type = "server"` previews)
+
+Previews mirror a live worktree, so stale caches would defeat their purpose.
+Two layers keep them fresh, and neither needs (or offers) configuration:
+
+- **The preview reverse proxy** rewrites every upstream response's freshness to
+  `Cache-Control: no-cache` (revalidate-before-use) while PRESERVING the
+  upstream `ETag`/`Last-Modified` validators (`forceRevalidate` in
+  `internal/preview/proxy.go`). This is applied at the proxy layer, so it works
+  for ANY preview server implementation - a Vite dev server, a Go binary, a
+  static file server - without that server cooperating. Unchanged assets still
+  answer with a cheap 304, so a well-behaved upstream keeps most of the
+  performance of caching; only the "serve from cache without asking" behavior
+  is removed. Deliberately not configurable: a preview that may serve stale
+  bytes silently hides exactly the changes it exists to show, and the 304 path
+  already keeps revalidation cheap.
+- **Hydra's own web UI** (the embedded SPA) serves `assets/*` (content-hashed
+  Vite bundles) as `immutable` and everything with a stable name
+  (`index.html`, icons) as `no-cache` (`setFrontendCacheHeader` in
+  `internal/cli/server_frontend.go`). Embedded files carry no modtime, so
+  without explicit headers browsers heuristically cached `index.html` and kept
+  showing an old build after a rebuild + restart.
+
+The status/loading endpoints the preview holding page uses are `no-store`.

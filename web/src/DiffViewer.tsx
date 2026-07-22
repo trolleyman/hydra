@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
@@ -6,28 +7,31 @@ import hljs from './lib/hljs'
 import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
+import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Settings2, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
+  Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
-  FileDiff as FileDiffIcon, FlaskConical, MonitorPlay,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
-import { TestVerdictChip } from './components/TestVerdict'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
+import { ResizeGrip } from './components/ResizeGrip'
+import { pinCardToTop, scrollCardToTop } from './lib/diffScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
 import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
-import { IMAGE_DIFF_MODES } from './components/artifactDiffContext'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './components/SettingsPopover'
+import { InfoTooltip } from './components/InfoTooltip'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
@@ -159,7 +163,11 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
 // comment" button centred over the gutter on hover. The button has a solid
 // button-style background so the icon stays legible on top of code/line
 // backgrounds, and its tooltip sits directly above the icon's centre.
-function CommentButton({ onClick }: { onClick: () => void }) {
+// memo + an (idx, onToggle) shape rather than a bound `onClick`: a diff line
+// re-renders whenever its file re-highlights (the agent edits it), but the gutter
+// comment button is identical across those. A stable onToggle (see UnifiedHunk /
+// SideBySideHunk) lets this skip that churn - one button per line adds up.
+const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: number; onToggle: (idx: number) => void }) {
   return (
     // The overlay spans the gutter to centre the button but is pointer-events-none
     // so it doesn't swallow clicks meant for the (now clickable) line numbers
@@ -168,7 +176,7 @@ function CommentButton({ onClick }: { onClick: () => void }) {
     <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
       <Tooltip content="Add comment" side="top" className="pointer-events-auto">
         <button
-          onClick={(e) => { e.stopPropagation(); onClick() }}
+          onClick={(e) => { e.stopPropagation(); onToggle(idx) }}
           className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
         >
           <MessageSquarePlus className="w-3 h-3 text-blue-500" />
@@ -176,7 +184,7 @@ function CommentButton({ onClick }: { onClick: () => void }) {
       </Tooltip>
     </div>
   )
-}
+})
 
 // Computes the number of lines hidden between two adjacent hunks.
 function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
@@ -231,7 +239,11 @@ const SELECTED_NUM_CLASS = 'bg-amber-100 dark:bg-amber-400/15 !text-amber-700 da
 // and onSelectLine is wired, is clickable to select the line (shift+click to
 // extend the range). It sits under the hover comment overlay, which is
 // pointer-events-none until hovered, so plain clicks reach this.
-function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
+// memo: a line re-renders whenever its file re-highlights (live edits stream a
+// new highlight map into the hunk), but a gutter number only changes when the
+// line's own number/selection does. Skipping the unchanged cells cuts the diff's
+// biggest render cost - there are two of these per line, across every hunk.
+const LineNumCell = memo(function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
   num: number | null | undefined
   side: DiffSide
   baseClass: string
@@ -252,12 +264,19 @@ function LineNumCell({ num, side, baseClass, selected, onSelectLine }: {
       {num ?? ''}
     </span>
   )
-}
+})
 
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
+
+// Row hover tint. This is a translucent overlay rather than `hover:brightness-95`
+// on the row: a filter promotes the row to its own compositing layer and forces a
+// re-raster of its text on every pointer move between rows, which leaves ghosted
+// glyph fragments from neighbouring wrapped rows. A black overlay at alpha a is
+// arithmetically identical to brightness(1-a), so the light-mode tint is unchanged.
+const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:after:absolute hover:after:inset-0 hover:after:bg-black/[0.05] dark:hover:after:bg-white/[0.04]"
 
 const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
@@ -269,6 +288,8 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
+  // Stable so the memo'd CommentButton on each line skips a re-highlight tick.
+  const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
   return (
     <div>
       {hunk.lines.map((line, idx) => {
@@ -284,12 +305,12 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const rowSel = selOld || selNew
         return (
           <Fragment key={idx}>
-            <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+            <div className={`flex items-stretch ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
               <div className="relative flex shrink-0 select-none">
                 <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
                 {!isNoNewline && !readOnly && (
-                  <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                  <CommentButton idx={idx} onToggle={toggleComment} />
                 )}
               </div>
               <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
@@ -336,6 +357,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
+  const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -353,7 +375,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <LineNumCell num={line.oldLineNum} side="old" baseClass={SBS_LINE_NUM} selected={selOld} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
-                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                    <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -368,7 +390,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <LineNumCell num={line.newLineNum} side="new" baseClass={SBS_LINE_NUM} selected={selNew} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
-                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
+                    <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -713,8 +735,11 @@ function EdgeExpander({ seg, onStep, onAll }: {
 // measured height (published on the panel root); the -16px cancels the scroll
 // container's pt-4 so the header pins exactly at the toolbar's bottom edge. No gap:
 // any gap here lets scrolling diff content peek through above the sticky header.
-// Mirrors STICKY_CARD_TOP's approach.
-export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
+// --sticky-files-h is the sticky "Files" section header's height (also published on
+// the panel root, 0 when there are no files): the file rows/headers dock just below
+// it, the same way Tests/Artifacts cards dock below their section header via
+// --sticky-section-h. Mirrors STICKY_CARD_TOP's approach.
+export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(--sticky-files-h, 0px))'
 
 // How long the file-body collapse/expand height glide runs - kept in JS so the
 // deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
@@ -926,17 +951,44 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const lineSel = controlled ? (selection ?? null) : localSel
   const selectLine = controlled ? onSelectLine : localSelectLine
 
+  // Stable per-file comment handler. Passed to the memo'd hunks below - an inline
+  // arrow here would mint a new identity every render, defeating UnifiedHunk /
+  // SideBySideHunk's memo so EVERY line re-rendered whenever this FileDiff did
+  // (e.g. an unrelated live-tick re-render of the diff subtree). Binding file.path
+  // once keeps the hunks' props stable so unchanged lines skip the render.
+  const onCommentForFile = useCallback(
+    (ln: number, isNew: boolean, txt: string) => onComment(file.path, ln, isNew, txt),
+    [onComment, file.path],
+  )
+
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
+
+  // Collapsing a file whose top has scrolled above the viewport would leave
+  // the scroll at a random depth of the files below - pin the (now short)
+  // card to the top instead, docked under the sticky chrome (see pinCardToTop
+  // for why it's a pin, not a one-shot scroll).
+  const toggleCollapse = () => {
+    if (!isCollapsed && cardRef.current) pinCardToTop(cardRef.current)
+    onToggleCollapse(file.path)
+  }
 
   return (
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
+      data-file-card={file.path}
+      // Dock target for jump-to-file. FILE_STICKY_TOP subtracts 16px (the scroll
+      // container's pt-4) so the header PINS flush at the bar bottom while
+      // reading; that same -16 must be added back here or the card lands 16px
+      // too high and the pinned header floats down over the first content line
+      // (scrolls "too far"). +16 lands the card border exactly at the sticky
+      // bar stack's bottom edge, so the header sits flush and line 1 is visible.
+      style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 16px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
@@ -948,10 +1000,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       <div
         style={{ top: FILE_STICKY_TOP }}
         className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
-        onClick={() => onToggleCollapse(file.path)}
+        onClick={toggleCollapse}
       >
+        {/* No onClick of its own: the header div handles the toggle, and a
+            second handler here would fire too (bubbling) and toggle right
+            back - the chevron was a no-op because of exactly that. */}
         <button
-          onClick={() => onToggleCollapse(file.path)}
+          aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
@@ -1091,9 +1146,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
@@ -1522,14 +1577,13 @@ function MergeConflictButton({ diff, agent, projectId }: {
 
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
-    try {
-      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
-      setOpen(false)
-    } catch {
-      // silently ignore
-    } finally {
-      setSending(false)
-    }
+    const res = await runWithToast(
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }),
+      { errorPrefix: 'Failed to send fix request to agent' },
+    )
+    setSending(false)
+    // Keep the panel open on failure so the user can retry; the toast explains why.
+    if (res.ok) setOpen(false)
   }, [projectId, agent.id, baseBranch])
 
   // Escape closes the panel; Enter confirms (Fix with agent), mirroring the
@@ -1706,6 +1760,19 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       type: note ? 'warning' : 'confirm',
       variant: 'updateBase',
       details: { fromBranch: baseBranch ?? '-', toBranch: agent.branch_name ?? '-', behind, note },
+      secondaryLabel: 'Fix with agent',
+      // Hand the update off to the agent session instead of merging server-side -
+      // mirrors the merge-conflict dialog's "Fix with agent". The primary Confirm
+      // stays a plain server-side update-from-base. Injects the request into the
+      // agent's input, the same channel the chat box uses.
+      onSecondary: async () => {
+        await runWithToast(
+          () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+            text: `Update this branch from its base by merging ${baseBranch} in, resolving any conflicts that arise.`,
+          }),
+          { errorPrefix: 'Failed to send update request to agent' },
+        )
+      },
       onConfirm: async () => {
         setUpdating(true)
         try {
@@ -1816,11 +1883,21 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
           <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
-        {isOpen && node.children.map((child) => (
-          <TreeNodeView key={child.path} node={child} depth={depth + 1}
-            collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-            onFileClick={onFileClick} activeFilePath={activeFilePath} />
-        ))}
+        {/* Children stay mounted and their height animates via the grid-rows
+            0fr<->1fr trick (the inner wrapper is overflow-hidden), so expand /
+            collapse glides open and shut without measuring heights. */}
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-out"
+          style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
+        >
+          <div className="overflow-hidden min-h-0">
+            {node.children.map((child) => (
+              <TreeNodeView key={child.path} node={child} depth={depth + 1}
+                collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+                onFileClick={onFileClick} activeFilePath={activeFilePath} />
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
@@ -1830,174 +1907,8 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
   )
 }
 
-// ── Settings popup ────────────────────────────────────────────────────────────
-
-// memo: pinned in the always-visible Changes toolbar; every prop is a
-// primitive or a stable setter, so diff refreshes skip it.
-const SettingsPopup = memo(function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
-  ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange,
-  testGroupResult, onTestGroupResultChange, testUseScope, onTestUseScopeChange, testScopeAvailable }: {
-    fileView: FileView; onFileViewChange: (v: FileView) => void
-    sideBySide: boolean; onSideBySideChange: (v: boolean) => void
-    ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
-    singleFile: boolean; onSingleFileChange: (v: boolean) => void
-    imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
-    artifactScale: number; onArtifactScaleChange: (v: number) => void
-    testGroupResult: boolean; onTestGroupResultChange: (v: boolean) => void
-    testUseScope: boolean; onTestUseScopeChange: (v: boolean) => void
-    // False when no loaded test case carries a logical scope - the "Group by
-    // scope" checkbox greys out rather than silently doing nothing.
-    testScopeAvailable: boolean
-  }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
-
-  const viewOptions: { value: FileView; label: string }[] = [
-    { value: 'tree', label: 'Tree' },
-    { value: 'flat', label: 'Flat list' },
-    { value: 'grouped', label: 'Grouped by folder' },
-  ]
-
-  return (
-    <div ref={ref} className="relative">
-      <Tooltip content="Settings">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-label="View settings"
-          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-        </button>
-      </Tooltip>
-
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">File List</p>
-          <div className="flex flex-col gap-0.5 mb-3">
-            {viewOptions.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="radio" name="hydra-file-view" checked={fileView === opt.value}
-                  onChange={() => onFileViewChange(opt.value)} className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">Options</p>
-          <div className="flex flex-col gap-0.5">
-            {[
-              { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
-              { checked: ignoreWhitespace, onChange: onIgnoreWhitespaceChange, label: 'Ignore whitespace' },
-              { checked: singleFile, onChange: onSingleFileChange, label: 'One file at a time' },
-            ].map(({ checked, onChange, label }) => (
-              <label key={label} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
-                  className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
-              </label>
-            ))}
-          </div>
-          {/* Test-results view modes - two orthogonal checkboxes (they compose):
-              per-status sections, and trees keyed by class/describe scope instead
-              of filesystem path. Scope greys out when no case carries one. */}
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Test Results</p>
-          <div className="flex flex-col gap-0.5">
-            <label className="flex items-center gap-2 py-0.5 cursor-pointer">
-              <input type="checkbox" checked={testGroupResult} onChange={(e) => onTestGroupResultChange(e.target.checked)}
-                className="w-3 h-3 accent-blue-500" />
-              <span className="text-xs text-gray-700 dark:text-gray-300">Group by result</span>
-            </label>
-            <label
-              className={`flex items-center gap-2 py-0.5 ${testScopeAvailable ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-              title={testScopeAvailable ? undefined : 'No test case carries a class/describe scope'}
-            >
-              <input type="checkbox" checked={testUseScope} disabled={!testScopeAvailable}
-                onChange={(e) => onTestUseScopeChange(e.target.checked)} className="w-3 h-3 accent-blue-500" />
-              <span className="text-xs text-gray-700 dark:text-gray-300">Group by scope</span>
-            </label>
-          </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Artifact Diff</p>
-          <div className="flex flex-col gap-0.5">
-            {IMAGE_DIFF_MODES.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input type="radio" name="hydra-image-diff-mode" checked={imageDiffMode === opt.value}
-                  onChange={() => onImageDiffModeChange(opt.value)} className="w-3 h-3 accent-blue-500" />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          {/* The artifact grid sizes each tile automatically by aspect ratio (a
-              wide desktop shot spans more columns than a tall phone shot); this
-              slider scales every tile up or down from there, drag a tile (or its
-              edge) to override one, double-click the edge to auto-size. */}
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Size</span>
-            <input
-              type="range" min={0.5} max={2} step={0.25} value={artifactScale}
-              onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
-              className="flex-1 accent-blue-500 cursor-pointer"
-              title="Scale every artifact tile up or down"
-            />
-            <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
-          </div>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
-        </div>
-      )}
-    </div>
-  )
-})
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
-
-export type InspectorView = 'diff' | 'tests' | 'previews'
-
-// The inspector pane's Diff | Tests | Previews view selector (new split layout).
-// A segmented control; a segment hides when its view has no data (Tests when the
-// project configures no runners, Previews when no server scripts). Diff is always
-// present. The Tests segment carries the verdict chip inline.
-function ViewTabs({ view, onChange, testsAvailable, previewsAvailable, tests }: {
-  view: InspectorView
-  onChange: (v: InspectorView) => void
-  testsAvailable: boolean
-  previewsAvailable: boolean
-  tests?: AgentResponse['tests']
-}) {
-  const seg = (active: boolean) =>
-    `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
-      active
-        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
-        : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-    }`
-  return (
-    <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-      <button type="button" className={seg(view === 'diff')} onClick={() => onChange('diff')}>
-        <FileDiffIcon className="w-3.5 h-3.5" /> Diff
-      </button>
-      {testsAvailable && (
-        <button type="button" className={seg(view === 'tests')} onClick={() => onChange('tests')}>
-          <FlaskConical className="w-3.5 h-3.5" /> Tests
-          {tests && tests.status !== 'none' && <TestVerdictChip tests={tests} variant="sm" />}
-        </button>
-      )}
-      {previewsAvailable && (
-        <button type="button" className={seg(view === 'previews')} onClick={() => onChange('previews')}>
-          <MonitorPlay className="w-3.5 h-3.5" /> Previews
-        </button>
-      )}
-    </div>
-  )
-}
 
 // DiffViewer only reads a handful of the agent's fields (listed in the memo
 // comparator below). The parent AgentDetail re-renders on EVERY live tick of
@@ -2009,22 +1920,21 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.projectId === next.projectId &&
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
+  prev.externalCommitSelect === next.externalCommitSelect &&
   prev.inspector === next.inspector &&
+  prev.changesLeading === next.changesLeading &&
+  prev.leadingInline === next.leadingInline &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
   prev.agent.worktree_path === next.agent.worktree_path &&
-  prev.agent.tests?.status === next.agent.tests?.status &&
-  prev.agent.tests?.passed === next.agent.tests?.passed &&
-  prev.agent.tests?.failed === next.agent.tests?.failed &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
 
-// inspector: renders in the new two-pane layout's right pane - the target
-// selector + a Diff | Tests | Previews view selector on top, with only the
-// selected view mounted below (the diff owning the base selector + its toolbar,
-// artifacts folded into it). Omitted -> the classic single-column stacked layout
-// (everything below the Changes bar at once), kept for the flag-off fallback.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, inspector }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; inspector?: boolean }) {
+// inspector: renders in the new two-pane layout's right pane. Same stacked
+// layout as the classic single-column page (Changes bar with the base -> head
+// selectors, then tests, previews, artifacts, and the diff itself), just
+// without the top margin - the pane's own padding supplies it.
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalCommitSelect, inspector, changesLeading, leadingInline }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -2032,28 +1942,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
-
-  // Inspector-pane view selector (new split layout only): which of Diff / Tests
-  // / Previews is showing. Persisted per agent so the pane restores its last
-  // view. The target selector (rightSel) is shared across all three views.
-  const [inspectorView, setInspectorView] = useState<InspectorView>(
-    () => loadAgentViewPrefs(projectId, agent.id).inspectorView ?? 'diff',
-  )
-  useEffect(() => {
-    if (inspector) patchAgentViewPrefs(projectId, agent.id, { inspectorView })
-  }, [inspector, inspectorView, projectId, agent.id])
-  // Whether the project configures any server previews - reported up by
-  // PreviewPanel so the Previews segment can hide when there is nothing to show.
-  const [previewsAvailable, setPreviewsAvailable] = useState(false)
-  // Tests availability comes straight off the agent (no extra fetch): the
-  // verdict is 'none' when the project configures no runners.
-  const testsAvailable = !!agent.tests && agent.tests.status !== 'none'
-  // Fall back to the Diff view if the active segment vanishes (e.g. tests
-  // disappear). Diff is always available.
-  useEffect(() => {
-    if (inspectorView === 'tests' && !testsAvailable) setInspectorView('diff')
-    if (inspectorView === 'previews' && !previewsAvailable) setInspectorView('diff')
-  }, [inspectorView, testsAvailable, previewsAvailable])
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
@@ -2068,6 +1956,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (stored) return parseInt(stored, 10)
     return 220
   })
+  // Mobile file-picker sheet (item 31): below md the side file-list column is
+  // hidden, so the "in N files" chip in the Changes bar opens this bottom sheet
+  // to jump between changed files. Ephemeral (no persistence).
+  const [fileSheetOpen, setFileSheetOpen] = useState(false)
+  // Whether the file-list column is hidden (the Files header's show/hide toggle).
+  // Persisted globally like the other diff view options.
+  const [filesListHidden, setFilesListHidden] = useState(() => readLocal(StorageKeys.diffFilesListHidden) === 'true')
+  useEffect(() => { writeLocal(StorageKeys.diffFilesListHidden, String(filesListHidden)) }, [filesListHidden])
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
     if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
@@ -2126,7 +2022,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
-  const [testGroupResult, setTestGroupResult] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testGroupResult)
+  // Group-by-result defaults ON (undefined stored pref -> true); an explicit
+  // stored false is respected.
+  const [testGroupResult, setTestGroupResult] = useState<boolean>(() => loadAgentViewPrefs(projectId, agent.id).testGroupResult ?? true)
   const [testUseScope, setTestUseScope] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testUseScope)
   // Whether any loaded test case carries a logical scope (class/describe
   // chain) - reported up by the TestsPanel so the cog can grey the "Group by
@@ -2330,6 +2228,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     return () => ro.disconnect()
   }, [])
 
+  // The sticky "Files" section header's height, published as --sticky-files-h so
+  // the file rows + each file's sticky header dock just below it (see
+  // FILE_STICKY_TOP) - the same mechanism the Tests/Artifacts panels use for
+  // their cards. Measured (it can wrap on narrow widths).
+  const [filesHeaderRef, filesHeaderH] = useMeasuredHeight(33)
+
   // True when the user currently has a non-collapsed text selection inside the diff.
   // Applying a background refresh in this state would replace the DOM nodes the
   // selection is anchored to and wipe it, so we defer the refresh until it clears.
@@ -2453,6 +2357,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
   }, [leftSel, rightSel, commits])
 
+  // An externally-driven "show just this commit" selection (a commit chip
+  // clicked in the chat transcript): parent -> commit, like picking the
+  // adjacent pair in the selectors by hand. Applied once per nonce - the
+  // selectors stay user-driven afterwards. When the sha isn't in our list yet
+  // (the chip's list can be fresher than ours right after a commit), refetch
+  // once and re-apply when the fresh list lands; if it's still missing then,
+  // the commit is gone for real (a rebase) and the click is dropped.
+  const appliedCommitNonceRef = useRef(0)
+  const retriedCommitNonceRef = useRef(0)
+  useEffect(() => {
+    const sel = externalCommitSelect
+    if (!sel || sel.nonce === appliedCommitNonceRef.current || commits.length === 0) return
+    const idx = commitIdx(sel.sha, commits)
+    if (idx === -1) {
+      if (retriedCommitNonceRef.current !== sel.nonce) {
+        retriedCommitNonceRef.current = sel.nonce
+        setRefreshKey((k) => k + 1)
+      } else {
+        appliedCommitNonceRef.current = sel.nonce
+      }
+      return
+    }
+    appliedCommitNonceRef.current = sel.nonce
+    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    setRightSel({ type: 'commit', sha: sel.sha })
+    // Bring the Changes bar + file list into view in whichever scroll context
+    // hosts us (the inspector pane, or the archived page's main scroll).
+    rootRef.current?.closest('[data-inspector-scroll], [data-main-scroll]')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [externalCommitSelect, commits])
+
   const getFileRef = useCallback((path: string) => {
     if (!fileRefCallbacksRef.current.has(path)) {
       fileRefCallbacksRef.current.set(path, (el: HTMLDivElement | null) => {
@@ -2478,7 +2412,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [handleShowFile])
 
   const scrollToFile = useCallback((path: string) => {
-    fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = fileRefs.current.get(path)
+    if (el) scrollCardToTop(el)
   }, [])
 
   const handleFileClick = useCallback((path: string) => {
@@ -2487,7 +2422,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (idx >= 0) setSingleFileIdx(idx)
     } else {
       if (collapsedFiles.has(path)) toggleFileCollapse(path)
-      setTimeout(() => scrollToFile(path), 50)
+      // No wait for the expand to render: scrollCardToTop re-measures every
+      // frame, so it rides out the 200ms collapse glide (and the lazy bodies
+      // mounting along the way) rather than trusting one stale measurement.
+      scrollToFile(path)
     }
   }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
@@ -2590,6 +2528,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const activeFilePath = singleFile && diff ? (diff.files[singleFileIdx]?.path ?? null) : null
   const hasExistingDiff = diff !== null
 
+  // The file order exactly as the sidebar lays it out for the current view, so
+  // the single-file pager (prev/next) walks files in the SAME order the list
+  // shows them, rather than diff.files' raw order (which groups differently and
+  // made the pager jump around - image6). Tree = depth-first leaf order,
+  // grouped = per-folder, flat = as-is.
+  const orderedFiles = useMemo(() => {
+    const files = diff?.files ?? []
+    if (fileView === 'grouped') return getGroupedFiles(files).flatMap(([, gf]) => gf)
+    if (fileView === 'tree') {
+      const out: DiffFile[] = []
+      const walk = (nodes: TreeNode[]) => nodes.forEach((n) => {
+        if (n.type === 'dir') walk(n.children)
+        else if (n.file) out.push(n.file)
+      })
+      walk(compactTree(buildFileTree(files)))
+      return out
+    }
+    return files
+  }, [diff, fileView])
+  // Position of the currently-shown single file within that display order, and a
+  // jump helper that maps an ordered position back to its diff.files index (which
+  // is what singleFileIdx / FileRow.isActive key off).
+  const singleOrderPos = diff ? orderedFiles.findIndex((f) => f.path === diff.files[singleFileIdx]?.path) : -1
+  const goToOrderPos = useCallback((pos: number) => {
+    const target = orderedFiles[pos]
+    if (!target) return
+    const idx = (diff?.files ?? []).findIndex((f) => f.path === target.path)
+    if (idx >= 0) setSingleFileIdx(idx)
+  }, [orderedFiles, diff])
+
   const renderSidebar = (files: DiffFile[]) => {
     if (fileView === 'tree') {
       const tree = compactTree(buildFileTree(files))
@@ -2632,7 +2600,21 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     <div className="flex items-center gap-1.5">
       <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
       <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
-      <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+      {/* Desktop: plain label (the side file list is visible). Mobile (< md, where
+          that list is hidden): a tappable chip that opens the file-picker sheet. */}
+      <span className="hidden md:inline text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+      {diff.files.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setFileSheetOpen(true)}
+          className="md:hidden inline-flex items-center gap-0.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dotted underline-offset-2 cursor-pointer"
+        >
+          in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      ) : (
+        <span className="md:hidden text-xs text-gray-400 dark:text-gray-500">in 0 files</span>
+      )}
     </div>
   )
   const resetBtn = !(leftSel.type === 'base' && rightSel.type === 'latest') && (
@@ -2666,18 +2648,29 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const loadingSpinner = loadingDiff && hasExistingDiff && (
     <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
   )
-  const settingsCog = (
-    <SettingsPopup
-      fileView={fileView} onFileViewChange={setFileView}
-      sideBySide={sideBySide} onSideBySideChange={setSideBySide}
-      ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
-      singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
-      imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
-      artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
-      testGroupResult={testGroupResult} onTestGroupResultChange={setTestGroupResult}
-      testUseScope={testUseScope} onTestUseScopeChange={setTestUseScope}
-      testScopeAvailable={testsHaveScope}
-    />
+  // The Files section's own settings (was the diff-toolbar cog): the file-list
+  // view mode plus the diff-rendering options. Lives in the Files header now, so
+  // Tests/Artifacts each carry only their own options in their own headers.
+  const filesSettingsBtn = (
+    <SettingsPopover label="File options" width={208}>
+      <SettingsGroupLabel className="mb-2">File List</SettingsGroupLabel>
+      <div className="flex flex-col gap-0.5 mb-3">
+        {([
+          { value: 'tree', label: 'Tree' },
+          { value: 'flat', label: 'Flat list' },
+          { value: 'grouped', label: 'Grouped by folder' },
+        ] as { value: FileView; label: string }[]).map((opt) => (
+          <SettingsOptionRow key={opt.value} type="radio" name="hydra-file-view"
+            checked={fileView === opt.value} onChange={() => setFileView(opt.value)} label={opt.label} />
+        ))}
+      </div>
+      <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
+      <div className="flex flex-col gap-0.5">
+        <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />
+        <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
+        <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
+      </div>
+    </SettingsPopover>
   )
 
   const testsPanelEl = agent.branch_name && projectId && (
@@ -2689,7 +2682,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       includeUncommitted={artifactParams.includeUncommitted}
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
       groupResult={testGroupResult}
+      onGroupResultChange={setTestGroupResult}
       useScope={testUseScope && testsHaveScope}
+      onUseScopeChange={setTestUseScope}
       onScopeAvailable={setTestsHaveScope}
     />
   )
@@ -2700,7 +2695,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       headRef={artifactParams.headRef}
       includeUncommitted={artifactParams.includeUncommitted}
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
-      onAvailability={setPreviewsAvailable}
     />
   )
   const artifactsPanelEl = agent.branch_name && (
@@ -2720,7 +2714,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // flash a loading spinner and reset the user's selection).
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
       imageDiffMode={imageDiffMode}
+      onImageDiffModeChange={setImageDiffMode}
       artifactScale={artifactScale}
+      onArtifactScaleChange={setArtifactScale}
       artifactView={artifactView}
       onArtifactViewChange={setArtifactView}
       artifactHighlight={artifactHighlight}
@@ -2749,26 +2745,39 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       No changes
     </div>
   ) : diff ? (
-    <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
+    <div className={`flex min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* File list sidebar (hidden on mobile - the diff content takes the full
           width there; files are still all rendered below, or reachable via the
-          prev/next pager in single-file mode) */}
+          prev/next pager in single-file mode - and hidden anywhere via the Files
+          header's toggle). The file count + section title now live in the sticky
+          Files header above, so the column has no cap header of its own; it docks
+          just below that header (FILE_STICKY_TOP includes its height).
+          Hidden via the toggle it stays mounted and its width + right margin
+          animate to 0 (the gap-4 is folded into that margin so the whole thing
+          slides away cleanly); the transition is dropped mid width-drag. */}
       <div
         ref={sidebarRef}
         className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
-        style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
+        style={{
+          width: filesListHidden ? 0 : sidebarWidth,
+          marginRight: filesListHidden ? 0 : 16,
+          borderWidth: filesListHidden ? 0 : undefined,
+          top: FILE_STICKY_TOP,
+          transition: isResizing ? undefined : 'width 240ms ease, margin-right 240ms ease',
+        }}
       >
-        <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
-            Files · {diff.files.length}
-          </span>
-        </div>
-        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
-        {/* Resize handle */}
-        <div
-          onMouseDown={startResizing}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
-        />
+        <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        {/* Width drag handle: invisible strip, shared pill on hover (the
+            unified resize affordance). Hidden while the column is collapsed. */}
+        {!filesListHidden && (
+          <div
+            onMouseDown={startResizing}
+            title="Drag to resize"
+            className="group/resize absolute right-0 top-0 bottom-0 w-3 -mr-1 flex items-center justify-center cursor-col-resize z-20 touch-none"
+          >
+            <ResizeGrip orientation="vertical" />
+          </div>
+        )}
       </div>
 
       {/* Diff content */}
@@ -2780,18 +2789,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                 Y and overlap it. The pager scrolls away; the file header stays. */}
             <div className="flex items-center gap-2 mb-3 z-20">
               <button
-                onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
-                disabled={singleFileIdx === 0}
+                onClick={() => goToOrderPos(singleOrderPos - 1)}
+                disabled={singleOrderPos <= 0}
                 className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
-                {singleFileIdx + 1} / {diff.files.length}
+                {singleOrderPos + 1} / {diff.files.length}
               </div>
               <button
-                onClick={() => setSingleFileIdx(Math.min(diff.files.length - 1, singleFileIdx + 1))}
-                disabled={singleFileIdx === diff.files.length - 1}
+                onClick={() => goToOrderPos(singleOrderPos + 1)}
+                disabled={singleOrderPos >= diff.files.length - 1}
                 className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -2815,7 +2824,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             />
           </>
         ) : (
-          diff.files.map((f) => {
+          // Render the stacked cards in the SAME order the sidebar lists them
+          // (orderedFiles = tree depth-first / grouped / flat), not diff.files'
+          // raw order - otherwise the tree/grouped sidebar and the diff column
+          // disagree and clicking a file scrolls to a card in a different spot.
+          orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
             <FileDiff key={f.path} file={f} sideBySide={sideBySide}
@@ -2838,6 +2851,48 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
   ) : null
 
+  // The "Files" section header - a peer to the Tests / Previews / Artifacts
+  // headers (same icon + title + info + right-aligned controls), sitting above
+  // the file-list column and diffs. Sticky like the others: it docks flush below
+  // the Changes bar and publishes its height as --sticky-files-h (on the panel
+  // root) so the file rows + each file's own sticky header dock just beneath it
+  // (see FILE_STICKY_TOP). Only shown once a diff with files has loaded. Carries
+  // the file-list show/hide toggle and the options cog (file-list grouping + diff
+  // rendering) that used to live in the Changes-bar cog. Shown for any loaded
+  // diff - including an empty one, where the "No changes" note sits beneath it.
+  const filesHeaderEl = diff && (
+    <div
+      ref={filesHeaderRef}
+      style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
+      // z-[22]: above the file cards' own sticky headers (z-20), which are later
+      // in the DOM and would otherwise paint OVER this section header while
+      // docking; below the Changes bar's z-[25].
+      className="sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+    >
+      <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+      <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
+      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      <InfoTooltip title="Files" width={460}>
+        <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
+        <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
+      </InfoTooltip>
+      <div className="ml-auto flex items-center gap-1.5">
+        {/* Show/hide the file-list column (hidden on mobile anyway, where the
+            diffs take the full width - so the toggle only bites at md+). */}
+        <Tooltip content={filesListHidden ? 'Show file list' : 'Hide file list'}>
+          <button
+            onClick={() => setFilesListHidden((v) => !v)}
+            aria-label={filesListHidden ? 'Show file list' : 'Hide file list'}
+            className="hidden md:flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+          >
+            {filesListHidden ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
+          </button>
+        </Tooltip>
+        {filesSettingsBtn}
+      </div>
+    </div>
+  )
+
   const dragOverlay = isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />
   const commentToast = commentSent && (
     <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
@@ -2846,104 +2901,44 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
   )
 
-  // ── New inspector layout ───────────────────────────────────────────────────
-  // Row 1: the global target selector + the Diff | Tests | Previews view tabs.
-  // Row 2: the selected view's own toolbar. Only the active view renders below;
-  // Tests/Previews are kept mounted-but-hidden so their availability guards drive
-  // the tabs and the (future) preview iframe doesn't tear down on every switch.
-  if (inspector) {
-    return (
-      <div ref={rootRef} style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
-        <div ref={changesBarRef} className="sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 -mx-1.5 sm:-mx-3 px-1.5 sm:px-3 py-2 mb-4 border-b border-gray-200 dark:border-gray-800 shadow-sm flex flex-col gap-2">
-          {/* Row 1: global target selector + view selector. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-gray-400 dark:text-gray-500 select-none">Target</span>
-            <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
-            <div className="flex-1 min-w-0" />
-            <ViewTabs
-              view={inspectorView}
-              onChange={setInspectorView}
-              testsAvailable={testsAvailable}
-              previewsAvailable={previewsAvailable}
-              tests={agent.tests}
-            />
-          </div>
-          {/* Row 2: the selected view's own toolbar. */}
-          {inspectorView === 'diff' && (
-            <div className="flex items-start gap-3">
-              <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-                {statsEl}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 dark:text-gray-500 select-none">vs</span>
-                  <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
-                </div>
-                {resetBtn}
-                {warningButtons}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {loadingSpinner}
-                {refreshBtn}
-                {settingsCog}
-              </div>
-            </div>
-          )}
-          {inspectorView === 'tests' && testsAvailable && (
-            <div className="flex items-center gap-4">
-              {/* Group-by controls relocated from the diff settings cog so they
-                  stay reachable while Tests is the active view (gotcha #9). */}
-              <label className="inline-flex items-center gap-1.5 text-xs cursor-pointer text-gray-600 dark:text-gray-300">
-                <input type="checkbox" className="accent-blue-600" checked={testGroupResult} onChange={(e) => setTestGroupResult(e.target.checked)} />
-                Group by result
-              </label>
-              <label className={`inline-flex items-center gap-1.5 text-xs ${testsHaveScope ? 'cursor-pointer text-gray-600 dark:text-gray-300' : 'opacity-40 cursor-not-allowed text-gray-500'}`}>
-                <input type="checkbox" className="accent-blue-600" checked={testUseScope} disabled={!testsHaveScope} onChange={(e) => setTestUseScope(e.target.checked)} />
-                Group by scope
-              </label>
-              <div className="flex-1" />
-              {loadingSpinner}
-              {refreshBtn}
-            </div>
-          )}
-        </div>
-
-        {/* Body: only the active view (Tests/Previews stay mounted but hidden). */}
-        {inspectorView === 'diff' && (
-          <>
-            {diffErrorBanner}
-            {artifactsPanelEl}
-            {diffContentEl}
-          </>
-        )}
-        <div style={{ display: inspectorView === 'tests' ? 'block' : 'none' }}>{testsPanelEl}</div>
-        <div style={{ display: inspectorView === 'previews' ? 'block' : 'none' }}>{previewPanelEl}</div>
-        {dragOverlay}
-        {commentToast}
-      </div>
-    )
-  }
-
-  // ── Classic stacked layout (flag-off fallback) ─────────────────────────────
+  // ── Stacked layout (single-column page AND the split layout's inspector pane) ─
   return (
     // --sticky-changes-h (the measured Changes-toolbar height) is published here so
     // the artifacts filter bar and card headers below can dock flush beneath it even
     // when the toolbar wraps. See the ResizeObserver above.
-    <div ref={rootRef} className="mt-4" style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
+    // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
+    // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
+    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0).
           z-[25] keeps it above the diff rows and the sticky file-list panel
-          (z-20) while staying *below* the sidebar overlay backdrop (z-30 in
-          __root.tsx) - at equal z-index the later-DOM bar would paint over the
-          scrim and stay bright when the off-canvas sidebar is open on
-          tablet/phone. */}
-      <div ref={changesBarRef} className="flex items-start gap-3 mb-6 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+          (z-20) and below the mobile sidebar panel (z-40 in __root.tsx). */}
+      {/* A pane TOOLBAR, deliberately subordinate to the global top bar: page
+          background (opaque, so content scrolls under it while stuck) and a
+          small section label rather than the top bar's white bg + title type.
+          py-2.5 lands a single-line bar at the working pane toolbar's min-h-12,
+          so the two collapse toggles flanking the divider line up. In the
+          inspector pane it fills the pane's top edge-to-edge: -mx-3/-mx-6 fully
+          cancels the scroll container's px-3/px-6, the inner px matches the
+          working pane toolbar's px-3/px-4, and -mt-4 cancels the container's
+          pt-4 so the bar sits flush at the top at rest too (not just when
+          stuck). */}
+      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2.5 border-b border-gray-200 dark:border-gray-700 ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-4' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
+        {/* Wide split: the collapse toggle flanks the divider at the bar's left
+            edge, pinned to the first line (self-start under items-start) so it
+            stays level with the working pane toolbar's toggle even when either
+            side wraps. Narrow screen-stack (leadingInline) instead flows the
+            back button INLINE as the first item of the top row (beside
+            "Changes"), so the ref-selector row below gets the full width. */}
+        {changesLeading && !leadingInline && <div className="shrink-0">{changesLeading}</div>}
         {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
+          {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400">Changes</h2>
           {statsEl}
 
           {/* Comparison selector (base → head) kept as one wrap unit so the arrow
@@ -2965,7 +2960,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <div className="flex items-center gap-2 shrink-0">
           {loadingSpinner}
           {refreshBtn}
-          {settingsCog}
         </div>
       </div>
 
@@ -2986,10 +2980,47 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {/* Visual artifacts (e.g. screenshots) for the selected versions */}
       {artifactsPanelEl}
 
-      {/* Content */}
+      {/* Files section header (its cog holds the file-list + diff options) then
+          the file-list column + diffs. */}
+      {filesHeaderEl}
       {diffContentEl}
       {dragOverlay}
       {commentToast}
+      {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
+          position:fixed is viewport-relative - the narrow screen-stack track has
+          a transform, which would otherwise be its containing block. md:hidden so
+          it can't linger if the viewport grows past the side-list breakpoint. */}
+      {fileSheetOpen && diff && createPortal(
+        <div className="md:hidden fixed inset-0 z-[60] flex flex-col justify-end" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setFileSheetOpen(false)} />
+          <div className="relative flex flex-col max-h-[70vh] bg-white dark:bg-gray-800 rounded-t-2xl border-t border-gray-200 dark:border-gray-700 shadow-2xl animate-in slide-in-from-bottom-4 duration-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                Files <span className="text-gray-400 dark:text-gray-500 tabular-nums">{diff.files.length}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setFileSheetOpen(false)}
+                aria-label="Close file list"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto overflow-x-hidden py-1">
+              {diff.files.map((f, i) => (
+                <FileRow
+                  key={f.path}
+                  file={f}
+                  isActive={singleFile && i === singleFileIdx}
+                  onClick={() => { handleFileClick(f.path); setFileSheetOpen(false) }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

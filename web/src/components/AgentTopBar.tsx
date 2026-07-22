@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { PanelLeftOpen, MoreHorizontal, ChevronDown } from 'lucide-react'
-import { useSidebarStore } from '../lib/sidebar'
+import { MoreHorizontal, ChevronDown } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
-import { IconButton } from './IconButton'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -495,14 +493,14 @@ function AdaptiveActions({
   )
 }
 
-// The agent page's header bar: the agent name (click / F2 to rename) with an
-// adaptive row of action buttons on the right and a status dot. The actions
-// collapse responsively (labels → icons → overflow menu) so they never spill out
-// of the bar. While the sidebar is collapsed the bar also hosts the show-sidebar
-// toggle.
-export function AgentTopBar({
-  title,
+// The agent page's share of the global top bar (rendered into __root's slot via
+// TopBarPortal): the agent name (click / F2 to rename) with an adaptive row of
+// action buttons on the right and a status dot. The actions collapse
+// responsively (labels → icons → overflow menu) so they never spill out of the
+// bar.
+export function AgentTopBarContent({
   statusDot,
+  title,
   actions,
   rename,
 }: {
@@ -511,8 +509,6 @@ export function AgentTopBar({
   actions: AgentTopBarAction[]
   rename?: AgentTopBarRename
 }) {
-  const collapsed = useSidebarStore((s) => s.collapsed)
-  const toggle = useSidebarStore((s) => s.toggle)
   // Only surface keyboard hints on devices that actually have a keyboard.
   const showShortcut = useFinePointer()
 
@@ -533,28 +529,16 @@ export function AgentTopBar({
   }, [editing])
 
   return (
-    // A real header above the scrolling content (not sticky inside it), so it
-    // aligns with the sidebar header and never collides with the diff's own
-    // sticky "Changes" header.
-    <div className="shrink-0 h-12 px-3 sm:px-4 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-      {collapsed && (
-        <IconButton
-          variant="panel"
-          aria-label="Show sidebar"
-          title="Show sidebar (Ctrl+.)"
-          onClick={toggle}
-          className="shrink-0 -ml-1"
-        >
-          <PanelLeftOpen className="w-5 h-5" />
-        </IconButton>
-      )}
+    <>
+      {/* Status cluster (the dot) sits just before the agent's name - kept
+          OUTSIDE the measured title/actions row so its width doesn't confuse
+          AdaptiveActions' collapse budget. */}
+      {statusDot && <div className="shrink-0 flex items-center gap-2">{statusDot}</div>}
 
       {/* Title + adaptive actions share this row; the title flexes/truncates so
           the toolbar always has room to lay out. AdaptiveActions measures this
           row via its own parentElement, so the row needs no ref. */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
-        {/* Status dot sits just before the agent's name. */}
-        {statusDot && <div className="shrink-0">{statusDot}</div>}
         {rename ? (
           // A single always-mounted input (read-only until editing) so the box
           // keeps its full width, clicking places the caret where you click, and
@@ -604,6 +588,7 @@ export function AgentTopBar({
           <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} />
         )}
       </div>
-    </div>
+
+    </>
   )
 }

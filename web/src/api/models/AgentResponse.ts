@@ -11,6 +11,14 @@ export type AgentResponse = {
      * Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
      */
     title?: string;
+    /**
+     * The chat plan/to-do list JSON the daemon tracks from the head's live Task*TodoWrite events (empty if none).
+     */
+    plan?: string;
+    /**
+     * The chat head's current model id, captured by the daemon from the CLI's system:init line (empty if not yet observed).
+     */
+    model?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
     project_path: string;
@@ -31,7 +39,7 @@ export type AgentResponse = {
      */
     ephemeral?: boolean;
     /**
-     * True when the head runs in chat mode (stream-json + chat view; Claude only).
+     * True when the head runs in structured chat mode (Claude or Codex).
      */
     chat_mode?: boolean;
     /**

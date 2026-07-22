@@ -41,6 +41,11 @@ type Registry struct {
 	onChatResult      func(id string)
 	onChatStep        func(id string)
 	onChatPlanApprove func(id, requestID string, input json.RawMessage)
+	onChatThinking    func(id, messageID string, durationMS int64)
+	onChatPlanSeed    func(id string) string
+	onChatPlanChange  func(id, planJSON string)
+	onChatModel       func(id, model string)
+	onChatLine        func(id, provider string, line []byte)
 }
 
 // NewRegistry returns an empty registry.
@@ -76,6 +81,17 @@ func (r *Registry) SetOnChatResult(fn func(id string)) {
 	r.mu.Unlock()
 }
 
+// ChatTurnEnded reports a provider-native turn completion to the same queue
+// lifecycle used by Claude's stream reducer.
+func (r *Registry) ChatTurnEnded(id string) {
+	r.mu.RLock()
+	fn := r.onChatResult
+	r.mu.RUnlock()
+	if fn != nil {
+		go fn(id)
+	}
+}
+
 // SetOnChatStep registers a callback invoked (off the read goroutine) each time
 // a chat-mode session's stdout carries a completed main-conversation assistant
 // line - a mid-turn step boundary (see claudestream.RingFilter.OnStep). The
@@ -97,6 +113,183 @@ func (r *Registry) SetOnChatPlanApproval(fn func(id, requestID string, input jso
 	r.mu.Lock()
 	r.onChatPlanApprove = fn
 	r.mu.Unlock()
+}
+
+// SetOnChatThinking registers a callback invoked (off the read goroutine) each
+// time a chat-mode session's stream completes a thinking block, with the head
+// id, the block's Claude message id, and the wall-clock duration Hydra measured.
+// The daemon wires this to persist the duration to the head's sidecar so a
+// reload/resume can render "Thought for Xs" without the browser timing it.
+func (r *Registry) SetOnChatThinking(fn func(id, messageID string, durationMS int64)) {
+	r.mu.Lock()
+	r.onChatThinking = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatPlanSeed registers a callback that supplies the persisted plan JSON
+// (Agent.Plan) for a head, called synchronously when a chat session registers,
+// so the session's plan tracker resumes from where the last session left off
+// (a TaskUpdate after a daemon restart still finds its task).
+func (r *Registry) SetOnChatPlanSeed(fn func(id string) string) {
+	r.mu.Lock()
+	r.onChatPlanSeed = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatPlanChange registers a callback invoked (off the read goroutine)
+// each time a chat-mode session's stdout changes the head's plan/to-do list
+// (a TaskCreate/TaskUpdate/TodoWrite or a create's result). The daemon wires
+// it to persist the new plan JSON onto the agent record, so the durable copy
+// stays fresh with no browser attached.
+func (r *Registry) SetOnChatPlanChange(fn func(id, planJSON string)) {
+	r.mu.Lock()
+	r.onChatPlanChange = fn
+	r.mu.Unlock()
+}
+
+// SetOnChatModel registers a callback invoked (off the read goroutine) when a
+// chat-mode session's stdout carries a system:init line naming the active
+// model - session start and every /model change. The daemon wires it to
+// persist the head's current model, so the selector shows the right one on
+// load even if no browser was attached when the model changed.
+func (r *Registry) SetOnChatModel(fn func(id, model string)) {
+	r.mu.Lock()
+	r.onChatModel = fn
+	r.mu.Unlock()
+}
+
+// ObserveChatModel persists a model resolved by a provider controller rather
+// than a provider stdout filter. Codex app-server's model/list response is the
+// authoritative account-specific source for its default model.
+func (r *Registry) ObserveChatModel(id, model string) {
+	r.mu.RLock()
+	fn := r.onChatModel
+	r.mu.RUnlock()
+	if fn != nil && model != "" {
+		go fn(id, model)
+	}
+}
+
+// SetOnChatLine registers the ordered provider-line observer used by the
+// normalized chat event adapter. The callback must remain cheap.
+func (r *Registry) SetOnChatLine(fn func(id, provider string, line []byte)) {
+	r.mu.Lock()
+	r.onChatLine = fn
+	r.mu.Unlock()
+}
+
+// ObserveChatLine feeds a provider-recovered history line through the same
+// durable normalization callback as process stdout.
+func (r *Registry) ObserveChatLine(id, provider string, line []byte) {
+	r.mu.RLock()
+	fn := r.onChatLine
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(id, provider, line)
+	}
+}
+
+// ChatPlanJSON returns the current incrementally-tracked plan for a session
+// ("" when the session or its plan doesn't exist). Exited sessions still
+// answer while they remain registered.
+func (r *Registry) ChatPlanJSON(id string) string {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+	return s.PlanJSON()
+}
+
+func (r *Registry) SetChatDriver(id string, driver ChatDriver) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	s.chatDriver = driver
+	s.mu.Unlock()
+	return nil
+}
+
+func (r *Registry) SendChatUser(id string, content json.RawMessage) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.SendUser(content))
+	}
+	line, err := claudestream.UserMessageLine(content)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(r.Write(id, line))
+}
+
+func (r *Registry) InterruptChat(id string) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.Interrupt())
+	}
+	interruptID := fmt.Sprintf("hydra-interrupt-%d", time.Now().UnixNano())
+	return errtrace.Wrap(r.Write(id, claudestream.InterruptLine(interruptID)))
+}
+
+func (r *Registry) RespondChat(id string, response json.RawMessage) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.Respond(response))
+	}
+	line, err := claudestream.ControlResponseLine(response)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(r.Write(id, line))
+}
+
+// SetChatModel changes the model used by subsequent turns when the installed
+// provider driver supports it. Claude's stream-json fallback is handled by the
+// caller because it uses a control-request line instead of a driver.
+func (r *Registry) SetChatModel(id, model string) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver == nil {
+		requestID := fmt.Sprintf("hydra-set-model-%d", time.Now().UnixNano())
+		return errtrace.Wrap(r.Write(id, claudestream.SetModelLine(requestID, model)))
+	}
+	return errtrace.Wrap(driver.SetModel(model))
 }
 
 // Start builds the sandbox command, launches it under a PTY, and registers the
@@ -205,6 +398,63 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			r.mu.RUnlock()
 			if fn != nil {
 				go fn(id, requestID, input)
+			}
+		}
+		// Incremental plan tracking: seed from the persisted copy (synchronously,
+		// BEFORE the read loop starts, so no line can beat the seed), then persist
+		// each change off the read goroutine like the other hooks.
+		r.mu.RLock()
+		seedFn := r.onChatPlanSeed
+		r.mu.RUnlock()
+		ringFilter.Plan = claudestream.NewPlanTracker()
+		if seedFn != nil {
+			ringFilter.Plan.Seed(seedFn(id))
+		}
+		ringFilter.OnPlanChange = func(planJSON string) {
+			r.mu.RLock()
+			fn := r.onChatPlanChange
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, planJSON)
+			}
+		}
+		// A system:init line names the active model; persist it off the read
+		// goroutine like the other hooks. Deduped PER SESSION (not per head id
+		// across the daemon's lifetime): a head killed and respawned under the
+		// same id starts a fresh DB row, and a longer-lived dedupe would skip
+		// re-persisting an unchanged model into it. lastModel needs no lock -
+		// Filter runs under the session lock, so calls are serialized.
+		lastModel := ""
+		ringFilter.OnModel = func(model string) {
+			if model == lastModel {
+				return
+			}
+			lastModel = model
+			r.mu.RLock()
+			fn := r.onChatModel
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, model)
+			}
+		}
+		ringFilter.OnLine = func(line []byte) {
+			r.mu.RLock()
+			fn := r.onChatLine
+			r.mu.RUnlock()
+			if fn != nil {
+				fn(id, string(agentType), line)
+			}
+		}
+		// A completed thinking block: persist its measured duration to the head's
+		// sidecar (a small disk write), dispatched off the read goroutine like the
+		// others. Filter also injects a live hydra_thinking line for attached
+		// clients; this callback is only the durable half.
+		ringFilter.OnThinking = func(messageID string, durationMS int64) {
+			r.mu.RLock()
+			fn := r.onChatThinking
+			r.mu.RUnlock()
+			if fn != nil {
+				go fn(id, messageID, durationMS)
 			}
 		}
 	}

@@ -27,10 +27,19 @@ type Agent struct {
 	// Title is the mutable, user-facing display name. The ID stays the stable
 	// identity (primary key, branch, worktree path, session key); renaming only
 	// touches this field. Seeded from the prompt, optionally refined by an LLM.
-	Title     string
-	Ephemeral bool `gorm:"default:false"`
-	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only).
+	Title string
+	// Plan is the chat plan/to-do list JSON reconstructed from the head's
+	// Task*/TodoWrite events - by the chat view live, and by the daemon from the
+	// full transcript on chat attach (claudestream.ReconstructPlan) - persisted
+	// so it survives navigation and is available in a new browser.
+	Plan string
+	// Model is the chat head's current model id, captured by the daemon from the
+	// CLI's system:init line (see internal/http/chat_ws.go) and persisted so the
+	// selector shows the right model on navigation and in a new browser.
+	Model          string
+	ConversationID string
+	Ephemeral      bool `gorm:"default:false"`
+	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
 

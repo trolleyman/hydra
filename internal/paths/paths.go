@@ -205,8 +205,43 @@ func GetChatQueueJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetChatQueueDirFromProjectRoot(projectRoot), id+".json")
 }
 
+// GetChatEventsDirFromProjectRoot returns the directory containing the
+// provider-neutral, sequenced chat event logs. Each head owns one JSONL file.
+func GetChatEventsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-events")
+}
+
+func GetChatEventsJSONLFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatEventsDirFromProjectRoot(projectRoot), id+".jsonl")
+}
+
+// GetChatStateDirFromProjectRoot returns the directory containing materialized
+// chat-state checkpoints. They are kept separate from event logs so a partial
+// checkpoint replacement can never damage durable history.
+func GetChatStateDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-state")
+}
+
+func GetChatStateJSONFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatStateDirFromProjectRoot(projectRoot), id+".json")
+}
+
 func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetBuildLogDirFromProjectRoot(projectRoot), id+".log")
+}
+
+// GetChatThinkingDirFromProjectRoot holds the per-head sidecars recording each
+// thinking block's Hydra-measured duration (keyed by Claude message id), so a
+// reload/resume can show "Thought for Xs" without the browser timing it. Lives
+// at .hydra/local/thinking/.
+func GetChatThinkingDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "thinking")
+}
+
+// GetChatThinkingJsonFromProjectRoot returns a chat-mode head's thinking-duration
+// sidecar, at .hydra/local/thinking/<id>.json.
+func GetChatThinkingJsonFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatThinkingDirFromProjectRoot(projectRoot), id+".json")
 }
 
 // GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle

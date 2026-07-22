@@ -195,6 +195,27 @@ func (p *artifactPlan) buildSet(s *Server, projectID, name string) api.ArtifactS
 	return s.buildArtifactSet(projectID, name, leftSpec, rightSpec, p.mgr, p.left, p.right)
 }
 
+// metasFor returns both sides' current metas for one script, kicking off (or
+// reading the in-flight snapshot of) each side's generation. A nil spec (script
+// absent on that version) yields an empty ready meta, so its counterpart's files
+// read as added/removed. The artifacts WS calls this per file event: Get is cheap
+// on a cache hit or an in-flight entry (it just returns a snapshot, including the
+// files streamed so far), so per-file diffing never re-runs a generation.
+func (p *artifactPlan) metasFor(name string) (left, right artifacts.Meta) {
+	leftSpec, rightSpec := p.specsFor(name)
+	if leftSpec != nil {
+		left, _ = p.mgr.Get(*leftSpec, p.left)
+	} else {
+		left = artifacts.Meta{Status: artifacts.StatusReady}
+	}
+	if rightSpec != nil {
+		right, _ = p.mgr.Get(*rightSpec, p.right)
+	} else {
+		right = artifacts.Meta{Status: artifacts.StatusReady}
+	}
+	return left, right
+}
+
 // buildSets builds every script's set, in stable name order.
 func (p *artifactPlan) buildSets(s *Server, projectID string) []api.ArtifactSet {
 	sets := make([]api.ArtifactSet, 0, len(p.names))
@@ -428,39 +449,47 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	deltas := mgr.Compare(leftMeta, rightMeta)
 	set.Changed = artifacts.AnyChanged(deltas)
 	for _, d := range deltas {
-		f := api.ArtifactFile{Name: d.Name, ChangeType: api.ArtifactFileChangeType(d.Change)}
-		if len(d.Tags) > 0 {
-			tags := append([]string(nil), d.Tags...)
-			f.Tags = &tags
-		}
-		if d.InLeft {
-			f.LeftUrl = ptr(blobURL(projectID, name, leftMeta.Key, d.Name))
-		}
-		if d.InRight {
-			f.RightUrl = ptr(blobURL(projectID, name, rightMeta.Key, d.Name))
-		}
-		if d.Unverified {
-			f.Unverified = ptr(true)
-		}
-		if d.ChangeRatio > 0 {
-			f.ChangeRatio = ptr(d.ChangeRatio)
-		}
-		if d.Fps > 0 {
-			f.Fps = ptr(d.Fps)
-		}
-		if d.Width > 0 && d.Height > 0 {
-			f.Width = ptr(d.Width)
-			f.Height = ptr(d.Height)
-		}
-		if d.Dpi > 0 {
-			f.Dpi = ptr(d.Dpi)
-		}
-		if d.Size > 0 {
-			f.Size = ptr(d.Size)
-		}
-		set.Files = append(set.Files, f)
+		set.Files = append(set.Files, artifactFileFromDelta(projectID, name, leftMeta.Key, rightMeta.Key, d))
 	}
 	return set
+}
+
+// artifactFileFromDelta folds one compared file into the API shape, wiring each
+// side's blob URL from that side's cache key. Shared by the whole-set build
+// (buildArtifactSet) and the artifacts WS's per-file streaming path so a streamed
+// tile is identical to the one the settled set carries.
+func artifactFileFromDelta(projectID, name, leftKey, rightKey string, d artifacts.FileDelta) api.ArtifactFile {
+	f := api.ArtifactFile{Name: d.Name, ChangeType: api.ArtifactFileChangeType(d.Change)}
+	if len(d.Tags) > 0 {
+		tags := append([]string(nil), d.Tags...)
+		f.Tags = &tags
+	}
+	if d.InLeft {
+		f.LeftUrl = ptr(blobURL(projectID, name, leftKey, d.Name))
+	}
+	if d.InRight {
+		f.RightUrl = ptr(blobURL(projectID, name, rightKey, d.Name))
+	}
+	if d.Unverified {
+		f.Unverified = ptr(true)
+	}
+	if d.ChangeRatio > 0 {
+		f.ChangeRatio = ptr(d.ChangeRatio)
+	}
+	if d.Fps > 0 {
+		f.Fps = ptr(d.Fps)
+	}
+	if d.Width > 0 && d.Height > 0 {
+		f.Width = ptr(d.Width)
+		f.Height = ptr(d.Height)
+	}
+	if d.Dpi > 0 {
+		f.Dpi = ptr(d.Dpi)
+	}
+	if d.Size > 0 {
+		f.Size = ptr(d.Size)
+	}
+	return f
 }
 
 // pendingTags gathers the deduped, sorted union of every tag carried by the

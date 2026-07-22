@@ -20,6 +20,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -65,7 +66,10 @@ type Server struct {
 	// ChatQueues holds chat-mode heads' queued (not-yet-sent) user messages,
 	// daemon-side and disk-persisted (see heads.ChatQueueManager). nil disables
 	// queueing (messages always send straight through).
-	ChatQueues  *heads.ChatQueueManager
+	ChatQueues *heads.ChatQueueManager
+	// ChatEvents owns provider-neutral durable history and current-state
+	// projections. nil keeps legacy tests/simulation paths working.
+	ChatEvents  *chat.Manager
 	StartTime   time.Time
 	Development bool // set when running under mage dev / mage DevAutoReload
 	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
@@ -298,6 +302,7 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 		resp[i] = api.ProjectInfo{
 			Id:              p.ID,
 			Path:            p.Path,
+			DisplayPath:     displayPathPtr(p.Path),
 			Name:            p.Name,
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
@@ -314,6 +319,34 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 		}
 	}
 	return resp, nil
+}
+
+// displayPathPtr returns the project path for display, with the server's home
+// directory abbreviated to "~". Computed server-side because only the server
+// knows its HOME (the web client must not guess home-directory patterns).
+func displayPathPtr(path string) *string {
+	dp := path
+	if home, err := os.UserHomeDir(); err == nil {
+		dp = abbreviateHome(path, home)
+	}
+	return &dp
+}
+
+// abbreviateHome replaces a leading `home` prefix of path with "~", matching
+// only on a whole path component (so /home/user2 is not abbreviated for
+// HOME=/home/user). Pure - split out of displayPathPtr for testing.
+func abbreviateHome(path, home string) string {
+	home = strings.TrimSuffix(home, "/")
+	if home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
 }
 
 // projectIconValue returns the trimmed custom icon configured in a project's
@@ -360,7 +393,7 @@ func (s *Server) SetProjectIcon(_ context.Context, request api.SetProjectIconReq
 	if err := config.Save(p.Path, *cfg); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, Name: p.Name}
+	resp := api.ProjectInfo{Id: p.ID, Path: p.Path, DisplayPath: displayPathPtr(p.Path), Name: p.Name}
 	if icon != "" {
 		resp.Icon = &icon
 	}
@@ -437,9 +470,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		s.Services.StartProject(p.Path)
 	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
-		Id:   p.ID,
-		Path: p.Path,
-		Name: p.Name,
+		Id:          p.ID,
+		Path:        p.Path,
+		DisplayPath: displayPathPtr(p.Path),
+		Name:        p.Name,
 	}), nil
 }
 
@@ -540,7 +574,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 	if m := string(heads.EgressModeFor(h.ID)); m != "" {
 		netEnf = &m
 	}
-	return api.AgentResponse{
+	resp := api.AgentResponse{
 		Id:                 h.ID,
 		Title:              &title,
 		BranchName:         h.Branch,
@@ -563,6 +597,13 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		MergeWhenGreen:     &h.MergeWhenGreen,
 		PublishWhenGreen:   &h.PublishWhenGreen,
 	}
+	if h.Plan != "" {
+		resp.Plan = &h.Plan
+	}
+	if h.Model != "" {
+		resp.Model = &h.Model
+	}
+	return resp
 }
 
 // agentResponseWithReview is agentResponse plus the per-head MR link (downstream
@@ -1344,11 +1385,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	chatMode := request.Body.ChatMode != nil && *request.Body.ChatMode
-	if chatMode && agentType != sandbox.AgentTypeClaude {
+	if chatMode && agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "chat_mode is only supported for claude agents",
+			Details: "chat_mode is only supported for claude and codex agents",
 		}, nil
 	}
 
@@ -1535,11 +1576,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 
 	if request.Body.ChatMode != nil {
 		chatMode := *request.Body.ChatMode
-		if head.AgentType != sandbox.AgentTypeClaude {
+		if head.AgentType != sandbox.AgentTypeClaude && head.AgentType != sandbox.AgentTypeCodex {
 			return api.UpdateAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "chat_mode is only supported for claude agents",
+				Details: "chat_mode is only supported for claude and codex agents",
 			}, nil
 		}
 		if chatMode != head.ChatMode {
@@ -1949,6 +1990,58 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	return api.RestartAgent200JSONResponse(agentResponse(*newHead)), nil
 }
 
+// RestartAgentSession restarts only the agent's CLI process: it stops the live
+// session, waits for it to exit, and resumes it (re-seeding from the current
+// config) so it continues from its transcript via --continue. Nothing else is
+// touched - no worktree, branch, DB row or transcript teardown - which is what
+// separates it from RestartAgent (a full kill + fresh respawn). Same primitive
+// the MCP-grant auto-relaunch uses; see heads.RestartHead.
+func (s *Server) RestartAgentSession(ctx context.Context, request api.RestartAgentSessionRequestObject) (api.RestartAgentSessionResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: restart agent session request: id=%q, project=%q", request.Id, projectRoot)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.RestartAgentSession404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	// An archived head has no worktree to relaunch into - reviving one is
+	// ResumeAgent's job, not this button's.
+	if head.Archived || head.Worktree == nil {
+		return api.RestartAgentSession409JSONResponse{
+			Code:    409,
+			Error:   api.ErrorResponseErrorConflict,
+			Details: "agent has no live worktree to restart into",
+		}, nil
+	}
+
+	// Restart synchronously: the client reconnects its terminal/chat pane on the
+	// response, so returning only once the new session is live means it attaches
+	// to that one rather than racing the dying process.
+	rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+	if err := heads.RestartHead(s.Sessions, s.DB, projectRoot, *head, rows, cols); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			return api.RestartAgentSession409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: "operation already in progress",
+			}, nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	s.notifyAgentsChanged(projectRoot, false)
+	return api.RestartAgentSession204Response{}, nil
+}
+
 // ResumeAgent revives an archived (killed/merged) agent: it recreates the
 // worktree+branch off the current base, un-archives the record, and relaunches
 // the agent so it continues from its saved conversation transcript. Unlike
@@ -2074,13 +2167,13 @@ func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) (
 	baseSHA, errBase := git.ResolveRef(projectRoot, baseBranch)
 	headSHA, errHead := git.ResolveRef(projectRoot, headBranch)
 	if errBase != nil || errHead != nil {
-		return errtrace.Wrap2(git.ListCommits(projectRoot, baseBranch, headBranch))
+		return errtrace.Wrap2(git.ListFirstParentCommits(projectRoot, baseBranch, headBranch))
 	}
 	key := strings.Join([]string{projectRoot, baseSHA, headSHA}, "\x00")
 	if v, ok := s.commitsCache.get(key); ok {
 		return v, nil
 	}
-	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
+	commits, err := git.ListFirstParentCommits(projectRoot, baseBranch, headBranch)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2369,6 +2462,19 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if request.Params.HeadRef != nil && *request.Params.HeadRef != "" {
 		headRef = *request.Params.HeadRef
 	}
+	// A head can be interrupted before its named branch ref is created (or the
+	// ref may disappear while the retained worktree still has a valid detached
+	// HEAD). The default agent comparison should use that worktree commit rather
+	// than exposing git's ambiguous-revision error in the Files panel. Explicit
+	// caller-supplied refs still fail normally so typos are not hidden.
+	if request.Params.HeadRef == nil || *request.Params.HeadRef == "" {
+		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
+			headRef = resolved
+		} else {
+			empty := api.DiffResponse{Files: []api.DiffFile{}, BaseRef: baseRef, HeadRef: headRef}
+			return api.GetAgentDiff200JSONResponse(empty), nil
+		}
+	}
 
 	ignoreWhitespace := false
 	if request.Params.IgnoreWhitespace != nil {
@@ -2525,6 +2631,18 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		BehindCount:        &behindCount,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
+}
+
+func resolveDefaultAgentHead(projectRoot string, worktree *string, headRef string) (string, bool) {
+	if _, err := git.ResolveRef(projectRoot, headRef); err == nil {
+		return headRef, true
+	}
+	if worktree != nil {
+		if worktreeHead, err := git.ResolveRef(*worktree, "HEAD"); err == nil {
+			return worktreeHead, true
+		}
+	}
+	return headRef, false
 }
 
 func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiffFilesRequestObject) (api.GetAgentDiffFilesResponseObject, error) {

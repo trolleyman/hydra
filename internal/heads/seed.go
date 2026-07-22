@@ -278,7 +278,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		}
 
 	case sandbox.AgentTypeCodex:
-		// Codex has no --append-system-prompt and no hook system we wire up; it
+		// Codex has no --append-system-prompt; it
 		// reads standing guidance from AGENTS.md files. Deliver the pre-prompt as
 		// the global ~/.codex/AGENTS.md (merged over the host's), which applies to
 		// every Codex session regardless of the repo's own AGENTS.md.
@@ -290,6 +290,16 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			}
 			res.Binds = append(res.Binds, sandbox.Bind{Source: agentsHost, Target: path.Join(home, ".codex", "AGENTS.md")})
 		}
+
+		hooksHost := filepath.Join(cacheDir, "codex-hooks.json")
+		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(home, ".codex", "hooks.json")), stableHydraBin)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err := os.WriteFile(hooksHost, hooks, 0o644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json")})
 	}
 
 	return res, nil
@@ -310,11 +320,14 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		KnownTools:       p.KnownTools,
 	}
 	// WebFetch host-gating is derived from the sandbox network policy rather than a
-	// dedicated list: WebFetch content is fetched provider-side (it does not go
-	// through the egress proxy), so the gate is the only place to enforce which
-	// hosts it may reach - and it should honour the same allow-list as the network.
-	// Filtering off (unrestricted/off) ⇒ no gating; filtering on (hard/advisory) ⇒
-	// allow the default hosts unioned with the user's allowed_hosts, minus blocked.
+	// dedicated list: the fetch runs inside the sandbox, so its traffic also
+	// crosses the egress boundary and must honour the same allow-list as the
+	// network. Gating it at the tool layer too is still worthwhile - the user gets
+	// prompted with the full URL before the tool runs - and a granted host is
+	// shared with the egress proxy via granted-hosts.json so one allow never
+	// prompts twice. Filtering off (unrestricted/off) ⇒ no gating; filtering on
+	// (hard/advisory) ⇒ allow the default hosts unioned with the user's
+	// allowed_hosts, minus blocked.
 	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(agentType)
 	if net.FilterHosts {
 		pol.WebFetchFilter = true
@@ -520,6 +533,13 @@ var envKeysHydraOwns = map[string]bool{
 	"HYDRA_WORKTREE":     true,
 	"HYDRA_BRANCH":       true,
 	"HYDRA_BASE_BRANCH":  true,
+	// A daemon may itself be launched with a project-local TMPDIR (notably an
+	// isolated test server). That host path is not the head's temp directory and
+	// is normally read-only in its sandbox. Every Linux head instead gets a
+	// private directory bound at /tmp, so always give child tools that path.
+	"TMPDIR": true,
+	"TMP":    true,
+	"TEMP":   true,
 }
 
 // headContextEnv returns the HYDRA_* environment variables describing the head
@@ -612,6 +632,9 @@ func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []str
 		"LANG=C.UTF-8",
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
+		"TMPDIR=/tmp",
+		"TMP=/tmp",
+		"TEMP=/tmp",
 	)
 	if gitAuthorName != "" {
 		env = append(env,

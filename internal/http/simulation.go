@@ -119,10 +119,13 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	// including the needs_input count above).
 	simTotal, simRunning, simWaiting, simFinished := 5, 2, 1, 1
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
+	simDisplayPath := "~/code/simulated/project"
+	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
 			Path:            "/simulated/project",
+			DisplayPath:     &simDisplayPath,
 			Name:            "simulated-project",
 			Icon:            &simIcon,
 			UnreadCount:     &simUnread,
@@ -135,6 +138,7 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 		{
 			Id:              "mobile-app",
 			Path:            "/simulated/mobile-app",
+			DisplayPath:     &mobileDisplayPath,
 			Name:            "mobile-app",
 			Icon:            &mobileIcon,
 			UnreadCount:     &otherUnread,
@@ -215,6 +219,8 @@ const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Matc
 // page renders the chat view instead of a terminal.
 const simAgentChatPrompt = "Add a retry with exponential backoff to the artifact uploader, and cover the giving-up path with a test."
 
+const simAgentCodexPrompt = "Exercise Codex chat tools, file edits, and a sub-agent, then report the result."
+
 // simAgentChat is the chat-mode demo agent, shared by ListAgents and GetAgent.
 func simAgentChat() api.AgentResponse {
 	createdAt := simNow().Add(-45 * time.Minute).Unix()
@@ -229,10 +235,27 @@ func simAgentChat() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentChatPrompt,
 		ChatMode:      ptr(true),
+		// Model as the daemon would have captured it from the head's system:init
+		// line (see simChatEvents); the chat selector seeds its label from this.
+		Model: ptr("claude-opus-4-8"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:    api.Waiting,
 			Timestamp: simNow().Format(time.RFC3339),
 		},
+	}
+}
+
+// simAgentCodex is the provider-neutral chat-event demo. Keeping it separate
+// from agent-chat means the simulation exercises both the legacy Claude input
+// adapter and the normalized Codex replay path in a real rendered page.
+func simAgentCodex() api.AgentResponse {
+	createdAt := simNow().Add(-40 * time.Minute).Unix()
+	return api.AgentResponse{
+		Id: "agent-chat-codex", Title: ptr("Exercise Codex chat events"), AgentType: "codex",
+		BaseBranch: "main", BranchName: ptr("hydra/sim-codex-chat"), SessionPid: 1007,
+		SessionStatus: "running", CreatedAt: &createdAt, Prompt: simAgentCodexPrompt,
+		ChatMode: ptr(true), Model: ptr(""),
+		AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 	}
 }
 
@@ -255,6 +278,7 @@ func simAgentAsk() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentAskPrompt,
 		ChatMode:      ptr(true),
+		Model:         ptr("claude-opus-4-8"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:      api.NeedsInput,
 			Timestamp:   simNow().Format(time.RFC3339),
@@ -324,6 +348,8 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode demo agent: its detail page renders the chat view instead of
 		// a terminal; HandleTerminalWS serves it chat framing.
 		simAgentChat(),
+		// Same presentation over the durable provider-neutral Codex event stream.
+		simAgentCodex(),
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.
 		simAgentAsk(),
@@ -492,9 +518,14 @@ func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Req
 }
 
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	// The chat plan reaches the client via the chat WS "plan" frame (see
+	// handleSimChatWS), mirroring the daemon's incremental tracking.
+	write := func(resp api.AgentResponse) {
+		api.WriteJSON(w, http.StatusOK, resp)
+	}
 	for _, a := range simArchivedAgents() {
 		if a.Id == id {
-			api.WriteJSON(w, http.StatusOK, a)
+			write(a)
 			return
 		}
 	}
@@ -542,11 +573,15 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if id == "agent-chat" {
-		api.WriteJSON(w, http.StatusOK, simAgentChat())
+		write(simAgentChat())
+		return
+	}
+	if id == "agent-chat-codex" {
+		write(simAgentCodex())
 		return
 	}
 	if id == "agent-ask" {
-		api.WriteJSON(w, http.StatusOK, simAgentAsk())
+		write(simAgentAsk())
 		return
 	}
 	if id == "agent-approval" {
@@ -660,6 +695,12 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
+// RestartAgentSession succeeds (rather than 501) so the UI's restart flow -
+// confirm dialog, toast, terminal reconnect - can be exercised in simulation.
+func (s *SimulationServer) RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *SimulationServer) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
@@ -945,6 +986,34 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   simNow().Add(-40 * time.Minute).Format(time.RFC3339),
+			},
+		}
+		api.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+	// agent-chat: two commits whose author dates interleave with the canned
+	// conversation's timestamps (simChatEvents), so the chat renders their
+	// commit chips mid-transcript - one after the Write card (18:01:30), one
+	// after the first turn's result footer (18:05:30).
+	if id == "agent-chat" {
+		resp := api.GetAgentCommits200JSONResponse{
+			{
+				Sha:         "beefcafe0123456789abcdef0123456789abcdef",
+				ShortSha:    "beefcaf",
+				Subject:     ptr("Cover the giving-up path with a test"),
+				Message:     "Cover the giving-up path with a test",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   "2026-07-09T18:05:30Z",
+			},
+			{
+				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
+				ShortSha:    "cafebab",
+				Subject:     ptr("Add jittered backoff helper to the uploader"),
+				Message:     "Add jittered backoff helper to the uploader\n\nBase 100ms, doubled per attempt, +/- 50% jitter, capped at 5 attempts.",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   "2026-07-09T18:01:30Z",
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -1775,25 +1844,25 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}
+	leftProgress := "button.png 4/9"
 	rightProgress := "artifacts-ab-dark.png 7/12"
 	startedAt := simNow().Add(-8 * time.Second).Unix()
+	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
 		simReadyChangedSet(),
-		// In-flight generation where one side has already FAILED while the other is
-		// still building: the LEFT (before) side exited non-zero (empty live log +
-		// persisted log URL + left_error), the RIGHT (after) side is still rendering.
-		// The whole set stays "generating", but the failed side's live log gets the
-		// red error border immediately - it must NOT read as a clean (green) finish
-		// just because its live log drained. The still-generating side stays neutral.
+		// In-flight generation where BOTH sides are still building AND tiles are
+		// already streaming in: the HandleArtifactsWS handler pushes "file" messages
+		// (see simStreamedArtifactFiles) into this set, so an expanded card shows the
+		// finished tiles above both live build logs - the per-file ::hydra:artifact::
+		// streaming, before the run settles. Files start empty; the WS fills them.
 		{
 			Name:          "components",
 			Status:        api.ArtifactSetStatusGenerating,
+			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
-			LeftLog:       &[]api.ArtifactLogLine{},
-			LeftLogUrl:    ptr(simLogURL("components", "error/left")),
-			LeftError:     ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
+			LeftLog:       &leftLog,
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},
@@ -2766,6 +2835,9 @@ var simChatEvents = []string{
 	// $ figure on turn footers; model + slash_commands feed the composer's
 	// model dropdown and / autocomplete.
 	`{"type":"system","subtype":"init","session_id":"sim-chat","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","pr-comments","review","security-review","usage"]}`,
+	// A context-compaction "session continued" preamble (item 39): a CLI-injected
+	// summary, not a real user turn, so the chat collapses it behind an expander.
+	`{"type":"user","uuid":"sim-compaction","message":{"role":"user","content":[{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. The user asked to add a retry loop with exponential backoff to the artifacts uploader, plus a giving-up test.\n2. We located the uploader in internal/artifacts/upload.go and drafted a jittered backoff helper.\n3. Next step: wire the retry loop into Put and add TestPutRetry.\n\nContinue from where you left off."}]}}`,
 	// Consecutive timestamps here let the replayed thought show "Thought for Xs"
 	// (item 7): the chat estimates the thinking duration from the gap between the
 	// triggering user turn and the assistant message that carried the thought.
@@ -2783,6 +2855,14 @@ var simChatEvents = []string{
 	`{"type":"user","uuid":"sim-model-caveat","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>"}}`,
 	`{"type":"user","uuid":"sim-model-cmd","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}}`,
 	`{"type":"user","uuid":"sim-model-out","message":{"role":"user","content":"<local-command-stdout>Set model to opus (claude-opus-4-8)</local-command-stdout>"}}`,
+	// A Skill launch: the tool_use renders as a Skill tool card with a short
+	// "Launching skill" output; the SKILL.md body Claude auto-loads into context
+	// arrives as an isMeta `user` text block (opening "Base directory for this
+	// skill: ..."). It was never typed, so it folds into a collapsed "Skill
+	// loaded: <name>" card instead of a huge user bubble.
+	`{"type":"assistant","message":{"id":"msg_sim_skill","content":[{"type":"tool_use","id":"toolu_sim_skill","name":"Skill","input":{"skill":"claude-api","args":"context window sizes per model"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_skill","content":"Launching skill: claude-api"}]}}`,
+	`{"type":"user","uuid":"sim-skill-body","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /tmp/claude-1000/bundled-skills/2.1.212/1b3566cf/claude-api\n\n# Building LLM-Powered Applications with Claude\n\nThis skill helps you build LLM-powered applications with Claude. Choose the right surface based on your needs, detect the project language, then read the relevant language-specific documentation.\n\n## Before You Start\n\nScan the target file for non-Anthropic provider markers (import openai, OpenAI(, gpt-4). If you find any, stop and tell the user.\n\n## Output Requirement\n\nWhen the user asks you to add or implement a Claude feature, your code must call Claude through one of the official SDKs."}]},"isMeta":true}`,
 	// A TodoWrite: feeds the floating plan panel (item 17) instead of a card.
 	`{"type":"assistant","message":{"id":"msg_sim_todo","content":[{"type":"tool_use","id":"toolu_sim_todo","name":"TodoWrite","input":{"todos":[{"content":"Read the current uploader","status":"completed","activeForm":"Reading the current uploader"},{"content":"Wire in the backoff retry loop","status":"in_progress","activeForm":"Wiring in the backoff retry loop"},{"content":"Add a test for the giving-up path","status":"pending","activeForm":"Adding a test for the giving-up path"},{"content":"Run go test and vet","status":"pending","activeForm":"Running go test and vet"}]}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_todo","content":"Todos updated"}]}}`,
@@ -2791,11 +2871,11 @@ var simChatEvents = []string{
 	// A Read of an auto-memory file: renders as "Read memory <name>" with the
 	// long ~/.claude/... path collapsed away (item 5).
 	`{"type":"assistant","message":{"id":"msg_sim_mem","content":[{"type":"tool_use","id":"toolu_sim_mem","name":"Read","input":{"file_path":"/home/callum/.claude/projects/-home-callum-code-hydra/memory/branch-split-mirror-design.md"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_mem","content":"---\nname: branch-split-mirror-design\ndescription: proposed ff-only mirror design\n---\n\nWorktree moves to an internal branch; hydra/<id> becomes a best-effort ff-only mirror."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_mem","content":"<system-reminder>This memory is 7 days old. Memories are point-in-time observations, not live state - claims about code behavior or file:line citations may be outdated. Verify against current code before asserting as fact.</system-reminder>\n     1\t---\n     2\tname: branch-split-mirror-design\n     3\tdescription: proposed ff-only mirror design so the user can checkout hydra/<id>\n     4\tmetadata:\n     5\t  type: reference\n     6\t---\n     7\t\n     8\tProposed (unbuilt) design: the **worktree moves to an internal branch**, and hydra/<id> becomes a best-effort **ff-only mirror** of it.\n     9\t\n    10\tForce-update and auto-conflict-merge were both ruled out - a force-push would clobber a user's local commits, and an auto-merge could silently resolve a conflict the wrong way."}]}}`,
 	// A Read with offset+limit: the range shows after the filename in the header
 	// (item 1); its .go output is syntax highlighted (item 3).
 	`{"type":"assistant","message":{"id":"msg_sim_off","content":[{"type":"tool_use","id":"toolu_sim_off","name":"Read","input":{"file_path":"internal/artifacts/upload.go","offset":100,"limit":40}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_off","content":"func sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_off","content":"   100\tfunc sleepBackoff(attempt int) {\n   101\t\tbase := 100 * time.Millisecond\n   102\t\td := base << attempt\n   103\t\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n   104\t\ttime.Sleep(d + jitter)\n   105\t}"}]}}`,
 	// An image Read: the decoded image shows in the Output section (item 4).
 	`{"type":"assistant","message":{"id":"msg_sim_img","content":[{"type":"tool_use","id":"toolu_sim_img","name":"Read","input":{"file_path":"web/scripts/screenshots/out/agent-dark.png"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_img","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + simChatImageB64 + `"}}]}]}}`,
@@ -2803,6 +2883,28 @@ var simChatEvents = []string{
 	// header).
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	// A Write tool call: its content renders as a numbered, syntax-highlighted
+	// code block (like a Read), not raw JSON.
+	`{"type":"assistant","timestamp":"2026-07-09T18:01:00.000Z","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_write","content":"File created successfully at: internal/artifacts/backoff.go"}]}}`,
+	// A TaskCreate tool call: its subject shows in the header in the regular
+	// (sans) font, like a path - not monospace. The timestamps here and on the
+	// Write above bracket the agent-chat commit at 18:01:30 (see
+	// GetAgentCommits), so its chip interleaves between the two cards.
+	`{"type":"assistant","timestamp":"2026-07-09T18:02:00.000Z","message":{"id":"msg_sim_taskcreate","content":[{"type":"tool_use","id":"toolu_sim_taskcreate","name":"TaskCreate","input":{"subject":"Add a giving-up test for the uploader","description":"Assert that when **every** attempt fails, ` + "`Put`" + ` surfaces the last error - a fake server that fails more times than the attempt cap."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate","content":"Task #1 created successfully: Add a giving-up test for the uploader"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate2","content":[{"type":"tool_use","id":"toolu_sim_taskcreate2","name":"TaskCreate","input":{"subject":"Thread MaxAttempts through the uploader config","description":"So callers can tune the retry cap without recompiling."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate2","content":"Task #2 created successfully: Thread MaxAttempts through the uploader config"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskcreate3","content":[{"type":"tool_use","id":"toolu_sim_taskcreate3","name":"TaskCreate","input":{"subject":"Run go test and vet","description":"Confirm the retry + giving-up paths pass and nothing else regressed."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskcreate3","content":"Task #3 created successfully: Run go test and vet"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskupd1","content":[{"type":"tool_use","id":"toolu_sim_taskupd1","name":"TaskUpdate","input":{"taskId":"1","status":"completed"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd1","content":"Updated task #1 status"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_taskupd2","content":[{"type":"tool_use","id":"toolu_sim_taskupd2","name":"TaskUpdate","input":{"taskId":"2","status":"in_progress"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd2","content":"Updated task #2 status"}]}}`,
+	// A queued message consumed INTO the running turn (queue-operation "remove"
+	// path): recorded only as this queued_command attachment - no plain user
+	// event exists - so the chat must rebuild the user bubble from it on replay.
+	`{"type":"attachment","uuid":"sim-queued-cmd-1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"Queued while you were working: prefer a helper named backoffRetry."}],"commandMode":"prompt"}}`,
 	// A sub-agent (Task tool) run: the Task tool_use in the main flow, then the
 	// sub-agent's own steps as isSidechain events (its prompt, thinking, a tool
 	// call, its reply), then the Task tool_result. The chat folds the sidechain
@@ -2816,6 +2918,13 @@ var simChatEvents = []string{
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
+	// A SendMessage back to that (now finished) sub-agent: the card renders the
+	// recipient, summary and message as prose - not the raw JSON, which echoes
+	// the same id/message three times - and its JSON reply as one sentence. The
+	// reply resumed the agent, so the sub goes back to "working" (its Task card
+	// settled long ago, hence SubagentView.reopened) until it notifies again.
+	`{"type":"assistant","message":{"id":"msg_sim_sendmsg","content":[{"type":"tool_use","id":"toolu_sim_sendmsg","name":"SendMessage","input":{"to":"sim_sub_1","summary":"Also check the artifacts uploader's giving-up path","message":"One more thing before you write up: check whether internal/artifacts asserts the giving-up path anywhere (all attempts exhausted, last error surfaced), and include file:line references in your report.","type":"message","recipient":"sim_sub_1","content":"One more thing before you write up: check whether internal/artifacts a…"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sendmsg","content":"{\"success\":true,\"message\":\"Agent \\\"sim_sub_1\\\" had no active task; resumed from transcript in the background with your message. You'll be notified when it finishes. Output: /tmp/claude-sim/tasks/sim_sub_1.output\",\"resumedAgentId\":\"sim_sub_1\",\"pin\":{\"id\":\"sim_sub_1\",\"name\":\"sim_sub_1\",\"ref\":\"acf68b\"}}"}]}}`,
 	// A second sub-agent marked the way CURRENT CLIs mark live stdout lines:
 	// parent_tool_use_id only (no isSidechain/agentId, and no meta frame). The
 	// chat must fold it into its Task card via the placeholder route instead of
@@ -2834,6 +2943,41 @@ var simChatEvents = []string{
 	// A harness-injected background-task notification: renders as a compact
 	// notice, not raw XML (item 15).
 	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bx2i97jd3</task-id>\n<status>completed</status>\n<summary>Background command \"go test ./... 2&gt;&amp;1\" completed (exit code 0)</summary>\n</task-notification>"}}`,
+	// A RESUMED background/async sub-agent that finished before a daemon
+	// stop+resume. On reconnect the backfill relays the main transcript first -
+	// the Agent launch, its launch-boilerplate tool_result (marks the card
+	// background) and its completion <task-notification> - and only THEN rebuilds
+	// the sub from its sidecar (the meta + sidechain steps handleSimChatWS emits
+	// after this slice). So the notification is processed before the sub exists;
+	// the card must still settle to "finished", not hang on "working" forever.
+	`{"type":"assistant","message":{"id":"msg_sim_resumed_bg","content":[{"type":"tool_use","id":"toolu_sim_resumed_bg","name":"Task","input":{"description":"Find preview proxy code","subagent_type":"scout","prompt":"Find the preview reverse-proxy handler and where response headers are copied."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_bg","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_resumed_bg (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>sim_sub_resumed_bg</task-id>\n<tool-use-id>toolu_sim_resumed_bg</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Find preview proxy code\" finished</summary>\n</task-notification>"}}`,
+	// A NESTED sub-agent: a background sub-agent that spawns its OWN background
+	// sub-agent. The nested spawn's Agent tool_use + launch boilerplate live in
+	// the PARENT's timeline and must upgrade into the child's SubagentCard there
+	// (not render as raw prompt JSON), with the child folded under the parent in
+	// the view selector. The notification sequence mirrors what the CLI really
+	// writes to the MAIN transcript: the parent's premature "finished" (it
+	// stopped while its child still ran), the child's completion, then the
+	// parent's real completion after the coordinator nudged it - the later
+	// parent notice supersedes the premature chip, so ONE parent chip remains.
+	`{"type":"assistant","message":{"id":"msg_sim_nest","content":[{"type":"tool_use","id":"toolu_sim_nest","name":"Agent","input":{"description":"Audit retry stack end to end","subagent_type":"general-purpose","prompt":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"text","text":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child","name":"Agent","input":{"description":"Scan config parsing","subagent_type":"scout","prompt":"Find where retry settings are parsed from config and report the file:line references."}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest_child (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2","content":[{"type":"text","text":"The config scan is running in the background - I'll fold its findings into the audit once it reports."}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"text","text":"Find where retry settings are parsed from config and report the file:line references."}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child_grep","name":"Grep","input":{"pattern":"max_attempts","path":"internal/config"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child_grep","content":"internal/config/config.go:88: MaxAttempts int"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_2","content":[{"type":"text","text":"Retry settings are parsed at internal/config/config.go:88 (MaxAttempts); nothing validates a zero/negative cap."}]}}`,
+	// The parent stopped (waiting on its child) -> the harness notified
+	// "finished" prematurely. This chip is superseded by the second one below.
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest_child</task-id>\n<tool-use-id>toolu_sim_nest_child</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Scan config parsing\" finished</summary>\n</task-notification>"}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_3","content":[{"type":"text","text":"Audit complete: the uploader retries with jittered backoff (internal/artifacts/backoff.go), config caps it via MaxAttempts (internal/config/config.go:88), and the unvalidated zero cap is the one real gap."}]}}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest_resume</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
 	// A chained command with a description: the collapsed card shows the
 	// description, the expanded card the ;/&&-split highlighted script.
 	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
@@ -2849,7 +2993,7 @@ var simChatEvents = []string{
 	// The chat must count the usage once and render ONE footer at the turn
 	// boundary - not one per event, interleaved around the text.
 	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"thinking","thinking":""}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nThe resulting backoff schedule:\n\n| Attempt | Base delay | With jitter | Outcome |\n| ------- | ---------: | :---------: | ------- |\n| 1 | 100ms | 50-150ms | retry |\n| 2 | 200ms | 100-300ms | retry |\n| 3 | 400ms | 200-600ms | retry |\n| 4 | 800ms | 400-1200ms | retry |\n| 5 | 1600ms | 800-2400ms | give up, surface last error |\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	// An interrupted turn: the user stops the reply mid-stream. The real CLI
 	// echoes the bracketed marker and ends the turn with an
 	// error_during_execution result, and fires NO Stop hook (spike-verified) -
@@ -2859,15 +3003,52 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_int","content":[{"type":"text","text":"Sure - I'll thread a MaxAttempts option through the uploader config and"}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
 	`{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":4210,"session_id":"sim-chat"}`,
+	// Resuming that interrupted turn: the CLI injects an isMeta "Continue from
+	// where you left off." user turn and answers it with a synthetic-model "No
+	// response requested." placeholder (spike-verified against claude 2.1.204).
+	// Its own UI hides both; claudestream.IsHiddenChatMessage drops them, so the
+	// chat must render NEITHER - they are here to exercise that filter (mirrored
+	// into sendSimChatEvent below).
+	`{"type":"user","uuid":"sim-resume-meta","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]},"isMeta":true}`,
+	`{"type":"assistant","uuid":"sim-resume-synthetic","message":{"id":"msg_sim_synthetic","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}`,
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
+	// A background Bash command plus its completion <task-notification>
+	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
+	// deduped to ONE notice chip). The notification carries the <output-file>
+	// path, so the chip expands to show the command's output (answered by the
+	// sim's task_output handler below).
+	`{"type":"assistant","message":{"id":"msg_sim_bgcmd","content":[{"type":"tool_use","id":"toolu_sim_bgcmd","name":"Bash","input":{"command":"go test ./... 2>&1","description":"Run the full test suite","run_in_background":true}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bgcmd","content":"Command running in background with ID: bash_sim_bg1. Output is being written to: /tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output. You will be notified when it completes. To check interim output, use Read on that file path."}]}}`,
+	// A ScheduleWakeup while waiting on the background run: its prompt is PROSE,
+	// so the collapsed header shows it in the sans font, not monospace.
+	`{"type":"assistant","message":{"id":"msg_sim_wakeup","content":[{"type":"tool_use","id":"toolu_sim_wakeup","name":"ScheduleWakeup","input":{"delaySeconds":1500,"prompt":"Fallback wakeup: check on the background test run and report the outcome.","reason":"Fallback in case the completion notification doesn't arrive"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_wakeup","content":"Next wakeup scheduled for 21:25:00 (in 1500s). Nothing more to do this turn - the harness re-invokes you when the wakeup fires or a task-notification arrives."}]}}`,
+	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>bash_sim_bg1</task-id>\n<tool-use-id>toolu_sim_bgcmd</tool-use-id>\n<output-file>/tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run the full test suite\" completed (exit code 0)</summary>\n</task-notification>"}`,
+	`{"type":"attachment","uuid":"sim-notif-bgcmd","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"<task-notification>\n<task-id>bash_sim_bg1</task-id>\n<tool-use-id>toolu_sim_bgcmd</tool-use-id>\n<output-file>/tmp/claude-1000/sim-project/sim-chat/tasks/bash_sim_bg1.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run the full test suite\" completed (exit code 0)</summary>\n</task-notification>"}}`,
+	// A long Read near the bottom of the conversation: its output overflows the
+	// card's capped panel (so the panel gets its OWN scrollbar), and one source
+	// line is far wider than the pane (so the gutter panel's per-line wrapping
+	// shows). Exercises pinned-at-bottom follow while such a card expands.
+	`{"type":"assistant","message":{"id":"msg_sim_long","content":[{"type":"tool_use","id":"toolu_sim_long","name":"Read","input":{"file_path":"internal/artifacts/upload_test.go"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_long","content":"     1\tpackage artifacts\n     2\t\n     3\timport (\n     4\t\t\"context\"\n     5\t\t\"errors\"\n     6\t\t\"net/http\"\n     7\t\t\"net/http/httptest\"\n     8\t\t\"strings\"\n     9\t\t\"testing\"\n    10\t)\n    11\t\n    12\t// flakyServer fails the first n PUTs with a 503, then succeeds - the shape of a transient outage the retry loop exists for, so every test in this file drives the uploader through it rather than stubbing the client.\n    13\tfunc flakyServer(t *testing.T, failures int) *httptest.Server {\n    14\t\tn := 0\n    15\t\treturn httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n    16\t\t\tif n < failures {\n    17\t\t\t\tn++\n    18\t\t\t\tw.WriteHeader(http.StatusServiceUnavailable)\n    19\t\t\t\treturn\n    20\t\t\t}\n    21\t\t\tw.WriteHeader(http.StatusOK)\n    22\t\t}))\n    23\t}\n    24\t\n    25\tfunc TestPutRetry(t *testing.T) {\n    26\t\tsrv := flakyServer(t, 1)\n    27\t\tdefer srv.Close()\n    28\t\tu := NewUploader(srv.URL)\n    29\t\tif err := u.Put(context.Background(), \"k\", strings.NewReader(\"v\")); err != nil {\n    30\t\t\tt.Fatalf(\"expected success after one transient failure, got %v\", err)\n    31\t\t}\n    32\t}\n    33\t\n    34\tfunc TestPutGivesUp(t *testing.T) {\n    35\t\tsrv := flakyServer(t, 10)\n    36\t\tdefer srv.Close()\n    37\t\tu := NewUploader(srv.URL)\n    38\t\terr := u.Put(context.Background(), \"k\", strings.NewReader(\"v\"))\n    39\t\tif !errors.Is(err, ErrExhausted) {\n    40\t\t\tt.Fatalf(\"want ErrExhausted, got %v\", err)\n    41\t\t}\n    42\t}"}]}}`,
 	// A tool_use with NO tool_result before the turn ends: it must NOT stay stuck
 	// showing "running" once the turn's result arrives / history replays (item 42).
 	`{"type":"assistant","message":{"id":"msg_sim_6","content":[{"type":"tool_use","id":"toolu_sim_stuck","name":"Read","input":{"file_path":"web/src/components/settings/NotificationsSection.tsx"}}]}}`,
 	`{"type":"result","subtype":"success","duration_ms":48211,"total_cost_usd":0.2145,"usage":{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800},"session_id":"sim-chat"}`,
+	// A standalone assistant reply that is mostly an ordered list - exercises the
+	// block markdown renderer's <ol> styling (list-decimal, pl-5) so the demo
+	// proves 1./2./3. indent with hanging wrapped lines, and a trailing unordered
+	// list shows bullets indent the same way. (Before the react-markdown switch
+	// the old inline renderer left these as flat, flush-left literal text.)
+	// The timestamp places the second agent-chat commit's chip (18:05:30) after
+	// the previous turn's result footer, before this closing mini-turn.
+	`{"type":"user","timestamp":"2026-07-09T18:06:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Recap what changed - numbered."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_list","content":[{"type":"text","text":"All three changes are in:\n\n1. **Retry loop** - wrapped ` + "`Put`" + ` in a bounded backoff loop that stops after 5 attempts and returns early on the first success, so a transient failure no longer sinks the whole upload.\n2. **Jitter** - each delay carries +/- 50% jitter, so a burst of clients that all failed at once don't retry in lockstep and stampede the server on the way back up.\n3. **Give-up path** - once the attempts are exhausted the loop surfaces the last error instead of swallowing it, now covered by ` + "`TestPutRetry`" + `.\n\nBullets indent the same way:\n\n- base delay doubles each attempt (100ms, 200ms, 400ms...)\n- the cap is configurable through ` + "`MaxAttempts`" + `\n\nAll green."}]}}`,
+	`{"type":"result","subtype":"success","duration_ms":5120,"total_cost_usd":0.021,"usage":{"input_tokens":180,"output_tokens":260,"cache_read_input_tokens":22100,"cache_creation_input_tokens":256},"session_id":"sim-chat"}`,
 }
 
 // simChatImageB64 is a tiny gradient PNG (base64) used by the simulated chat's
@@ -2877,11 +3058,139 @@ const simChatImageB64 = "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAKZ0lEQVR
 
 // sendSimChatEvent relays one canned stream-json line as a claude_event frame.
 func sendSimChatEvent(conn *safeConn, line string) {
+	// Mirror the real relay (sendChatEventLine): drop the CLI's hidden resume
+	// placeholders so the simulation exercises the same filtering.
+	if claudestream.IsHiddenChatMessage([]byte(line)) {
+		return
+	}
 	frame, _ := json.Marshal(chatEventFrame{
 		terminalEvent: terminalEvent{Type: "claude_event"},
 		Event:         json.RawMessage(line),
 	})
 	_ = conn.WriteMessage(websocket.TextMessage, frame)
+}
+
+// sendSimThinking emits the synthetic hydra_thinking event the daemon produces
+// for a measured thinking block (see claudestream + chat_ws), so the sim
+// exercises the client's backend-timed "Thought for Xs" path.
+func sendSimThinking(conn *safeConn, messageID string, durationMS int64) {
+	line, _ := json.Marshal(map[string]any{
+		"type":        "hydra_thinking",
+		"message_id":  messageID,
+		"duration_ms": durationMS,
+	})
+	sendSimChatEvent(conn, string(line))
+}
+
+func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, payload map[string]any) {
+	event := map[string]any{
+		"seq": seq, "type": eventType,
+		"timestamp": simNow().Add(time.Duration(seq) * time.Millisecond).Format(time.RFC3339Nano),
+		"payload":   payload,
+	}
+	frame, _ := json.Marshal(map[string]any{"type": "chat_event", "event": event})
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
+}
+
+// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. It
+// includes the regressions that are otherwise difficult to reproduce on demand:
+// a rich multi-file edit, a spawn whose transport result is merely "completed",
+// and a later closeAgent control that must remain an ordinary tool rather than
+// creating an empty child conversation.
+func handleSimCodexChatWS(conn *safeConn) {
+	// Deliberately override the settled REST state first: only the later
+	// normalized terminal turn event can return this live connection to finished.
+	sendStatusUpdate(conn, "running")
+	// Mid-response attach: the daemon reports the block already in flight in its
+	// snapshot; the live stream below only carries this block's remaining
+	// deltas. The seeded prefix must render immediately and the continuation
+	// must land in the SAME bubble, settling to one message.
+	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{
+		"subagents": map[string]any{},
+		"stream":    map[string]any{"kind": "text", "message_id": "sim-codex-seed", "text": "This reply began before you attached"},
+	}})
+	_ = conn.WriteMessage(websocket.TextMessage, state)
+	events := []struct {
+		typ string
+		p   map[string]any
+	}{
+		{"conversation_started", map[string]any{"model": ""}},
+		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
+		{"assistant_delta", map[string]any{"message_id": "sim-codex-seed", "text": " and finished after."}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
+		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "docs/codex-chat.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Codex chat\n+# Codex chat support\n"},
+			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "TOOL_DEMO.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-draft\n+complete\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "output": "File updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "docs/sim-added.md", "kind": map[string]any{"type": "add"}, "diff": "# Added document\n First character and indentation preserved\n+literal plus preserved\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-write", "name": "Write", "output": "File updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "input": map[string]any{"prompt": "Inspect chat replay and report the key invariant.", "description": "Inspect chat replay", "_raw": map[string]any{"tool": "spawnAgent"}}}},
+		{"subagent_started", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "description": "Inspect chat replay", "prompt": "Inspect chat replay and report the key invariant.", "status": "running"}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-child-report", "agent_id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "sidechain": true, "text": "Replay uses the same sequenced normalized events as live delivery."}},
+		{"notice", map[string]any{"text": "<task-notification><task-id>sim-codex-child</task-id><tool-use-id>sim-codex-spawn</tool-use-id><status>completed</status><summary>Agent &quot;Inspect chat replay&quot; finished</summary><output-file>/tmp/sim-codex-child.output</output-file></task-notification>"}},
+		{"subagent_completed", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "status": "completed"}},
+		{"tool_completed", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "output": "completed", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "input": map[string]any{"agent_id": "sim-codex-child", "_raw": map[string]any{"tool": "closeAgent"}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "output": "Agent closed", "status": "completed"}},
+		// Compatibility regression: old Claude logs incorrectly followed a
+		// background-command notice with this lifecycle event. The notice's
+		// output-file must keep it out of the sub-agent projection on replay.
+		{"notice", map[string]any{"text": "<task-notification><task-id>sim-background-command</task-id><status>completed</status><summary>Background command completed</summary><output-file>/tmp/sim-background-command.log</output-file></task-notification>"}},
+		{"subagent_completed", map[string]any{"id": "sim-background-command", "status": "completed"}},
+		// Opus can report a real measured reasoning span without exposing any
+		// reasoning text. The UI must still render its duration-only thought.
+		{"reasoning_completed", map[string]any{"message_id": "sim-hidden-reasoning", "text": ""}},
+		{"reasoning_duration", map[string]any{"message_id": "sim-hidden-reasoning", "duration_ms": 4200}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
+		// A merge commit that dragged main in: it must render as ONE collapsed chip
+		// ("Merged main - N commits") that expands to the merged-in commits, not a
+		// flood of per-commit chips.
+		{"commit_created", map[string]any{
+			"head": "aa11bb22", "sha": "aa11bb22cc33dd44ee55ff6677889900aabbccdd", "short_sha": "aa11bb2",
+			"subject": "Merge branch 'main' into hydra/codex-demo", "author_name": "Agent Codex",
+			"author_email": "codex@hydra.ai", "timestamp": simNow().Add(-2 * time.Minute).Format(time.RFC3339),
+			"is_merge": true, "merged_count": 3, "merged_commits": []map[string]any{
+				{"sha": "1111111111111111111111111111111111111111", "short_sha": "1111111", "subject": "Bump dependencies to latest patch releases", "author_name": "Maintainer", "timestamp": simNow().Add(-50 * time.Minute).Format(time.RFC3339)},
+				{"sha": "2222222222222222222222222222222222222222", "short_sha": "2222222", "subject": "Tidy up the egress proxy logging", "author_name": "Maintainer", "timestamp": simNow().Add(-55 * time.Minute).Format(time.RFC3339)},
+				{"sha": "3333333333333333333333333333333333333333", "short_sha": "3333333", "subject": "Fix a flaky terminal resize test", "author_name": "Maintainer", "timestamp": simNow().Add(-60 * time.Minute).Format(time.RFC3339)},
+			},
+		}},
+		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
+		{"user_message", map[string]any{"id": "sim-codex-interrupt-user", "content": []map[string]any{{"type": "text", "text": "Start an answer that I will interrupt."}}}},
+		{"turn_started", map[string]any{"id": "sim-codex-interrupt-turn", "status": "running"}},
+		{"assistant_delta", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible"}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-partial", "text": "This partial answer remains visible", "partial": true}},
+		// Legacy compatibility: older normalized logs retained the cancellation
+		// status but labelled this event turn_completed.
+		{"turn_completed", map[string]any{"id": "sim-codex-interrupt-turn", "status": "cancelled"}},
+		{"turn_started", map[string]any{"id": "sim-codex-error-turn", "status": "running"}},
+		{"turn_error", map[string]any{"error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
+		{"turn_failed", map[string]any{"id": "sim-codex-error-turn", "status": "failed", "error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
+	}
+	for i, event := range events {
+		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)
+	}
+	sendTerminalEvent(conn, "replay_done")
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
 }
 
 // handleSimChatWS speaks the chat framing (see chat_ws.go) for the simulated
@@ -2890,6 +3199,13 @@ func sendSimChatEvent(conn *safeConn, line string) {
 // reply, so the input path can be exercised end to end.
 func handleSimChatWS(conn *safeConn) {
 	sendStatusUpdate(conn, "running")
+	// Replay the measured thinking durations first (mirrors the daemon's
+	// emitThinkingDurations, which reads the head's sidecar before the transcript
+	// backfill): msg_sim_1's visible thought and msg_sim_4's EMPTY silently
+	// -reasoned thought both carry a duration, so the empty card stays visible as
+	// "Thought for Xs" on replay instead of vanishing.
+	sendSimThinking(conn, "msg_sim_1", 5000)
+	sendSimThinking(conn, "msg_sim_4", 3000)
 	for _, line := range simChatEvents {
 		sendSimChatEvent(conn, line)
 	}
@@ -2901,6 +3217,43 @@ func handleSimChatWS(conn *safeConn) {
 		Description: "Audit upload retry tests",
 		ToolUseID:   "toolu_sim_task",
 	})
+	// The resumed background sub-agent's sidecar, delivered AFTER the main
+	// transcript (which already carried its completion <task-notification>) -
+	// exactly the daemon backfill order. Its card was created 'running' here,
+	// after the notification was processed, so it settles only via the
+	// completion recorded on replay_done (regression guard for the stop+resume
+	// "stuck working" bug).
+	sendSubagentMeta(conn, "sim_sub_resumed_bg", &claudestream.SubagentMeta{
+		AgentType:   "scout",
+		Description: "Find preview proxy code",
+		ToolUseID:   "toolu_sim_resumed_bg",
+	})
+	// The nested pair (see the sim_sub_nest sidechain lines): the child's meta
+	// carries ParentAgentID, folding it under the parent's card and selector row.
+	sendSubagentMeta(conn, "sim_sub_nest", &claudestream.SubagentMeta{
+		AgentType:   "general-purpose",
+		Description: "Audit retry stack end to end",
+		ToolUseID:   "toolu_sim_nest",
+		SpawnDepth:  1,
+	})
+	sendSubagentMeta(conn, "sim_sub_nest_child", &claudestream.SubagentMeta{
+		AgentType:     "scout",
+		Description:   "Scan config parsing",
+		ToolUseID:     "toolu_sim_nest_child",
+		ParentAgentID: "sim_sub_nest",
+		SpawnDepth:    2,
+	})
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
+	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
+	// The daemon's full-transcript plan reconstruction (sendReconstructedPlan),
+	// derived here from the same canned events so sim exercises the real
+	// reducer + frame end to end.
+	if planJSON := claudestream.ReconstructPlanFromTranscript([]byte(strings.Join(simChatEvents, "\n"))); planJSON != "" {
+		if frame, err := json.Marshal(chatPlanFrame{terminalEvent: terminalEvent{Type: "plan"}, Plan: planJSON}); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+	}
 	sendTerminalEvent(conn, "replay_done")
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).
@@ -2913,6 +3266,17 @@ func handleSimChatWS(conn *safeConn) {
 	// append a second "Set model to ..." at the bottom of the conversation.
 	sendSimUserText(conn, "sim-chat", "<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>")
 	sendSimUserText(conn, "sim-chat", "<local-command-stdout>Set model to opus (claude-opus-4-8)</local-command-stdout>")
+
+	// Simulate a model_refusal_fallback: a safety classifier flags a turn under one
+	// model, so the CLI streams its blocks live, then RETRACTS them (evicting from
+	// transcript state) and retries under a fallback model. On the live stream those
+	// flagged blocks already rendered, so the reducer must evict the retracted uuids
+	// or they linger as a duplicate at the bottom of the chat. This scenario is
+	// net-zero when the fix works (the flagged blocks are emitted then evicted, so
+	// nothing extra shows); a regression would leave the FLAGGED-* text visible.
+	sendSimChatEvent(conn, `{"type":"assistant","uuid":"sim-refusal-flagged-think","message":{"id":"msg_sim_refusal_flagged","content":[{"type":"thinking","thinking":"FLAGGED-THINKING: this block should be retracted by the fallback."}]}}`)
+	sendSimChatEvent(conn, `{"type":"assistant","uuid":"sim-refusal-flagged-text","message":{"id":"msg_sim_refusal_flagged","content":[{"type":"text","text":"FLAGGED-TEXT: this reply should be retracted by the fallback."}]}}`)
+	sendSimChatEvent(conn, `{"type":"system","subtype":"model_refusal_fallback","direction":"retry","trigger":"refusal","originalModel":"claude-fable-5","fallbackModel":"claude-opus-4-8","retractedMessageUuids":["sim-refusal-flagged-think","sim-refusal-flagged-text"],"uuid":"sim-refusal-notice"}`)
 
 	turn := 0
 	// processTurn echoes one user turn and streams its reply (ending in a
@@ -2927,6 +3291,53 @@ func handleSimChatWS(conn *safeConn) {
 		text := firstTextBlock(content)
 		if strings.HasPrefix(text, "/") {
 			sendSimUserText(conn, "sim-chat", fmt.Sprintf("<local-command-stdout>Simulated output of %s.</local-command-stdout>", strings.Fields(text)[0]))
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "nested") {
+			// A LIVE nested background run: parent Agent spawn (background), the
+			// parent spawning its OWN background child, the parent's premature
+			// "finished" notification while the child still runs (the card must
+			// read "waiting on sub-agents", not finished), the child completing,
+			// and finally the parent's real completion whose notice supersedes
+			// the premature chip.
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_lnest","content":[{"type":"tool_use","id":"toolu_sim_lnest","name":"Agent","input":{"description":"Live nested audit","subagent_type":"general-purpose","prompt":"Audit the retry stack; delegate the config scan to a scout."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_lnest (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_lnest", &claudestream.SubagentMeta{
+				AgentType:   "general-purpose",
+				Description: "Live nested audit",
+				ToolUseID:   "toolu_sim_lnest",
+				SpawnDepth:  1,
+			})
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":600,"session_id":"sim-chat"}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest","message":{"role":"user","content":[{"type":"text","text":"Audit the retry stack; delegate the config scan to a scout."}]}}`)
+			time.Sleep(800 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_1","content":[{"type":"tool_use","id":"toolu_sim_lnest_child","name":"Agent","input":{"description":"Live config scan","subagent_type":"scout","prompt":"Find where retry settings are parsed from config."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest_child","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_lnest_child (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_lnest_child", &claudestream.SubagentMeta{
+				AgentType:     "scout",
+				Description:   "Live config scan",
+				ToolUseID:     "toolu_sim_lnest_child",
+				ParentAgentID: "sim_sub_lnest",
+				SpawnDepth:    2,
+			})
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_2","content":[{"type":"text","text":"Config scan delegated - waiting on its findings."}]}}`)
+			// The parent stopped -> premature completion notification while the
+			// child is still working: parent must show "waiting on sub-agents".
+			lnestNotif1 := `<task-notification>\n<task-id>sim_sub_lnest</task-id>\n<tool-use-id>toolu_sim_lnest</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live nested audit\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestNotif1+`"}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"role":"user","content":[{"type":"text","text":"Find where retry settings are parsed from config."}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"id":"msg_sim_lnest_child_1","content":[{"type":"tool_use","id":"toolu_sim_lnest_grep","name":"Grep","input":{"pattern":"max_attempts","path":"internal/config"}}]}}`)
+			time.Sleep(2500 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_lnest_grep","content":"internal/config/config.go:88: MaxAttempts int"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest_child","message":{"id":"msg_sim_lnest_child_2","content":[{"type":"text","text":"Retry settings parse at internal/config/config.go:88 (MaxAttempts)."}]}}`)
+			lnestChildNotif := `<task-notification>\n<task-id>sim_sub_lnest_child</task-id>\n<tool-use-id>toolu_sim_lnest_child</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live config scan\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestChildNotif+`"}`)
+			time.Sleep(1500 * time.Millisecond)
+			// The parent resumed (nudged), folded the findings in and finished for
+			// real: this notice supersedes the premature chip above.
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_lnest","message":{"id":"msg_sim_lnest_3","content":[{"type":"text","text":"Audit complete: backoff loop is sound; the config cap (config.go:88) lacks zero-value validation."}]}}`)
+			lnestNotif2 := `<task-notification>\n<task-id>sim_sub_lnest</task-id>\n<tool-use-id>toolu_sim_lnest_resume</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Live nested audit\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+lnestNotif2+`"}`)
 			return
 		}
 		if strings.Contains(strings.ToLower(text), "subagent") {
@@ -2949,6 +3360,41 @@ func handleSimChatWS(conn *safeConn) {
 			// the report).
 			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_live_task","content":"Swept docs/: retry guidance lives in docs/retry.md (jittered exponential backoff); the giving-up path is undocumented."}]}}`)
 			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":1600,"session_id":"sim-chat"}`)
+			return
+		}
+		if strings.Contains(strings.ToLower(text), "background") {
+			// A LIVE background/async sub-agent (the Agent tool's default): the Task
+			// tool_use, then a tool_result that is ONLY the launch boilerplate
+			// (isLaunchBoilerplate - so nothing settles the card there), then the
+			// LAUNCHING turn's own `result` (it ends right after launching, while the
+			// sub is still working) - which must NOT settle the background card - and
+			// finally, while idle, the sub's own sidechain steps and its completion
+			// <task-notification> off the MAIN transcript, delivered as the CLI's real
+			// bookkeeping shapes: a queue-operation (no uuid) AND an attachment (uuid),
+			// both carrying the same XML. The card must stay "working" across the turn
+			// result and flip to "finished" only on the notification, showing ONE notice.
+			sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_sim_bg_task","content":[{"type":"tool_use","id":"toolu_sim_bg_task","name":"Task","input":{"description":"Background docs sweep","subagent_type":"Explore","prompt":"Sweep docs/ in the background and report the retry guidance you find."}}]}}`)
+			sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bg_task","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_bg (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`)
+			sendSubagentMeta(conn, "sim_sub_bg", &claudestream.SubagentMeta{
+				AgentType:   "Explore",
+				Description: "Background docs sweep",
+				ToolUseID:   "toolu_sim_bg_task",
+			})
+			// The launching turn ends here, while the background sub is still working:
+			// this result must NOT settle the background card (it is not a synchronous
+			// sub the turn was waiting on).
+			sendSimChatEvent(conn, `{"type":"result","subtype":"success","duration_ms":700,"session_id":"sim-chat"}`)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_bg","message":{"role":"user","content":[{"type":"text","text":"Sweep **docs/** in the background and report:\n\n1. Which files mention `+"`backoff`"+`\n2. Whether the *giving-up* path is documented\n\nReturn file paths with line numbers."}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_bg","message":{"id":"msg_sim_bg_1","content":[{"type":"tool_use","id":"toolu_sim_bg_grep","name":"Grep","input":{"pattern":"backoff","path":"docs"}}]}}`)
+			time.Sleep(1200 * time.Millisecond)
+			sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_bg_grep","content":"docs/retry.md:12: jittered exponential backoff"}]}}`)
+			sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_bg","message":{"id":"msg_sim_bg_2","content":[{"type":"text","text":"Background sweep done: docs/retry.md prescribes jittered exponential backoff; the giving-up path is undocumented."}]}}`)
+			// The completion, off the main transcript, while the parent is idle - the
+			// queue-operation copy then the attachment copy (deduped to a single notice).
+			time.Sleep(1500 * time.Millisecond)
+			bgNotif := `<task-notification>\n<task-id>sim_sub_bg</task-id>\n<tool-use-id>toolu_sim_bg_task</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Background docs sweep\" finished</summary>\n</task-notification>`
+			sendSimChatEvent(conn, `{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"`+bgNotif+`"}`)
+			sendSimChatEvent(conn, `{"type":"attachment","uuid":"sim-notif-bg","attachment":{"type":"queued_command","commandMode":"task-notification","prompt":"`+bgNotif+`"}}`)
 			return
 		}
 		const replyText = "Simulated reply: message received. This mock streams a few token deltas, then the complete assistant turn."
@@ -2982,6 +3428,12 @@ func handleSimChatWS(conn *safeConn) {
 			simQueueRemove("sim-chat", msg.ID)
 		case "load_before":
 			sendSimHistoryBefore(conn, msg.Before)
+		case "task_output":
+			// The expandable background-command chip fetching the task's output
+			// file (see chat_ws.go sendChatTaskOutput). Canned tail for the demo.
+			out := "ok  \tgithub.com/trolleyman/hydra/internal/artifacts\t0.41s\nok  \tgithub.com/trolleyman/hydra/internal/git\t1.02s\nok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s\nok  \tgithub.com/trolleyman/hydra/internal/http\t3.87s\nok  \tgithub.com/trolleyman/hydra/internal/sandbox\t0.66s\nPASS\nexit=0"
+			frame, _ := json.Marshal(map[string]any{"type": "task_output", "file": msg.File, "content": out})
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
 		case "user_message":
 			// A message the client marked queued (a turn was running) is HELD, to
 			// be drained when the current turn ends - here, right after the next
@@ -3008,6 +3460,7 @@ type simChatClientMsg struct {
 	Content  json.RawMessage `json:"content"`
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
+	File     string          `json:"file"`
 }
 
 // simOlderHistory is a canned run of older conversation (oldest-first, uuids
@@ -3033,7 +3486,9 @@ func buildSimOlderHistory() []string {
 func simOlderBefore(beforeUUID string) (events []string, done bool) {
 	const batch = 8
 	idx := -1
-	if beforeUUID == "sim-real-0" {
+	// The client anchors on the FIRST uuid-carrying replayed line - the
+	// compaction preamble (sim-compaction), which precedes sim-real-0.
+	if beforeUUID == "sim-real-0" || beforeUUID == "sim-compaction" {
 		idx = len(simOlderHistory)
 	} else {
 		for i := range simOlderHistory {
@@ -3172,6 +3627,21 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	// message_start carries the initial usage; message_delta the running output
 	// token count - both feed the live "working" indicator (item 48).
 	streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1200, "output_tokens": 1}}})
+	// A short live thinking block first: stream its start/stop, settle it as its
+	// own assistant event, then send the hydra_thinking duration the daemon would
+	// have measured - so the card flips "Thinking..." -> "Thought for Xs" live and
+	// the duration survives a reload (mirrors the real backend timing path).
+	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking"}})
+	streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": "Reading the request, then drafting the reply."}})
+	time.Sleep(1200 * time.Millisecond)
+	streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+	thought, _ := json.Marshal(map[string]any{
+		"type":       "assistant",
+		"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "thinking", "thinking": "Reading the request, then drafting the reply."}}},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(thought))
+	sendSimThinking(conn, msgID, 1200)
 	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
 	tokens := 1
 	for chunk := range strings.SplitSeq(replyText, " ") {
@@ -3201,6 +3671,149 @@ func streamSimReply(conn *safeConn, sessionID, msgID, replyText string) {
 	sendSimChatEvent(conn, string(result))
 }
 
+// simAskImplMarkdown is the big markdown-heavy block agent-ask types out slowly
+// at the end of its implementation turn. It deliberately exercises a broad slice
+// of the chat markdown renderer so the demo doubles as a manual test surface:
+// h2/h3 headings, an ordered (1-4) list, an unordered list, bold/italic/
+// strikethrough + inline code, a GFM table (which also shows off the shrink-to-
+// content table width), a fenced code block, a blockquote and a link.
+var simAskImplMarkdown = strings.Join([]string{
+	"## Config override resolution",
+	"",
+	"The loader now merges three layers, **last wins**:",
+	"",
+	"1. `config.toml` - the committed base, checked in for everyone.",
+	"2. `config.<env>.toml` - per-environment overrides (e.g. `config.prod.toml`).",
+	"3. `HYDRA_*` environment variables - the final say, for secrets and one-offs.",
+	"4. The merged result is validated *once*, so an override can fill a base gap.",
+	"",
+	"Each key resolves top-down, so a value present in *all three* ends up taking",
+	"the environment variable. Keys only the base defines pass through untouched,",
+	"and ~~partial tables replace wholesale~~ tables now deep-merge field by field.",
+	"",
+	"### What ships in the first cut",
+	"",
+	"- **Schema validation** - unknown keys are rejected at load time.",
+	"- Friendly errors: `unknown key \"retry.attemps\" (did you mean \"attempts\"?)`.",
+	"- A single `Load(root, env)` entry point; callers pass the active environment.",
+	"",
+	"Worked example - resolving `retry.max_attempts` across the layers:",
+	"",
+	"| Layer | Source | Value | Effective |",
+	"| ----- | ------ | ----: | :-------: |",
+	"| Base | config.toml | 3 | |",
+	"| Env | config.prod.toml | 5 | " + "✓" + " |",
+	"| Var | HYDRA_RETRY_MAX_ATTEMPTS | (unset) | |",
+	"",
+	"The merge itself is a small recursive pass:",
+	"",
+	"```go",
+	"func merge(dst, src map[string]any) {",
+	"    for k, v := range src {",
+	"        if sub, ok := v.(map[string]any); ok {",
+	"            if d, ok := dst[k].(map[string]any); ok {",
+	"                merge(d, sub)",
+	"                continue",
+	"            }",
+	"        }",
+	"        dst[k] = v",
+	"    }",
+	"}",
+	"```",
+	"",
+	"> Note: validation runs on the *merged* result, not each layer - an override",
+	"> is allowed to fill in a key the base leaves out.",
+	"",
+	"Full details live in [the config docs](https://example.com/docs/config). Want",
+	"me to add hot-reload next, or wire up secrets interpolation first?",
+}, "\n")
+
+// streamSimAskImplementation streams the large, feature-rich turn agent-ask
+// produces once its AskUserQuestion is answered: an opening paragraph, two
+// interleaved tool steps with a thinking block between them, then the long
+// markdown-heavy block (simAskImplMarkdown) typed in slowly. It exercises the
+// live streaming path end to end - stream_event deltas feeding the working
+// indicator, and a thinking card flipping "Thinking..." -> "Thought for Xs".
+func streamSimAskImplementation(conn *safeConn, sessionID string) {
+	streamEv := func(event map[string]any) {
+		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": sessionID})
+		sendSimChatEvent(conn, string(line))
+	}
+	// streamText types one assistant text block out word by word (feeding the
+	// running output-token count), then settles the full assistant event.
+	streamText := func(msgID, text string, delay time.Duration) {
+		streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1400, "output_tokens": 1}}})
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text"}})
+		tokens := 1
+		for chunk := range strings.SplitSeq(text, " ") {
+			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk + " "}})
+			tokens += 2
+			streamEv(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": tokens}})
+			time.Sleep(delay)
+		}
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+		streamEv(map[string]any{"type": "message_stop"})
+		settle, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "text", "text": text}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(settle))
+	}
+	// streamThinking streams a live thinking block, settles it, then emits the
+	// backend-measured duration so the card lands on "Thought for Xs".
+	streamThinking := func(msgID, thinking string, dur time.Duration) {
+		streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": msgID, "usage": map[string]any{"input_tokens": 1400, "output_tokens": 1}}})
+		streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking"}})
+		streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": thinking}})
+		time.Sleep(dur)
+		streamEv(map[string]any{"type": "content_block_stop", "index": 0})
+		streamEv(map[string]any{"type": "message_stop"})
+		settle, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "thinking", "thinking": thinking}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(settle))
+		sendSimThinking(conn, msgID, dur.Milliseconds())
+	}
+	// toolStep emits a tool_use card, pauses as if it were running, then lands
+	// its tool_result so the card settles out of the running state.
+	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration) {
+		use, _ := json.Marshal(map[string]any{
+			"type":       "assistant",
+			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "tool_use", "id": toolID, "name": name, "input": input}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(use))
+		time.Sleep(dur)
+		res, _ := json.Marshal(map[string]any{
+			"type":       "user",
+			"message":    map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": result}}},
+			"session_id": sessionID,
+		})
+		sendSimChatEvent(conn, string(res))
+	}
+
+	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result. Let me read the current loader first.", 45*time.Millisecond)
+	toolStep("msg_ask_impl_2", "toolu_ask_read", "Read",
+		map[string]any{"file_path": "internal/config/load.go"},
+		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond)
+	streamThinking("msg_ask_impl_3", "Load reads a single file today. I'll overlay config.<env>.toml on top via a recursive merge, then validate the merged map against the known keys.", 1600*time.Millisecond)
+	toolStep("msg_ask_impl_4", "toolu_ask_edit", "Edit",
+		map[string]any{"file_path": "internal/config/load.go", "old_string": "return parseFile(filepath.Join(root, \"config.toml\"))", "new_string": "base, err := parseFile(filepath.Join(root, \"config.toml\"))\nif err != nil {\n\treturn nil, err\n}\nreturn applyEnvOverlay(base, root, env)"},
+		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond)
+	streamText("msg_ask_impl_5", "That's the merge wired in. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
+	streamText("msg_ask_impl_6", simAskImplMarkdown, 70*time.Millisecond)
+
+	result, _ := json.Marshal(map[string]any{
+		"type": "result", "subtype": "success", "duration_ms": 9200, "total_cost_usd": 0.0361,
+		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 1820, "cache_read_input_tokens": 22400, "cache_creation_input_tokens": 980},
+		"session_id": sessionID,
+	})
+	sendSimChatEvent(conn, string(result))
+}
+
 // --- Simulated AskUserQuestion agent (agent-ask) ------------------------------
 
 // simAskQuestionInput is the AskUserQuestion input the simulated agent-ask
@@ -3224,7 +3837,11 @@ var simAskEvents = []string{
 	`{"type":"system","subtype":"init","session_id":"sim-ask","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentAskPrompt + `"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"thinking","thinking":"The loader currently reads one config.toml. Layering strategy and scope of the first cut are product decisions - ask instead of guessing."}]}}`,
-	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area. First, a sketch of the override file so we have something concrete to talk about:"}]}}`,
+	// A Write tool call: its content renders as a numbered, syntax-highlighted
+	// code block (like a Read), not raw JSON.
+	`{"type":"assistant","message":{"id":"msg_ask_write","content":[{"type":"tool_use","id":"toolu_ask_write","name":"Write","input":{"file_path":"config.local.toml","content":"# Per-environment overrides, layered over config.toml.\n# Keys here win; anything omitted falls through to the base file.\n\n[network]\nmode = \"hard\"\nallowed_hosts = [\"api.internal.example.com\"]\n\n[claude.sandbox]\nwritable_paths = [\"./.cache/local\"]\n\n[tests.unit]\ncommand = \"go test ./... -short\"\n"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask_write","content":"File created successfully at: config.local.toml"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_2","content":[{"type":"tool_use","id":"toolu_ask_1","name":"AskUserQuestion","input":` + simAskQuestionInput + `}]}}`,
 	`{"type":"control_request","request_id":"sim-ask-req-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":` + simAskQuestionInput + `,"tool_use_id":"toolu_ask_1","requires_user_interaction":true}}`,
 }
@@ -3271,7 +3888,10 @@ func handleSimAskWS(conn *safeConn) {
 				"session_id": "sim-ask",
 			})
 			sendSimChatEvent(conn, string(toolResult))
-			streamSimReply(conn, "sim-ask", "msg_ask_ack", "Great - going with those choices. This mock stops here; a real head would start implementing now.")
+			// Answering the question kicks off the big streamed implementation turn
+			// (interleaved tools + thinking, then a long markdown block typed in
+			// slowly) so the demo shows a large chat streaming in live.
+			streamSimAskImplementation(conn, "sim-ask")
 			sendStatusUpdate(conn, "waiting")
 		case "set_model":
 			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
@@ -3306,6 +3926,10 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	// bash tabs (shell=true) still get the plain simulated terminal below.
 	if agentID == "agent-chat" && r.URL.Query().Get("shell") != "true" {
 		handleSimChatWS(conn)
+		return
+	}
+	if agentID == "agent-chat-codex" && r.URL.Query().Get("shell") != "true" {
+		handleSimCodexChatWS(conn)
 		return
 	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {
@@ -3372,10 +3996,20 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// simArtifactStreamInterval is the gap between the mock "components" tiles the
+// artifacts WS trickles in, so opening the agent page shows them pop in one at a
+// time (the ::hydra:artifact:: streaming) rather than all at once. Small enough
+// that the whole set has arrived within a second or two - the screenshot
+// generator waits for the last tile (see expandArtifact in take-screenshots.ts)
+// so it stays deterministic despite the timing.
+const simArtifactStreamInterval = 600 * time.Millisecond
+
 // HandleArtifactsWS streams the mock artifact sets over a WebSocket, mirroring
 // the real server's endpoint. It sends one snapshot (the simulated states,
-// including the in-flight set's live log) and then keeps the connection open,
-// ignoring client messages, until the peer closes it.
+// including the in-flight set's live log), then trickles the in-flight
+// "components" set's tiles in one at a time - a live demo of the per-file
+// ::hydra:artifact:: streaming - and finally keeps the connection open, ignoring
+// client messages, until the peer closes it.
 func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
@@ -3385,14 +4019,98 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	msg := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
-	data, _ := json.Marshal(msg)
+	snapshot := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
+	data, _ := json.Marshal(snapshot)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 
-	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+	// Read (and discard) client frames in the background, closing done on any error
+	// so the trickle below stops the moment the peer disconnects.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Trickle each finished tile into the still-generating "components" set, one per
+	// interval, exactly as the real server pushes a "file" message per compared
+	// output. Each tile lands as a "file" frame the panel upserts into the card.
+	for _, f := range simStreamedArtifactFiles(id) {
+		select {
+		case <-done:
+			return
+		case <-time.After(simArtifactStreamInterval):
+		}
+		fdata, _ := json.Marshal(artifactWSMessage{Type: "file", Script: "components", File: &f})
+		if err := conn.WriteMessage(websocket.TextMessage, fdata); err != nil {
 			return
 		}
+	}
+
+	// Then keep streaming build-log lines for the still-generating "components"
+	// set, a couple per tick, mirroring a chatty capture script. This exercises
+	// the panel's live-log path (and its re-render behaviour under a fast log).
+	for i := 0; ; i++ {
+		select {
+		case <-done:
+			return
+		case <-time.After(150 * time.Millisecond):
+		}
+		side := "left"
+		if i%2 == 1 {
+			side = "right"
+		}
+		line := &api.ArtifactLogLine{Stream: api.Stdout, Text: fmt.Sprintf("[%s] capturing frame %d ... ok", side, i)}
+		ldata, _ := json.Marshal(artifactWSMessage{Type: "log", Script: "components", Side: side, Line: line})
+		if err := conn.WriteMessage(websocket.TextMessage, ldata); err != nil {
+			return
+		}
+	}
+}
+
+// simStreamedArtifactFiles is the ordered list of tiles the simulated in-flight
+// "components" generation finishes and streams over the WS as "file" messages
+// (see HandleArtifactsWS), one per ::hydra:artifact:: marker. A mix of freshly
+// added components (right-only) and modified ones (a "Draft" grey badge going
+// green "Live", so the pixel diff has something to reveal), so the streaming grid
+// documents both change kinds arriving mid-run. Ordered so the trickle reads like
+// a capture loop working through a page list.
+func simStreamedArtifactFiles(id string) []api.ArtifactFile {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ArtifactFile{
+		{
+			Name:        "button.png",
+			ChangeType:  api.ArtifactFileChangeTypeModified,
+			LeftUrl:     ptr(simSVGUI("Button", false, "#64748b", "Draft", 240, 120)),
+			RightUrl:    ptr(simSVGUI("Button", false, "#16a34a", "Live", 240, 120)),
+			ChangeRatio: ptr(0.04),
+			Width:       ptr(960), Height: ptr(480),
+		},
+		{
+			Name:       "card.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Card (after)", "#15803d", 320, 200)),
+			Width:      ptr(1280), Height: ptr(800),
+		},
+		{
+			Name:        "modal.png",
+			ChangeType:  api.ArtifactFileChangeTypeModified,
+			LeftUrl:     ptr(simSVGUI("Modal", false, "#64748b", "Draft", 300, 220)),
+			RightUrl:    ptr(simSVGUI("Modal", false, "#16a34a", "Live", 300, 220)),
+			ChangeRatio: ptr(0.07),
+			Width:       ptr(1200), Height: ptr(880),
+		},
+		{
+			Name:       "toast.png",
+			ChangeType: api.ArtifactFileChangeTypeAdded,
+			RightUrl:   ptr(simSVG("Toast (after)", "#15803d", 280, 100)),
+			Width:      ptr(1120), Height: ptr(400),
+		},
 	}
 }
 

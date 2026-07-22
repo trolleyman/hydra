@@ -3,10 +3,11 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
-// The two-pane split only applies at lg+ (the sidebar's own breakpoint). Below
-// it the agent page degrades to the classic single-column stacked layout, which
-// is already responsive and reads well on a phone.
-export const SPLIT_QUERY = '(min-width: 1024px)'
+// The two-pane split only applies at md+ (the sidebar's own breakpoint, and
+// RepositoryView's). Below it the agent page becomes the narrow screen-stack
+// (chat <-> diff full-screen screens). Unified to 768px so every surface flips
+// to its mobile layout at the same width.
+export const SPLIT_QUERY = '(min-width: 768px)'
 
 // Small matchMedia hook (mirrors useFinePointer) - re-renders on breakpoint
 // crossings so the layout can swap between split and stacked live.
@@ -25,39 +26,9 @@ export function useMediaQuery(query: string): boolean {
   return matches
 }
 
-// Agent-page layout state: the split-layout feature flag and the pane-collapse
-// focus mode. Both are browser-scoped, global preferences (like the sidebar
-// store) so any surface - notably AgentTopBar, which hosts the inspector toggle
-// - can read and flip them without prop-drilling.
-
-// ── Split-layout feature flag ────────────────────────────────────────────────
-// The new two-pane agent layout (working pane + inspector pane). Default ON; a
-// Settings > Browser toggle lets the user fall back to the classic single-scroll
-// stacked layout while it beds in. Stored as '0' when opted out; absent/'1' = on.
-export function loadSplitLayoutEnabled(): boolean {
-  return readLocal(StorageKeys.splitLayoutEnabled) !== '0'
-}
-
-interface SplitLayoutState {
-  enabled: boolean
-  setEnabled: (enabled: boolean) => void
-}
-
-export const useSplitLayoutStore = create<SplitLayoutState>()(
-  persist(
-    (set) => ({
-      enabled: loadSplitLayoutEnabled(),
-      setEnabled: (enabled) => set({ enabled }),
-    }),
-    {
-      name: StorageKeys.splitLayoutEnabled,
-      storage: singleFieldStorage('enabled', loadSplitLayoutEnabled, (enabled) =>
-        writeLocal(StorageKeys.splitLayoutEnabled, enabled ? null : '0'),
-      ),
-      partialize: (s) => ({ enabled: s.enabled }),
-    },
-  ),
-)
+// Agent-page layout state: the pane-collapse focus mode. Browser-scoped, global
+// preference (like the sidebar store) so any surface - notably the top bar's
+// inspector toggle - can read and flip it without prop-drilling.
 
 // ── Pane collapse (focus mode) ───────────────────────────────────────────────
 // The divider has three states: the normal split, terminal-only (inspector

@@ -1,6 +1,9 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -72,9 +75,9 @@ func TestAgentArgv(t *testing.T) {
 		// Codex disables its own sandbox/approvals (it runs inside Hydra's
 		// sandbox); the task is a positional argument and resume continues the
 		// most recent session in the cwd.
-		{AgentTypeCodex, false, "do a thing", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "do a thing"}},
-		{AgentTypeCodex, false, "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}},
-		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
+		{AgentTypeCodex, false, "do a thing", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "do a thing"}},
+		{AgentTypeCodex, false, "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}},
+		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
 		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, "")
@@ -131,6 +134,19 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 	}
 }
 
+func TestAgentArgvCodexChat(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"codex", "--dangerously-bypass-hook-trust", "--enable", "default_mode_request_user_input", "app-server", "--listen", "stdio://"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("resume=%v: got %q, want %q", resume, got, want)
+		}
+	}
+}
+
 // TestAgentArgvModel verifies --model is passed on a fresh spawn but omitted on
 // resume (so the agent restores its transcript's model / any /model change).
 func TestAgentArgvModel(t *testing.T) {
@@ -143,8 +159,8 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeClaude, true, []string{"claude", "--dangerously-skip-permissions", "--continue"}},
 		{AgentTypeGemini, false, []string{"gemini", "--approval-mode=yolo", "--model", "opus"}},
 		{AgentTypeGemini, true, []string{"gemini", "--approval-mode=yolo", "--resume", "latest"}},
-		{AgentTypeCodex, false, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--model", "opus"}},
-		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
+		{AgentTypeCodex, false, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--model", "opus"}},
+		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
 		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "")
@@ -168,4 +184,33 @@ func TestExpandAllDedupes(t *testing.T) {
 			t.Errorf("expandAll[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
+}
+
+func TestEnsureWritableDir(t *testing.T) {
+	home := t.TempDir()
+
+	// A HOME-anchored path that does not exist yet is created (including parents).
+	nested := filepath.Join(home, ".local", "share", "aube")
+	ensureWritableDir(nested, home)
+	if fi, err := os.Stat(nested); err != nil || !fi.IsDir() {
+		t.Errorf("ensureWritableDir did not create HOME-anchored path %q: err=%v", nested, err)
+	}
+
+	// An existing path is left untouched (no error, still a dir).
+	ensureWritableDir(nested, home)
+	if fi, err := os.Stat(nested); err != nil || !fi.IsDir() {
+		t.Errorf("ensureWritableDir disturbed existing path %q: err=%v", nested, err)
+	}
+
+	// A path OUTSIDE HOME is never created, so a config typo cannot litter the
+	// wider filesystem.
+	outside := filepath.Join(t.TempDir(), "not-under-home")
+	ensureWritableDir(outside, home)
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Errorf("ensureWritableDir created a non-HOME path %q (err=%v); want it left missing", outside, err)
+	}
+
+	// Empty inputs are no-ops (must not panic or create anything).
+	ensureWritableDir("", home)
+	ensureWritableDir(nested, "")
 }

@@ -160,8 +160,11 @@ type ChatQueueManager struct {
 	// with a `result` line (subtype error_during_execution) but fires NO Stop
 	// hook, so nothing in-sandbox ever flips status.json out of "running" - the
 	// head would spin forever and a queue restored on attach would never drain.
-	// OnTurnEnd consumes the mark and writes the "waiting" status itself.
+	// OnTurnEnd consumes the mark and writes the resting status itself.
 	interrupted map[string]time.Time
+	// onEvent mirrors queue/input transitions into the normalized durable chat
+	// stream. Optional so focused queue tests and legacy callers stay lightweight.
+	onEvent func(id, eventType string, payload any)
 }
 
 // interruptMarkTTL bounds how long a pending-interrupt mark stays valid. An
@@ -184,6 +187,21 @@ var interruptSettleTimeout = 5 * time.Second
 // to a session's stdin; store resolves an agent id to its project root.
 func NewChatQueueManager(reg *session.Registry, store *db.Store) *ChatQueueManager {
 	return &ChatQueueManager{reg: reg, store: store, queues: map[string]*ChatQueue{}, interrupted: map[string]time.Time{}}
+}
+
+func (m *ChatQueueManager) SetEventSink(fn func(id, eventType string, payload any)) {
+	m.mu.Lock()
+	m.onEvent = fn
+	m.mu.Unlock()
+}
+
+func (m *ChatQueueManager) emit(id, eventType string, payload any) {
+	m.mu.Lock()
+	fn := m.onEvent
+	m.mu.Unlock()
+	if fn != nil {
+		fn(id, eventType, payload)
+	}
 }
 
 // queue returns the cached ChatQueue for id, loading it from disk on first use.
@@ -273,20 +291,17 @@ func (m *ChatQueueManager) takeInterrupted(id string) bool {
 }
 
 // writeToStdin hands one message's content to the CLI as a user turn.
-func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) {
-	line, err := claudestream.UserMessageLine(content)
-	if err != nil {
-		log.Printf("warn: chat queue: bad content for %s: %v", id, err)
-		return
-	}
+func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool {
 	// A new user turn is starting: a still-pending interrupt mark belongs to a
 	// turn that never answered (a race with its own end), not to this one.
 	m.mu.Lock()
 	delete(m.interrupted, id)
 	m.mu.Unlock()
-	if err := m.reg.Write(id, line); err != nil {
+	if err := m.reg.SendChatUser(id, content); err != nil {
 		log.Printf("warn: chat queue: write to %s: %v", id, err)
+		return false
 	}
+	return true
 }
 
 // Submit records a fresh user message. queued reflects the client's view that a
@@ -305,16 +320,23 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) {
 func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
+		m.emit(id, "queued_message", map[string]any{"id": msg.ID, "status": "queued", "content": msg.Content})
 		m.kickIfResting(projectRoot, id)
 		return
 	}
-	m.writeToStdin(id, msg.Content)
+	if m.writeToStdin(id, msg.Content) {
+		m.emit(id, "user_message", map[string]any{"id": msg.ID, "content": msg.Content})
+	}
 }
 
 // Dequeue removes a still-queued message (the Up-arrow recall), reporting
 // whether it was found.
 func (m *ChatQueueManager) Dequeue(projectRoot, id, msgID string) bool {
-	return m.queue(projectRoot, id).Dequeue(msgID)
+	removed := m.queue(projectRoot, id).Dequeue(msgID)
+	if removed {
+		m.emit(id, "queue_message_removed", map[string]any{"id": msgID})
+	}
+	return removed
 }
 
 // List returns a head's queued messages (for the on-attach replay frame).
@@ -325,27 +347,31 @@ func (m *ChatQueueManager) List(projectRoot, id string) []QueuedMessage {
 // OnTurnEnd is the registry's turn-end (`result` event) hook: the current turn
 // finished, so dump the queued messages to the CLI.
 //
-// A turn ended by a user interrupt fires no Stop hook (unlike a normal turn
-// end), so nothing in-sandbox updates status.json and the head would sit in
-// "running" forever - spinner on, the client queueing instead of sending, and
-// OnAttach refusing to drain. Consume the pending-interrupt mark and write the
-// "waiting" status here, exactly as the hook would have; the JSON poller picks
-// it up within a tick and broadcasts it. Written BEFORE the drain, so a drained
+// The provider result is the daemon's authoritative turn-end signal. Write the
+// resting status here rather than relying solely on Claude's in-sandbox Stop
+// hook: that hook may be delayed or absent, which otherwise leaves chat mode
+// stuck "running" indefinitely. Written BEFORE the drain, so a drained
 // message's own UserPromptSubmit hook (status running, newer timestamp)
-// supersedes it cleanly.
+// supersedes it cleanly. Interrupt tracking is still consumed here so its
+// timeout cannot relabel a later turn.
 func (m *ChatQueueManager) OnTurnEnd(id string) {
 	root, ok := m.resolveRoot(id)
 	if !ok {
 		return
 	}
-	if m.takeInterrupted(id) {
-		if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
-			Status:    api.Waiting,
-			Timestamp: time.Now().Format(time.RFC3339Nano),
-		}); err != nil {
-			log.Printf("warn: write post-interrupt status for %s: %v", id, err)
-		}
+	m.takeInterrupted(id)
+	status := api.Finished
+	if entries, err := os.ReadDir(paths.GetSubagentsDirFromProjectRoot(root, id)); err == nil && len(entries) > 0 {
+		status = api.Running
 	}
+	ts := time.Now().Format(time.RFC3339Nano)
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+		Status:    status,
+		Timestamp: ts,
+	}); err != nil {
+		log.Printf("warn: write post-turn status for %s: %v", id, err)
+	}
+	_ = m.store.UpdateAgentStatus(id, string(status), ts, false)
 	m.drainAll(root, id)
 }
 
@@ -403,7 +429,9 @@ func (m *ChatQueueManager) drainAll(projectRoot, id string) {
 		if !ok {
 			return
 		}
-		m.writeToStdin(id, msg.Content)
+		if m.writeToStdin(id, msg.Content) {
+			m.emit(id, "user_message", map[string]any{"id": msg.ID, "content": msg.Content})
+		}
 	}
 }
 

@@ -1,53 +1,90 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useSidebarStore } from './sidebar'
 import { StorageKeys, readLocal } from './storage'
 
-// The sidebar store adopts zustand persist but distinguishes the persisted
-// explicit `preference` from the transient runtime `collapsed` flag. matchMedia
-// is stubbed to never match (see test setup), so the screen-width default is
-// "collapsed" (small-screen behaviour).
-describe('useSidebarStore persistence', () => {
+// The store keeps two independent flags: the persisted desktop collapse
+// preference and the transient mobile panel state. The global matchMedia stub
+// (see test setup) never matches, so by default tests run on the "mobile" side;
+// desktop-side cases override matchMedia per test.
+
+function stubMatchMedia(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: () => ({
+      matches,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  })
+}
+
+describe('useSidebarStore', () => {
   beforeEach(() => {
     localStorage.clear()
-    // Re-read after clearing so each case starts from "no stored preference".
+    stubMatchMedia(false)
+    // Re-read after clearing so each case starts from "nothing stored".
     useSidebarStore.persist.rehydrate()
+    useSidebarStore.getState().closeMobile()
   })
 
-  it('falls back to the screen-width default when nothing is stored', () => {
-    expect(useSidebarStore.getState().preference).toBe(null)
-    expect(useSidebarStore.getState().collapsed).toBe(true)
+  afterEach(() => {
+    stubMatchMedia(false)
   })
 
-  it('toggle records and persists the explicit preference', () => {
-    const before = useSidebarStore.getState().collapsed
-    useSidebarStore.getState().toggle()
-    expect(useSidebarStore.getState().collapsed).toBe(!before)
-    expect(useSidebarStore.getState().preference).toBe(!before)
-    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe(!before ? '1' : '0')
+  it('defaults to desktop expanded and mobile closed when nothing is stored', () => {
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(false)
+    expect(useSidebarStore.getState().mobileOpen).toBe(false)
   })
 
-  it('a transient change moves collapsed but does not clobber the preference', () => {
-    // User explicitly expands (e.g. on a wide screen).
-    useSidebarStore.getState().setCollapsed(false, true)
-    expect(useSidebarStore.getState().preference).toBe(false)
-    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe('0')
-
-    // A transient small-screen auto-close flips the live flag only.
-    useSidebarStore.getState().setCollapsed(true, false)
-    expect(useSidebarStore.getState().collapsed).toBe(true)
-    expect(useSidebarStore.getState().preference).toBe(false)
-    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe('0')
-  })
-
-  it('rehydrates the live collapsed flag from a stored preference', () => {
-    localStorage.setItem(StorageKeys.sidebarCollapsed, '0')
-    useSidebarStore.persist.rehydrate()
-    expect(useSidebarStore.getState().preference).toBe(false)
-    expect(useSidebarStore.getState().collapsed).toBe(false)
-
+  it('rehydrates only an explicit stored "1" as collapsed', () => {
     localStorage.setItem(StorageKeys.sidebarCollapsed, '1')
     useSidebarStore.persist.rehydrate()
-    expect(useSidebarStore.getState().preference).toBe(true)
-    expect(useSidebarStore.getState().collapsed).toBe(true)
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(true)
+
+    // The old store's '0' ("explicitly expanded") migrates to expanded.
+    localStorage.setItem(StorageKeys.sidebarCollapsed, '0')
+    useSidebarStore.persist.rehydrate()
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(false)
+  })
+
+  it('never rehydrates the mobile panel open', () => {
+    useSidebarStore.getState().openMobile()
+    localStorage.setItem(StorageKeys.sidebarCollapsed, '1')
+    useSidebarStore.persist.rehydrate()
+    expect(useSidebarStore.getState().mobileOpen).toBe(false)
+  })
+
+  it('toggle on mobile flips mobileOpen and persists nothing', () => {
+    useSidebarStore.getState().toggle()
+    expect(useSidebarStore.getState().mobileOpen).toBe(true)
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(false)
+    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe(null)
+
+    useSidebarStore.getState().toggle()
+    expect(useSidebarStore.getState().mobileOpen).toBe(false)
+  })
+
+  it('toggle on desktop flips and persists desktopCollapsed, leaving mobileOpen alone', () => {
+    stubMatchMedia(true)
+    useSidebarStore.getState().toggle()
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(true)
+    expect(useSidebarStore.getState().mobileOpen).toBe(false)
+    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe('1')
+
+    // Expanding again clears the key (expanded is the default).
+    useSidebarStore.getState().toggle()
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(false)
+    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe(null)
+  })
+
+  it('desktop collapse preference survives a mobile open/close cycle', () => {
+    stubMatchMedia(true)
+    useSidebarStore.getState().toggle() // collapse on desktop
+    stubMatchMedia(false)
+    useSidebarStore.getState().openMobile()
+    useSidebarStore.getState().closeMobile()
+    expect(useSidebarStore.getState().desktopCollapsed).toBe(true)
+    expect(readLocal(StorageKeys.sidebarCollapsed)).toBe('1')
   })
 })

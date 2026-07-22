@@ -152,6 +152,23 @@ func (in *instance) serveLoadingPage(w http.ResponseWriter) {
 	fmt.Fprintf(w, loadingPageHTML, html.EscapeString(name), statusPrefix)
 }
 
+// forceRevalidate is the reverse proxy's ModifyResponse hook. Previews mirror
+// the live (uncommitted) worktree, so a browser must never serve a preview
+// response from cache without checking with us first, or edits appear stale.
+// We rewrite Cache-Control to "no-cache" (revalidate before every use) but keep
+// the upstream dev server's ETag/Last-Modified validators intact: unchanged
+// assets still get a cheap 304, changed ones get fresh bytes. We only downgrade
+// freshness (max-age/Expires/immutable) - never touch validation - because the
+// dev server is the only component that knows the real content behind a URL
+// (bundled artifacts have no on-disk file for us to stat).
+func forceRevalidate(resp *http.Response) error {
+	// no-cache means "may store, but must revalidate before use" - unlike
+	// no-store this preserves conditional-request 304s via the kept validators.
+	resp.Header.Set("Cache-Control", "no-cache")
+	resp.Header.Del("Expires") // legacy freshness; would override Cache-Control in old caches
+	return nil
+}
+
 // prefersHTML reports whether the request looks like a browser navigation
 // (rather than an app's fetch/XHR/WS), i.e. it should get an HTML page.
 func prefersHTML(r *http.Request) bool {

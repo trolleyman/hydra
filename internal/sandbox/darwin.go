@@ -65,6 +65,10 @@ func BuildSpec(opts Options) (*Spec, error) {
 	}
 	// Writable paths (the worktree is covered by WORK_DIR in the template).
 	for _, p := range expandAll(opts.WritablePaths, home) {
+		// Create a HOME-anchored writable_path that doesn't exist yet, so a
+		// freshly-configured cache/store (e.g. ~/.local/share/aube) can actually
+		// be written under - a file-write rule can't create a missing parent.
+		ensureWritableDir(p, home)
 		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(p))
 	}
 	// Masked paths: deny both read and write.

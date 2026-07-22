@@ -6,6 +6,8 @@ import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
 import { fireNotification, dismissNotification } from './notifyPrefs'
+import { agentTransitionToast } from './agentToast'
+import { ensureProjectIconUrl, projectIconUrl } from './projectIconUrl'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
@@ -52,6 +54,14 @@ const OS_STICKY_DISMISS_MS = 120_000
 // backgrounded/unfocused case. A focused tab gets the toast only (no redundant
 // OS notification). See lib/notifyPrefs.
 //
+// Those OS notifications are titled `Hydra agent in <project id> <transition>`
+// with the agent name as the body, and carry the project's icon. Leading with
+// "Hydra" brands them in a crowded OS tray; the project comes next because out
+// of tab it's what decides whether it's worth switching away for (the toasts
+// word it agent-first, since in-app you already know the project). Project id
+// rather than display name: it's what the routes, CLI and branch names use, so
+// it matches what you'd search for.
+//
 // `selectedAgentId` is the agent (branch) whose page is currently open. Its own
 // state-transition toasts are suppressed - you're already looking at that branch,
 // so a toast announcing what its header already shows is just noise. The out-of-
@@ -66,6 +76,14 @@ export function useAgentNotifications(
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
   const navigate = useNavigate()
+
+  // Rasterizing a project icon into a URL is async, but notifications fire from
+  // a synchronous diff - so warm the cache whenever the project list changes and
+  // read it synchronously below. A project whose icon hasn't resolved yet just
+  // gets the default Hydra mark on that one notification.
+  useEffect(() => {
+    for (const p of projects) void ensureProjectIconUrl(p.icon, p.id)
+  }, [projects])
 
   // Open an agent from an OS-notification click: select its project first (a
   // no-op for the current one), then route to it. Mirrors the toast's "View".
@@ -110,6 +128,9 @@ export function useAgentNotifications(
   // agentId → status timestamp we last fetched approvals for, so we only refetch
   // when the gate bumps the timestamp (a new park / a resolution).
   const approvalStamp = useRef<Map<string, string>>(new Map())
+  // agentIds with an in-flight listAgentApprovals fetch, so overlapping ticks
+  // don't double-fetch (matters for lingering cards, which refetch every tick).
+  const approvalFetching = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     // The store's agent list belongs to `agentsProjectId`; ignore runs where it
@@ -117,6 +138,15 @@ export function useAgentNotifications(
     if (!currentProjectId || agentsProjectId !== currentProjectId) return
 
     const toast = useToastStore.getState()
+    // OS notifications lead with the project id and carry the agent name as the
+    // detail line - out of tab, "which project?" is the part you can't infer.
+    // Read imperatively (like the toast store above): the project list changes on
+    // every cross-project count broadcast, and making it a dep would re-run this
+    // whole diff - including the approval fetches - for an icon lookup.
+    const projectIcon = projectIconUrl(
+      useProjectStore.getState().projects.find((p) => p.id === currentProjectId)?.icon,
+      currentProjectId,
+    )
 
     // --- 1. needs_input / finished transition toasts ---
     const prev = lastStatus.current
@@ -154,37 +184,37 @@ export function useAgentNotifications(
       if (status === 'needs_input' && notifType !== 'policy_approval') {
         if (!isSelected) {
           toast.show({
-            message: `"${name}" transitioned to needs input`,
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} needs input`,
-            body: 'The agent is blocked waiting on you.',
+            title: `Hydra agent in ${currentProjectId} needs input`,
+            body: name,
             tag: `needs-input:${agent.id}`,
             sticky: true,
             autoDismissMs: OS_STICKY_DISMISS_MS,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
       } else if (status === 'finished') {
         if (!isSelected) {
           toast.show({
-            message: `"${name}" transitioned to finished`,
             type: 'success',
             duration: FINISHED_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} finished`,
-            body: 'The agent has completed its task.',
+            title: `Hydra agent in ${currentProjectId} finished`,
+            body: name,
             tag: `finished:${agent.id}`,
             sticky: false,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -194,18 +224,18 @@ export function useAgentNotifications(
         // toast + sticky OS notification), but as an error.
         if (!isSelected) {
           toast.show({
-            message: `"${name}" hit an API error`,
             type: 'error',
             duration: NEEDS_INPUT_TOAST_MS,
-            agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
         }
         if (!pageActive) {
           fireNotification({
-            title: `${name} hit an API error`,
-            body: 'The turn failed mid-response - the reply may be incomplete.',
+            title: `Hydra agent in ${currentProjectId} hit an API error`,
+            body: name,
             tag: `error:${agent.id}`,
             sticky: true,
+            icon: projectIcon,
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -215,46 +245,81 @@ export function useAgentNotifications(
     lastUnread.current = nextUnread
 
     // --- 2. security-gate approval toasts ---
-    const decide = async (agentId: string, reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) => {
+    // `command` is sent only for a host_command allow: it echoes back the exact
+    // command the card displayed, and the daemon runs THAT text (never the
+    // head-writable request file), closing the TOCTOU window.
+    const decide = async (
+      agentId: string,
+      reqid: string,
+      decision: ApprovalDecisionRequest.decision,
+      remember: boolean,
+      command?: string,
+    ) => {
       await runWithToast(
-        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember }),
+        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember, command }),
         { errorPrefix: decision === ApprovalDecisionRequest.decision.ALLOW ? 'Failed to allow request' : 'Failed to deny request' },
       )
     }
 
-    // Drop tracked toasts for agents that have left the approval wait (or the
-    // list). They resolved elsewhere, so tear them down silently (no deny).
-    const approvalAgentIds = new Set(
+    // A parked request lives on disk for the whole approval window, and
+    // listAgentApprovals reads it directly - so a card's lifetime is tied to its
+    // REQUEST (decided or withdrawn), NOT to the head's momentary status. A head
+    // routinely leaves the policy_approval status while a connection is still
+    // parked: the in-sandbox client (curl/git/Claude's fetch) gives up on the held
+    // connection long before the ~5-min server window, and the agent's own
+    // PostToolUse hook then rewrites status to "running" (see the egress approver
+    // in internal/heads/egress.go). The connection is dead by then, but the host
+    // can still be granted - "Always allow" persists it so the agent's retry
+    // sails through - so we keep the card up until its request actually resolves,
+    // instead of dismissing it the instant the status flips (which used to make
+    // the card vanish seconds after appearing).
+    const agentById = new Map(agents.map((a) => [a.id, a]))
+    const parkedAgentIds = new Set(
       agents.filter((a) => a.agent_status?.notification_type === 'policy_approval').map((a) => a.id),
     )
+    // Drop tracked cards only for agents that have vanished from the list entirely
+    // (killed/merged): their requests can never resolve, so tear down silently.
+    // A head that merely LEFT the approval wait keeps its cards - they're
+    // reconciled against the on-disk request below.
     for (const [agentId, reqMap] of approvalToasts.current) {
-      if (approvalAgentIds.has(agentId)) continue
+      if (agentById.has(agentId)) continue
       for (const [reqid, toastId] of reqMap) {
         toast.dismiss(toastId, { silent: true })
-        // The gate wait is over, so retract its OS notification too.
+        // The head is gone, so retract its OS notification too.
         dismissNotification(`approval:${agentId}:${reqid}`)
       }
       approvalToasts.current.delete(agentId)
       approvalStamp.current.delete(agentId)
     }
 
-    // For each agent waiting on the gate, fetch its parked calls when the status
-    // timestamp has changed since we last looked, then reconcile toasts.
-    for (const agent of agents) {
-      if (agent.agent_status?.notification_type !== 'policy_approval') continue
+    // Reconcile approvals for every head that is parked now OR still shows a card
+    // we're tracking - so a lingering card keeps polling until its request is
+    // withdrawn/decided, even after the head's status moved off policy_approval.
+    const reconcileIds = new Set([...parkedAgentIds, ...approvalToasts.current.keys()])
+    for (const agentId of reconcileIds) {
+      const agent = agentById.get(agentId)
+      if (!agent) continue
+      if (approvalFetching.current.has(agentId)) continue // a fetch is already in flight
       const stamp = agent.agent_status?.timestamp ?? ''
-      if (approvalStamp.current.get(agent.id) === stamp) continue
-      approvalStamp.current.set(agent.id, stamp)
+      const parked = parkedAgentIds.has(agentId)
+      // Stamp-gate parked heads (skip refetching the same still-parked set every
+      // tick). A head that already left the wait but still shows a card must be
+      // refetched regardless, so we notice its request being withdrawn at timeout
+      // even though its status has stopped changing.
+      if (parked && approvalStamp.current.get(agentId) === stamp) continue
+      approvalStamp.current.set(agentId, stamp)
+      approvalFetching.current.add(agentId)
 
-      const agentId = agent.id
       const agentName = agent.title || agent.id
       void (async () => {
         let approvals: ApprovalRequest[]
         try {
           approvals = (await api.default.listAgentApprovals(currentProjectId, agentId)).approvals ?? []
         } catch {
-          // Leave existing toasts in place; a later stamp bump will retry.
+          // Leave existing toasts in place; a later tick will retry.
           return
+        } finally {
+          approvalFetching.current.delete(agentId)
         }
         let reqMap = approvalToasts.current.get(agentId)
         if (!reqMap) {
@@ -262,13 +327,34 @@ export function useAgentNotifications(
           approvalToasts.current.set(agentId, reqMap)
         }
         const liveReqids = new Set(approvals.map((a) => a.reqid))
-        // Withdrawn requests (gone from the fetch) → silent teardown.
+        // Withdrawn/decided requests (gone from the fetch) → silent teardown. Runs
+        // for parked and lingering heads alike; a lingering head polls precisely
+        // so its card disappears once the park times out or resolves elsewhere.
         for (const [reqid, toastId] of reqMap) {
           if (liveReqids.has(reqid)) continue
           toast.dismiss(toastId, { silent: true })
           dismissNotification(`approval:${agentId}:${reqid}`)
           reqMap.delete(reqid)
         }
+        // A head that has LEFT the approval wait only ever tears its cards down -
+        // it never surfaces a new one here (a genuinely new park flips the head
+        // back into policy_approval, handled by the parked branch below). This
+        // also means a stale in-flight fetch can only remove a card, never
+        // resurrect a just-decided one - so the stale-response guard below is
+        // needed only on the parked path.
+        if (!parked) {
+          if (reqMap.size === 0) {
+            approvalToasts.current.delete(agentId)
+            approvalStamp.current.delete(agentId)
+          }
+          return
+        }
+        // A newer status transition may have resolved/withdrawn one of these
+        // approvals while the request was in flight. Never let an older HTTP
+        // response resurrect a just-dismissed card (seen as a quick identical
+        // popup). (A lingering head keeps the same stamp across refetches, so this
+        // would be a no-op there - hence the parked-only placement.)
+        if (approvalStamp.current.get(agentId) !== stamp) return
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
         // dedups so a repeat fetch (or StrictMode double-run) reuses the toast.
         for (const a of approvals) {
@@ -280,12 +366,19 @@ export function useAgentNotifications(
           // registering it in Hydra's known-tools list, not a per-call grant) are
           // one-shot only.
           const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
+          // A webfetch/egress allow is a session-wide host grant - it covers every
+          // later request to that host until the head is killed - so its button
+          // says "Allow", not "Allow once". Other kinds are genuinely one-shot.
+          const sessionHostGrant = a.kind === 'webfetch' || a.kind === 'egress'
+          // host_command echoes the displayed command back on allow (the TOCTOU
+          // guard); every other kind sends no command.
+          const echoCommand = a.kind === 'host_command' ? a.target : undefined
           const actions = [
             {
-              label: 'Allow once',
+              label: sessionHostGrant ? 'Allow' : 'Allow once',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
-                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false)
+                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false, echoCommand)
                 reqMap!.delete(a.reqid)
                 toast.dismiss(toastId, { silent: true })
               },
@@ -336,11 +429,14 @@ export function useAgentNotifications(
           reqMap.set(a.reqid, id)
           if (isNewApproval && !pageActive) {
             fireNotification({
-              title: `${agentName} needs approval`,
-              body: a.summary,
+              title: `Hydra agent in ${currentProjectId} needs approval`,
+              // Approval keeps its summary after the agent name - unlike the
+              // status notifications, *what* is being approved is the point.
+              body: `${agentName} - ${a.summary}`,
               tag: `approval:${agentId}:${a.reqid}`,
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
+              icon: projectIcon,
               onClick: () => openAgent(currentProjectId, agentId),
             })
           }
@@ -387,20 +483,20 @@ export function useAgentNotifications(
           toast.show({
             // One toast per agent (no plural copy); the key dedups a re-fetch.
             key: `bg-needs-input:${a.id}`,
-            message: `Agent "${agentName}" in project "${projectName}" transitioned to needs input`,
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
             // Cross-project: the label still links through (its onClick selects the
             // project first), and projectName draws the cross-project banner.
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName, projectIcon: p.icon },
+            ...agentTransitionToast({ agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName, projectIcon: p.icon }),
           })
           if (!pageActive) {
             fireNotification({
-              title: `${agentName} needs input`,
-              body: `In project "${projectName}" - the agent is blocked waiting on you.`,
+              title: `Hydra agent in ${pid} needs input`,
+              body: agentName,
               tag: `needs-input:${a.id}`,
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
+              icon: projectIconUrl(p.icon, pid),
               onClick: () => openAgent(pid, a.id),
             })
           }
@@ -437,21 +533,17 @@ export function useAgentNotifications(
           const isErr = status === 'errored'
           toast.show({
             key: `bg-${status}:${a.id}`,
-            message: isErr
-              ? `Agent "${agentName}" in project "${projectName}" hit an API error`
-              : `Agent "${agentName}" in project "${projectName}" transitioned to finished`,
             type: isErr ? 'error' : 'success',
             duration: isErr ? NEEDS_INPUT_TOAST_MS : FINISHED_TOAST_MS,
-            agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon },
+            ...agentTransitionToast({ agentName, agentId: a.id, projectId: pid, status, projectName, projectIcon: p.icon }),
           })
           if (!pageActive) {
             fireNotification({
-              title: isErr ? `${agentName} hit an API error` : `${agentName} finished`,
-              body: isErr
-                ? `In project "${projectName}" - the turn failed mid-response and the reply may be incomplete.`
-                : `In project "${projectName}" - the agent has completed its task.`,
+              title: isErr ? `Hydra agent in ${pid} hit an API error` : `Hydra agent in ${pid} finished`,
+              body: agentName,
               tag: `${isErr ? 'error' : 'finished'}:${a.id}`,
               sticky: isErr,
+              icon: projectIconUrl(p.icon, pid),
               onClick: () => openAgent(pid, a.id),
             })
           }

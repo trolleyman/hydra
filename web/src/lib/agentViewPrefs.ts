@@ -2,7 +2,6 @@
 // agent, so an agent's detail page restores its own layout on reload and when
 // switching between agents - treating each agent like its own page. We persist:
 //   - terminalHeight: the height the user dragged the terminal panel to.
-//   - scrollTop: the scroll position of the agent detail page.
 //   - collapsedFiles: which files are collapsed in the diff viewer.
 //
 //   - bashTabs: the extra bash shell tabs open in the terminal panel (each with
@@ -25,7 +24,6 @@ export type BashTabPref = {
 
 export type AgentViewPrefs = {
   terminalHeight?: number
-  scrollTop?: number
   collapsedFiles?: string[]
   bashTabs?: BashTabPref[]
   activeTabId?: string
@@ -49,9 +47,7 @@ export type AgentViewPrefs = {
   // Unsent chat composer text, so a draft survives switching agents and reloads
   // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
   chatDraft?: string
-  // New split layout: which inspector-pane view (Diff / Tests / Previews) was
-  // last open, and whether the working pane's prompt disclosure is collapsed.
-  inspectorView?: 'diff' | 'tests' | 'previews'
+  // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
 }
 
@@ -68,7 +64,6 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
   if (!stored) return {}
   return {
     terminalHeight: stored.terminalHeight,
-    scrollTop: stored.scrollTop,
     collapsedFiles: stored.collapsedFiles,
     bashTabs: stored.bashTabs,
     activeTabId: stored.activeTabId,
@@ -79,7 +74,6 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
-    inspectorView: stored.inspectorView,
     promptCollapsed: stored.promptCollapsed,
   }
 }

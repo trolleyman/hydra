@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -12,7 +12,11 @@ import {
   ClipboardList,
   FilePen,
   FileText,
+  GitCommitHorizontal,
+  GitMerge,
   Globe,
+  History,
+  Info,
   ListChecks,
   ListEnd,
   ListPlus,
@@ -20,29 +24,44 @@ import {
   MessageSquare,
   Plus,
   Search,
+  Send,
+  SlidersHorizontal,
+  Sparkles,
+  SquareDot,
+  SquareMinus,
+  SquarePlus,
   SquareTerminal,
   Wrench,
   X,
 } from 'lucide-react'
 import { AgentStatus } from '../api'
+import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
+import { formatBashForDisplay } from '../lib/bashFormat'
+import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { pasteMarkerText } from '../lib/pastedText'
+import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
-import { type Attachment, nextAttachmentId } from '../lib/spawnDrafts'
+import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
-import { chatImageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
+import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatFontStore } from '../lib/chatPrefs'
+import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { providerErrorText } from '../lib/providerError'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -55,16 +74,126 @@ import { useChatFontStore } from '../lib/chatPrefs'
 
 interface ChatProps {
   agentId: string
+  agentType?: string
   projectId: string | null
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // Clicking a commit chip: point the diff viewer at just that commit (and
+  // reveal the diff pane). Absent -> chips render non-clickable.
+  onSelectCommit?: (sha: string) => void
+}
+
+interface NormalizedChatEvent {
+  seq: number
+  source_id?: string
+  type: string
+  timestamp: string
+  payload?: Record<string, unknown>
+}
+
+interface ChatProjectionSnapshot {
+  plan?: unknown
+  slash_commands?: string[]
+  turn?: { id?: string; status?: string }
+  // The block being produced right now, accumulated from the deltas that landed
+  // before this client attached (see seedStream).
+  stream?: { kind?: string; message_id?: string; text?: string }
+  subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; prompt?: string; status?: string; activity?: string }>
 }
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
 // common properties, losing each variant's own fields).
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
+
+// One commit dragged in by a merge, shown in the merge chip's expanded list.
+interface MergedCommit { sha: string; shortSha: string; subject: string }
+
+// mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
+// (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
+// before the annotation existed - both render as a plain commit chip.
+function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged'> {
+  if (payload.is_merge !== true) return {}
+  const raw = Array.isArray(payload.merged_commits) ? payload.merged_commits : []
+  const merged: MergedCommit[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const m = entry as Record<string, unknown>
+    const sha = typeof m.sha === 'string' ? m.sha : ''
+    if (!sha) continue
+    merged.push({
+      sha,
+      shortSha: typeof m.short_sha === 'string' ? m.short_sha : sha.slice(0, 7),
+      subject: typeof m.subject === 'string' ? m.subject : '',
+    })
+  }
+  const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
+  return { isMerge: true, mergedCount, merged }
+}
+
+// mergeChipLabel renders "Merged <ref> - N commits", extracting the merged ref
+// name from a standard git merge subject and falling back to the raw subject.
+function mergeChipLabel(subject: string, count: number): string {
+  const m = subject.match(/^Merge (?:remote-tracking )?branch '([^']+)'/)
+  const n = `${count} commit${count === 1 ? '' : 's'}`
+  return m ? `Merged ${m[1]} - ${n}` : `${subject} - ${n}`
+}
+
+// Shared styling for commit/merge pills - the same centered notification look as
+// notice/cmdout chips.
+const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none'
+const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
+
+// MergeCommitChip renders a merge as a single pill that expands to list the commits
+// it dragged in. Its own useState survives row re-renders (the row is memo'd on the
+// stable chip item), so expansion needs no plumbing through the transcript.
+function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSelectCommit?: (sha: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const clickable = !!onSelectCommit
+  const count = item.mergedCount ?? item.merged?.length ?? 0
+  const label = mergeChipLabel(item.subject, count)
+  const shown = item.merged?.length ?? 0
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-[90%]`}
+        title={expanded ? 'Hide merged commits' : 'Show merged commits'}
+      >
+        {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+        <GitMerge className="w-3 h-3 shrink-0" />
+        <span className="truncate">{label}</span>
+      </button>
+      {expanded && shown > 0 && (
+        <div className="flex w-full max-w-[90%] flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
+          {item.merged!.map((m) => (
+            <div
+              key={m.sha}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
+              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+              title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
+            >
+              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+              <span className="font-mono shrink-0">{m.shortSha}</span>
+              <span className="truncate">{m.subject}</span>
+            </div>
+          ))}
+          {shown < count && (
+            <div className="px-1 py-0.5 text-[11px] italic text-stone-400 dark:text-stone-500">
+              ... and {count - shown} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
@@ -82,30 +211,58 @@ type ChatItem =
   // A harness-injected system notice (e.g. a <task-notification> when a
   // background task finishes), rendered as a compact muted line, not raw XML.
   // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
-  // the pill can offer a View button.
-  | { kind: 'notice'; id: number; text: string; subagentKey?: string }
+  // the pill can offer a View button. taskId/toolUseId (from the notification's
+  // own tags) let the pill resolve its background sub-agent at render time, and
+  // outputFile (the <output-file> tag) makes a background command's pill
+  // expandable to show the command's output.
+  | { kind: 'notice'; id: number; text: string; subagentKey?: string; taskId?: string; toolUseId?: string; outputFile?: string; noEntrance?: boolean }
+  // The CLI-injected "session continued" preamble after a context compaction
+  // (auto/out-of-context or /compact): a bookkeeping summary, not a real user
+  // turn, so it collapses behind an expander (item 39). outOfContext labels the
+  // auto/ran-out-of-context case specifically.
+  | { kind: 'contextNote'; id: number; text: string; outOfContext: boolean }
+  // Machine-injected context (isMeta) that rode in a `user` envelope but was
+  // never typed - rendered out of the chat flow rather than as a user bubble.
+  // `skill` is a Skill's auto-loaded SKILL.md body (name = the skill); `meta` is
+  // the generic fallback for any other injected-context message. Keying both off
+  // the isMeta flag avoids a per-string matcher for each new injection kind.
+  | { kind: 'skill'; id: number; name: string; text: string }
+  | { kind: 'meta'; id: number; text: string }
   | { kind: 'interrupted'; id: number }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
   // re-animating it as it settles reads as a flicker (item 56), same rationale
   // as the queued-user-bubble case above.
-  | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean }
-  // durationMs is set for a thought whose streaming we timed live (item 11);
-  // replayed history has no timing, so it renders as a plain "Thought".
-  | { kind: 'thinking'; id: number; text: string; durationMs?: number; noEntrance?: boolean }
+  // uuid is the conversation-record id of the assistant block this item was built
+  // from, stamped so a model_refusal_fallback retraction can evict it (see
+  // ProviderEvent.retractedMessageUuids). Only set on live assistant-produced items.
+  | { kind: 'assistant'; id: number; text: string; noEntrance?: boolean; uuid?: string }
+  // durationMs is the thinking time the daemon measured for this block (delivered
+  // as a hydra_thinking event keyed by msgId); absent for old history recorded
+  // before backend timing, which falls back to a transcript-gap estimate or a
+  // plain "Thought". msgId lets a late-arriving duration patch this item.
+  | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean; uuid?: string }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean }
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
-  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string }
+  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; uuid?: string }
   | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
   // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
   // no Task card to fold into and renders as a standalone card in the flow. The
   // common case - a sub-agent linked to its Task card - needs no item: the Task
   // ToolCard upgrades into a SubagentCard in place (see renderChatItem).
   | { kind: 'subagent'; id: number; agentId: string }
+  // A commit the agent made on its branch, shown as a clickable notification
+  // chip. Not a chat event: git is the durable record, so chips derive from the
+  // commits endpoint and are interleaved into the transcript by `ts` (the
+  // commit's author date, epoch ms) against the items' stamped times (see
+  // mergedItems). Clicking one points the diff viewer at just that commit.
+  // A merge chip (isMerge) collapses the commits it brought in: mergedCount is the
+  // true total, merged is a capped preview list the chip expands to show.
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -120,14 +277,30 @@ interface SubagentView {
   toolUseId?: string
   agentType?: string
   description?: string
+  // The sub-agent that spawned this one (from its meta frame) - set only for a
+  // NESTED sub-agent (a sub-agent's own Task/Agent spawn). Its card renders
+  // inside the parent's step timeline, not the main flow, and a parent whose
+  // own run has settled still reads "waiting on sub-agents" while any
+  // descendant runs (see subsAwaitingChildren).
+  parentAgentId?: string
   prompt?: string
   // 'running' until a sidechain result (or the turn's result) settles it; for a
   // Task-linked sub the parent tool_result is the more precise done signal.
   status: 'running' | 'done'
+  // A background/async sub-agent (its Task tool_result was only the launch
+  // boilerplate). It runs on past the turn that launched it, so the turn's
+  // result must NOT settle it - only its own <task-notification> completion does.
+  background?: boolean
+  // Put back to work by a SendMessage after it had already finished (the tool
+  // resumed it in the background). Its parent Task tool_result settled long ago,
+  // so that signal must stop counting as "done" or the card would read finished
+  // while the agent is running again - see reopenMessagedSubagent.
+  reopened?: boolean
   items: ChatItem[]
 }
 
 type ToolItem = Extract<ChatItem, { kind: 'tool' }>
+type CommitChipItem = Extract<ChatItem, { kind: 'commit' }>
 
 // isSubRunning reports whether a sub-agent is still working: the parent Task
 // card's tool_result (or its turn ending, `ended`) is the precise done signal
@@ -136,7 +309,7 @@ type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 // that result is ignored and we defer to the sub's own status (settled when its
 // sidechain result finally lands), keeping the "working" marker up meanwhile.
 function isSubRunning(sub: SubagentView, tool?: ToolItem): boolean {
-  if (tool) {
+  if (tool && !sub.reopened) {
     if (tool.result !== undefined && !isLaunchBoilerplate(tool.result)) return false
     if (tool.ended) return false
   }
@@ -156,6 +329,15 @@ function subLabels(sub: SubagentView, tool?: ToolItem): { label: string; desc: s
     (typeof input?.description === 'string' ? (input.description as string) : '') ||
     (sub.prompt ? sub.prompt.split('\n')[0] : '')
   return { label, desc }
+}
+
+function subCardLabels(sub: SubagentView, tool?: ToolItem): { label: string; desc: string } {
+  const original = subLabels(sub, tool)
+  const kind = original.label === 'Sub-agent' ? '' : original.label
+  return {
+    label: kind.toLowerCase() === 'codex' ? 'Agent' : 'Sub-agent',
+    desc: [kind, original.desc].filter(Boolean).join(': '),
+  }
 }
 
 // A message handed to the socket but not yet echoed back by the CLI
@@ -192,7 +374,7 @@ interface TokenUsage {
   cache_read_input_tokens?: number
 }
 
-interface ClaudeEvent {
+interface ProviderEvent {
   type: string
   subtype?: string
   // ISO-8601 wall-clock time the entry was recorded. Only transcript lines
@@ -217,6 +399,16 @@ interface ClaudeEvent {
   // system:init fields the pane cares about.
   model?: string
   slash_commands?: string[]
+  // model_refusal_fallback system event: when a turn trips a model's safety
+  // classifier the CLI retries it under a fallback model and emits this, listing
+  // the uuids of the flagged blocks it retracted. On the LIVE stream those blocks
+  // already streamed and rendered (the retry then re-emits them under new uuids),
+  // so the reducer evicts the listed uuids to undo the duplicate. Read both
+  // spellings: the persisted transcript uses camelCase, and the stdout stream-json
+  // field name isn't guaranteed identical. Only the retry is persisted, so the
+  // backfill/history path never sees the duplicate and needs no eviction.
+  retractedMessageUuids?: string[]
+  retracted_message_uuids?: string[]
   // "none" when the CLI is authed with an OAuth subscription - then
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
@@ -235,6 +427,22 @@ interface ClaudeEvent {
   isSidechain?: boolean
   agentId?: string
   parent_tool_use_id?: string | null
+  subagentNotice?: { key: string; label: string; description: string }
+  // Set by the CLI on machine-injected context that rides in a `user` envelope
+  // but was never typed by the user - the resume nudge, and a Skill's auto-loaded
+  // SKILL.md body. The reducer routes these out of the normal chat flow (a
+  // collapsed meta card / a skill card) instead of rendering them as a user turn.
+  isMeta?: boolean
+  // A background/async sub-agent's completion <task-notification> is written to
+  // the main transcript not as a user turn but as bookkeeping records the chat
+  // socket relays live: a queue-operation (XML on top-level `content`) and an
+  // attachment (XML on `attachment.prompt`). handleProviderEvent settles the sub
+  // off whichever carries it (see handleTaskNotification).
+  content?: string
+  // attachment.prompt is a string for <task-notification> records, and an array
+  // of content blocks for queued_command records (a queued message consumed
+  // into a running turn - see queuedCommandText).
+  attachment?: { type?: string; prompt?: string | { type?: string; text?: string }[]; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -251,11 +459,17 @@ interface ClaudeEvent {
   // require user interaction.
   request_id?: string
   request?: { subtype?: string; tool_name?: string; input?: unknown; tool_use_id?: string }
+  // hydra_thinking (a Hydra-synthesized event, not from Claude): the daemon
+  // measured a thinking block's duration from the live stream and reports it
+  // keyed by the assistant message id, so the client shows "Thought for Xs"
+  // without timing it in the browser. Replayed from the head's sidecar on
+  // reconnect (see internal/http emitThinkingDurations).
+  message_id?: string
 }
 
 // parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
 // null when absent/unparseable (live stdout lines have none).
-function parseEventTs(ev: ClaudeEvent): number | null {
+function parseEventTs(ev: ProviderEvent): number | null {
   if (typeof ev.timestamp !== 'string') return null
   const t = Date.parse(ev.timestamp)
   return Number.isFinite(t) ? t : null
@@ -297,12 +511,25 @@ const STOP_REASON_LABEL: Record<string, string> = {
   model_context_window_exceeded: 'response cut off (context full)',
 }
 
-// Playful gerunds for the live "working" indicator (item 48), Claude-Code style;
-// one is picked per turn so it stays stable while the turn runs.
+// Playful gerunds for the live "working" indicator (item 48), Claude-Code
+// style: a broad grab-bag picked at RANDOM per turn (not round-robin, which
+// made the same few words - Flambeing, Crunching - feel like fixtures). The
+// pick stays stable while the turn runs.
 const WORKING_VERBS = [
-  'Flambéing', 'Percolating', 'Simmering', 'Noodling', 'Conjuring', 'Marinating',
-  'Whisking', 'Churning', 'Brewing', 'Pondering', 'Tinkering', 'Finagling',
-  'Crunching', 'Wrangling', 'Sculpting', 'Concocting',
+  'Accomplishing', 'Actualizing', 'Baking', 'Brewing', 'Cerebrating',
+  'Churning', 'Coalescing', 'Cogitating', 'Combobulating', 'Computing',
+  'Concocting', 'Conjuring', 'Considering', 'Cooking', 'Crafting',
+  'Crunching', 'Deciphering', 'Deliberating', 'Distilling', 'Divining',
+  'Effecting', 'Elucidating', 'Envisioning', 'Finagling', 'Flambeing',
+  'Forging', 'Frolicking', 'Germinating', 'Hatching', 'Herding',
+  'Hustling', 'Ideating', 'Incubating', 'Inferring', 'Manifesting',
+  'Marinating', 'Moseying', 'Mulling', 'Musing', 'Mustering',
+  'Noodling', 'Percolating', 'Perusing', 'Pondering', 'Pontificating',
+  'Puttering', 'Puzzling', 'Reticulating', 'Ruminating', 'Scheming',
+  'Schlepping', 'Simmering', 'Smooshing', 'Spelunking', 'Stewing',
+  'Sussing', 'Synthesizing', 'Thinking', 'Tinkering', 'Transmuting',
+  'Unfurling', 'Unravelling', 'Vibing', 'Wandering', 'Whirring',
+  'Whisking', 'Wibbling', 'Wizarding', 'Working', 'Wrangling',
 ]
 
 // Auto-reconnect tuning: a connection that stayed open this long counts as
@@ -337,6 +564,144 @@ function contentText(content: unknown): string {
   return ''
 }
 
+function stableContentKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableContentKey).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableContentKey(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'undefined'
+}
+
+// Claude appends a machine-oriented continuation/usage trailer to completed
+// side-agent text. It belongs to the transport, not the human-readable report.
+function cleanSubagentReport(text: string): string {
+  return text
+    .replace(/\n?agentId:\s*[^\n]+(?:\n<usage>[\s\S]*?<\/usage>)?\s*$/i, '')
+    .replace(/\n?<usage>[\s\S]*?<\/usage>\s*$/i, '')
+    .trimEnd()
+}
+
+// Bridge the provider-neutral backend timeline into the mature presentation
+// reducer while Claude's legacy wire format is being retired. Provider details
+// stop at this boundary; paging and live delivery use the same conversion.
+function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
+  const p = ev.payload ?? {}
+  const base = {
+    timestamp: ev.timestamp,
+    // Hydra user events retain the client-generated id. Matching optimistic
+    // bubbles by this id avoids a repeated same-text message replacing the
+    // wrong bubble (and visibly flashing during Codex send reconciliation).
+    uuid: typeof p.uuid === 'string' && p.uuid
+      ? p.uuid
+      : ev.type === 'user_message' && typeof p.id === 'string' && p.id
+        ? p.id
+        : `normalized:${ev.seq}`,
+    isSidechain: p.sidechain === true,
+    agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
+    parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
+  }
+  const text = typeof p.text === 'string' ? p.text : contentText(p.content)
+  const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
+  switch (ev.type) {
+    case 'conversation_started':
+      return [{ type: 'system', subtype: 'init', model: typeof p.model === 'string' ? p.model : undefined, slash_commands: Array.isArray(p.slash_commands) ? p.slash_commands.filter((v): v is string => typeof v === 'string') : undefined, apiKeySource: typeof p.api_key_source === 'string' ? p.api_key_source : undefined }]
+    case 'user_message':
+      return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+    case 'context_message':
+      return [{ ...base, type: 'user', isMeta: true, message: { content: p.content as ClaudeContentBlock[] | string } }]
+    case 'assistant_message':
+      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }], stop_reason: typeof p.stop_reason === 'string' ? p.stop_reason : undefined, usage: p.usage as TokenUsage } }] : []
+    case 'reasoning_completed':
+      return text.trim() || showEmptyReasoning ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
+    case 'tool_started': {
+      const name = typeof p.name === 'string' ? p.name : 'tool'
+      const input = p.input ?? p.item ?? (typeof p.command === 'string' ? { command: p.command, cwd: p.cwd } : p)
+      return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input }] } }]
+    }
+    case 'tool_completed': {
+      const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
+      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed' }] } }]
+    }
+    case 'plan_updated': {
+      // Claude exposes its TaskCreate/TaskUpdate calls as ordinary tool cards;
+      // its tracker-generated plan events are state checkpoints, not a second
+      // visible UpdatePlan invocation. Codex's turn/plan/updated notification
+      // has no separate tool item, so retain its useful timeline card.
+      if (p.provider !== 'codex') return []
+      const plan = Array.isArray(p.plan) ? p.plan : []
+      const completed = plan.filter((entry) => entry && typeof entry === 'object' && (entry as { status?: unknown }).status === 'completed').length
+      const summary = `${plan.length} task${plan.length === 1 ? '' : 's'} · ${completed} completed`
+      const toolID = `plan:${ev.seq}`
+      return [
+        { ...base, type: 'assistant', message: { id: `tool:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'UpdatePlan', input: { description: summary, plan } }] } },
+        { ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: 'Plan updated' }] } },
+      ]
+    }
+    case 'subagent_completed': {
+      const key = typeof p.id === 'string' ? p.id : ''
+      const label = typeof p.agent_type === 'string' ? p.agent_type : 'Sub-agent'
+      const description = typeof p.description === 'string' ? p.description : ''
+      return key ? [{ ...base, type: 'hydra_subagent_completed', isSidechain: false, agentId: undefined, parent_tool_use_id: null, subagentNotice: { key, label, description } }] : []
+    }
+    case 'content_stream_started':
+      // The first normalized delta opens the presentation stream. Forwarding
+      // this provider boundary as well opened it twice and reset Claude's
+      // partially rendered response when its first token arrived.
+      return []
+    case 'content_stream_completed':
+      // The completed semantic message closes the stream atomically with the
+      // settled item, avoiding an empty gap between preview and final content.
+      return []
+    case 'usage_updated': {
+      const usage = p.usage as TokenUsage
+      return typeof p.message_id === 'string'
+        ? [{ type: 'stream_event', event: { type: 'message_start', message: { usage } } }]
+        : [{ type: 'stream_event', event: { type: 'message_delta', usage } }]
+    }
+    case 'reasoning_duration':
+      return [{ type: 'hydra_thinking', message_id: typeof p.message_id === 'string' ? p.message_id : '', duration_ms: typeof p.duration_ms === 'number' ? p.duration_ms : 0 }]
+    case 'messages_retracted':
+      return [{ type: 'system', subtype: 'model_refusal_fallback', retractedMessageUuids: Array.isArray(p.message_ids) ? p.message_ids.filter((v): v is string => typeof v === 'string') : [] }]
+    case 'notice':
+      return text && !isAgentCompletionNotification(text) ? [{ ...base, type: 'queue-operation', content: text }] : []
+    case 'interaction_requested': {
+      const interaction = p.interaction && typeof p.interaction === 'object' ? p.interaction as Record<string, unknown> : {}
+      if (p.provider === 'claude') {
+        return [{ type: 'control_request', request_id: typeof p.request_id === 'string' ? p.request_id : '', request: interaction as ProviderEvent['request'] }]
+      }
+      const params = interaction.params && typeof interaction.params === 'object' ? interaction.params as Record<string, unknown> : {}
+      if (interaction.method === 'item/tool/requestUserInput') {
+        const toolID = typeof params.itemId === 'string' ? params.itemId : id
+        const requestID = String(interaction.request_id ?? '')
+        const input = { questions: Array.isArray(params.questions) ? params.questions : [] }
+        return [
+          { ...base, type: 'assistant', message: { id: `question:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'AskUserQuestion', input }] } },
+          { type: 'control_request', request_id: requestID, request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', tool_use_id: toolID, input } },
+        ]
+      }
+      return []
+    }
+    case 'turn_completed':
+    case 'turn_failed': {
+      // Compatibility for logs written before cancellation got its own event
+      // type: the adapter labelled them completed/failed but retained Codex's
+      // cancellation status or error in the payload.
+      const terminal = `${typeof p.status === 'string' ? p.status : ''} ${contentText(p.error)}`.toLowerCase()
+      if (/interrupt|cancel/.test(terminal)) {
+        return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
+      }
+      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: providerErrorText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
+    }
+    case 'turn_error':
+      return [{ ...base, type: 'result', subtype: 'error', is_error: true, result: providerErrorText(p.error) }]
+    case 'turn_interrupted':
+      return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
+    default:
+      return []
+  }
+}
+
 // closeOpenFence appends a virtual closing fence when a streaming text ends
 // inside an open ``` block, so the partial code renders as a code block
 // instead of raw backticks until the real fence arrives.
@@ -361,6 +726,76 @@ function stripLocalCommandCaveat(text: string): string {
   return text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
 }
 
+// isTaskNotification reports whether a message IS a harness <task-notification>
+// bookkeeping record (which always leads with the tag) rather than a real message
+// that merely mentions one in its prose - so quoting "<task-notification>" in a
+// chat message no longer gets it swallowed as a notice. trimStart covers the raw
+// relay channels (ev.content / attachment.prompt) that aren't pre-trimmed.
+function isTaskNotification(text: string): boolean {
+  return text.trimStart().startsWith('<task-notification>')
+}
+
+// Logs written before agent completion became one canonical lifecycle event
+// contain both this machine notification and subagent_completed. Suppress the
+// former during replay so old conversations are idempotent too.
+function isAgentCompletionNotification(text: string): boolean {
+  if (!isTaskNotification(text)) return false
+  const status = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+  const summary = decodeEntities(/<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim() ?? '')
+  return status === 'completed' && /^Agent\b/i.test(summary)
+}
+
+// queuedCommandText extracts the message text from a queued_command attachment
+// record. When the CLI consumes a queued message INTO A RUNNING TURN (mid-turn
+// steering - the queue-operation "remove" path), it writes NO plain `user`
+// event; this attachment, with the text on attachment.prompt content blocks,
+// is the message's only durable trace - so replay must rebuild the user bubble
+// from it or the message vanishes on the next reattach. (A message consumed
+// while the CLI is idle gets a real user event and never reaches this path.)
+function queuedCommandText(ev: ProviderEvent): string | null {
+  const att = ev.attachment
+  if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
+  const prompt = att.prompt
+  if (typeof prompt === 'string') {
+    // A background task's <task-notification> rides the same attachment type
+    // with a string prompt - that's a notice, never a user message (the
+    // reducers consume it before reaching here; this guard is belt+braces).
+    const t = prompt.trim()
+    return !t || isTaskNotification(t) ? null : t
+  }
+  if (!Array.isArray(prompt)) return null
+  const text = prompt
+    .filter((b) => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+  return text || null
+}
+
+// detectContextNote recognises the CLI-injected "session continued" preamble that
+// leads a conversation after a context compaction (auto/ran-out-of-context or an
+// explicit /compact). It's a summary the CLI feeds the model to carry state over,
+// not a real user turn, so the chat collapses it behind an expander (item 39).
+// Returns null for any ordinary message. outOfContext flags the auto case.
+function detectContextNote(text: string): { outOfContext: boolean } | null {
+  const t = text.trimStart()
+  if (t.startsWith('This session is being continued from a previous conversation')) {
+    return { outOfContext: /ran out of context/i.test(t.slice(0, 200)) }
+  }
+  return null
+}
+
+// detectSkillBody recognises the SKILL.md body Claude auto-injects when a Skill
+// tool runs: an isMeta `user` text block that always opens with "Base directory
+// for this skill: <path>". Returns the skill name (the path's last segment) and
+// the body with that lead line stripped, or null for any other meta message.
+function detectSkillBody(text: string): { name: string; body: string } | null {
+  const m = /^\s*Base directory for this skill:\s*(\S+)[^\n]*\n?/.exec(text)
+  if (!m) return null
+  const name = m[1].split('/').filter(Boolean).pop() || 'skill'
+  return { name, body: text.slice(m[0].length).trim() }
+}
+
 // decodeEntities turns the handful of XML entities that appear in injected
 // harness text (a <task-notification> summary) back into their characters.
 function decodeEntities(text: string): string {
@@ -382,26 +817,131 @@ function trimWorktreePaths(text: string, worktree: string | null): string {
   return text.split(prefix).join('').split(worktree).join('.')
 }
 
+// Input fields that hold PROSE (a sentence the agent wrote), rendered in the
+// sans font on the card header rather than monospace - a ScheduleWakeup prompt
+// or an Agent brief isn't code.
+const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'summary', 'description', 'prompt', 'reason'])
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
-// card, favouring the fields agent tools actually carry.
-function summarizeToolInput(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input !== 'object') return String(input)
+// card, favouring the fields agent tools actually carry, and reports whether
+// the picked field is prose (see PROSE_INPUT_KEYS).
+function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
+  if (input == null) return { text: '', prose: false }
+  if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
+  if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
   // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
   if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
     const status = typeof obj.status === 'string' ? obj.status : ''
     const subj = typeof obj.subject === 'string' ? obj.subject : ''
-    return `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`
+    return { text: `#${obj.taskId}${status ? ` -> ${status}` : ''}${subj ? `: ${subj}` : ''}`, prose: true }
   }
-  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'description', 'prompt']) {
-    if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
+  for (const key of ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'subject', 'summary', 'description', 'prompt', 'reason']) {
+    if (typeof obj[key] === 'string' && obj[key]) return { text: obj[key] as string, prose: PROSE_INPUT_KEYS.has(key) }
   }
   try {
-    return JSON.stringify(input)
+    return { text: JSON.stringify(input), prose: false }
   } catch {
-    return ''
+    return { text: '', prose: false }
   }
+}
+
+function mergeToolInputHistory(previous: unknown, next: unknown): unknown {
+  if (!next || typeof next !== 'object') return next
+  const merged = { ...(next as Record<string, unknown>) }
+  const raws: unknown[] = []
+  const collect = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    const obj = value as Record<string, unknown>
+    if (Array.isArray(obj._raw_events)) raws.push(...obj._raw_events)
+    else if (obj._raw != null) raws.push(obj._raw)
+  }
+  collect(previous)
+  collect(next)
+  const unique = raws.filter((raw, index) => raws.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(raw)) === index)
+  if (unique.length > 1) merged._raw_events = unique
+  return merged
+}
+
+function interactiveShellTranscript(command: string, output: string): { command: string; output: string } | null {
+  if (!/^(?:(?:\/usr\/bin|\/bin)\/)?(?:ba|z|)sh(?:\s+(?:-[il]*c\s+)?(?:(?:\/usr\/bin|\/bin)\/)?(?:ba|z|)sh)?$/.test(command.trim())) return null
+  const clean = stripAnsi(output).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = clean.split('\n')
+  const entered = lines.find((line) => line.trim() && !/^\[\d+\]\s+\d+\s*$/.test(line.trim()))?.trim()
+  if (!entered || entered === 'exit') return null
+  const rest = lines
+    .slice(lines.indexOf(lines.find((line) => line.trim() === entered) ?? '') + 1)
+    .filter((line) => line.trim() !== 'exit' && !/^[^\n]*[$#]\s+exit\s*$/.test(line))
+    .join('\n')
+    .trimEnd()
+  return { command: entered, output: rest }
+}
+
+// Keep provider protocol identifiers in Raw while making MCP calls scan like
+// namespace-qualified operations in the normal card header.
+// sendMessageRecipient pulls the agent a SendMessage call is addressed to. The
+// tool echoes the id under both `to` and the legacy `recipient` (and mirrors
+// `message` as `content`) - the card shows it once and hides the duplicates.
+const SEND_MESSAGE_ECHO_KEYS = new Set(['recipient', 'content', 'type'])
+function sendMessageRecipient(input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const obj = input as Record<string, unknown>
+  for (const key of ['to', 'recipient', 'agent_id', 'agentId']) {
+    if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
+  }
+  return ''
+}
+
+// A SendMessage result is a JSON envelope, not prose:
+//   {"success":true,"message":"Agent \"<id>\" had no active task; resumed ...
+//    Output: /tmp/.../tasks/<id>.output","resumedAgentId":"<id>","pin":{...}}
+// parseSendMessageResult turns it into what the card actually shows - the
+// sentence, the recipient it names, and whether the agent was resumed (i.e. it
+// is working again, see reopenMessagedSubagent). Null for anything that isn't
+// that envelope, so an unrecognised result falls back to the plain panel.
+interface SendMessageResult {
+  ok: boolean
+  message: string
+  outputFile: string
+  recipient: string
+  resumed: boolean
+}
+function parseSendMessageResult(text?: string): SendMessageResult | null {
+  if (!text || !text.trim().startsWith('{')) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  if (typeof obj.success !== 'boolean' && typeof obj.message !== 'string') return null
+  let message = typeof obj.message === 'string' ? obj.message : ''
+  // The output-file path is machine plumbing - keep it out of the sentence (the
+  // Raw view still has it).
+  let outputFile = ''
+  const outputAt = /\s*Output:\s*(\S+)\s*$/.exec(message)
+  if (outputAt) {
+    outputFile = outputAt[1]
+    message = message.slice(0, outputAt.index).trim()
+  }
+  const resumedAgentId = typeof obj.resumedAgentId === 'string' ? obj.resumedAgentId : ''
+  const pin = obj.pin && typeof obj.pin === 'object' ? (obj.pin as Record<string, unknown>) : null
+  const pinnedId = pin && typeof pin.id === 'string' ? pin.id : ''
+  return {
+    ok: obj.success !== false,
+    message,
+    outputFile,
+    recipient: resumedAgentId || pinnedId,
+    resumed: resumedAgentId !== '',
+  }
+}
+
+function displayToolName(name: string): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
+  return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
 // collapseHome rewrites an absolute home path (/home/<user>/..., /Users/<user>/
@@ -475,65 +1015,44 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
   return { text: stripToolUseError(collect(content)), images }
 }
 
+// Decoded intrinsic sizes of tool-result images, cached module-wide so a
+// re-render (or the same image in another card) never re-decodes.
+const imageDimsCache = new Map<string, { w: number; h: number }>()
+
+// useImageDims eagerly decodes the given image sources - as soon as the result
+// arrives, while the card is still collapsed - and returns the cache of their
+// intrinsic sizes. Rendering the <img> with width/height attributes lets
+// layout reserve the correct box BEFORE the pixels are decoded, so the card's
+// open animation (Expandable measures scrollHeight at open) sees the true
+// height. Without this an image Read opened at its text-only height and
+// snapped tall once the image landed after the animation.
+function useImageDims(srcs: string[] | undefined): Map<string, { w: number; h: number }> {
+  const [, bump] = useState(0)
+  useEffect(() => {
+    if (!srcs?.length) return
+    let cancelled = false
+    for (const src of srcs) {
+      if (imageDimsCache.has(src)) continue
+      const img = new Image()
+      img.onload = () => {
+        if (img.naturalWidth > 0) imageDimsCache.set(src, { w: img.naturalWidth, h: img.naturalHeight })
+        if (!cancelled) bump((n) => n + 1)
+      }
+      img.src = src
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [srcs])
+  return imageDimsCache
+}
+
 // --- Plan / to-do panel (TodoWrite) -----------------------------------------
 
-// One entry of the agent's TodoWrite list. `activeForm` is the present-tense
-// label the CLI shows while a step is in progress ("Running tests").
-interface TodoItem {
-  content: string
-  status: 'pending' | 'in_progress' | 'completed'
-  activeForm?: string
-}
-
-// parseTodos validates a TodoWrite tool input ({todos: [...]}), returning null
-// for anything malformed so the call falls back to a normal tool card.
-function parseTodos(input: unknown): TodoItem[] | null {
-  if (!input || typeof input !== 'object') return null
-  const todos = (input as { todos?: unknown }).todos
-  if (!Array.isArray(todos)) return null
-  const out: TodoItem[] = []
-  for (const t of todos) {
-    if (!t || typeof t !== 'object') continue
-    const o = t as Record<string, unknown>
-    if (typeof o.content !== 'string' || !o.content) continue
-    const status = o.status === 'in_progress' || o.status === 'completed' ? o.status : 'pending'
-    out.push({ content: o.content, status, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined })
-  }
-  return out.length ? out : null
-}
-
-// The Task* tool family (TaskCreate/TaskUpdate) is the incremental cousin of
-// TodoWrite: instead of one call carrying the whole list, each call mutates a
-// single task. parseTaskCreate reads a TaskCreate input ({subject, ...}); a new
-// task always starts `pending` (the harness assigns its id in creation order).
-function parseTaskCreate(input: unknown): { content: string; activeForm?: string } | null {
-  if (!input || typeof input !== 'object') return null
-  const o = input as Record<string, unknown>
-  if (typeof o.subject !== 'string' || !o.subject) return null
-  return { content: o.subject, activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined }
-}
-
-// parseTaskUpdate reads a TaskUpdate input ({taskId, status?, subject?, ...}),
-// returning the referenced id plus only the fields it changes (status "deleted"
-// removes the task). Returns null when it names no task, so the call falls back
-// to a normal tool card.
-function parseTaskUpdate(
-  input: unknown,
-): { taskId: string; status?: TodoItem['status'] | 'deleted'; content?: string; activeForm?: string } | null {
-  if (!input || typeof input !== 'object') return null
-  const o = input as Record<string, unknown>
-  const taskId = typeof o.taskId === 'string' ? o.taskId : typeof o.taskId === 'number' ? String(o.taskId) : ''
-  if (!taskId) return null
-  const status =
-    o.status === 'pending' || o.status === 'in_progress' || o.status === 'completed' || o.status === 'deleted'
-      ? o.status
-      : undefined
-  return {
-    taskId,
-    status,
-    content: typeof o.subject === 'string' && o.subject ? o.subject : undefined,
-    activeForm: typeof o.activeForm === 'string' ? o.activeForm : undefined,
-  }
+// restoredPlan reads the persisted plan for an agent as display TodoItems, so
+// the panel can seed from it on mount / reconnect (see planStore).
+function restoredPlan(projectId: string | null, agentId: string): TodoItem[] {
+  return toTodoItems(loadPlan(projectId, agentId))
 }
 
 // parseExitPlan reads an ExitPlanMode input ({plan, planFilePath}) - the plan
@@ -554,22 +1073,136 @@ function parseExitPlan(input: unknown): { plan: string; fileName: string } | nul
 // chat's top-right corner (item 17): a compact card that expands to the checklist
 // and collapses to a "Plan n/total" chip - defaulting collapsed when the pane is
 // too narrow to sit a card alongside the transcript.
-function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
-  const [open, setOpen] = useState(!narrow)
-  // Follow the narrow/wide flip (collapse when it gets tight, re-open when it
-  // widens) while still letting the user toggle in between - a render-phase sync
-  // like the settings fields use.
-  const [prevNarrow, setPrevNarrow] = useState(narrow)
-  if (prevNarrow !== narrow) {
-    setPrevNarrow(narrow)
-    setOpen(!narrow)
-  }
+// TodoLi is one checklist row (icon + text), styled by status. When the task
+// carries a description, the row is clickable: a hover-revealed chevron expands
+// an animated description block beneath it.
+function TodoLi({ t }: { t: TodoItem }) {
+  const [open, setOpen] = useState(false)
+  const hasDesc = !!t.description
+  return (
+    <li>
+      <div
+        className={`group flex items-start gap-1.5 ${hasDesc ? 'cursor-pointer' : ''}`}
+        onClick={hasDesc ? () => setOpen((o) => !o) : undefined}
+      >
+        {t.status === 'completed' ? (
+          <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
+        ) : t.status === 'in_progress' ? (
+          <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
+        ) : (
+          <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
+        )}
+        <span
+          className={`flex-1 min-w-0 ${
+            t.status === 'completed'
+              ? 'line-through text-stone-400 dark:text-stone-500'
+              : t.status === 'in_progress'
+                ? 'font-medium text-stone-700 dark:text-stone-200'
+                : 'text-stone-500 dark:text-stone-400'
+          }`}
+        >
+          {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
+        </span>
+        {hasDesc && (
+          <ChevronRight
+            className={`mt-0.5 w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-[transform,opacity] duration-200 ${open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover:opacity-70'}`}
+          />
+        )}
+      </div>
+      {hasDesc && (
+        <Expandable open={open}>
+          <div className="pl-5 pr-1 pt-0.5 pb-0.5 text-[11px] leading-snug text-stone-500 dark:text-stone-400 whitespace-pre-wrap break-words">
+            {t.description}
+          </div>
+        </Expandable>
+      )}
+    </li>
+  )
+}
+
+// useChipWidth measures the natural (fit-content) width of a floating card's
+// collapsed header chip via an invisible clone, so open/close can animate the
+// card between PIXEL endpoints. Transitioning from `width: fit-content`
+// cannot work here: the moment the list content mounts, fit-content already
+// resolves to the open width, so the transition's start equals its end and
+// the card snaps wide instead of gliding.
+function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null] {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => setW(el.offsetWidth)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w]
+}
+
+// `stacked`: anchor to a second row below the sub-agent selector - on a
+// narrow pane even the two COLLAPSED chips overlap side by side (the plan
+// chip sat over the selector and swallowed its clicks). Static, so nothing
+// relocates when either card expands.
+// memo: this sits next to the composer, whose `input` state re-renders ChatPane
+// on every keystroke. The plan only changes on a TodoWrite (stable `todos`
+// identity between those), and the layout flags are stable while typing, so the
+// panel - and its chip-width measurement - skips the per-keystroke churn.
+const PlanPanel = memo(function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
+  // Frozen at mount: fade in only when the plan APPEARS live (a first
+  // TodoWrite mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
   const total = todos.length
   const done = todos.filter((t) => t.status === 'completed').length
   const allDone = total > 0 && done === total
+  // Completed items fold behind a "(N completed)" toggle so the in-progress /
+  // pending work sits in view without scrolling past the done ones. Collapsed by
+  // default; irrelevant when everything's done (the whole panel is collapsed then).
+  const completed = todos.filter((t) => t.status === 'completed')
+  const active = todos.filter((t) => t.status !== 'completed')
+  const [showDone, setShowDone] = useState(false)
+  // Default collapsed when the pane is too narrow to sit a card alongside the
+  // transcript, or when every item is checked off (a finished plan is just
+  // noise expanded).
+  const [open, setOpen] = useState(!narrow && !allDone)
+  // Follow the narrow/wide flip and the all-done flip (collapse when it gets
+  // tight or the plan completes, re-open when it widens or work resumes) while
+  // still letting the user toggle in between - a render-phase sync like the
+  // settings fields use.
+  const [prevNarrow, setPrevNarrow] = useState(narrow)
+  const [prevAllDone, setPrevAllDone] = useState(allDone)
+  if (prevNarrow !== narrow || prevAllDone !== allDone) {
+    setPrevNarrow(narrow)
+    setPrevAllDone(allDone)
+    setOpen(!narrow && !allDone)
+  }
 
   return (
-    <div className="absolute top-3 right-3 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur animate-chat-item-in">
+    // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
+    // opening glides the width (the measured chip px -> w-64, see useChipWidth)
+    // alongside the Expandable height. Corner-anchored; while open it takes
+    // the higher z so it layers over the selector's chip on a narrow pane
+    // instead of anything relocating.
+    <div
+      style={{ width: open ? 256 : chipW ?? undefined }}
+      className={`absolute ${stacked ? 'top-12' : 'top-2'} right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+    >
+      {/* Invisible clone of the header at natural width - the collapsed chip
+          width the open/close transition animates from/to (border included so
+          the border-box width matches the card's). */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 px-2.5 py-1.5"
+      >
+        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+        <span className="text-xs font-semibold shrink-0">Plan</span>
+        <span className="shrink-0 text-[11px] tabular-nums">{done}/{total}</span>
+        <ChevronRight className="w-3 h-3 shrink-0" />
+      </div>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -584,34 +1217,38 @@ function PlanPanel({ todos, narrow }: { todos: TodoItem[]; narrow: boolean }) {
         />
       </button>
       <Expandable open={open}>
-        <ul className="max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
-          {todos.map((t, i) => (
-            <li key={i} className="flex items-start gap-1.5">
-              {t.status === 'completed' ? (
-                <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-emerald-500" />
-              ) : t.status === 'in_progress' ? (
-                <LoaderCircle className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-amber-500" />
-              ) : (
-                <Circle className="mt-0.5 w-3.5 h-3.5 shrink-0 text-stone-300 dark:text-stone-600" />
-              )}
-              <span
-                className={
-                  t.status === 'completed'
-                    ? 'line-through text-stone-400 dark:text-stone-500'
-                    : t.status === 'in_progress'
-                      ? 'font-medium text-stone-700 dark:text-stone-200'
-                      : 'text-stone-500 dark:text-stone-400'
-                }
+        {/* Fixed w-64 (the card's OPEN width): Expandable measures scrollHeight
+            the moment it opens, while the card is still gliding out from its
+            narrow chip width - without a fixed inner width the text wraps into
+            a huge column, the height animates to that, then snaps back down
+            once the width lands. */}
+        <div className="w-64 max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+          {completed.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowDone((v) => !v)}
+                className="flex w-full items-center gap-1 text-left text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
               >
-                {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <ChevronRight className={`w-3 h-3 shrink-0 transition-transform duration-200 ${showDone ? 'rotate-90' : ''}`} />
+                <span>{completed.length} completed</span>
+              </button>
+              <Expandable open={showDone}>
+                <ul className="space-y-1 pt-1">
+                  {completed.map((t, i) => <TodoLi key={`c${i}`} t={t} />)}
+                </ul>
+              </Expandable>
+            </>
+          )}
+          {active.length > 0 && (
+            <ul className="space-y-1">
+              {active.map((t, i) => <TodoLi key={`a${i}`} t={t} />)}
+            </ul>
+          )}
+        </div>
       </Expandable>
     </div>
   )
-}
+})
 
 // --- Claude-app-ish shared styles -------------------------------------------
 
@@ -631,64 +1268,54 @@ const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 // Claude model aliases offered by the in-chat model dropdown. Sent verbatim to
 // the CLI's set_model control request, so these must be aliases it accepts.
 const CLAUDE_MODELS = [
+  { id: 'fable', label: 'Fable' },
   { id: 'opus', label: 'Opus' },
   { id: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', label: 'Haiku' },
-  { id: 'fable', label: 'Fable' },
 ]
+const CODEX_MODELS = [
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+  { id: 'gpt-5.5', label: 'GPT-5.5' },
+  { id: 'gpt-5.4', label: 'GPT-5.4' },
+  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+]
+
+// Effective context window (tokens) for a model, used to turn a turn's prompt
+// size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
+// expose a 1M window; only Haiku is 200k. A flat 200k constant (the old value)
+// read >100% used on the 1M models once a conversation passed 200k tokens, so
+// the window has to follow the model. An unknown model (before the first
+// system:init lands) defaults to 1M, since every offered model except Haiku is
+// 1M - the model is also persisted per-agent now, so this is rarely hit.
+function contextWindowTokens(model: string): number {
+  return model.toLowerCase().includes('haiku') ? 200_000 : 1_000_000
+}
+
+// contextInputTokens sums the prompt-side tokens of a usage sample (everything
+// the model had to read: fresh input + cache reads + cache writes), which is the
+// size of the context the last message was sent with. Output tokens are excluded
+// - they land in the NEXT turn's input, not this one's prompt.
+function contextInputTokens(u: TokenUsage | undefined): number {
+  if (!u) return 0
+  return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+}
 
 // modelDisplayLabel shortens a full model id ("claude-fable-5") to its alias
 // label ("Fable") for the dropdown trigger.
 function modelDisplayLabel(model: string): string {
-  if (!model) return 'Model'
+  // An empty Codex model is meaningful: app-server interprets an omitted
+  // model as the user's configured default and does not echo its concrete id
+  // in thread lifecycle responses. Say that explicitly instead of suggesting
+  // Hydra failed to load the selector state.
+  if (!model) return 'Default'
   const lower = model.toLowerCase()
   for (const m of CLAUDE_MODELS) {
     if (lower.includes(m.id)) return m.label
   }
+  for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
   return model.replace(/^claude-/, '')
-}
-
-// splitBashChains inserts a newline after each top-level `;`, `&&` and `||` so
-// a chained one-liner reads as separate steps in the expanded Bash card. It is
-// deliberately optimistic: it only tracks quotes and backslash escapes, not
-// the full shell grammar, and a command that already contains newlines is left
-// exactly as written.
-function splitBashChains(cmd: string): string {
-  if (cmd.includes('\n')) return cmd
-  let out = ''
-  let inSingle = false
-  let inDouble = false
-  let escaped = false
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i]
-    out += ch
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (ch === '\\') {
-      escaped = true
-      continue
-    }
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle
-      continue
-    }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble
-      continue
-    }
-    if (inSingle || inDouble) continue
-    // `;` splits (but not `;;`, a case terminator); `&&`/`||` split after the
-    // second character. A single `|` (pipe) or `&` (background/redirect) does
-    // not.
-    const isChain = (ch === ';' && cmd[i + 1] !== ';') || ((ch === '&' || ch === '|') && cmd[i + 1] === ch)
-    if (!isChain) continue
-    if (ch !== ';') out += cmd[++i]
-    while (cmd[i + 1] === ' ') i++
-    if (i + 1 < cmd.length) out += '\n'
-  }
-  return out
 }
 
 // highlightHtml returns highlight.js token HTML, or null for plain rendering.
@@ -717,14 +1344,57 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
   return open || mounted
 }
 
-// Expandable animates its child open/closed via the grid-rows 0fr/1fr trick
-// (see .chat-expandable in index.css) - height animates to the content's
-// intrinsic size without any JS measuring.
+// Expandable animates its child open/closed by transitioning a MEASURED
+// max-height (0 <-> content height). We moved off the grid-rows 0fr/1fr trick
+// because, with a nested scroll container inside (a CodePanel's max-h-64 <pre>),
+// the grid container's height ran ahead of the resolved fr track mid-transition,
+// leaving a transient empty gap below the content - the "weird" half-open frame.
+// Measuring clips exactly and reveals linearly. After opening we release
+// max-height to 'none' so later content growth (streamed output) isn't capped.
 function Expandable({ open, children }: { open: boolean; children: ReactNode }) {
   const mounted = useDelayedUnmount(open)
+  const ref = useRef<HTMLDivElement>(null)
+  const first = useRef(true)
+  // max-height is driven imperatively (not via React state / JSX style) so a
+  // re-render from streamed content can't clobber the animated value, and to
+  // avoid a synchronous setState in the layout effect.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // First commit: set the initial state without animating (before paint).
+    if (first.current) {
+      first.current = false
+      el.style.maxHeight = open ? 'none' : '0px'
+      return
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.style.transition = ''
+      el.style.maxHeight = open ? 'none' : '0px'
+      return
+    }
+    el.style.transition = 'max-height 0.22s ease'
+    // scrollHeight is the full content height regardless of the current clip.
+    const h = el.scrollHeight
+    if (open) {
+      el.style.maxHeight = '0px'
+      void el.offsetHeight // force reflow so the next change transitions
+      el.style.maxHeight = `${h}px`
+      const onEnd = (e: TransitionEvent) => {
+        if (e.propertyName !== 'max-height') return
+        el.style.maxHeight = 'none' // release the cap so later growth isn't clipped
+        el.removeEventListener('transitionend', onEnd)
+      }
+      el.addEventListener('transitionend', onEnd)
+      return () => el.removeEventListener('transitionend', onEnd)
+    }
+    // Collapsing: pin the current height, then animate to 0.
+    el.style.maxHeight = `${h}px`
+    void el.offsetHeight
+    el.style.maxHeight = '0px'
+  }, [open])
   return (
-    <div className={`chat-expandable ${open ? 'chat-expandable-open' : ''}`}>
-      <div>{mounted ? children : null}</div>
+    <div ref={ref} style={{ overflow: 'hidden' }}>
+      {mounted ? children : null}
     </div>
   )
 }
@@ -742,8 +1412,9 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
 
 // OutputPanel renders a tool's textual output on the shared quiet panel,
 // syntax highlighted when a language is known (item 3, e.g. a Read of a .ts
-// file) and tinted red on error. Tall output scrolls within a capped height.
-function OutputPanel({ text, lang, isError }: { text: string; lang: string; isError?: boolean }) {
+// file). The card border/status carries failure semantics; keeping the output
+// neutral means a long mostly-successful script does not become a wall of red.
+function OutputPanel({ text, lang }: { text: string; lang: string; isError?: boolean }) {
   // Code output (a Read of a known extension) is stripped of any stray ANSI and
   // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
   // to spans. Neither path ever shows raw escape garbage.
@@ -751,11 +1422,413 @@ function OutputPanel({ text, lang, isError }: { text: string; lang: string; isEr
     () => (lang ? highlightHtml(stripAnsi(text), lang) : hasAnsi(text) ? ansiToHtml(text) : null),
     [text, lang],
   )
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 ${
-    isError ? 'text-red-600 dark:text-red-300' : 'text-stone-600 dark:text-stone-300'
-  }`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
+}
+
+function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
+  const parsed = (() => {
+    const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
+    if (!match) return { body: text, links: [] as { title: string; url: string }[] }
+    try {
+      const links = JSON.parse(match[1]) as unknown
+      if (!Array.isArray(links)) return { body: text, links: [] as { title: string; url: string }[] }
+      const clean = links.filter((v): v is { title: string; url: string } =>
+        !!v && typeof v === 'object' && typeof (v as { title?: unknown }).title === 'string' && typeof (v as { url?: unknown }).url === 'string')
+      return { body: (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim(), links: clean }
+    } catch {
+      return { body: text, links: [] as { title: string; url: string }[] }
+    }
+  })()
+  return (
+    <div className={`space-y-2 break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+      {parsed.links.length > 0 && (
+        <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
+          <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
+          <ul className="space-y-1">
+            {parsed.links.map((link, i) => <li key={`${link.url}:${i}`}><a className="text-blue-600 dark:text-blue-400 hover:underline" href={link.url} target="_blank" rel="noreferrer">{link.title}</a></li>)}
+          </ul>
+        </div>
+      )}
+      {parsed.body && <Markdown text={parsed.body} />}
+    </div>
+  )
+}
+
+function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: string | null }) {
+  if (!Array.isArray(changes)) return null
+  const showFileHeaders = changes.length > 1
+  return (
+    <div className="space-y-1.5">
+      {changes.map((raw, i) => {
+        const change = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+        const path = typeof change.path === 'string' ? trimWorktreePaths(change.path, worktree) : `file ${i + 1}`
+        const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
+        const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
+        const diff = typeof change.diff === 'string' ? change.diff : ''
+        const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        return (
+          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
+            {showFileHeaders && (
+              <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
+                <FileText className="h-3 w-3 shrink-0 text-blue-500" />
+                <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+                <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
+              </div>
+            )}
+            {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
+  const rows = useMemo(() => {
+    // Codex uses the same field for two distinct representations: updates are
+    // unified diffs, while add/delete items contain the complete file text.
+    // Only unified-diff mode has a structural prefix to remove. Inferring that
+    // from each line corrupts full files whose content begins with space/+/-.
+    const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
+    let oldLine = kind === 'delete' ? 1 : 0
+    let newLine = kind === 'add' ? 1 : 0
+    return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
+      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+      if (hunk) {
+        oldLine = Number(hunk[1])
+        newLine = Number(hunk[2])
+        return []
+      }
+      const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
+      const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
+      const added = kind === 'add' || hasAddedMarker
+      const removed = kind === 'delete' || hasRemovedMarker
+      const oldNo = added ? '' : String(oldLine++)
+      const newNo = removed ? '' : String(newLine++)
+      return [{ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo }]
+    })
+  }, [diff, kind])
+  const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
+  return (
+    <div className="bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
+      {rows.map((row, i) => (
+        <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
+          {kind !== 'add' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
+          {kind !== 'delete' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
+          <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// GutterCodePanel renders code lines beside a line-number gutter, one grid row
+// per source line so a long line WRAPS under its own number instead of scrolling
+// the whole block sideways. Highlighting runs over the whole body (multi-line
+// constructs colourise correctly) and is split back into per-line HTML
+// (highlightLines, which falls back to escaped plain lines for an unknown lang).
+function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[]; lang: string }) {
+  const lines = useMemo(() => highlightLines(code.join('\n'), lang || 'plaintext'), [code, lang])
+  return (
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+      <div className="grid grid-cols-[auto_1fr] text-[11px] leading-4 font-mono">
+        {nums.map((n, i) => (
+          <Fragment key={i}>
+            {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
+            <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{n}</span>
+            <span className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: lines[i] ?? '' }} />
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// NumberedCodePanel renders code with a 1..N line-number gutter and syntax
+// highlighting - the shape a Read shows - used for a Write tool's file content.
+function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
+  const body = code.replace(/\n$/, '')
+  const parts = useMemo(() => {
+    const lines = body.split('\n')
+    return { nums: lines.map((_, i) => String(i + 1)), code: lines }
+  }, [body])
+  return <GutterCodePanel nums={parts.nums} code={parts.code} lang={lang} />
+}
+
+// ReadOutputPanel renders a Read's `cat -n` output (each line prefixed with its
+// file line number + a tab) as a proper neutral line-number gutter plus syntax-
+// highlighted code. The numbers are split OUT of the code before highlighting, so
+// the highlighter can't colour them as numeric literals (item 43: the file line
+// numbers rendered in the "number" token colour instead of a plain gutter). The
+// gutter shows the file's REAL line numbers (honouring a Read offset), not 1..N.
+// Falls back to the plain OutputPanel when the text isn't the cat -n shape.
+function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
+  const parsed = useMemo(() => {
+    const lines = text.replace(/\n$/, '').split('\n')
+    const nums: string[] = []
+    const code: string[] = []
+    let matched = 0
+    for (const l of lines) {
+      const m = /^\s{0,6}(\d+)\t(.*)$/.exec(l)
+      if (m) { nums.push(m[1]); code.push(m[2]); matched++ } else { nums.push(''); code.push(l) }
+    }
+    return { nums, code, ok: lines.length > 0 && matched > lines.length / 2 }
+  }, [text])
+  if (!parsed.ok) return <OutputPanel text={text} lang={lang} />
+  return <GutterCodePanel nums={parsed.nums} code={parsed.code} lang={lang} />
+}
+
+// EditDiffPanel shows an Edit's old_string and new_string as two syntax-
+// highlighted blocks side by side (old left, new right; stacked on a narrow
+// pane), tinted red/green like a diff. No line numbers - the strings are
+// fragments, not whole files. A "replace all" chip surfaces the replace_all flag.
+function EditDiffPanel({ oldStr, newStr, lang, replaceAll }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean }) {
+  const oldHtml = useMemo(() => highlightHtml(oldStr, lang), [oldStr, lang])
+  const newHtml = useMemo(() => highlightHtml(newStr, lang), [newStr, lang])
+  const block = (label: string, str: string, html: string | null, tone: 'old' | 'new') => (
+    <div className="flex-1 min-w-0">
+      <div className={`mb-0.5 text-[10px] font-semibold tracking-wide select-none ${tone === 'old' ? 'text-red-500/80 dark:text-red-400/80' : 'text-emerald-600/80 dark:text-emerald-400/80'}`}>
+        {label}
+      </div>
+      {html != null
+        ? <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`} dangerouslySetInnerHTML={{ __html: html }} />
+        : <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`}>{str || ' '}</pre>}
+    </div>
+  )
+  return (
+    <div className="space-y-1">
+      {replaceAll && (
+        <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
+      )}
+      <div className="flex flex-col sm:flex-row gap-1.5">
+        {block('Old', oldStr, oldHtml, 'old')}
+        {block('New', newStr, newHtml, 'new')}
+      </div>
+    </div>
+  )
+}
+
+// parseMemory splits a memory Read's result into its point-in-time reminder,
+// its YAML frontmatter, and its markdown body - stripping the cat -n line-number
+// gutter the Read tool adds ("     1\t---" -> "---").
+function parseMemory(raw: string): { reminder: string | null; yaml: string; body: string } {
+  let text = raw
+  let reminder: string | null = null
+  const m = text.match(/<system-reminder>([\s\S]*?)<\/system-reminder>\s*/i)
+  if (m) {
+    reminder = m[1].trim()
+    text = (text.slice(0, m.index) + text.slice((m.index ?? 0) + m[0].length))
+  }
+  // Drop the line-number prefix ("<up to 6 spaces>N\t") each Read line carries.
+  text = text
+    .split('\n')
+    .map((l) => l.replace(/^\s{0,6}\d+\t/, ''))
+    .join('\n')
+    .trim()
+  let yaml = ''
+  let body = text
+  const fm = text.match(/^---\n([\s\S]*?)\n---\n?/)
+  if (fm) {
+    yaml = fm[1]
+    body = text.slice(fm[0].length).trim()
+  }
+  return { reminder, yaml, body }
+}
+
+// MemoryPanel renders a Claude auto-memory Read nicely (item: memory cards): the
+// point-in-time <system-reminder> as a callout under the header, the YAML
+// frontmatter as a highlighted code box, and the body as normal markdown prose -
+// no line-number gutter.
+function MemoryPanel({ text }: { text: string }) {
+  const serif = useChatFontStore((s) => s.serif)
+  const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
+  const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
+  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  return (
+    <div className="space-y-2">
+      {reminder && (
+        <div className="flex gap-1.5 rounded-md border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200/90">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>{reminder}</span>
+        </div>
+      )}
+      {yaml && (
+        yamlHtml != null
+          ? <pre className={codeCls} dangerouslySetInnerHTML={{ __html: yamlHtml }} />
+          : <pre className={codeCls}>{yaml}</pre>
+      )}
+      {body && (
+        <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={body} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// LabeledField is a small uppercase label over a value block - the shape the
+// Output panel header uses, reused for the Task tool's subject/description/output.
+function LabeledField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">{label}</div>
+      {children}
+    </div>
+  )
+}
+
+// TaskToolFields renders a TaskCreate / TaskUpdate input as labeled fields -
+// subject and description as markdown prose - instead of raw JSON. A TaskUpdate's
+// id/status ride on a compact line above.
+function TaskToolFields({ input, serif }: { input: Record<string, unknown>; serif: boolean }) {
+  const taskId = typeof input.taskId === 'string' || typeof input.taskId === 'number' ? String(input.taskId) : ''
+  const status = typeof input.status === 'string' ? (input.status as string) : ''
+  const subject = typeof input.subject === 'string' ? (input.subject as string) : ''
+  const description = typeof input.description === 'string' ? (input.description as string) : ''
+  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  return (
+    <div className="space-y-1.5">
+      {(taskId || status) && (
+        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+          {taskId && <span className="font-medium">#{taskId}</span>}
+          {status && <span>{taskId ? ' -> ' : ''}{status}</span>}
+        </div>
+      )}
+      {subject && (
+        <LabeledField label="Subject"><div className={proseCls}><Markdown text={subject} /></div></LabeledField>
+      )}
+      {description && (
+        <LabeledField label="Description"><div className={proseCls}><Markdown text={description} /></div></LabeledField>
+      )}
+    </div>
+  )
+}
+
+// AgentChip is the recipient of a SendMessage - the sub-agent's label (and its
+// short id) as a pill that opens that agent's chat when we can resolve it.
+function AgentChip({
+  label,
+  id,
+  running,
+  onOpenChat,
+}: {
+  label: string
+  id: string
+  running?: boolean
+  onOpenChat?: () => void
+}) {
+  const body = (
+    <>
+      <Bot className="w-3 h-3 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+      <span className="truncate">{label}</span>
+      {id && <span className="shrink-0 font-mono text-[10px] text-stone-400 dark:text-stone-500">{id.slice(0, 8)}</span>}
+      {running && <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
+      {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
+    </>
+  )
+  const cls =
+    'flex max-w-full items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2 py-0.5 text-[11px] text-stone-500 dark:text-stone-400'
+  return onOpenChat ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onOpenChat() }}
+      className={`${cls} cursor-pointer hover:text-stone-700 dark:hover:text-stone-200`}
+      title="Open this agent's chat"
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={`${cls} select-none`}>{body}</span>
+  )
+}
+
+// SendMessageFields renders a SendMessage input as who it went to plus the
+// message itself, as prose - the raw JSON (with its echoed recipient/content
+// duplicates) said the same thing three times and buried the actual message.
+function SendMessageFields({
+  input,
+  serif,
+  recipientLabel,
+  recipientId,
+  recipientRunning,
+  onOpenChat,
+}: {
+  input: Record<string, unknown>
+  serif: boolean
+  recipientLabel: string
+  recipientId: string
+  recipientRunning?: boolean
+  onOpenChat?: () => void
+}) {
+  const message = typeof input.message === 'string' ? input.message : typeof input.content === 'string' ? input.content : ''
+  const summary = typeof input.summary === 'string' ? input.summary : ''
+  // Anything the tool carried beyond the fields rendered below (and the echoed
+  // duplicates) still shows, so a new field never silently disappears.
+  const extra = Object.fromEntries(
+    Object.entries(input).filter(
+      ([key]) => !SEND_MESSAGE_ECHO_KEYS.has(key) && key !== 'to' && key !== 'summary' && key !== 'message' && !key.startsWith('_'),
+    ),
+  )
+  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  return (
+    <div className="space-y-1.5">
+      {recipientId && (
+        <LabeledField label="To">
+          <AgentChip label={recipientLabel} id={recipientId} running={recipientRunning} onOpenChat={onOpenChat} />
+        </LabeledField>
+      )}
+      {summary && (
+        <LabeledField label="Summary"><div className={proseCls}><Markdown text={summary} /></div></LabeledField>
+      )}
+      {message && (
+        <LabeledField label="Message">
+          <div className={`${PANEL_CLASS} px-2.5 py-1.5 ${proseCls} text-stone-700 dark:text-stone-200`}>
+            <Markdown text={message} />
+          </div>
+        </LabeledField>
+      )}
+      {Object.keys(extra).length > 0 && <CodePanel code={JSON.stringify(extra, null, 2)} lang="json" />}
+    </div>
+  )
+}
+
+// SendMessageOutcome renders the tool's JSON reply as the one line it means:
+// whether the message landed, and (when it resumed a finished agent) a way into
+// that agent's chat to watch it work.
+function SendMessageOutcome({
+  result,
+  recipientRunning,
+  onOpenChat,
+}: {
+  result: SendMessageResult
+  recipientRunning?: boolean
+  onOpenChat?: () => void
+}) {
+  return (
+    <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1`}>
+      <div className="flex items-start gap-1.5">
+        {result.ok ? (
+          <Check className="w-3.5 h-3.5 shrink-0 mt-px text-emerald-600/80 dark:text-emerald-400/80" />
+        ) : (
+          <X className="w-3.5 h-3.5 shrink-0 mt-px text-red-500 dark:text-red-400" />
+        )}
+        <span className="break-words leading-relaxed text-stone-700 dark:text-stone-200">
+          {result.message || (result.ok ? 'Message delivered.' : 'Message failed.')}
+        </span>
+      </div>
+      {result.resumed && onOpenChat && (
+        <button
+          onClick={onOpenChat}
+          className="flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
+        >
+          {recipientRunning && <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
+          <span>{recipientRunning ? 'Working - open its chat' : 'Open its chat'}</span>
+          <MessageSquare className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  )
 }
 
 // Per-tool icons for the card header; anything unlisted gets the wrench.
@@ -771,21 +1844,66 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Task: Bot,
   Agent: Bot,
+  SendMessage: Send,
   TaskCreate: ListPlus,
   TaskUpdate: ListChecks,
+  UpdatePlan: ListChecks,
+}
+
+function LowlitPath({ path }: { path: string }) {
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-500 dark:text-stone-400">{name}</span></>
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
-const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
+// recipient* / openSub describe a SendMessage's target agent. They are passed
+// as primitives (plus the stable openSubView callback) so the memo comparison
+// still holds - an object prop would re-render every card on each parent render.
+const ToolCard = memo(function ToolCard({
+  item,
+  worktree,
+  recipientId = '',
+  recipientLabel = '',
+  recipientRunning = false,
+  openSub,
+}: {
+  item: Extract<ChatItem, { kind: 'tool' }>
+  worktree: string | null
+  recipientId?: string
+  recipientLabel?: string
+  recipientRunning?: boolean
+  openSub?: (key: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // Eagerly decode result images (the card mounts collapsed the moment the
+  // result lands), so opening later measures the true expanded height.
+  const imageDims = useImageDims(item.resultImages)
+  const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
-  const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
+	const visibleResult = item.result ?? item.runningOutput
+  const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
+	const input = useMemo(() => {
+		if (!rawInput || (!('_raw' in rawInput) && !('_raw_events' in rawInput))) return rawInput
+		const visible = { ...rawInput }
+		delete visible._raw
+		delete visible._raw_events
+		return visible
+	}, [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
+	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
+  const displayedCommand = isBash ? formatBashForDisplay(command, commandCwd === worktree ? '' : commandCwd) : ''
+  const executableCommand = isBash ? formatBashForDisplay(command, '') : ''
+  const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
+  const visibleCommand = interactiveTranscript?.command ?? displayedCommand
+  const renderedResult = interactiveTranscript?.output ?? visibleResult
   const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
@@ -800,19 +1918,58 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
 
+  // Write / Edit specifics: render the payload richly rather than as raw JSON -
+  // a Write's whole file content as a numbered code block, an Edit's
+  // old_string/new_string side by side. Both syntax-highlight by the target
+  // file's extension.
+  const filePath = typeof input?.file_path === 'string' ? (input.file_path as string) : ''
+  const isWrite = item.name === 'Write' && typeof input?.content === 'string'
+  const isEdit = item.name === 'Edit' && typeof input?.old_string === 'string' && typeof input?.new_string === 'string'
+  const fileLang = isWrite || isEdit ? langFromPath(filePath) : ''
+
+  // Task tools carry a prose subject, not a path/command - shown in the header.
+  const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
+  const isWebSearch = item.name === 'WebSearch'
+  const isFileChanges = Array.isArray(input?.changes)
+  const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
+  const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
+
+  // SendMessage: a note to another agent, so the card reads as who it went to +
+  // what was said, and its JSON reply becomes a sentence (items: rich message
+  // card). The recipient's label/liveness are resolved by the caller.
+  const isSendMessage = item.name === 'SendMessage' && input != null
+  const messageTo = isSendMessage ? sendMessageRecipient(input) || recipientId : ''
+  const messageResult = isSendMessage ? parseSendMessageResult(visibleResult) : null
+  const openRecipientChat = openSub && recipientId ? () => openSub(recipientId) : undefined
+  const recipientName = recipientLabel || (messageTo ? messageTo.slice(0, 8) : 'agent')
+
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
+  const summarized = summarizeToolInput(input)
+  const changedPaths = isFileChanges
+    ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
+    : []
   const summary = mem
     ? `memory ${mem}`
-    : collapseHome(trimWorktreePaths(isBash ? description || command : summarizeToolInput(item.input), worktree))
+    : isWebSearch
+      ? (typeof input?.query === 'string' && input.query.trim() ? input.query : 'Preparing search…')
+    : isFileChanges
+      ? changedPaths.join(', ')
+      : collapseHome(trimWorktreePaths(isBash ? description || visibleCommand.replace(/\n/g, ' ') : summarized.text, worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
-  // description are prose (sans) already.
+  // description / task subject / prose input field (a ScheduleWakeup prompt)
+  // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryMono = !mem && !isPathSummary && !(isBash && description)
+    !isBash && !mem && !!input && (isFileChanges || typeof input.file_path === 'string' || typeof input.path === 'string')
+  const summaryPaths = isFileChanges
+    ? changedPaths
+    : isPathSummary
+      ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+      : []
+  const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -826,10 +1983,16 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
-    const raw: Record<string, unknown> = { input: item.input }
-    if (item.result !== undefined) raw.result = item.result
+		const protocolEvents = rawInput?._raw_events
+		const protocolInput = rawInput?._raw
+		const raw: Record<string, unknown> = Array.isArray(protocolEvents)
+			? { events: protocolEvents }
+			: protocolInput && typeof protocolInput === 'object'
+			? { ...(protocolInput as Record<string, unknown>) }
+			: { input: item.input }
+		if (visibleResult !== undefined && !('aggregatedOutput' in raw) && !('result' in raw) && !('events' in raw)) raw.result = visibleResult
     return JSON.stringify(raw, null, 2)
-  }, [showRaw, item.input, item.result])
+	}, [showRaw, rawInput, item.input, visibleResult])
 
   return (
     <div
@@ -839,28 +2002,49 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      {/* Header row: the whole left side toggles open; a Raw button sits at the
-          right, only while expanded (item 32). Two sibling buttons (not nested)
-          so the Raw toggle doesn't also collapse the card. */}
-      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      {/* Header row: the WHOLE row toggles open (so when collapsed the entire
+          card is the click target); the Raw button stops propagation so it
+          doesn't also collapse. Body clicks (below) never toggle - only the
+          header does, which is what you want once expanded. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{item.name}</span>
-          <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
+          {/* Who a message went to belongs in the collapsed header - it is the
+              first thing you want to know about a SendMessage. */}
+          {isSendMessage && messageTo && (
+            <span className="shrink-0 flex items-baseline gap-1 text-stone-400 dark:text-stone-500">
+              <span aria-hidden>-&gt;</span>
+              <span className="max-w-40 truncate text-stone-500 dark:text-stone-400">{recipientName}</span>
+            </span>
+          )}
+          {isSendMessage && recipientRunning && (
+            <LoaderCircle className="w-3 h-3 shrink-0 self-center animate-spin text-violet-500/80 dark:text-violet-400/80" />
+          )}
+          {isPathSummary ? (
+            <span className="truncate">
+              {summaryPaths.map((path, index) => <span key={`${path}:${index}`}>{index > 0 && <span className="text-stone-400 dark:text-stone-500">, </span>}<LowlitPath path={path} /></span>)}
+            </span>
+          ) : (
+            <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
-        </button>
+        </div>
         {pending && (
           <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
         )}
         {open && (
           <button
-            onClick={() => setShowRaw((r) => !r)}
+            onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
             className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
@@ -879,11 +2063,48 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           ) : (
             <>
               {isBash ? (
-                <CodePanel code={trimWorktreePaths(splitBashChains(command), worktree)} lang="bash" />
+                <div>
+                  {interactiveTranscript && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Terminal input (inferred from echo)
+                    </div>
+                  )}
+                  <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
+                </div>
+              ) : isWebSearch && typeof input?.query === 'string' && input.query.trim() ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
+              ) : isWebSearch && pending ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-400 dark:text-stone-500`}>Preparing search…</div>
+              ) : isGlob ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
+              ) : isWebFetch ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline">{input!.url as string}</a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
+              ) : isFileChanges ? (
+                <FileChangesPanel changes={input?.changes} worktree={worktree} />
+              ) : isWrite ? (
+                <NumberedCodePanel code={trimWorktreePaths(input!.content as string, worktree)} lang={fileLang} />
+              ) : isEdit ? (
+                <EditDiffPanel
+                  oldStr={trimWorktreePaths(input!.old_string as string, worktree)}
+                  newStr={trimWorktreePaths(input!.new_string as string, worktree)}
+                  lang={fileLang}
+                  replaceAll={input!.replace_all === true}
+                />
+              ) : isSendMessage && input ? (
+                <SendMessageFields
+                  input={input}
+                  serif={serif}
+                  recipientLabel={recipientName}
+                  recipientId={messageTo}
+                  recipientRunning={recipientRunning}
+                  onOpenChat={openRecipientChat}
+                />
+              ) : isTaskTool && input ? (
+                <TaskToolFields input={input} serif={serif} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
-              {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
+				{(renderedResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
@@ -894,18 +2115,43 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                   )}
                   {item.resultImages && item.resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
-                      {item.resultImages.map((src, i) => (
-                        <img
-                          key={i}
-                          src={src}
-                          alt="Tool output image"
-                          className="max-w-full rounded-md border border-stone-200 dark:border-white/[0.08]"
-                        />
-                      ))}
+                      {item.resultImages.map((src, i) => {
+                        // width/height attrs (from the eager decode) + h-auto:
+                        // layout reserves the image's aspect box before the
+                        // browser paints the pixels - see useImageDims.
+                        const dims = imageDims.get(src)
+                        return (
+                          <img
+                            key={i}
+                            src={src}
+                            width={dims?.w}
+                            height={dims?.h}
+                            alt="Tool output image"
+                            onClick={() => setImgLightbox(i)}
+                            // min-h while the size is still unknown (a slow
+                            // url-source image opened before the eager decode
+                            // finished): the open measures a visible loading
+                            // box instead of a sliver.
+                            className={`max-w-full h-auto rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
+                          />
+                        )
+                      })}
                     </div>
                   )}
-                  {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
-                    <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+					{renderedResult !== undefined && !(renderedResult === '' && item.resultImages?.length) && (
+                    messageResult && !item.isError
+                      ? <SendMessageOutcome result={messageResult} recipientRunning={recipientRunning} onOpenChat={openRecipientChat} />
+                    : mem && !item.isError
+						? <MemoryPanel text={renderedResult} />
+                      : isTaskTool && !item.isError
+							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                        : isWebSearch && !item.isError
+                          ? <WebSearchOutput text={renderedResult} serif={serif} />
+                        : isWebFetch && !item.isError
+                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                        : isRead && !item.isError
+								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
+								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}
@@ -913,6 +2159,16 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           )}
         </div>
       </Expandable>
+      {/* Read of an image returns image blocks (item 4); clicking one opens it
+          full-size in the shared lightbox, like an attachment image. */}
+      {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
+        <ImageLightbox
+          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0 }))}
+          index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          onIndexChange={setImgLightbox}
+          onClose={() => setImgLightbox(null)}
+        />
+      )}
     </div>
   )
 })
@@ -938,11 +2194,14 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
 
   return (
     <div className="rounded-lg border border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03] text-xs overflow-hidden">
-      <div className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
@@ -951,10 +2210,10 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
           {parsed.fileName && (
             <span className="truncate font-mono text-stone-400 dark:text-stone-500">{parsed.fileName}</span>
           )}
-        </button>
+        </div>
         {open && (
           <button
-            onClick={() => setShowRaw((r) => !r)}
+            onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
             className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
@@ -1035,6 +2294,20 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   // no snippet or disclosure) rather than the "Thinking..." indicator vanishing.
   if (empty && !streaming && durationMs == null) return null
 
+  // While streaming, the "Thinking..." label now lives inside the live "working"
+  // indicator's brackets (see item 48), so this card surfaces only the live tail
+  // - the last couple of thought lines. A silent (empty) thought renders nothing
+  // here at all, avoiding a second "Thinking..." line whose appearing/vanishing
+  // shifted the layout.
+  if (streaming) {
+    if (!tail) return null
+    return (
+      <div className="text-xs mt-1 italic text-stone-400 dark:text-stone-500 whitespace-pre-wrap break-words line-clamp-2">
+        {tail}
+      </div>
+    )
+  }
+
   return (
     <div className="text-xs">
       <button
@@ -1042,14 +2315,10 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
         disabled={empty}
         className={`group flex w-full items-center gap-1.5 text-left ${empty ? 'cursor-default' : 'cursor-pointer'}`}
       >
-        {streaming ? (
-          <span className="chat-text-shimmer font-medium shrink-0 text-stone-500">Thinking...</span>
-        ) : (
-          <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
-            {settledLabel}
-          </span>
-        )}
-        {!streaming && !open && snippet && (
+        <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+          {settledLabel}
+        </span>
+        {!open && snippet && (
           <span className="truncate italic text-stone-400/80 dark:text-stone-500/80">{snippet}</span>
         )}
         {!empty && (
@@ -1058,11 +2327,6 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           />
         )}
       </button>
-      {streaming && !open && !empty && tail && (
-        <div className="mt-1 italic text-stone-400 dark:text-stone-500 whitespace-pre-wrap break-words line-clamp-2">
-          {tail}
-        </div>
-      )}
       <Expandable open={open}>
         <div className="pt-1.5">
           <div
@@ -1097,7 +2361,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           <div className="absolute inset-x-0 bottom-0 max-h-[75vh] flex flex-col rounded-t-2xl border-t border-stone-200 dark:border-white/10 bg-[#faf9f5] dark:bg-[#2b2b28] shadow-2xl animate-chat-sheet-up">
             <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
               <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
-                {streaming ? 'Thinking...' : settledLabel}
+                {settledLabel}
               </span>
               <button
                 onClick={() => setSheet(false)}
@@ -1117,6 +2381,18 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
   )
 })
 
+// SubagentLinks bundles what rendering NESTED sub-agents needs, threaded from
+// the pane into SubagentCard -> SubagentTimeline (and recursively down): the
+// toolUse -> sub map that upgrades an inner Task/Agent tool card into the
+// spawned sub-agent's own card, the tool lookup for its status/report, the set
+// of settled-but-waiting-on-children agents, and the open-chat-view hook.
+interface SubagentLinks {
+  subByToolUse: Record<string, SubagentView>
+  taskToolByUse: Record<string, ToolItem>
+  awaitingChildren: Set<string>
+  openSubView: (key: string) => void
+}
+
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
 // skipId drops one inner item (the assistant message shown separately as the
@@ -1126,29 +2402,48 @@ function SubagentTimeline({
   worktree,
   serif,
   skipId,
+  links,
 }: {
   sub: SubagentView
   worktree: string | null
   serif: boolean
   skipId?: number
+  links?: SubagentLinks
 }) {
   return (
     <>
-      {sub.items.map((it) =>
-        it.id === skipId ? null : it.kind === 'thinking' ? (
-          <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-        ) : it.kind === 'tool' ? (
-          it.name === 'ExitPlanMode' ? (
-            <PlanCard key={it.id} item={it} />
-          ) : (
-            <ToolCard key={it.id} item={it} worktree={worktree} />
+      {sub.items.map((it) => {
+        if (it.id === skipId) return null
+        if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+        if (it.kind === 'tool') {
+          // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
+          // spawn): upgrade it into the spawned agent's own card, exactly like
+          // the main flow upgrades its Task cards - instead of leaking the raw
+          // prompt JSON + launch boilerplate as a plain tool card.
+          const nested = links?.subByToolUse[it.toolUseId]
+          if (links && nested && nested.agentId !== sub.agentId)
+            return (
+              <SubagentCard
+                key={it.id}
+                sub={nested}
+                tool={it}
+                worktree={worktree}
+                serif={serif}
+                links={links}
+                onOpenChat={() => links.openSubView(nested.agentId)}
+              />
+            )
+          if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
+          return <ToolCard key={it.id} item={it} worktree={worktree} />
+        }
+        if (it.kind === 'assistant')
+          return (
+            <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <Markdown text={it.text} />
+            </div>
           )
-        ) : it.kind === 'assistant' ? (
-          <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-            <Markdown text={it.text} />
-          </div>
-        ) : null,
-      )}
+        return null
+      })}
     </>
   )
 }
@@ -1162,11 +2457,104 @@ interface SubReport {
   itemId?: number
 }
 
+// NoticePill renders a task-notification chip. A notice that resolves to a
+// sub-agent is CLICKABLE (opens that agent's chat); a background command's
+// notice (it carried an <output-file>) is EXPANDABLE, fetching and showing the
+// command's output beneath the pill.
+function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
+  text: string
+  onOpenChat?: () => void
+  outputFile?: string
+  requestTaskOutput?: (file: string) => Promise<{ content?: string; error?: string }>
+}) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ content?: string; error?: string } | null>(null)
+  const expandable = !onOpenChat && !!outputFile && !!requestTaskOutput
+  const clickable = !!onOpenChat || expandable
+  const onClick = () => {
+    if (onOpenChat) {
+      onOpenChat()
+      return
+    }
+    if (!expandable) return
+    if (open || result != null) {
+      setOpen(!open)
+      return
+    }
+    // First expand: fetch the output BEFORE opening, so the reveal animation
+    // measures the real content. Opening around a small "loading" placeholder
+    // made the panel glide to placeholder height and then jump to full size
+    // when the output landed (the same first-open jump image reads had before
+    // their dimensions were reserved). The pill's chevron spins while fetching.
+    if (loading) return
+    setLoading(true)
+    requestTaskOutput!(outputFile!).then((res) => {
+      setResult(res)
+      setLoading(false)
+      setOpen(true)
+    })
+  }
+  const pill = (
+    <div
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none ${
+        clickable ? 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors' : ''
+      }`}
+      title={text}
+    >
+      {expandable &&
+        (loading ? (
+          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-stone-400 dark:text-stone-500" />
+        ) : (
+          <ChevronRight className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        ))}
+      <span className="truncate">{text}</span>
+      {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
+    </div>
+  )
+  if (!expandable) return <div className="flex justify-center">{pill}</div>
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex justify-center">{pill}</div>
+      <Expandable open={open}>
+        <div className="w-full">
+          {result?.error ? (
+            <div className="text-center py-1 text-[11px] text-stone-400 dark:text-stone-500">{result.error}</div>
+          ) : (
+            <OutputPanel text={result?.content ?? ''} lang="" />
+          )}
+        </div>
+      </Expandable>
+    </div>
+  )
+}
+
 // isLaunchBoilerplate spots the async/background-agent launch acknowledgement
 // ("Async agent launched successfully ... internal metadata ...") - that is NOT
 // the real report, just the handle returned to the parent at spawn time.
 function isLaunchBoilerplate(s: string): boolean {
   return /Async agent launched successfully|internal metadata/i.test(s)
+}
+
+// Codex exposes all collaboration controls through collabAgentToolCall. Only a
+// spawn owns a child conversation; wait/send/resume/close are ordinary tool
+// calls and must not create empty sub-agent cards. Claude's Agent tool has no
+// `_raw.tool` discriminator, but its prompt/subagent_type shape is a spawn.
+function isAgentSpawnInput(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const input = value as Record<string, unknown>
+  const raw = input._raw && typeof input._raw === 'object' ? input._raw as Record<string, unknown> : null
+  const rawTool = typeof raw?.tool === 'string' ? raw.tool.replace(/[_-]/g, '').toLowerCase() : ''
+  if (rawTool) return rawTool === 'spawnagent'
+  return typeof input.prompt === 'string' || typeof input.subagent_type === 'string'
+}
+
+function isAgentStatusOnlyResult(tool: ToolItem | undefined, result: string): boolean {
+  return tool?.name === 'Agent' && /^(?:completed|complete|done|success|succeeded)$/i.test(result.trim())
 }
 
 // subReport resolves what a sub-agent reported back. Normally that is the Task
@@ -1176,8 +2564,8 @@ function isLaunchBoilerplate(s: string): boolean {
 // the message so it is not shown twice.
 function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
   const res = tool?.result?.trim()
-  if (tool?.isError && res) return { text: tool!.result!, isError: true }
-  if (res && !isLaunchBoilerplate(res)) return { text: tool!.result!, isError: false }
+  if (tool?.isError && res) return { text: cleanSubagentReport(tool!.result!), isError: true }
+  if (res && !isLaunchBoilerplate(res) && !isAgentStatusOnlyResult(tool, res)) return { text: cleanSubagentReport(tool!.result!), isError: false }
   for (let i = sub.items.length - 1; i >= 0; i--) {
     const it = sub.items[i]
     if (it.kind === 'assistant' && it.text.trim()) return { text: it.text, isError: false, itemId: it.id }
@@ -1317,6 +2705,7 @@ const SubagentCard = memo(function SubagentCard({
   serif,
   onOpenChat,
   finishedBadge,
+  links,
 }: {
   sub: SubagentView
   tool?: ToolItem
@@ -1324,36 +2713,48 @@ const SubagentCard = memo(function SubagentCard({
   serif: boolean
   onOpenChat?: () => void
   finishedBadge?: boolean
+  links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
-  const [open, setOpen] = useState(true)
+  // Settled itself, but sub-agents IT spawned are still working: the harness
+  // "finishes" an agent the moment its turn ends, even mid-wait on background
+  // children, so a plain "finished" here misreads. Keep the card visually live
+  // until the whole subtree is quiet.
+  const waiting = !running && !!links?.awaitingChildren.has(sub.agentId)
+  const active = running || waiting
+  // Collapsed by default so a sub-agent never dominates the main conversation
+  // (#62); the user expands the card to see its prompt, steps and report.
+  const [open, setOpen] = useState(false)
   // The step timeline is collapsed by default (prompt + report are the resting
   // view); the user expands it to inspect the sub-agent's inner work.
   const [stepsOpen, setStepsOpen] = useState(false)
 
-  const { label, desc } = subLabels(sub, tool)
+  const { label, desc } = subCardLabels(sub, tool)
   const steps = sub.items.length
-  const report = running ? null : subReport(sub, tool)
+  const report = active ? null : subReport(sub, tool)
 
   return (
     <div
       className={`rounded-lg border text-xs overflow-hidden ${
         tool?.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : running
+          : active
             ? 'border-violet-300/70 bg-violet-50/40 dark:border-violet-500/30 dark:bg-violet-500/[0.05]'
             : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
-      <div className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-        >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        className="flex w-full items-center gap-1.5 pl-2.5 pr-2 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left">
           <ChevronRight
             className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          {running ? (
+          {active ? (
             <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
               <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-violet-400/60" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
@@ -1368,6 +2769,11 @@ const SubagentCard = memo(function SubagentCard({
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
+          ) : waiting ? (
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              waiting on sub-agents
+            </span>
           ) : finishedBadge ? (
             <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
               <Check className="w-3 h-3" />
@@ -1380,11 +2786,11 @@ const SubagentCard = memo(function SubagentCard({
               </span>
             )
           )}
-        </button>
+        </div>
         {onOpenChat && (
           <Tooltip content="Open sub-agent chat" side="top">
             <button
-              onClick={onOpenChat}
+              onClick={(e) => { e.stopPropagation(); onOpenChat() }}
               aria-label="Open sub-agent chat"
               className="shrink-0 rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
@@ -1400,7 +2806,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`${PANEL_CLASS} max-h-40 overflow-y-auto break-words px-2.5 py-1.5 text-[11px] leading-4 text-stone-600 dark:text-stone-300`}>
+              <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -1418,7 +2824,7 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
+                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
                 </div>
               </Expandable>
             </div>
@@ -1439,25 +2845,29 @@ function SubagentChatView({
   tool,
   worktree,
   serif,
+  links,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
   serif: boolean
+  links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
+  // Same as SubagentCard: settled itself but spawned sub-agents still working.
+  const waiting = !running && !!links?.awaitingChildren.has(sub.agentId)
   const { label, desc } = subLabels(sub, tool)
-  const report = running ? null : subReport(sub, tool)
+  const report = running || waiting ? null : subReport(sub, tool)
   return (
     <>
       <div className="flex items-baseline gap-2 pt-8 text-stone-600 dark:text-stone-300">
         <Bot className="w-4 h-4 shrink-0 self-center text-violet-500/80 dark:text-violet-400/80" />
         <span className="text-sm font-semibold">{label}</span>
         {desc && <span className="truncate text-xs text-stone-400 dark:text-stone-500">{desc}</span>}
-        {running ? (
+        {running || waiting ? (
           <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400/90">
             <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-            working
+            {running ? 'working' : 'waiting on sub-agents'}
           </span>
         ) : (
           <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
@@ -1466,24 +2876,24 @@ function SubagentChatView({
           </span>
         )}
       </div>
+      {/* The sub-agent's task is its "user" turn: render it as a user message
+          bubble (like the main conversation's), no "Prompt" heading. This is the
+          full view only - the folded SubagentCard keeps its labelled Prompt. */}
       {sub.prompt && (
-        <div>
-          <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
-            Prompt
-          </div>
-          <div className={`${PANEL_CLASS} break-words px-3 py-2 text-xs leading-5 text-stone-600 dark:text-stone-300`}>
+        <div className="flex flex-col items-end gap-1">
+          <div className={`${USER_BUBBLE_CLASS} leading-relaxed ${serif ? 'font-serif' : ''}`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
-      {running && (
+      {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
           <span className="text-[#c96442]">✳</span>
-          <span className="chat-text-shimmer font-medium">Working...</span>
+          <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -1491,87 +2901,213 @@ function SubagentChatView({
 }
 
 // ChatViewSelector is the top-left dropdown listing the current agents - the
-// main conversation plus each sub-agent (Task tool run) with its live status -
-// switching which conversation the pane shows. Rendered only once sub-agents
-// exist; floats over the timeline like the jump-to-bottom button.
+// main conversation plus the sub-agent tree (children indented under the
+// sub-agent that spawned them) with live status - switching which conversation
+// the pane shows. Rendered only once sub-agents exist; floats over the
+// timeline like the jump-to-bottom button.
+//
+// There is no separate header chip: the card ALWAYS renders the full list, and
+// the collapsed state is the list clipped to just the current row (the card's
+// height is one row and the list is translated up by that row's offset).
+// Opening glides the translate to 0 while the height and width expand, so the
+// chip visually slides down into its slot in the tree as the other rows are
+// revealed around it - and picking a row morphs the card back down onto the
+// row that was just clicked.
 function ChatViewSelector({
   chatView,
   subagents,
   taskToolByUse,
+  awaitingChildren,
   onSelect,
+  fadeIn,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
   taskToolByUse: Record<string, ToolItem>
+  awaitingChildren: Set<string>
   onSelect: (key: string) => void
+  fadeIn: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const subs = Object.values(subagents)
+  // Frozen at mount: fade in only when the selector APPEARS live (the first
+  // sub-agent spawning mid-conversation), not on every reload's replay.
+  const [animateIn] = useState(fadeIn)
+  const [chipRef, chipW] = useChipWidth()
+  // The morph's collapse target. Mirrors chatView, but updates the instant a
+  // row is picked: onSelect round-trips through the parent's state, and
+  // collapsing toward the OLD row for that render would visibly start the
+  // morph at the wrong slot.
+  const [localView, setLocalView] = useState(chatView)
+  const [prevChatView, setPrevChatView] = useState(chatView)
+  if (prevChatView !== chatView) {
+    setPrevChatView(chatView)
+    setLocalView(chatView)
+  }
   const toolOf = (sub: SubagentView) => (sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined)
-  const current = chatView !== 'main' ? subagents[chatView] : undefined
-  const currentLabel = current ? subLabels(current, toolOf(current)).label : 'Main conversation'
+  const busy = (sub: SubagentView) => isSubRunning(sub, toolOf(sub)) || awaitingChildren.has(sub.agentId)
+  // The full tree, main conversation first, children indented under their
+  // parent. A sub with nothing to show yet (no meta, no prompt, no steps - a
+  // transcript file seen before any of its content) is left out until it has
+  // substance, unless it IS the current view (the collapse target must exist).
+  interface SelectorRow {
+    key: string
+    label: string
+    desc: string
+    depth: number
+    sub?: SubagentView
+  }
+  const rows: SelectorRow[] = [{ key: 'main', label: 'Main conversation', desc: '', depth: 0 }]
+  {
+    const kids: Record<string, SubagentView[]> = {}
+    const roots: SubagentView[] = []
+    for (const sub of Object.values(subagents)) {
+      if (sub.parentAgentId && subagents[sub.parentAgentId]) (kids[sub.parentAgentId] ??= []).push(sub)
+      else roots.push(sub)
+    }
+    const walk = (sub: SubagentView, depth: number) => {
+      if (sub.agentType || sub.description || sub.prompt || sub.items.length > 0 || sub.agentId === localView) {
+        const { label, desc } = subLabels(sub, toolOf(sub))
+        rows.push({ key: sub.agentId, label, desc, depth, sub })
+      }
+      for (const c of kids[sub.agentId] ?? []) walk(c, depth + 1)
+    }
+    for (const r of roots) walk(r, 0)
+  }
+  const currentRow = rows.find((r) => r.key === localView) ?? rows[0]
   const pick = (key: string) => {
+    setLocalView(key)
     setOpen(false)
     onSelect(key)
   }
+
+  // The morph itself, driven imperatively (like Expandable) so live re-renders
+  // can't clobber an in-flight glide: card height between one-row and
+  // full-list PIXEL endpoints, list translateY between -currentRow.offsetTop
+  // and 0. Runs every render; unchanged geometry writes nothing, geometry that
+  // shifted without an open/selection change (a sub spawning, a label landing)
+  // snaps without animating.
+  const cardRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>())
+  const lastGeom = useRef<{ h: number; y: number } | null>(null)
+  const prevMorph = useRef<{ open: boolean; view: string } | null>(null)
+  useLayoutEffect(() => {
+    const card = cardRef.current
+    const list = listRef.current
+    const row = rowRefs.current.get(currentRow.key)
+    if (!card || !list || !row) return
+    // The card is border-box; row/list heights are its content.
+    const borders = card.offsetHeight - card.clientHeight
+    const h = (open ? list.offsetHeight : row.offsetHeight) + borders
+    const y = open ? 0 : -row.offsetTop
+    const prev = prevMorph.current
+    const intent = prev == null || prev.open !== open || prev.view !== currentRow.key
+    prevMorph.current = { open, view: currentRow.key }
+    if (!intent && lastGeom.current && lastGeom.current.h === h && lastGeom.current.y === y) return
+    lastGeom.current = { h, y }
+    const animate =
+      prev != null && intent && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // Width rides the same transition (the JSX only sets the width VALUE).
+    card.style.transition = animate ? 'width 0.2s ease, height 0.22s ease' : 'width 0.2s ease'
+    list.style.transition = animate ? 'transform 0.22s ease' : ''
+    card.style.height = `${h}px`
+    list.style.transform = y ? `translateY(${y}px)` : ''
+  })
+
+  // Click-away closes: once open, the toggle has morphed down to the current
+  // row's slot, so the old muscle-memory spot (top-left) may be over a
+  // different row - clicking anywhere outside should just dismiss.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    // Capture phase: a panel that stops mousedown propagation (scroll/drag
+    // handlers) must still dismiss the dropdown.
+    document.addEventListener('mousedown', onDown, true)
+    return () => document.removeEventListener('mousedown', onDown, true)
+  }, [open])
+
+  const rowIcon = (r: SelectorRow) =>
+    r.sub ? (
+      <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
+    ) : (
+      <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+    )
+  const rowBusy = (r: SelectorRow) => (r.sub ? busy(r.sub) : false)
+
   return (
-    <div className="absolute top-2 left-3 z-20 text-xs">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Switch agent chat"
-        className={`flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 backdrop-blur px-2.5 py-1 shadow-sm transition-colors cursor-pointer ${
-          open
-            ? 'text-stone-800 dark:text-stone-100'
-            : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
-        }`}
+    // A floating card styled like the PlanPanel, corner-anchored; while open
+    // it takes the higher z so it layers over the plan panel's chip on a
+    // narrow pane instead of anything relocating. Collapsed width is the
+    // current row's natural (fit-content) width, measured off the invisible
+    // clone below (see useChipWidth).
+    <div
+      ref={cardRef}
+      style={{ width: open ? 288 : chipW ?? undefined }}
+      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+    >
+      {/* Invisible clone of the CURRENT row at natural width - the collapsed
+          width the open/close transition animates from/to. Mirrors the row's
+          flow exactly (same paddings/gaps; ml-auto resolves to 0 at w-max). */}
+      <div
+        aria-hidden
+        ref={chipRef}
+        className="invisible absolute -left-[9999px] top-0 w-max border flex items-center gap-1.5 py-1.5 pr-2.5"
+        style={{ paddingLeft: 12 }}
       >
-        {current ? (
-          <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
-        ) : (
-          <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-        )}
-        <span className="max-w-48 truncate font-medium">{currentLabel}</span>
-        {current && isSubRunning(current, toolOf(current)) && (
-          <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
-        )}
-        <ChevronDown className="w-3 h-3 shrink-0" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 z-20 w-72 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+        {rowIcon(currentRow)}
+        <span className="max-w-48 truncate font-medium">{currentRow.label}</span>
+        {currentRow.desc && <span className="max-w-44 truncate">{currentRow.desc}</span>}
+        <span className="ml-auto shrink-0 flex items-center gap-1">
+          {rowBusy(currentRow) && <LoaderCircle className="w-3 h-3 shrink-0" />}
+          {currentRow.key === 'main' && <ChevronRight className="w-3 h-3 shrink-0" />}
+        </span>
+      </div>
+      {/* No wrapper padding: collapsed, the card clips to exactly one row, so
+          the chip's edges are the row's own padding in every state. */}
+      <div ref={listRef} className="will-change-transform">
+        {rows.map((r) => {
+          const isCurrent = r.key === currentRow.key
+          return (
             <button
-              onClick={() => pick('main')}
-              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
+              key={r.key}
+              ref={(el) => {
+                if (el) rowRefs.current.set(r.key, el)
+                else rowRefs.current.delete(r.key)
+              }}
+              onClick={() => (isCurrent ? setOpen((o) => !o) : pick(r.key))}
+              title={isCurrent ? 'Switch agent chat' : undefined}
+              aria-expanded={isCurrent ? open : undefined}
+              // Collapsed, the non-current rows are clipped out of view - keep
+              // them out of the tab order too.
+              tabIndex={!open && !isCurrent ? -1 : undefined}
+              // Tree indent. Only the CURRENT row flattens while collapsed (it
+              // IS the chip, and a nested agent's chip should sit flush) and
+              // glides into its indented slot on open; the other rows keep a
+              // static indent so nothing else shifts sideways during the morph.
+              style={{ paddingLeft: !open && isCurrent ? 12 : 12 + r.depth * 14 }}
+              className={`flex w-full items-center gap-1.5 pr-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] ${
+                isCurrent ? 'transition-all duration-200' : 'transition-colors'
+              } ${open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''}`}
             >
-              <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="font-medium">Main conversation</span>
-              {chatView === 'main' && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-[#c96442]" />}
+              {rowIcon(r)}
+              <span className="max-w-48 shrink-0 truncate font-medium">{r.label}</span>
+              {r.desc && <span className="min-w-0 max-w-44 truncate text-stone-400 dark:text-stone-500">{r.desc}</span>}
+              <span className="ml-auto shrink-0 flex items-center gap-1">
+                {rowBusy(r) && (
+                  <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
+                )}
+                {r.key === 'main' && (
+                  <ChevronRight
+                    className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+                  />
+                )}
+              </span>
             </button>
-            {subs.map((sub) => {
-              const tool = toolOf(sub)
-              const { label, desc } = subLabels(sub, tool)
-              return (
-                <button
-                  key={sub.agentId}
-                  onClick={() => pick(sub.agentId)}
-                  className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer"
-                >
-                  <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
-                  <span className="shrink-0 font-medium">{label}</span>
-                  {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
-                  <span className="ml-auto shrink-0 flex items-center gap-1">
-                    {isSubRunning(sub, tool) && (
-                      <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />
-                    )}
-                    {chatView === sub.agentId && <Check className="w-3.5 h-3.5 text-[#c96442]" />}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -1697,6 +3233,10 @@ function QuestionCard({
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // Whether the "Other" row is selected, per question. Explicit state (not
+  // derived from the text) so a typed-but-then-rejected free text can stay in
+  // the box while a real option is picked instead.
+  const [otherSel, setOtherSel] = useState<boolean[]>(() => specs.map(() => false))
   const [submitted, setSubmitted] = useState(false)
   const answered = submitted || answeredText != null
 
@@ -1709,9 +3249,11 @@ function QuestionCard({
     () => (answeredText != null ? deriveAnswered(specs, answeredText) : null),
     [specs, answeredText],
   )
-  const localEmpty = selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '')
+  const localEmpty =
+    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
+  const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -1729,16 +3271,34 @@ function QuestionCard({
         return next
       }),
     )
+    // Picking a real option in a single-select takes over from "Other" (the
+    // typed text stays in the box, just deselected).
+    if (!specs[qi].multiSelect) {
+      setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+    }
   }
 
-  const complete = specs.every((_, i) => selected[i].size > 0 || other[i].trim() !== '')
+  // Select (or, when the dot itself is clicked, toggle) the "Other" row.
+  // Clicking anywhere in the row and typing both select it; in a single-select
+  // that clears the picked option, mirroring toggleOption's takeover.
+  function selectOther(qi: number, next = true) {
+    if (answered) return
+    setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
+    if (next && !specs[qi].multiSelect) {
+      setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+    }
+  }
+
+  const complete = specs.every(
+    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+  )
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
-      if (other[i].trim()) labels.push(other[i].trim())
+      if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
     }
     if (onSubmit(answers)) setSubmitted(true)
@@ -1788,14 +3348,66 @@ function QuestionCard({
                 </button>
               )
             })}
-            <input
-              type="text"
-              value={showOther[qi]}
-              onChange={(e) => setOther((prev) => prev.map((v, i) => (i === qi ? e.target.value : v)))}
-              disabled={answered}
-              placeholder="Other..."
-              className="w-full rounded-lg border border-stone-200 dark:border-white/[0.07] bg-transparent px-2.5 py-1.5 text-xs placeholder-stone-400 dark:placeholder-stone-500 outline-none focus:border-[#c96442]/60 disabled:opacity-50"
-            />
+            {/* "Other" renders as one more option row: it has its own dot and
+                is selected by clicking the row, typing in it, or toggling the
+                dot - and a settled card highlights it like any picked option. */}
+            {(() => {
+              const isSel = showOtherSel[qi]
+              return (
+                <div
+                  onClick={() => selectOther(qi)}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                    answered ? 'cursor-default' : 'cursor-text'
+                  } ${
+                    isSel
+                      ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
+                      : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
+                  } ${answered && !isSel ? 'opacity-50' : ''}`}
+                >
+                  <button
+                    type="button"
+                    disabled={answered}
+                    aria-label={isSel ? 'Deselect Other' : 'Select Other'}
+                    aria-pressed={isSel}
+                    onClick={(e) => {
+                      // The dot is the one spot that can also DEselect.
+                      e.stopPropagation()
+                      selectOther(qi, !otherSel[qi])
+                    }}
+                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                      q.multiSelect ? 'rounded' : 'rounded-full'
+                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'} ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
+                  >
+                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                  </button>
+                  <input
+                    type="text"
+                    value={showOther[qi]}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                      // Typing claims the selection.
+                      selectOther(qi)
+                    }}
+                    onFocus={() => selectOther(qi)}
+                    onKeyDown={(e) => {
+                      // Enter submits the card, like the composer. Ignored while
+                      // an IME is composing, and a no-op if another question is
+                      // still unanswered (submit() gates on `complete`).
+                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      submit()
+                    }}
+                    disabled={answered}
+                    placeholder="Other..."
+                    className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
+                  />
+                </div>
+              )
+            })()}
           </div>
         </div>
       ))}
@@ -1846,9 +3458,15 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  const copyWithoutBlockPadding = (event: ClipboardEvent<HTMLDivElement>) => {
+    const selected = window.getSelection()?.toString() ?? ''
+    if (!selected || !/\n+$/.test(selected)) return
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', selected.replace(/\n+$/, ''))
+  }
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`} onCopy={copyWithoutBlockPadding}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -1859,12 +3477,9 @@ const ChatUserMessage = memo(function ChatUserMessage({
           />
         )}
       </div>
-      {sending && (
-        <div className="flex items-center gap-1 pr-1 text-[10px] text-stone-400 dark:text-stone-500 select-none">
-          <LoaderCircle className="w-3 h-3 animate-spin" />
-          Sending...
-        </div>
-      )}
+      {/* No "Sending..." row: the dimmed (opacity-75) bubble already signals the
+          in-flight state, and a row that appears then vanishes on confirm shifted
+          the whole transcript below it. */}
       {lightboxIndex !== null && lightboxImages.length > 0 && (
         <ImageLightbox
           images={lightboxImages}
@@ -1877,6 +3492,108 @@ const ChatUserMessage = memo(function ChatUserMessage({
   )
 })
 
+// ContextNoteCard renders a collapsed CLI-injected "session continued" preamble
+// (item 39): a compact pill naming what it is - a context compaction the model
+// was handed to carry state over - that expands to the full summary on click,
+// instead of dumping the whole block into the flow. outOfContext picks the label.
+const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { text: string; outOfContext: boolean }) {
+  const [open, setOpen] = useState(false)
+  const label = outOfContext
+    ? 'Continued from a previous conversation (ran out of context)'
+    : 'Continued from a previous conversation'
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <History className="w-3 h-3 shrink-0" />
+        <span className="truncate">{label}</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
+// SkillCard renders a Skill's auto-loaded SKILL.md body: a compact "Skill
+// loaded: <name>" header that expands to the instructions as markdown. It's
+// context the model was fed, not a user turn, so it stays collapsed by default
+// (the launch itself is already shown by the Skill tool card above it).
+const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <Sparkles className="w-3 h-3 shrink-0" />
+        <span className="truncate">Skill loaded: {name}</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
+// MetaCard is the generic fallback for machine-injected (isMeta) context that
+// isn't a recognised skill body - collapsed behind an expander so a future
+// injection kind never dumps raw text into the flow (no per-string matcher
+// needed, just the isMeta flag).
+const MetaCard = memo(function MetaCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        aria-expanded={open}
+      >
+        <Info className="w-3 h-3 shrink-0" />
+        <span className="truncate">Injected context</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className="w-full max-w-[92%]">
+        <Expandable open={open}>
+          <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
+            <Markdown text={text} />
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+})
+
+// routeMetaText classifies a machine-injected (isMeta) `user` text block into a
+// ChatItem: a skill body -> a SkillCard, anything else -> a generic MetaCard.
+// Shared by the live and history reducers so both agree. Returns null for empty
+// text (nothing to show).
+function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
+  const t = text.trim()
+  if (!t) return null
+  const skill = detectSkillBody(t)
+  if (skill) return { kind: 'skill', name: skill.name, text: skill.body }
+  return { kind: 'meta', text: t }
+}
+
 // reduceHistoryEvents reduces a batch of older (settled) conversation events -
 // the load-older page (item 25) - into ChatItems ready to prepend. It mirrors
 // the live reducer's settled-event handling (no streaming, model or
@@ -1884,10 +3601,15 @@ const ChatUserMessage = memo(function ChatUserMessage({
 // assistant text/thinking/tool_use/question blocks with tool_result patching,
 // and result footers. A TodoWrite is dropped (the plan panel already holds the
 // latest state, not this older one). allocId hands out ids for the batch.
-function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): ChatItem[] {
+function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>): ChatItem[] {
   const items: ChatItem[] = []
+  // The current event's transcript timestamp, carried forward over entries
+  // without one - stamped per pushed item (tsOut) for the commit-chip interleave.
+  let lastTs: number | null = null
   const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
-    items.push({ ...item, id: allocId() } as ChatItem)
+    const id = allocId()
+    if (lastTs != null) tsOut?.set(id, lastTs)
+    items.push({ ...item, id } as ChatItem)
   }
   const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -1904,7 +3626,36 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
       }
     }
   }
-  const routeUser = (rawText: string) => {
+  // Distinct task-notifications already rendered in this batch: the CLI records
+  // each one several times (queue-operation, attachment, sometimes a consumed
+  // user turn) and only ONE chip should show (mirrors the live reducer's
+  // seenNotif).
+  const seenNotifs = new Set<string>()
+  // task-ids whose completion already rendered as the canonical "Sub-agent
+  // finished" chip (from a subagent_completed event). The user turn that
+  // resumed the parent re-states the same notification; suppress that second
+  // chip (mirrors the live reducer's renderedSubCompletions).
+  const subCompletions = new Set<string>()
+  const pushNotification = (text: string) => {
+    const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+    const toolUseId = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+    const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+    const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+    const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
+    if (taskId && subCompletions.has(taskId)) return
+    const dedupKey = `${taskId ?? ''}\0${toolUseId ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
+    if (seenNotifs.has(dedupKey)) return
+    seenNotifs.add(dedupKey)
+    push({ kind: 'notice', text: decodeEntities(summary || 'Background task update'), taskId, toolUseId, outputFile, noEntrance: true })
+  }
+  const routeUser = (rawText: string, isMeta?: boolean) => {
+    // Machine-injected context (a skill body etc.) is not a user turn - route it
+    // to a skill/meta card off the isMeta flag, before any content-sniffing.
+    if (isMeta) {
+      const meta = routeMetaText(rawText)
+      if (meta) push(meta)
+      return
+    }
     const text = stripLocalCommandCaveat(rawText)
     if (!text) return
     // A user turn starting settles the previous turn's synthesized footer
@@ -1926,9 +3677,13 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
       push({ kind: 'interrupted' })
       return
     }
-    if (text.includes('<task-notification>')) {
-      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
-      push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+    if (isTaskNotification(text)) {
+      pushNotification(text)
+      return
+    }
+    const ctxNote = detectContextNote(text)
+    if (ctxNote) {
+      push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
       return
     }
     push({ kind: 'user', text })
@@ -1963,14 +3718,43 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
     }
   }
   for (const ev of events) {
+    const evTs = parseEventTs(ev)
+    if (evTs != null) lastTs = evTs
+    // A <task-notification> bookkeeping record (queue-operation XML on
+    // `content`, attachment XML on `attachment.prompt`): render its chip in
+    // place, like the live relay does.
+    const notifText =
+      (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
+      (typeof ev.attachment?.prompt === 'string' && isTaskNotification(ev.attachment.prompt) && ev.attachment.prompt) ||
+      ''
+    if (notifText) {
+      pushNotification(notifText)
+      continue
+    }
+    if (ev.type === 'hydra_subagent_completed' && ev.subagentNotice) {
+      const notice = ev.subagentNotice
+      if (notice.key) subCompletions.add(notice.key)
+      push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: true })
+      continue
+    }
+    // A queued message consumed into a running turn: its queued_command
+    // attachment is its only durable record (no plain user event exists) -
+    // rebuild the user bubble from it, settling the prior turn's footer like
+    // any real user turn.
+    const queuedText = queuedCommandText(ev)
+    if (queuedText != null) {
+      flushHistFooter()
+      push({ kind: 'user', text: queuedText })
+      continue
+    }
     if (ev.type === 'user') {
       const content = ev.message?.content
       if (typeof content === 'string') {
-        if (content.trim()) routeUser(content)
+        if (content.trim()) routeUser(content, ev.isMeta)
         continue
       }
       for (const block of content ?? []) {
-        if (block.type === 'text' && block.text?.trim()) routeUser(block.text)
+        if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
           patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
@@ -1999,7 +3783,13 @@ function reduceHistoryEvents(events: ClaudeEvent[], allocId: () => number): Chat
         if (msgId && seen.has(key)) continue
         if (msgId) seen.add(key)
         if (block.type === 'text' && block.text?.trim()) push({ kind: 'assistant', text: block.text })
-        else if (block.type === 'thinking' && block.thinking?.trim()) push({ kind: 'thinking', text: block.thinking })
+        else if (block.type === 'thinking') {
+          // Duration from the daemon's measurement (sent up-front on connect, so
+          // it's in hand even for a lazily-loaded older batch); show an empty
+          // silently-reasoned thought only when it carries one.
+          const dur = msgId ? durations?.get(msgId) : undefined
+          if (block.thinking?.trim() || dur != null) push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur })
+        }
         else if (block.type === 'tool_use' && block.id) {
           const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
@@ -2065,21 +3855,54 @@ interface SettledMessagesProps {
   subagents: Record<string, SubagentView>
 }
 
+// One settled row, memo'd per item so appending a new message renders ONLY the
+// new row - not the whole transcript. renderItem reads the live serif / connected
+// / worktree / subagents values through a ref, so those are passed here purely as
+// memo keys (unused in the body): a change to any of them re-renders every row so
+// its output can't go stale, but a plain message append leaves them untouched and
+// the existing rows bail. `animate` is stable per row (liveFromId is fixed once
+// replay completes), so a new message doesn't re-trigger neighbours' entrance.
+interface SettledRowProps {
+  item: ChatItem
+  animate: boolean
+  renderItem: (item: ChatItem) => ReactNode
+  serif: boolean
+  connected: boolean
+  worktreePath: string | null
+  subByToolUse: Record<string, SubagentView>
+  subagents: Record<string, SubagentView>
+}
+const SettledRow = memo(
+  function SettledRow({ item, animate, renderItem }: SettledRowProps) {
+    return <div className={animate ? 'animate-chat-item-in' : undefined}>{renderItem(item)}</div>
+  },
+  (a, b) =>
+    a.item === b.item &&
+    a.animate === b.animate &&
+    a.renderItem === b.renderItem &&
+    a.serif === b.serif &&
+    a.connected === b.connected &&
+    a.worktreePath === b.worktreePath &&
+    a.subByToolUse === b.subByToolUse &&
+    a.subagents === b.subagents,
+)
+
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem }: SettledMessagesProps) {
+  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents }: SettledMessagesProps) {
     return (
       <>
         {items.map((item) => (
-          <div
+          <SettledRow
             key={item.id}
-            className={
-              liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)
-                ? 'animate-chat-item-in'
-                : undefined
-            }
-          >
-            {renderItem(item)}
-          </div>
+            item={item}
+            animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+            renderItem={renderItem}
+            serif={serif}
+            connected={connected}
+            worktreePath={worktreePath}
+            subByToolUse={subByToolUse}
+            subagents={subagents}
+          />
         ))}
       </>
     )
@@ -2095,15 +3918,105 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+  const usesNormalizedEvents = agentType === 'claude' || agentType === 'codex'
   const [items, setItems] = useState<ChatItem[]>([])
+  // Wall-clock time per item id (epoch ms) - the message side of the
+  // commit-chip interleave. Stamped by the reducers: replayed events carry the
+  // transcript's own timestamp (carried forward over ring lines, which have
+  // none), live items use arrival time. A side map rather than a ChatItem
+  // field so the many push/setItems sites stay untouched.
+  const itemTsRef = useRef<Map<number, number>>(new Map())
+  // ── Commit chips ─────────────────────────────────────────────────────────
+  // The branch's commits (oldest first), rendered as notification chips
+  // interleaved into the transcript (see mergedItems). Fetched on mount /
+  // reconnect and again on every head_moved diff_refresh frame - git is the
+  // durable record, so replay needs no persisted chat event.
+  const [commitChips, setCommitChips] = useState<CommitChipItem[]>([])
+  // Chip bookkeeping: `cache` keeps each sha's chip (and id) identity-stable
+  // across refetches so SettledRow's memo holds; ids allocate far above the
+  // live reducer's (from 1) and the history pager's (negative), so they never
+  // collide. Chips from the first fetch are noEntrance - only commits that
+  // land while the transcript is on screen animate in. inflight/again coalesce
+  // concurrent fetches (a burst of head_moved frames) into one trailing rerun.
+  const chipStateRef = useRef({
+    cache: new Map<string, CommitChipItem>(),
+    nextId: 2_000_000_000,
+    sig: '',
+    loadedOnce: false,
+    inflight: false,
+    again: false,
+  })
+  const fetchCommitsRef = useRef<() => void>(() => {})
+  const fetchCommits = useCallback(() => {
+    if (usesNormalizedEvents) return
+    const st = chipStateRef.current
+    if (st.inflight) {
+      st.again = true
+      return
+    }
+    st.inflight = true
+    api.default.getAgentCommits(projectId ?? '', agentId)
+      .then((commits) => {
+        const firstLoad = !st.loadedOnce
+        st.loadedOnce = true
+        // Only rebuild state when the list actually changed, so an idle
+        // refetch never re-renders the transcript.
+        const sig = commits.map((c) => c.sha).join('\0')
+        if (sig === st.sig) return
+        st.sig = sig
+        const chips = commits.map((c) => {
+          let chip = st.cache.get(c.sha)
+          if (!chip) {
+            chip = {
+              kind: 'commit',
+              id: st.nextId++,
+              sha: c.sha,
+              shortSha: c.short_sha,
+              subject: (c.subject ?? c.message).split('\n')[0].trim(),
+              ts: Date.parse(c.timestamp) || 0,
+              noEntrance: firstLoad || undefined,
+            }
+            st.cache.set(c.sha, chip)
+          }
+          return chip
+        })
+        chips.sort((a, b) => a.ts - b.ts)
+        setCommitChips(chips)
+      })
+      .catch(() => {})
+      .then(() => {
+        st.inflight = false
+        if (st.again) {
+          st.again = false
+          fetchCommitsRef.current()
+        }
+      })
+  }, [agentId, projectId, usesNormalizedEvents])
+  fetchCommitsRef.current = fetchCommits
+  useEffect(() => {
+    fetchCommits()
+  }, [fetchCommits, reconnectAttempt])
+  // Thinking-block durations the daemon measured, keyed by assistant message id
+  // (delivered as hydra_thinking events - replayed from the head's sidecar on
+  // connect, then live). The reducer reads this when it builds a thinking item;
+  // a load-older batch reads it too (reduceHistoryEvents). A ref so both survive
+  // re-renders and the whole connection's worth of durations stays in hand.
+  const thoughtDurationsRef = useRef<Map<string, number>>(new Map())
   // The in-flight streamed content block (token streaming via stream_event
   // deltas), rendered live below the settled items and superseded by the
   // complete assistant event that follows it.
   const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
-  const [todos, setTodos] = useState<TodoItem[]>([])
+  // Seeded from the persisted plan (planStore) so navigating away and back shows
+  // the last known plan even when the replay window no longer includes the
+  // TaskCreate events. Live events reconcile on top (see the reducer).
+  const [todos, setTodos] = useState<TodoItem[]>(() =>
+    loadPlan(projectId, agentId)
+      .sort((a, b) => a.order - b.order)
+      .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })),
+  )
   // Live "working" indicator (item 48): the turn's start time (for the ticking
   // elapsed), the elapsed seconds, the running output-token count (completed
   // messages + the in-flight one), and the per-turn verb. Reset each turn.
@@ -2116,7 +4029,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const turnStartClockRef = useRef<number | null>(null)
   const turnTokensRef = useRef(0)
   const curMsgTokensRef = useRef(0)
-  const turnCountRef = useRef(0)
   // The latest assistant message's stop_reason this turn, so the footer can flag
   // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
   const turnStopReasonRef = useRef<string | null>(null)
@@ -2144,6 +4056,21 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
   const [replayDone, setReplayDone] = useState(false)
+  // True a beat after the replay settles: floating cards (plan, sub-agent
+  // selector) that MOUNT after this fade in - they appeared live - while cards
+  // restored by the replay itself render without the entrance animation (a
+  // reload should not replay the fade every time).
+  const liveUiRef = useRef(false)
+  useEffect(() => {
+    if (!replayDone) {
+      liveUiRef.current = false
+      return
+    }
+    const t = setTimeout(() => {
+      liveUiRef.current = true
+    }, 150)
+    return () => clearTimeout(t)
+  }, [replayDone])
   // Item ids >= this animate in (they arrived live); replayed history commits
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
@@ -2162,7 +4089,24 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // The composer draft (text + attachments) is restored per agent so it survives
   // switching agents/reloads (item 30): text from agentViewPrefs, attachments
   // from the in-memory chatDrafts cache.
-  const [input, setInput] = useState(() => loadAgentViewPrefs(projectId, agentId).chatDraft ?? '')
+  //
+  // Undo/redo spans BOTH the typed text and the attachment chips: an image/file
+  // paste (and its "[filename]" marker) calls preventDefault, so the browser's
+  // native textarea undo never sees it and Ctrl+Z can't walk it back. `present`
+  // is the live composer state; commit/undo/redo/reconcile/resetHistory drive the
+  // snapshot stack (see composerHistory), mirroring the spawn box.
+  const initialComposer = useRef<ReturnType<typeof makeSnapshot> | null>(null)
+  if (!initialComposer.current) {
+    initialComposer.current = makeSnapshot(
+      loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
+      loadChatAttachments(chatDraftKey(projectId, agentId)),
+      0,
+      0,
+    )
+  }
+  const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
+  const input = present.prompt
+  const attachments = present.attachments
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -2183,7 +4127,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
-  const optimisticTextsRef = useRef<string[]>([])
+  const optimisticTextsRef = useRef<{ clientId: string; text: string }[]>([])
   // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
   // real echo can supersede it. null when none is pending.
   const optimisticModelIdRef = useRef<number | null>(null)
@@ -2193,24 +4137,35 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // whether the transcript start has been reached, and the scrollHeight snapshot
   // used to keep the viewport anchored across a prepend.
   const oldestUuidRef = useRef<string | null>(null)
+  const oldestEventCursorRef = useRef<string | null>(null)
   const historyIdRef = useRef(-1_000_000)
   const loadingOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
-  // Composer attachments (same upload flow as the spawn box), restored from the
-  // per-agent in-memory cache (item 30).
-  const [attachments, setAttachments] = useState<Attachment[]>(() => loadChatAttachments(chatDraftKey(projectId, agentId)))
+  // Composer attachments live in the undo history (`present.attachments`, above)
+  // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // Current model (from system:init / set_model confirmations) and the slash
-  // commands the CLI advertises, both fed by the event stream.
+  // Current model, fed live by the event stream (system:init / set_model
+  // confirmations). Seeded from AgentResponse.model - which the daemon captures
+  // from the head's system:init line - so the selector shows the right model on
+  // load instead of the "Model" placeholder, before the live stream re-confirms
+  // it (see the serverModel effect below).
   const [model, setModel] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  // Prompt-side tokens of the most recent message, i.e. how much context the
+  // conversation currently occupies. Drives the "context left" chip beside the
+  // model selector (item 40). Seeded to 0 and repopulated from replay on
+  // reconnect (the latest message's usage wins).
+  const [contextTokens, setContextTokens] = useState(0)
   const [slashCommands, setSlashCommands] = useState<string[]>([])
   const [slashSel, setSlashSel] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
+  // The currently-highlighted row in the slash popup, so keyboard nav can keep
+  // it in view when the (now scrollable, uncapped) list overflows.
+  const selectedSlashRef = useRef<HTMLButtonElement | null>(null)
   // The user-dragged minimum composer height, in whole rows (item 9): content
   // grows the box line by line up to MAX_ROWS regardless. Persisted per agent
   // like the terminal height (item 23).
@@ -2230,6 +4185,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   })
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const normalizedAvailableRef = useRef(false)
+  // Pending task_output requests (the expandable background-command chip
+  // fetching its output file), resolved by the matching task_output frame.
+  const taskOutputWaitersRef = useRef(new Map<string, (res: { content?: string; error?: string }) => void>())
   const scrollRef = useRef<HTMLDivElement>(null)
   // The inner content wrapper inside the scroll container; observed so we can
   // follow the bottom smoothly while a card expands (item 55) - the height
@@ -2242,6 +4201,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // jump-to-bottom button.
   const pinnedRef = useRef(true)
   const [pinned, setPinned] = useState(true)
+  // The previous scroll event's offset, for telling an UPWARD user scroll apart
+  // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
+  const prevScrollTopRef = useRef(0)
   // Latest scroll offset + pin, mirrored on every scroll so deactivation (the
   // pane going display:none loses its scroll geometry) and unmount can persist
   // it (item 20).
@@ -2251,11 +4213,52 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
+  // Whether pasting an attachment also inserts its "[filename]" marker into the
+  // composer (a Browser setting, default on).
+  const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
+  const branchName = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
+  )
+  const chatLinkCtx = projectId
+    ? { projectId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+    : undefined
+  // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
+  // the only copy of the plan; seed it into localStorage (only when local is
+  // empty) so the reconnect effect's loadPlan restores it. Runs when the value
+  // arrives (the agent-list poll can land after mount).
+  const serverPlan = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan,
+  )
+  useEffect(() => {
+    const seeded = seedLocalPlan(projectId, agentId, serverPlan)
+    if (seeded.length) {
+      setTodos(
+        seeded
+          .sort((a, b) => a.order - b.order)
+          .map(({ content, status: st, activeForm, description }) => ({ content, status: st, activeForm, description })),
+      )
+    }
+  }, [serverPlan, projectId, agentId])
+
+  // The daemon-captured model (AgentResponse.model). Adopt it while the selector
+  // is still on the placeholder, so the right model shows on load before any
+  // live system:init lands. The live stream stays authoritative from there.
+  const serverModel = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
+  )
+  useEffect(() => {
+    if (serverModel) setModel((m) => m || serverModel)
+  }, [serverModel])
+
+  // Smooth (paced) streaming - a Browser setting. Read inside the WS reducer's
+  // per-frame flush via a ref so a mid-stream toggle takes effect on the next
+  // frame without re-running the reducer effect.
+  const smoothStream = useChatStreamStore((s) => s.smooth)
 
   const onStatusUpdateRef = useRef(onStatusUpdate)
   const onDiffRefreshRef = useRef(onDiffRefresh)
@@ -2263,19 +4266,29 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
   const isTurnRunningRef = useRef(isTurnRunning)
+  const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
+    smoothStreamRef.current = smoothStream
   })
 
   useEffect(() => {
     setItems([])
+    normalizedAvailableRef.current = false
+    itemTsRef.current = new Map()
     setStream(null)
-    setTodos([])
+    // Restore the persisted plan (not []) so a reconnect / re-navigation shows
+    // the last known plan before the replay reconstructs it (planStore).
+    setTodos(restoredPlan(projectId, agentId))
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
+    // The replay re-emits the conversation's usage; the latest message wins.
+    setContextTokens(0)
+    // Durations are re-sent from the sidecar at the start of each connection.
+    thoughtDurationsRef.current = new Map()
     // The transcript replay + the daemon's queue frame are authoritative for
     // this new connection, so drop the optimistic copies (queued bubbles and
     // in-flight "sending" messages) that would otherwise double them.
@@ -2285,6 +4298,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     optimisticModelIdRef.current = null
     // Reset load-older paging for the fresh backfill.
     oldestUuidRef.current = null
+    oldestEventCursorRef.current = null
     historyIdRef.current = -1_000_000
     loadingOlderRef.current = false
     setLoadingOlder(false)
@@ -2304,50 +4318,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const seenBlocks = new Map<string, Set<string>>()
 
     // --- Task* plan reconstruction (item 17, cont.) ------------------------
-    // TodoWrite carries the whole to-do list in one call, so it can just replace
-    // `todos`. The Task* family (TaskCreate/TaskUpdate) is incremental, so we
-    // rebuild the list here and republish it to the same PlanPanel: TaskCreate
-    // appends a task (the harness numbers them in creation order - #1, #2, ... -
-    // which we mirror with taskSeq, since the assigned id lives in the tool
-    // *result*, not its input); TaskUpdate mutates one by id, or drops it on
-    // status "deleted". A session uses one planning tool or the other; if both
-    // ever appear, the most recent write wins.
-    const taskItems = new Map<string, { content: string; status: TodoItem['status']; activeForm?: string; order: number }>()
-    let taskSeq = 0
-    const publishTasks = () => {
-      const list = [...taskItems.values()]
-        .sort((a, b) => a.order - b.order)
-        .map(({ content, status, activeForm }) => ({ content, status, activeForm }))
-      setTodos(list)
-    }
-    // applyTaskTool folds one Task* tool_use into the plan panel (TaskCreate
-    // appends a pending task; TaskUpdate mutates one by id, or drops it on status
-    // "deleted"). Non-Task tools and malformed inputs are ignored. The block is
-    // still rendered as a normal tool card by the caller, so the task-list
-    // mutation stays visible in the conversation flow too.
-    const applyTaskTool = (name: string | undefined, input: unknown) => {
-      if (name === 'TaskCreate') {
-        const t = parseTaskCreate(input)
-        if (!t) return
-        taskSeq += 1
-        taskItems.set(String(taskSeq), { content: t.content, status: 'pending', activeForm: t.activeForm, order: taskSeq })
-        publishTasks()
-      } else if (name === 'TaskUpdate') {
-        const u = parseTaskUpdate(input)
-        if (!u) return
-        // A TaskUpdate for a task we never saw created (e.g. its create predates
-        // the replay window) has nothing to reflect yet.
-        const cur = taskItems.get(u.taskId)
-        if (!cur) return
-        if (u.status === 'deleted') taskItems.delete(u.taskId)
-        else {
-          if (u.status) cur.status = u.status
-          if (u.content) cur.content = u.content
-          if (u.activeForm !== undefined) cur.activeForm = u.activeForm
-        }
-        publishTasks()
-      }
-    }
+    // The plan is rebuilt from the agent's tool calls and republished to the
+    // PlanPanel. The reducer itself lives in lib/planReducer (it is pure, and
+    // tested there); here it is wired to the persisted plan on both ends - the
+    // seed it starts from, and savePlan/setTodos on every change.
+    const plan = createPlanBuilder(loadPlan(projectId, agentId), (entries) => {
+      savePlan(projectId, agentId, entries)
+      setTodos(toTodoItems(entries))
+    })
 
     const pending: ChatItem[] = []
     let flushScheduled = false
@@ -2358,19 +4336,56 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       setItems((prev) => [...prev, ...batch])
     }
     const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
-      pending.push({ ...item, id: nextId++ } as ChatItem)
+      const id = nextId++
+      // Stamp the item's wall-clock time for the commit-chip interleave:
+      // replayed events use the transcript's timestamp (prevEventTs carries it
+      // forward over ring lines, which have none), live items arrival time.
+      const ts = replaying ? prevEventTs : Date.now()
+      if (ts != null) itemTsRef.current.set(id, ts)
+      pending.push({ ...item, id } as ChatItem)
       if (!replaying && !flushScheduled) {
         flushScheduled = true
         queueMicrotask(flush)
       }
+      return id
+    }
+    // dropItem retracts a pushed item from wherever it currently lives - the
+    // un-flushed batch or the committed state. Used to supersede an interim
+    // notice (see handleTaskNotification).
+    const dropItem = (id: number) => {
+      const i = pending.findIndex((it) => it.id === id)
+      if (i >= 0) {
+        pending.splice(i, 1)
+        return
+      }
+      itemTsRef.current.delete(id)
+      setItems((prev) => prev.filter((it) => it.id !== id))
     }
 
-    // Token-streaming buffer. Deltas can arrive far faster than 60fps, so they
-    // accumulate here and the visible state is refreshed on a short timer;
+    // Token-streaming buffer. Deltas can arrive far faster than the display
+    // refreshes, so they accumulate here and the visible state is flushed once
+    // per animation frame (~16ms at 60Hz, faster on high-refresh displays);
     // each refresh re-renders (and re-parses the markdown of) only the one
     // in-flight block, which stays small.
+    //
+    // streamBuf.text is the full received text; `revealed` is how many of its
+    // chars are actually shown. With smooth streaming on (the default, a Browser
+    // setting) each frame advances `revealed` toward the full length by a bounded
+    // step, so a bursty upstream (the claude CLI flushes ~250-char deltas ~5x/sec)
+    // is drained as steady, continuous typing instead of landing in chunks. The
+    // step is proportional to the backlog (so it never falls arbitrarily behind)
+    // with a floor (so slow streams still finish) and a cap (so a big burst never
+    // dumps at once). Smooth off: reveal jumps straight to the full length.
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
-    let streamTimer: ReturnType<typeof setTimeout> | null = null
+    let revealed = 0
+    let streamFrame: number | null = null
+    // Which block kinds this message streamed live. `message_stop` clears
+    // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
+    // event arrives, so streamBuf can't tell the settle "you were already on
+    // screen". This set outlives message_stop - reset per message (message_start),
+    // added on each streamed block - so the settle can suppress its entrance
+    // animation and the finished message doesn't re-fade over text already there.
+    let streamedKinds = new Set<'assistant' | 'thinking'>()
     // Turn-footer synthesis for backfilled history (the transcript has no
     // `result` events to carry usage). The transcript records one assistant
     // event PER CONTENT BLOCK, each carrying the same message envelope (id,
@@ -2405,34 +4420,63 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         })
       }
     }
-    // When a thinking block starts streaming we stamp the start time; the settled
-    // thinking item picks it up (and clears it) to show "Thought for Xs" (item
-    // 11). Replayed history never streams, so it stays null -> a plain "Thought".
-    let thinkingStart: number | null = null
-    const takeThinkingDuration = (): number | undefined => {
-      if (thinkingStart == null) return undefined
-      const ms = Date.now() - thinkingStart
-      thinkingStart = null
-      return ms
-    }
+    // Thinking durations are measured on the daemon now (delivered as
+    // hydra_thinking events into thoughtDurationsRef, keyed by message id), not
+    // timed in the browser - so a reload/resume shows the same "Thought for Xs"
+    // for every client. The estimate below is only a fallback for old history
+    // recorded before backend timing existed.
+    //
     // The wall-clock timestamp of the previously handled transcript event, so a
     // replayed thought (which never streams, so the live timer above is empty)
     // can still show "Thought for Xs" - estimated as the gap from the event that
     // triggered the turn to this assistant message (item 7). Live stdout lines
     // carry no timestamp, so this stays null there and the live timer is used.
     let prevEventTs: number | null = null
+    // Paced-reveal tuning (chars, per animation frame). See streamBuf's comment.
+    const REVEAL_FLOOR = 3 // min chars/frame so a slow stream still finishes
+    const REVEAL_RATE = 0.2 // drain this fraction of the backlog per frame
+    const REVEAL_CAP = 40 // max chars/frame so a big burst never dumps at once
+    const onStreamFrame = () => {
+      streamFrame = null
+      if (!streamBuf) {
+        setStream(null)
+        return
+      }
+      const full = streamBuf.text.length
+      if (smoothStreamRef.current) {
+        if (revealed < full) {
+          const backlog = full - revealed
+          const step = Math.min(REVEAL_CAP, Math.max(REVEAL_FLOOR, Math.ceil(backlog * REVEAL_RATE)))
+          revealed = Math.min(full, revealed + step)
+        }
+      } else {
+        revealed = full
+      }
+      setStream({ kind: streamBuf.kind, text: streamBuf.text.slice(0, revealed) })
+      // Keep animating until the reveal catches up, even after deltas stop.
+      if (revealed < full) scheduleStreamFlush()
+    }
     const scheduleStreamFlush = () => {
-      if (streamTimer != null) return
-      streamTimer = setTimeout(() => {
-        streamTimer = null
-        setStream(streamBuf ? { ...streamBuf } : null)
-      }, 40)
+      if (streamFrame != null) return
+      streamFrame = requestAnimationFrame(onStreamFrame)
+    }
+    // Adopt the partial block the daemon reports in its attach snapshot: this
+    // client connected mid-response, and the live socket only carries the
+    // deltas from here on. Revealed in full rather than paced - that text was
+    // produced before we connected, so typing it out would replay it at the
+    // wrong moment - after which the remaining deltas stream normally.
+    const seedStream = (kind: 'assistant' | 'thinking', text: string) => {
+      streamBuf = { kind, text }
+      revealed = text.length
+      streamedKinds.add(kind)
+      setStream({ kind, text })
     }
     const clearStream = () => {
       streamBuf = null
-      if (streamTimer != null) {
-        clearTimeout(streamTimer)
-        streamTimer = null
+      revealed = 0
+      if (streamFrame != null) {
+        cancelAnimationFrame(streamFrame)
+        streamFrame = null
       }
       setStream(null)
     }
@@ -2473,20 +4517,55 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // card upgrades into the SubagentCard in place) and labels it. A frame
     // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
     // into, so it gets a standalone 'subagent' item instead.
-    const markedStandalone = new Set<string>()
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
+    // Task tool_use ids whose tool_result was the async-launch boilerplate: their
+    // sub-agents run in the background, past the launching turn, so a turn result
+    // never settles them (only their <task-notification> does). Tracked as a set
+    // because the boilerplate result can arrive before the sub is even created.
+    const backgroundToolUses = new Set<string>()
+    const markBackground = (sub: SubagentView, toolUseId: string) => {
+      if (toolUseId && backgroundToolUses.has(toolUseId)) sub.background = true
+    }
     // Task tool_use inputs by id: the label/description fallback for a sub-agent
     // whose meta frame hasn't arrived (the live placeholder route).
     const taskInputByUse = new Map<string, { type?: string; desc?: string }>()
-    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string) => {
+    // SendMessage tool_use id -> the agent it addressed, so its result (which
+    // may name the agent only as `resumedAgentId`) can reopen the right sub.
+    const messageTargetByUse = new Map<string, string>()
+    // reopenMessagedSubagent puts a sub-agent back into the "working" state when
+    // a SendMessage resumed it. Without this the sub keeps the finished state its
+    // Task tool_result gave it long ago, so the UI claims it is done while it is
+    // in fact running again - and the steps it streams land in a card that reads
+    // as settled. Its next <task-notification> settles it again as usual.
+    const reopenMessagedSubagent = (toolUseId: string, result: string) => {
+      const parsed = parseSendMessageResult(result)
+      if (!parsed || !parsed.ok || !parsed.resumed) return
+      const agentId = parsed.recipient || messageTargetByUse.get(toolUseId) || ''
+      const sub = agentId ? subLocal[agentId] : undefined
+      if (!sub) return
+      sub.status = 'running'
+      sub.reopened = true
+      // It was resumed in the BACKGROUND: it outlives the turn that messaged it,
+      // so neither the turn's result nor the end-of-replay sweep may settle it -
+      // only its next <task-notification>. Its earlier completion is stale now,
+      // so forget it (the sweeps replay recorded completions).
+      sub.background = true
+      completedNotifs.delete(sub.agentId)
+      if (sub.toolUseId) completedNotifs.delete(sub.toolUseId)
+      scheduleSubFlush()
+    }
+    const handleSubagentMeta = (agentId: string, toolUseId: string, agentType: string, description: string, parentAgentId: string, prompt = '') => {
       if (!agentId) return
       const sub = ensureSubagent(agentId)
       if (agentType) sub.agentType = agentType
       if (description) sub.description = description
+      if (prompt) sub.prompt = prompt
+      if (parentAgentId) sub.parentAgentId = parentAgentId
       if (toolUseId) {
         sub.toolUseId = toolUseId
+        markBackground(sub, toolUseId)
         toolUseToSub.set(toolUseId, agentId)
         // Absorb the placeholder accumulated from live parent_tool_use_id-only
         // lines, now that the meta names the real sub-agent.
@@ -2494,6 +4573,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const ph = subLocal[phKey]
         if (ph && phKey !== agentId) {
           if (!sub.prompt && ph.prompt) sub.prompt = ph.prompt
+          if (ph.background) sub.background = true
           const meta = subMeta.get(agentId)!
           for (const it of ph.items) sub.items.push({ ...it, id: meta.nextId++ } as ChatItem)
           if (ph.status === 'done' && sub.status === 'running') sub.status = 'done'
@@ -2502,9 +4582,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // A viewer parked on the placeholder follows it to the real key.
           setChatView((cur) => (cur === phKey ? agentId : cur))
         }
-      } else if (!markedStandalone.has(agentId)) {
-        markedStandalone.add(agentId)
-        push({ kind: 'subagent', agentId })
       }
       scheduleSubFlush()
     }
@@ -2518,19 +4595,23 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
           sub.items[i] = { ...it, result, isError, resultImages }
-          return
+          break
         }
       }
+      // A NESTED spawn's result lands here (the spawning Task tool_use lives in
+      // a sub-agent's own timeline, so the main flow's settle never sees it):
+      // mirror it - launch boilerplate marks the spawned sub background, a real
+      // result settles it. A non-spawn tool result matches no sub and no-ops.
+      settleSubagentByToolUse(toolUseId, result)
     }
     // noticeSubDone drops a compact "finished" notice (with a View link to the
-    // sub-agent's chat) into the main flow when a sub-agent completes LIVE -
-    // replayed history stays quiet (the folded card already tells the story).
+    // sub-agent's chat) into the main flow. It is derived from the sequenced
+    // lifecycle event, so replay must restore it as well as the launch card.
     const noticeSubDone = (key: string, sub: SubagentView) => {
-      if (replaying) return
       const info = sub.toolUseId ? taskInputByUse.get(sub.toolUseId) : undefined
       const label = sub.agentType || info?.type || 'Sub-agent'
       const desc = sub.description || info?.desc || ''
-      push({ kind: 'notice', text: `${label} finished${desc ? ': ' + desc : ''}`, subagentKey: key })
+      push({ kind: 'notice', text: `${label} finished${desc ? ': ' + desc : ''}`, subagentKey: key, noEntrance: replaying || undefined })
     }
     // settleSubagentByToolUse marks the sub-agent spawned by a Task tool_use as
     // done - the parent tool_result arriving is the authoritative live end
@@ -2538,28 +4619,148 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // background/async agent's result is only the launch boilerplate, though, so
     // it settles nothing - that sub stays running until its sidechain result.
     const settleSubagentByToolUse = (toolUseId: string, result: string) => {
-      if (isLaunchBoilerplate(result)) return
+      if (isLaunchBoilerplate(result)) {
+        // Not a completion - it just tells us this is a background/async sub.
+        // Flag it (and any sub already linked, incl. a live placeholder) so the
+        // turn's result won't settle it early; it ends via its task-notification.
+        backgroundToolUses.add(toolUseId)
+        for (const key in subLocal) {
+          if (subLocal[key].toolUseId === toolUseId) subLocal[key].background = true
+        }
+        return
+      }
       for (const key in subLocal) {
         const sub = subLocal[key]
         if (sub.toolUseId === toolUseId && sub.status === 'running') {
           sub.status = 'done'
-          noticeSubDone(key, sub)
+          // A NESTED sub-agent's finish shows on its card inside the parent's
+          // timeline; a main-flow notice for it would just be noise.
+          if (!sub.parentAgentId) noticeSubDone(key, sub)
           scheduleSubFlush()
         }
       }
+    }
+    // Distinct task-notifications already surfaced this connection: the notice +
+    // settle fire once even though the CLI writes each notification more than
+    // once (a queue-operation and an attachment, both relayed live off the main
+    // transcript) and a later real user turn may consume it again.
+    const seenNotif = new Set<string>()
+    // task-ids / tool-use-ids whose <task-notification> reported completion. A
+    // background sub-agent's card is rebuilt from its sidecar transcript, which
+    // the backfill relays AFTER the main transcript (where the notification
+    // lives) - so on a reconnect/resume the settle loop below can run before the
+    // sub even exists and match nothing. Record the completed ids here so a sub
+    // created or linked later still settles (mirrors backgroundToolUses, which
+    // exists for the same "signal arrives before the sub" reason).
+    const completedNotifs = new Set<string>()
+    // task-ids that already rendered a sub-agent completion chip via the
+    // canonical subagent_completed event (the richer "Sub-agent finished" pill
+    // with a View link). Claude records the same completion a second time as the
+    // user turn that resumed the parent; that copy must still SETTLE the sub but
+    // must not push a second chip (`Agent "X" finished`) for the same task. Old
+    // stored logs hold both records - newer ones collapse them server-side.
+    const renderedSubCompletions = new Set<string>()
+    // Older normalized logs may contain a subagent_completed event for a
+    // background command because Claude uses the same task-notification
+    // envelope for both. Remember output-file task ids so those historical
+    // events cannot create a transient empty agent card during replay/live
+    // catch-up. New backend events no longer emit the bogus lifecycle event.
+    const backgroundCommandTaskIDs = new Set<string>()
+    // The latest completion notice pushed per task-id: an agent that stops, is
+    // messaged/resumed, and stops again notifies more than once, and rendering
+    // every summary reads as the same agent "finishing" twice. A newer
+    // completion notice for the same task supersedes (retracts) the older chip;
+    // the conversation in between (the nudge, its replies) tells the story.
+    const noticeIdByTask = new Map<string, number>()
+    // handleTaskNotification folds one <task-notification> record into the flow:
+    // a compact notice, plus - for a background/async sub-agent whose completion
+    // this is (its Task tool_result was only launch boilerplate, so nothing else
+    // settles it) - marking the matching still-"working" card done by task-id /
+    // tool-use-id. Reached both from a user turn that consumed the notification
+    // and from the live main-transcript relay, so it dedups its own copies.
+    const handleTaskNotification = (text: string, ts?: number | null, quiet?: boolean) => {
+      const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
+      const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
+      const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
+      const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
+      const linkedAgent = Object.values(subLocal).some((sub) =>
+        (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse))
+      const agentNotification = linkedAgent || /^Agent\b/i.test(decodeEntities(summary ?? ''))
+      if (outputFile && taskId && !agentNotification) backgroundCommandTaskIDs.add(taskId)
+      const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
+      if (seenNotif.has(dedupKey)) return
+      seenNotif.add(dedupKey)
+      const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
+      if (!stillRunning && (taskId || noticeToolUse)) {
+        // Remember the completion so a sub rebuilt later (backfill ordering)
+        // still settles, even though the loop below may match nothing now.
+        if (taskId) completedNotifs.add(taskId)
+        if (noticeToolUse) completedNotifs.add(noticeToolUse)
+        for (const key in subLocal) {
+          const sub = subLocal[key]
+          const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
+          if (matches && sub.status === 'running') {
+            sub.status = 'done'
+            scheduleSubFlush()
+          }
+        }
+      }
+      // A PRE-WINDOW notification relayed for bookkeeping only
+      // (notification_backfill): apply the completion, render nothing - the
+      // chip belongs to a part of the conversation that isn't loaded.
+      if (quiet) return
+      // The canonical subagent_completed event already rendered this task's
+      // completion chip (and the settle above ran); the resume echo of the same
+      // notification must not push a second one.
+      if (taskId && renderedSubCompletions.has(taskId)) return
+      // A genuine turn-starting continuation anchors the "working" clock (item 48).
+      if (ts != null) turnStartClockRef.current = ts
+      if (!stillRunning && taskId) {
+        const superseded = noticeIdByTask.get(taskId)
+        if (superseded != null) dropItem(superseded)
+      }
+      const noticeId = push({
+        kind: 'notice',
+        text: decodeEntities(summary || 'Background task update'),
+        taskId,
+        toolUseId: noticeToolUse,
+        outputFile,
+        noEntrance: replaying || undefined,
+      })
+      if (!stillRunning && taskId) noticeIdByTask.set(taskId, noticeId)
     }
     // routeSidechain folds one sub-agent stream event into its card. Mirrors the
     // main user/assistant handling, minus the specialisations that can't occur
     // inside a sub-agent (slash commands, TodoWrite plan panel, AskUserQuestion,
     // the queue) - those render as plain items or are ignored.
-    const routeSidechain = (ev: ClaudeEvent) => {
+    const routeSidechain = (ev: ProviderEvent) => {
       const parentTool = typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : ''
+      if (!ev.agentId && !parentTool) return
       // Transcript lines name their sub-agent; a live stdout line carries only
       // the spawning Task tool_use - land it in the linked sub if the meta
       // frame already arrived, else in a placeholder merged later.
-      const agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
+      let agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
+      // Older Codex logs knew the child thread id but did not persist its spawn
+      // tool id. Bind the first unclaimed child sidechain to the oldest Agent
+      // placeholder so those logs self-heal on replay. New logs carry
+      // parent_item_id and take the direct route above.
+      if (ev.agentId && !parentTool && !subLocal[ev.agentId]) {
+        const childID = ev.agentId
+        const placeholderKey = Object.keys(subLocal).find((key) => key.startsWith('tool:'))
+        const placeholder = placeholderKey ? subLocal[placeholderKey] : undefined
+        if (placeholder?.toolUseId) {
+          // In old logs the spawn tool's own completion was mistaken for the
+          // child's completion. Seeing the real child sidechain proves it is
+          // still active, so reopen the placeholder before merging it.
+          placeholder.status = 'running'
+          handleSubagentMeta(childID, placeholder.toolUseId, placeholder.agentType ?? '', placeholder.description ?? '', placeholder.parentAgentId ?? '', placeholder.prompt ?? '')
+          agentId = childID
+        }
+      }
       const sub = ensureSubagent(agentId)
       if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
+      if (parentTool) markBackground(sub, parentTool)
       const meta = subMeta.get(agentId)!
       // Snapshot the sub's previous event timestamp before advancing, so a
       // replayed thought can estimate its duration (item 7); mirrors the main
@@ -2595,7 +4796,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
             if (block.type === 'text' && block.text?.trim()) {
-              sub.items.push({ kind: 'assistant', id: meta.nextId++, text: block.text })
+              const report = cleanSubagentReport(block.text)
+              if (report) sub.items.push({ kind: 'assistant', id: meta.nextId++, text: report })
             } else if (block.type === 'thinking' && block.thinking?.trim()) {
               const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
               sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
@@ -2607,7 +4809,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       } else if (ev.type === 'result') {
         if (sub.status === 'running') {
           sub.status = 'done'
-          noticeSubDone(agentId, sub)
+          if (!sub.parentAgentId) noticeSubDone(agentId, sub)
         }
       }
       scheduleSubFlush()
@@ -2638,6 +4840,43 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         }),
       )
     }
+
+    // Some Codex items only reveal useful fields on item/completed. Refresh
+    // the existing card before applying its result so it does not retain the
+    // raw started-frame id or empty input.
+    const patchToolMetadata = (toolUseId: string, name: string, input: unknown) => {
+      const patch = (it: ChatItem): ChatItem =>
+        it.kind === 'tool' && it.toolUseId === toolUseId
+          ? { ...it, name: name || it.name, input: mergeToolInputHistory(it.input, input) }
+          : it
+      const pendingIndex = pending.findIndex((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
+      if (pendingIndex >= 0) pending[pendingIndex] = patch(pending[pendingIndex])
+      else setItems((prev) => prev.map(patch))
+      let subChanged = false
+      for (const key in subLocal) {
+        const sub = subLocal[key]
+        const next = sub.items.map(patch)
+        if (next.some((it, i) => it !== sub.items[i])) {
+          sub.items = next
+          subChanged = true
+        }
+      }
+      if (subChanged) scheduleSubFlush()
+    }
+
+		const appendToolOutput = (toolUseId: string, delta: string) => {
+			if (!delta) return
+			const inPending = pending.find((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
+			if (inPending?.kind === 'tool') {
+				inPending.runningOutput = (inPending.runningOutput ?? '') + delta
+				return
+			}
+			setItems((prev) => prev.map((it) =>
+				it.kind === 'tool' && it.toolUseId === toolUseId
+					? { ...it, runningOutput: (it.runningOutput ?? '') + delta }
+					: it,
+			))
+		}
 
     // clearSending drops the "Sending..." indicator from optimistic user
     // messages the moment the agent starts responding (item 44) - the response
@@ -2720,11 +4959,11 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // events, snapshot the scroll height so the viewport can be re-anchored
     // after the prepend (a layout effect does the adjust), advance the oldest
     // anchor, and mark the end reached.
-    const handleHistoryBefore = (events: ClaudeEvent[], done: boolean) => {
+    const handleHistoryBefore = (events: ProviderEvent[], done: boolean) => {
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
-        const older = reduceHistoryEvents(events, () => historyIdRef.current--)
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current, itemTsRef.current)
         // Advance the anchor to the oldest event of this batch.
         const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
         if (anchor) oldestUuidRef.current = anchor
@@ -2757,7 +4996,16 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null) => {
+    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '') => {
+      // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
+      // in a `user` envelope but was never typed - route it to a skill/meta card
+      // off the isMeta flag rather than the content-sniffing below. It doesn't
+      // start a turn, so it skips the turn-clock/optimistic-echo bookkeeping.
+      if (isMeta) {
+        const meta = routeMetaText(rawText)
+        if (meta) push(meta)
+        return
+      }
       // Drop the CLI's local-command caveat wrapper; a message that is nothing
       // but the caveat is skipped entirely (item 31).
       const text = stripLocalCommandCaveat(rawText)
@@ -2821,51 +5069,61 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         return
       }
       if (text.startsWith('[Request interrupted by user')) {
+        // Codex can be interrupted before it emits item/completed. Preserve
+        // everything received so far as the assistant's partial response
+        // before closing the presentation stream and adding the boundary.
+        if (streamBuf?.text.trim()) {
+          push(streamBuf.kind === 'assistant'
+            ? { kind: 'assistant', text: streamBuf.text, noEntrance: true }
+            : { kind: 'thinking', text: streamBuf.text, noEntrance: true })
+        }
+        clearStream()
         push({ kind: 'interrupted' })
         interruptPending = true
         endPendingTools()
         return
       }
-      // A harness-injected background-task notification (<task-notification>):
-      // render a compact one-line notice instead of the raw XML (item 15).
-      if (text.includes('<task-notification>')) {
-        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
-        // A background/async sub-agent's completion arrives as this notification,
-        // not a tool_result we settle on (its tool_result was only the launch
-        // boilerplate), so a still-"working" sub would never clear otherwise
-        // (item 8). Match the notification's task-id / tool-use-id to the sub and
-        // mark it done unless the status says it is still going.
-        const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
-        const noticeToolUse = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
-        const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
-        const stillRunning = taskStatus != null && /^(running|in[_-]?progress|pending)$/i.test(taskStatus)
-        if (!stillRunning && (taskId || noticeToolUse)) {
-          for (const key in subLocal) {
-            const sub = subLocal[key]
-            const matches = (taskId && sub.agentId === taskId) || (noticeToolUse && sub.toolUseId === noticeToolUse)
-            if (matches && sub.status === 'running') {
-              sub.status = 'done'
-              scheduleSubFlush()
-            }
-          }
-        }
+      // A harness-injected background-task notification (<task-notification>)
+      // consumed as a user turn: fold it into a notice (and settle a background
+      // sub-agent) via the shared handler, which dedups against the live
+      // main-transcript relay of the same notification (item 8/15).
+      if (isTaskNotification(text)) {
+        handleTaskNotification(text, ts)
+        return
+      }
+      // A context-compaction "session continued" preamble: collapse it behind an
+      // expander rather than dumping the whole summary inline (item 39). Not a
+      // real user turn, so it doesn't anchor the working-clock or dedup.
+      const ctxNote = detectContextNote(text)
+      if (ctxNote) {
+        push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
+        return
+      }
+      // The stdout echo of a message already rendered from its queued_command
+      // attachment (a queued message consumed into a running turn): the
+      // attachment is the durable, correctly-placed copy - drop the echo.
+      const qi = queuedCmdTexts.indexOf(text)
+      if (qi >= 0) {
+        queuedCmdTexts.splice(qi, 1)
         markTurnStart()
-        push({ kind: 'notice', text: decodeEntities(summary || 'Background task update') })
+        settlePendingSend(text)
         return
       }
       // The echo of a message we already showed optimistically (item 26): just
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
       // it for placement would put the user message below its own reply.
-      const oi = optimisticTextsRef.current.indexOf(text)
+      const oi = optimisticTextsRef.current.findIndex((pending) =>
+        (clientId !== '' && pending.clientId === clientId) || (clientId === '' && pending.text === text))
       if (oi >= 0) {
         markTurnStart()
+        const optimisticText = optimisticTextsRef.current[oi].text
         optimisticTextsRef.current.splice(oi, 1)
         setItems((prev) => {
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && it.text === text) {
+            if (it.kind === 'user' && it.sending && it.text === optimisticText) {
               j = k
               break
             }
@@ -2884,10 +5142,58 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
+      plainUserTexts.push(text)
       push({ kind: 'user', text, noEntrance: fromQueue })
     }
 
-    const handleClaudeEvent = (ev: ClaudeEvent) => {
+    // One-shot dedup between a queued_command attachment and the stdout echo of
+    // the same message: whichever renders first is remembered here so the other
+    // is dropped (they carry different uuids, so the socket's uuid dedup can't
+    // pair them).
+    const queuedCmdTexts: string[] = []
+    const plainUserTexts: string[] = []
+
+    // routeQueuedCommand renders a queued_command attachment - the only durable
+    // record of a queued message consumed into a RUNNING turn (see
+    // queuedCommandText). Routed through routeUserText so the sender's own
+    // optimistic/queued bubbles fold into the settled item.
+    const routeQueuedCommand = (text: string, ts: number | null) => {
+      const pi = plainUserTexts.indexOf(text)
+      if (pi >= 0) {
+        // Its stdout echo already rendered the bubble (ring replay order).
+        plainUserTexts.splice(pi, 1)
+        return
+      }
+      routeUserText(text, ts)
+      queuedCmdTexts.push(text)
+    }
+
+    const handleProviderEvent = (ev: ProviderEvent) => {
+      // A background/async sub-agent's completion arrives NOT as a user turn but
+      // as a <task-notification> bookkeeping record the chat socket relays live
+      // off the main transcript: a queue-operation (XML on `content`) or an
+      // attachment (XML on `attachment.prompt`). Settle off it up front, whatever
+      // the event type, so a finished background sub-agent's card stops reading
+      // "working" the moment it ends. A notification later consumed by a real
+      // user turn routes through routeUserText instead, and dedups there.
+      const notifText =
+        (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
+        (typeof ev.attachment?.prompt === 'string' &&
+          isTaskNotification(ev.attachment.prompt) &&
+          ev.attachment.prompt) ||
+        ''
+      if (notifText) {
+        handleTaskNotification(notifText, parseEventTs(ev))
+        return
+      }
+      // A queued message consumed into a running turn: its queued_command
+      // attachment (relayed by the backfill and the live notification tailer)
+      // is its only durable record - render the user bubble from it.
+      const queuedText = queuedCommandText(ev)
+      if (queuedText != null) {
+        routeQueuedCommand(queuedText, parseEventTs(ev))
+        return
+      }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
       // main flow. This is the fix for sub-agent prompts showing as user
       // messages (they arrive as sidechain `user` events - live ones marked
@@ -2895,9 +5201,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // below: sidechain uuids live in sub-agent transcripts, so anchoring
       // history paging on one would never resolve.
       if (ev.isSidechain || (typeof ev.parent_tool_use_id === 'string' && ev.parent_tool_use_id)) {
+        // Only the types routeSidechain actually renders may create/route into
+        // a sub: anything else (a stream_event partial delta, bookkeeping
+        // records) would ensureSubagent an empty, unlabeled placeholder card.
         // A sub-agent's partial deltas aren't token-streamed into the main
         // bubble; its complete blocks arrive via the transcript tail.
-        if (ev.type !== 'stream_event') routeSidechain(ev)
+        if (ev.type === 'user' || ev.type === 'assistant' || ev.type === 'result') routeSidechain(ev)
         return
       }
       // Snapshot the prior event's timestamp before advancing it - a replayed
@@ -2917,6 +5226,27 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               setSlashCommands(ev.slash_commands.filter((c): c is string => typeof c === 'string'))
             }
             if (typeof ev.apiKeySource === 'string') setApiKeyReal(ev.apiKeySource !== 'none')
+          } else if (ev.subtype === 'model_refusal_fallback') {
+            // A safety-classifier refusal: the flagged blocks already streamed and
+            // rendered live, and the retry re-emits them under new uuids, so evict
+            // the retracted uuids to undo the duplicate. Both the not-yet-flushed
+            // pending batch and committed state, mirroring the hydra_thinking patch.
+            // This is gated on the refusal subtype, so a normal turn never reaches
+            // it; if the uuids don't match (e.g. an unexpected wire shape) nothing
+            // is evicted and the duplicate simply remains - never a false removal.
+            const retracted = new Set([...(ev.retractedMessageUuids ?? []), ...(ev.retracted_message_uuids ?? [])])
+            if (retracted.size === 0) return
+            for (let i = pending.length - 1; i >= 0; i--) {
+              const u = (pending[i] as { uuid?: string }).uuid
+              if (u && retracted.has(u)) pending.splice(i, 1)
+            }
+            setItems((prev) => {
+              const next = prev.filter((it) => {
+                const u = (it as { uuid?: string }).uuid
+                return !(u && retracted.has(u))
+              })
+              return next.length === prev.length ? prev : next
+            })
           }
           return
         }
@@ -2936,20 +5266,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // and just renders the proposed plan as a card (see PlanCard).
           return
         }
+        case 'hydra_subagent_completed': {
+          if (ev.subagentNotice) {
+            const notice = ev.subagentNotice
+            if (notice.key) renderedSubCompletions.add(notice.key)
+            push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: replaying || undefined })
+          }
+          return
+        }
         case 'user': {
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs)
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '')
             return
           }
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs)
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
+              if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
+              if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
             }
           }
           return
@@ -2981,33 +5321,33 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             seen = new Set()
             seenBlocks.set(msgId, seen)
           }
-          for (const block of content) {
+          for (let bi = 0; bi < content.length; bi++) {
+            const block = content[bi]
             const key = `${block.type}:${block.id ?? ''}:${block.text ?? block.thinking ?? ''}`
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
             if (block.type === 'text' && block.text?.trim()) {
               // noEntrance when this settles the block we've been streaming live:
               // the text is already on screen, so a fade-in on swap flickers
-              // (item 56).
-              push({ kind: 'assistant', text: block.text, noEntrance: streamBuf?.kind === 'assistant' })
+              // (item 56). streamedKinds (not streamBuf, which message_stop has
+              // already nulled) remembers we streamed this text.
+              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid })
             } else if (block.type === 'thinking') {
-              // Always consume the live timer (resets thinkingStart). Push a
-              // settled thought when it has visible text, OR when it was a
-              // silently-reasoned turn we timed live (Opus/Fable stream an empty
-              // thinking block): a timed empty thought still shows "Thought for
-              // Xs" instead of the "Thinking..." indicator just vanishing (item
-              // 11). Replayed empty thoughts (no duration) stay hidden so history
-              // isn't cluttered with contentless cards.
-              let dur = takeThinkingDuration()
-              // Replayed thought (no live timing): estimate its duration from the
-              // gap since the triggering event so history still reads "Thought for
-              // Xs" (item 7). Only for thoughts with visible text, so a contentless
-              // replayed thinking block stays hidden rather than cluttering history.
+              // Duration comes from the daemon (a hydra_thinking event keyed by
+              // this message id, already in hand - sent before the backfill and
+              // live at the block's end). A settled thought is shown when it has
+              // visible text OR carries a measured duration: a duration means it
+              // was a real (possibly silently-reasoned, empty) thought, so an
+              // empty timed thought still reads "Thought for Xs" instead of
+              // vanishing (item 11). Old history with no backend duration falls
+              // back to the transcript-gap estimate (visible-text thoughts only,
+              // so a contentless untimed block stays hidden).
+              let dur = msgId ? thoughtDurationsRef.current.get(msgId) : undefined
               if (dur == null && block.thinking?.trim() && prevTs != null && evTs != null) {
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
-                push({ kind: 'thinking', text: block.thinking ?? '', durationMs: dur, noEntrance: streamBuf?.kind === 'thinking' })
+                push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking'), uuid: ev.uuid })
               }
             } else if (block.type === 'tool_use' && block.id) {
               // AskUserQuestion renders as an interactive question card, not a
@@ -3019,19 +5359,37 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
               const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
               if (specs) {
-                push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+                push({ kind: 'question', toolUseId: block.id, input: block.input, specs, uuid: ev.uuid })
               } else if (todos) {
-                setTodos(todos)
+                plan.applyTodoWrite(todos)
               } else {
-                applyTaskTool(block.name, block.input)
-                if (block.name === 'Task') {
+                plan.applyTaskTool(block.name, block.input, block.id)
+                if (block.name === 'SendMessage') {
+                  const to = sendMessageRecipient(block.input)
+                  if (to) messageTargetByUse.set(block.id, to)
+                }
+                if (block.name === 'Task' || block.name === 'Agent') {
                   const inp = (typeof block.input === 'object' && block.input !== null ? block.input : {}) as Record<string, unknown>
                   taskInputByUse.set(block.id, {
                     type: typeof inp.subagent_type === 'string' ? inp.subagent_type : undefined,
                     desc: typeof inp.description === 'string' ? inp.description : undefined,
                   })
+                  if (block.name === 'Agent' && isAgentSpawnInput(block.input)) {
+                    // Codex may not reveal the child thread id until the spawn
+                    // item completes. Give the spawn card a linked placeholder
+                    // immediately; handleSubagentMeta merges it into the real
+                    // child when that id arrives, so raw Agent JSON never flashes
+                    // before the rich sub-agent card.
+                    const placeholder = ensureSubagent('tool:' + block.id)
+                    placeholder.toolUseId = block.id
+                    toolUseToSub.set(block.id, placeholder.agentId)
+                    placeholder.agentType = typeof inp.subagent_type === 'string' ? inp.subagent_type : 'Sub-agent'
+                    placeholder.description = typeof inp.description === 'string' ? inp.description : ''
+                    placeholder.prompt = typeof inp.prompt === 'string' ? inp.prompt : placeholder.description
+                    scheduleSubFlush()
+                  }
                 }
-                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid })
               }
             }
           }
@@ -3044,12 +5402,44 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             histTurnOut += u.output_tokens
             histLastUsage = u
           }
+          // Track how full the context is (item 40): the prompt-side tokens of
+          // the latest message. Runs for replay (assistant events) and live
+          // finals alike; message_start covers the live streaming case.
+          const ctx = contextInputTokens(u)
+          if (ctx > 0) setContextTokens(ctx)
           const sr = ev.message?.stop_reason
           if (sr && sr !== 'tool_use') histStopReason = sr
           // The complete event supersedes any in-flight streamed block (finals
           // always follow their own deltas). Cleared in the same batch as the
           // push above, so the text swaps without a flash.
           clearStream()
+          return
+        }
+        case 'hydra_thinking': {
+          // The daemon measured a thinking block's duration and reports it here
+          // keyed by message id (replayed from the sidecar on connect, then live
+          // at the block's end). Stash it for the thinking item this reducer
+          // builds; if that item already exists (the duration arrived after it),
+          // patch it in place - both the not-yet-flushed pending batch and the
+          // committed state.
+          const mid = ev.message_id
+          const ms = ev.duration_ms
+          if (!mid || typeof ms !== 'number') return
+          thoughtDurationsRef.current.set(mid, ms)
+          for (const it of pending) {
+            if (it.kind === 'thinking' && it.msgId === mid && it.durationMs == null) it.durationMs = ms
+          }
+          setItems((prev) => {
+            let changed = false
+            const next = prev.map((it) => {
+              if (it.kind === 'thinking' && it.msgId === mid && it.durationMs == null) {
+                changed = true
+                return { ...it, durationMs: ms }
+              }
+              return it
+            })
+            return changed ? next : prev
+          })
           return
         }
         case 'stream_event': {
@@ -3062,7 +5452,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
             streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
-            if (bt === 'thinking') thinkingStart = Date.now()
+            revealed = 0
+            if (streamBuf) streamedKinds.add(streamBuf.kind)
             scheduleStreamFlush()
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta
@@ -3074,9 +5465,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               scheduleStreamFlush()
             }
           } else if (e.type === 'message_start') {
-            // A new API message in this turn: seed the in-flight token count (item 48).
+            // A new API message in this turn: reset which kinds this message
+            // streamed (see streamedKinds), then seed the in-flight token count
+            // (item 48).
+            streamedKinds = new Set()
             curMsgTokensRef.current = e.message?.usage?.output_tokens ?? 0
             setTurnTokens(turnTokensRef.current + curMsgTokensRef.current)
+            // The prompt this message was sent with = current context fill (item 40).
+            const ctx = contextInputTokens(e.message?.usage)
+            if (ctx > 0) setContextTokens(ctx)
           } else if (e.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
             // Running (cumulative-for-this-message) output token count.
             curMsgTokensRef.current = e.usage.output_tokens
@@ -3115,11 +5512,14 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // the turn's pending synthesized footer.
           turnStopReasonRef.current = null
           discardHistFooter()
-          // A turn ends only once all its sub-agents have; settle any still
-          // marked running (a sub whose own result line we never saw).
+          // A synchronous sub-agent finishes within the turn that launched it, so
+          // a turn ending settles any still marked running (a sub whose own result
+          // line we never saw). A BACKGROUND sub-agent, though, outlives its
+          // launching turn - settling it here would wrongly flip it to "finished"
+          // while it is still working; it ends only via its <task-notification>.
           let changed = false
           for (const k in subLocal) {
-            if (subLocal[k].status === 'running') {
+            if (subLocal[k].status === 'running' && !subLocal[k].background) {
               subLocal[k].status = 'done'
               changed = true
             }
@@ -3136,6 +5536,144 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
     }
 
+    const recordNormalizedCommit = (normalized: NormalizedChatEvent) => {
+      if (normalized.type !== 'commit_created') return
+      const payload = normalized.payload ?? {}
+      const sha = typeof payload.sha === 'string' ? payload.sha : ''
+      if (!sha) return
+      const st = chipStateRef.current
+      if (st.cache.has(sha)) return
+      const chip: CommitChipItem = {
+        kind: 'commit', id: st.nextId++, sha,
+        shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
+        subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
+        ts: Date.parse(normalized.timestamp) || Date.now(),
+        noEntrance: replaying || undefined,
+        ...mergeFieldsFromPayload(payload),
+      }
+      st.cache.set(sha, chip)
+      setCommitChips((prev) => [...prev, chip])
+    }
+    const normalizedStreams = new Set<string>()
+    // A reconnect boundary or version-skewed server can deliver the same
+    // durable event in history and live catch-up. Seq is its canonical identity;
+    // reducing it twice is especially visible for completion/commit chips.
+    const seenNormalizedSeq = new Set<number>()
+    const firstNormalizedDelivery = (event: NormalizedChatEvent): boolean => {
+      if (!Number.isFinite(event.seq)) return true
+      if (seenNormalizedSeq.has(event.seq)) return false
+      seenNormalizedSeq.add(event.seq)
+      return true
+    }
+    // Hydra persists a user message before writing it to the provider. Claude's
+    // replay-user-messages mode later echoes the same content with an unrelated
+    // UUID. New logs carry a user_message_echoed marker; this one-to-one content
+    // matcher also repairs older logs which already contain both visible events.
+    const pendingHydraUserEchoes = new Map<string, number>()
+    const pendingClaudeUserEchoes = new Map<string, number>()
+    const keepNormalizedUserEvent = (event: NormalizedChatEvent): boolean => {
+      if (event.type !== 'user_message' && event.type !== 'user_message_echoed') return true
+      const key = stableContentKey(event.payload?.content ?? null)
+      if (key === 'null') return event.type === 'user_message'
+      const hydraCount = pendingHydraUserEchoes.get(key) ?? 0
+      if (event.type === 'user_message_echoed') {
+        if (hydraCount > 0) pendingHydraUserEchoes.set(key, hydraCount - 1)
+        return false
+      }
+      if (event.source_id?.startsWith('claude:')) {
+        if (hydraCount > 0) {
+          pendingHydraUserEchoes.set(key, hydraCount - 1)
+          return false
+        }
+        pendingClaudeUserEchoes.set(key, (pendingClaudeUserEchoes.get(key) ?? 0) + 1)
+        return true
+      }
+      const claudeCount = pendingClaudeUserEchoes.get(key) ?? 0
+      if (claudeCount > 0) {
+        pendingClaudeUserEchoes.set(key, claudeCount - 1)
+        return false
+      }
+      pendingHydraUserEchoes.set(key, hydraCount + 1)
+      return true
+    }
+    // Opus can spend measurable time in a hidden reasoning block whose final
+    // text is empty. Pair the semantic completion and duration regardless of
+    // which one was imported first, then synthesize the empty thinking block
+    // only when its duration proves that real reasoning occurred.
+    const emptyNormalizedReasoning = new Map<string, NormalizedChatEvent>()
+    const normalizedReasoningDurations = new Set<string>()
+    const normalizedPresentationEvents = (event: NormalizedChatEvent): ProviderEvent[] => {
+      const messageID = typeof event.payload?.message_id === 'string' ? event.payload.message_id : ''
+      if (event.type === 'reasoning_completed' && !contentText(event.payload?.text).trim()) {
+        if (messageID && normalizedReasoningDurations.has(messageID)) {
+          return normalizedToProviderEvents(event, true)
+        }
+        if (messageID) emptyNormalizedReasoning.set(messageID, event)
+        return []
+      }
+      if (event.type === 'reasoning_duration' && messageID) {
+        normalizedReasoningDurations.add(messageID)
+        const converted = normalizedToProviderEvents(event)
+        const completed = emptyNormalizedReasoning.get(messageID)
+        if (completed) {
+          emptyNormalizedReasoning.delete(messageID)
+          converted.push(...normalizedToProviderEvents(completed, true))
+        }
+        return converted
+      }
+      return normalizedToProviderEvents(event)
+    }
+    const replayedAssistantTexts = new Set<string>()
+    // Codex often reveals semantic tool fields only on tool_completed. Keep the
+    // richest payload by id so an older tool_started page can be enriched before
+    // the history reducer creates its card (pagination arrives newest-first).
+    const normalizedToolMetadata = new Map<string, { name: string; input: unknown }>()
+    const rememberNormalizedToolMetadata = (event: NormalizedChatEvent) => {
+      if (event.type !== 'tool_started' && event.type !== 'tool_completed') return
+      const id = typeof event.payload?.id === 'string' ? event.payload.id : ''
+      const name = typeof event.payload?.name === 'string' ? event.payload.name : ''
+      if (id && name && event.payload && 'input' in event.payload) {
+        const prior = normalizedToolMetadata.get(id)
+        const input = mergeToolInputHistory(prior?.input, event.payload.input)
+        // A completion wins; an empty started payload must not overwrite it
+        // when an older page is loaded after the newer completion page.
+        if (event.type === 'tool_completed' || !prior) normalizedToolMetadata.set(id, { name, input })
+        else normalizedToolMetadata.set(id, { name: prior.name, input })
+      }
+    }
+    const enrichNormalizedTool = (event: NormalizedChatEvent): NormalizedChatEvent => {
+      if (event.type !== 'tool_started') return event
+      const id = typeof event.payload?.id === 'string' ? event.payload.id : ''
+      const rich = normalizedToolMetadata.get(id)
+      return rich ? { ...event, payload: { ...event.payload, name: rich.name, input: rich.input } } : event
+    }
+    const handleNormalizedSubagent = (event: NormalizedChatEvent): boolean => {
+      if (event.type !== 'subagent_started' && event.type !== 'subagent_updated' && event.type !== 'subagent_completed') return false
+      const sub = event.payload ?? {}
+      const subID = typeof sub.id === 'string' ? sub.id : ''
+      if (subID && backgroundCommandTaskIDs.has(subID)) return true
+      const rawParentID = typeof sub.parent_id === 'string' ? sub.parent_id : ''
+      // Codex puts the root conversation thread in parent_id too. It is only a
+      // nested-agent relationship when that id names an actual known child.
+      const parentID = rawParentID && subLocal[rawParentID] ? rawParentID : ''
+      handleSubagentMeta(
+        subID,
+        typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',
+        typeof sub.agent_type === 'string' ? sub.agent_type : '',
+        typeof sub.description === 'string' ? sub.description : '',
+        parentID,
+        typeof sub.prompt === 'string' ? sub.prompt : '',
+      )
+      if (subID && event.type === 'subagent_completed') {
+        const completedSub = ensureSubagent(subID)
+        completedSub.status = 'done'
+      }
+      scheduleSubFlush()
+      return true
+    }
+    let activeNormalizedAssistantStream = ''
+    let activeNormalizedReasoningStream = ''
+
     const ws = new WebSocket(getWsUrl(agentId, projectId))
     wsRef.current = ws
     let retryTimer: number | null = null
@@ -3150,14 +5688,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         type?: string
         status?: string
         head_moved?: boolean
-        event?: ClaudeEvent
+        event?: ProviderEvent
         messages?: { id?: string; content?: unknown }[]
         agentId?: string
         toolUseId?: string
         agentType?: string
         description?: string
-        events?: ClaudeEvent[]
+        parentAgentId?: string
+        events?: ProviderEvent[]
         done?: boolean
+        file?: string
+        content?: string
+        error?: string
+        plan?: string
+        state?: ChatProjectionSnapshot
+        next_cursor?: string
+        normalizedEvents?: NormalizedChatEvent[]
       }
       try {
         msg = JSON.parse(e.data)
@@ -3170,16 +5716,242 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           return
         case 'diff_refresh':
           onDiffRefreshRef.current?.(msg.head_moved ?? false)
+          // HEAD moved = a commit landed (or the branch was rewritten): refresh
+          // the commit chips so the new one appears within the poll interval.
+          if (msg.head_moved && !usesNormalizedEvents) fetchCommitsRef.current()
           return
         case 'claude_event':
-          if (msg.event) handleClaudeEvent(msg.event)
+          // Compatibility-only frame. Structured providers consume the
+          // sequenced backend event stream instead.
+          if (!normalizedAvailableRef.current && msg.event) handleProviderEvent(msg.event)
           return
+        case 'state_snapshot': {
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
+          // Persisted "/" autocomplete list, so old heads whose system:init has
+          // scrolled past the replayed history window still populate the popup.
+          if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {
+            setSlashCommands(msg.state.slash_commands.filter((c): c is string => typeof c === 'string'))
+          }
+          const rawPlan = msg.state?.plan
+          const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+          if (entries.length) plan.adoptServer(entries)
+          for (const [key, sub] of Object.entries(msg.state?.subagents ?? {})) {
+            const subID = sub.id || key
+            handleSubagentMeta(subID, sub.parent_item_id ?? '', sub.agent_type ?? '', sub.description ?? '', sub.parent_id ?? '', sub.prompt ?? '')
+            if (sub.status && sub.status !== 'running') ensureSubagent(subID).status = 'done'
+          }
+          const partial = msg.state?.stream
+          if (partial?.text) {
+            const kind = partial.kind === 'thinking' ? 'thinking' : 'text'
+            // Register the id the continuing deltas will resolve to, so they
+            // append to this preview instead of opening a second one (which
+            // would drop the prefix), and so the completed message settles it.
+            const streamID = partial.message_id || `${kind}:snapshot`
+            normalizedStreams.add(streamID)
+            if (kind === 'text') activeNormalizedAssistantStream = streamID
+            else activeNormalizedReasoningStream = streamID
+            seedStream(kind === 'text' ? 'assistant' : 'thinking', partial.text)
+          }
+          return
+        }
+        case 'chat_event': {
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
+          const normalized = msg.event as unknown as NormalizedChatEvent | undefined
+          if (!normalized || !firstNormalizedDelivery(normalized) || !keepNormalizedUserEvent(normalized)) return
+          // Status frames and normalized chat events travel independently. A
+          // completed turn is already durable by the time this event arrives,
+          // so settle the selected head immediately instead of waiting for the
+          // slower project-status refresh. Historical pages use chat_history,
+          // not this live-only branch, and therefore cannot overwrite status.
+          if (normalized.payload?.sidechain !== true) {
+            if (normalized.type === 'turn_started') {
+              onStatusUpdateRef.current?.(AgentStatus.RUNNING)
+            } else if (
+              normalized.type === 'turn_completed' ||
+              normalized.type === 'turn_failed' ||
+              normalized.type === 'turn_interrupted'
+            ) {
+              const childStillRunning = Object.values(subLocal).some((sub) => sub.status === 'running')
+              onStatusUpdateRef.current?.(childStillRunning ? AgentStatus.RUNNING : AgentStatus.FINISHED)
+            }
+          }
+          rememberNormalizedToolMetadata(normalized)
+          if (handleNormalizedSubagent(normalized)) {
+            const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+            if (normalized.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+              for (const converted of normalizedPresentationEvents(normalized)) handleProviderEvent(converted)
+            }
+            return
+          }
+          const explicitStreamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : ''
+          if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
+            if (normalized.payload?.sidechain === true) {
+              // Sub-agent cards consume their completed blocks; routing child
+              // token deltas through the main stream created a second partial
+              // response and corrupted replay state.
+              return
+            }
+            const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
+            let streamID = explicitStreamID
+            if (!streamID) {
+              streamID = kind === 'text' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream
+              if (!streamID) streamID = `${kind}:${normalized.seq}`
+            }
+            if (kind === 'text') activeNormalizedAssistantStream = streamID
+            else activeNormalizedReasoningStream = streamID
+            if (!normalizedStreams.has(streamID)) {
+              normalizedStreams.add(streamID)
+              handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } } })
+            }
+            const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+            handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
+            return
+          }
+          const activeStreamID = normalized.type === 'assistant_message' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream
+          // Claude's token envelopes do not carry the final message id, while
+          // its completed assistant envelope does. Prefer an explicitly open
+          // id (Codex), otherwise settle the provider's active anonymous stream.
+          const streamID = explicitStreamID && normalizedStreams.has(explicitStreamID) ? explicitStreamID : activeStreamID
+          const settlesNormalizedStream =
+            (normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)
+          if (normalized.type === 'plan_updated') {
+            const rawPlan = normalized.payload?.plan
+            const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+            if (entries.length) plan.adoptServer(entries)
+          }
+					if (normalized.type === 'tool_started' || normalized.type === 'tool_completed') {
+						const toolID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+						const toolName = typeof normalized.payload?.name === 'string' ? normalized.payload.name : ''
+						if (toolID && toolName && normalized.payload && 'input' in normalized.payload) {
+							patchToolMetadata(toolID, toolName, normalized.payload.input)
+						}
+					}
+					if (normalized.type === 'tool_delta') {
+						const toolID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+						const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+						appendToolOutput(toolID, delta)
+						return
+          }
+          recordNormalizedCommit(normalized)
+          if (replaying && normalized.type === 'assistant_message') {
+            const text = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+            if (text && replayedAssistantTexts.has(text)) return
+            if (text) replayedAssistantTexts.add(text)
+          }
+          for (const converted of normalizedPresentationEvents(normalized)) handleProviderEvent(converted)
+          if (settlesNormalizedStream) {
+            // Commit the completed message and remove its streamed preview in
+            // one React batch. Clearing first and flushing the settled item in
+            // a microtask produced a visible blank/full-message flicker.
+            flush()
+            handleProviderEvent({ type: 'stream_event', event: { type: 'message_stop' } })
+            if (normalized.type === 'assistant_message') activeNormalizedAssistantStream = ''
+            else activeNormalizedReasoningStream = ''
+          }
+          return
+        }
+        case 'chat_history': {
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
+          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+            .filter(firstNormalizedDelivery)
+            .filter(keepNormalizedUserEvent)
+          oldestEventCursorRef.current = msg.next_cursor ?? null
+          for (const event of normalized) {
+            recordNormalizedCommit(event)
+            rememberNormalizedToolMetadata(event)
+          }
+          if (loadingOlderRef.current) {
+            const main: ProviderEvent[] = []
+            for (const rawEvent of normalized) {
+              if (handleNormalizedSubagent(rawEvent)) {
+                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+                  main.push(...normalizedPresentationEvents(rawEvent))
+                }
+                continue
+              }
+              const event = enrichNormalizedTool(rawEvent)
+              if (event.payload?.sidechain === true) {
+                if (event.type === 'tool_started' || event.type === 'tool_completed') {
+                  const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+                  const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+                  if (toolID && toolName && 'input' in event.payload) patchToolMetadata(toolID, toolName, event.payload.input)
+                }
+                for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
+              } else {
+                main.push(...normalizedPresentationEvents(event))
+              }
+            }
+            handleHistoryBefore(main, msg.done === true)
+          } else {
+            for (const rawEvent of normalized) {
+              if (handleNormalizedSubagent(rawEvent)) {
+                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+                  for (const converted of normalizedPresentationEvents(rawEvent)) handleProviderEvent(converted)
+                }
+                continue
+              }
+              const event = enrichNormalizedTool(rawEvent)
+              if (event.type === 'assistant_message') {
+                const text = typeof event.payload?.text === 'string' ? event.payload.text : ''
+                if (text && replayedAssistantTexts.has(text)) continue
+                if (text) replayedAssistantTexts.add(text)
+              }
+              if (event.type === 'plan_updated') {
+                const rawPlan = event.payload?.plan
+                const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+                if (entries.length) plan.adoptServer(entries)
+              }
+              if (event.type === 'tool_started' || event.type === 'tool_completed') {
+                const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+                const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+                if (toolID && toolName && event.payload && 'input' in event.payload) {
+                  patchToolMetadata(toolID, toolName, event.payload.input)
+                }
+              }
+              for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
+            }
+            if (msg.done === true) setAllHistoryLoaded(true)
+          }
+          return
+        }
+        case 'notification_backfill': {
+          if (normalizedAvailableRef.current) return
+          // A <task-notification> record from BEFORE the backfill window,
+          // relayed so a long-finished background task/agent still settles on
+          // reconnect. Settle-only: no notice chip (its place in the
+          // conversation isn't loaded), no working-clock anchor.
+          const ev = msg.event
+          const notifText =
+            (typeof ev?.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
+            (typeof ev?.attachment?.prompt === 'string' &&
+              isTaskNotification(ev.attachment.prompt) &&
+              ev.attachment.prompt) ||
+            (typeof ev?.message?.content === 'string' && isTaskNotification(ev.message.content) && ev.message.content) ||
+            ''
+          if (notifText) handleTaskNotification(notifText, null, true)
+          return
+        }
         case 'subagent_meta':
+          if (normalizedAvailableRef.current) return
           // Links a sub-agent to its Task tool_use (folding it into that card)
           // and labels it; arrives ahead of the sub's events live, and per-sub
           // during backfill. Tolerates arriving after events too.
-          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '')
+          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '', msg.parentAgentId ?? '')
           return
+        case 'task_output': {
+          // Answer to a task_output request: hand it to the waiting chip.
+          const waiter = taskOutputWaitersRef.current.get(msg.file ?? '')
+          if (waiter) {
+            taskOutputWaitersRef.current.delete(msg.file ?? '')
+            waiter({ content: msg.content, error: msg.error })
+          }
+          return
+        }
         case 'replay_done':
           // History that ends on a completed turn (no trailing user message to
           // settle it, and no result event in the replay to supersede it) gets
@@ -3190,16 +5962,31 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
-          // Same for sub-agents (item 5): a sub still marked running after the
-          // whole transcript replayed only stays genuinely live if the head is
-          // mid-turn right now (a reconnect during an active turn). Otherwise -
-          // e.g. after a server restart - the run is long over and never emitted
-          // the settling result, so mark it done (and end its orphaned steps) so
-          // it doesn't read "working" forever.
+          // A BACKGROUND sub-agent settles only off its <task-notification>. That
+          // record lives in the main transcript, which the backfill replays
+          // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification
+          // ran with no sub to match. Apply the recorded completion retroactively
+          // here, to ANY still-running sub the notifications named (not just ones
+          // already marked background - the launch boilerplate that would mark
+          // them can itself fall outside the backfill window); a sub with no
+          // recorded completion is genuinely still live, so leave it be.
+          for (const key in subLocal) {
+            const sub = subLocal[key]
+            if (sub.status !== 'running') continue
+            if (completedNotifs.has(sub.agentId) || (sub.toolUseId && completedNotifs.has(sub.toolUseId))) {
+              sub.status = 'done'
+            }
+          }
+          // Same for non-background sub-agents (item 5): a sub still marked running
+          // after the whole transcript replayed only stays genuinely live if the
+          // head is mid-turn right now (a reconnect during an active turn).
+          // Otherwise - e.g. after a server restart - the run is long over and
+          // never emitted the settling result, so mark it done (and end its
+          // orphaned steps) so it doesn't read "working" forever.
           if (!isTurnRunningRef.current) {
             for (const key in subLocal) {
               const sub = subLocal[key]
-              if (sub.status !== 'running') continue
+              if (sub.status !== 'running' || sub.background) continue
               sub.status = 'done'
               for (let i = 0; i < sub.items.length; i++) {
                 const it = sub.items[i]
@@ -3217,12 +6004,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           // elapsed effect set turnStartRef to page-load time before the
           // backfill arrived; correct it (and elapsed) here, before the
           // indicator first renders (it's gated on replayDone).
-          {
+          if (isTurnRunningRef.current) {
             const real = turnStartClockRef.current
             if (real != null && real <= Date.now()) {
               turnStartRef.current = real
               setElapsed(Math.floor((Date.now() - real) / 1000))
             }
+          } else {
+            // Idle chat: the backfill's historical user messages also passed
+            // through markTurnStart, so the anchor now holds the LAST turn's
+            // start. Clear it, or the next live turn would show its elapsed
+            // time as "since that old message" instead of starting from 0.
+            turnStartClockRef.current = null
           }
           setLiveFromId(nextId)
           setReplayDone(true)
@@ -3236,9 +6029,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           reconcileQueue(msg.messages ?? [])
           return
         case 'history_before':
+          if (normalizedAvailableRef.current) return
           // A load-older page (item 25): older conversation events to prepend.
           handleHistoryBefore(msg.events ?? [], msg.done === true)
           return
+        case 'plan': {
+          // The daemon's stream-tracked plan (sent once per attach, after the
+          // backfill). It supersedes anything assembled from the tail window
+          // or restored from storage - without it a plan whose Task* creates
+          // predate the backfill window (a head that ran unwatched, a
+          // byte-dense conversation) never resurfaces.
+          const entries = parseServerPlan(typeof msg.plan === 'string' ? msg.plan : '')
+          if (entries.length) plan.adoptServer(entries)
+          return
+        }
       }
     }
     ws.onclose = () => {
@@ -3258,21 +6062,45 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     }
 
     return () => {
-      if (streamTimer != null) clearTimeout(streamTimer)
+      if (streamFrame != null) cancelAnimationFrame(streamFrame)
       if (retryTimer != null) clearTimeout(retryTimer)
       closeWebSocket(ws)
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, projectId, reconnectAttempt, autoRetry])
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, usesNormalizedEvents])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
-  // labels, the live/done state and the final report.
+  // labels, the live/done state and the final report. A NESTED sub-agent's
+  // spawning tool_use lives inside its parent's timeline, not the main items,
+  // so those are indexed too.
   const taskToolByUse = useMemo(() => {
     const m: Record<string, ToolItem> = {}
     for (const it of items) if (it.kind === 'tool') m[it.toolUseId] = it
+    for (const s of Object.values(subagents)) for (const it of s.items) if (it.kind === 'tool') m[it.toolUseId] = it
     return m
-  }, [items])
+  }, [items, subagents])
+
+  // Sub-agents whose own run has settled but which still have a running
+  // descendant. The harness "finishes" a sub-agent the moment its turn ends -
+  // even when it stopped to wait on background sub-agents it spawned - so a
+  // card that flipped to "finished" while its children work misreads. These
+  // ids keep their cards in a live "waiting on sub-agents" state until the
+  // whole subtree is quiet.
+  const subsAwaitingChildren = useMemo(() => {
+    const kids: Record<string, SubagentView[]> = {}
+    for (const s of Object.values(subagents)) {
+      if (s.parentAgentId) (kids[s.parentAgentId] ??= []).push(s)
+    }
+    const out = new Set<string>()
+    if (Object.keys(kids).length === 0) return out
+    const own = (s: SubagentView) => isSubRunning(s, s.toolUseId ? taskToolByUse[s.toolUseId] : undefined)
+    const treeRunning = (s: SubagentView): boolean => own(s) || (kids[s.agentId] ?? []).some(treeRunning)
+    for (const s of Object.values(subagents)) {
+      if (!own(s) && (kids[s.agentId] ?? []).some(treeRunning)) out.add(s.agentId)
+    }
+    return out
+  }, [subagents, taskToolByUse])
 
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
@@ -3292,9 +6120,36 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     mainScrollRef.current = null
   }, [agentId, projectId])
 
-  function openSubView(key: string) {
-    if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
-    setChatView(key)
+  // Stable identity (per chatView) so the subagentLinks memo below doesn't
+  // rebuild every render.
+  const openSubView = useCallback(
+    (key: string) => {
+      if (chatView === 'main') mainScrollRef.current = { ...lastScrollRef.current }
+      setChatView(key)
+    },
+    [chatView],
+  )
+
+  // requestTaskOutput fetches a background task's output file over the chat
+  // socket (the expandable notification chip), resolving with the daemon's
+  // task_output answer or an error.
+  function requestTaskOutput(file: string): Promise<{ content?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        resolve({ error: 'Not connected' })
+        return
+      }
+      taskOutputWaitersRef.current.set(file, resolve)
+      ws.send(JSON.stringify({ type: 'task_output', file }))
+      window.setTimeout(() => {
+        const waiter = taskOutputWaitersRef.current.get(file)
+        if (waiter) {
+          taskOutputWaitersRef.current.delete(file)
+          waiter({ error: 'Timed out fetching the output' })
+        }
+      }, 10000)
+    })
   }
 
   // Position the viewport when the view switches: a running sub-agent pins to
@@ -3315,12 +6170,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     } else {
       const sub = subagents[chatView]
       const tool = sub?.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
-      const running = sub ? isSubRunning(sub, tool) : false
+      const running = sub ? isSubRunning(sub, tool) || subsAwaitingChildren.has(sub.agentId) : false
       pinnedRef.current = running
       setPinned(running)
       el.scrollTop = running ? el.scrollHeight : 0
     }
-  }, [chatView, subagents, taskToolByUse])
+  }, [chatView, subagents, taskToolByUse, subsAwaitingChildren])
 
   // Keep the viewport anchored across a load-older prepend (item 25): before
   // paint, grow scrollTop by however much taller the content got, so the lines
@@ -3356,7 +6211,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       curMsgTokensRef.current = 0
       turnStopReasonRef.current = null
       setTurnTokens(0)
-      setTurnVerb(WORKING_VERBS[turnCountRef.current++ % WORKING_VERBS.length])
+      setTurnVerb(WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)])
     }
     const tick = () => setElapsed(Math.floor((Date.now() - (turnStartRef.current ?? Date.now())) / 1000))
     tick()
@@ -3371,12 +6226,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
   }, [items, stream, replayDone, pendingSends, subagents])
 
-  // Follow the bottom continuously while pinned as the content height changes
+  // Follow the bottom continuously while pinned as the geometry changes
   // between renders - notably during a card's 0.22s expand/collapse animation,
   // which grows the height frame-by-frame. Without this the disclosure glides
   // open and then the view snaps to the bottom in one jump once React next
-  // re-renders (item 55). A no-op when the user has scrolled up (not pinned),
-  // so load-older prepends and the restored offset are left alone.
+  // re-renders (item 55). The VIEWPORT is observed too: the composer sits
+  // below the scroll pane, so a growing textarea (a wrapped line) shrinks the
+  // pane without touching the content height - re-pin then as well. A no-op
+  // when the user has scrolled up (not pinned), so load-older prepends and the
+  // restored offset are left alone.
   useEffect(() => {
     const el = scrollRef.current
     const content = contentRef.current
@@ -3385,6 +6243,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       if (pinnedRef.current) el.scrollTop = el.scrollHeight
     })
     ro.observe(content)
+    ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
@@ -3447,13 +6306,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
-    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !oldestUuidRef.current) return
+    const normalized = usesNormalizedEvents && normalizedAvailableRef.current
+    const anchor = normalized ? oldestEventCursorRef.current : oldestUuidRef.current
+    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !anchor) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     loadingOlderRef.current = true
     setLoadingOlder(true)
-    ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
+    ws.send(normalized
+      ? JSON.stringify({ type: 'load_events_before', cursor: anchor, limit: 100 })
+      : JSON.stringify({ type: 'load_before', before: anchor }))
   }
+
+  // Auto-fill: when the loaded window is shorter than the pane (a byte-dense
+  // backfill - a few image reads can eat the whole window in a handful of
+  // messages), there is no scrollbar, so scrolling can never trigger the
+  // load-older request. Keep paging older history in until the pane overflows
+  // (or history runs out). Re-checked after every batch lands (items change
+  // clears loadingOlder).
+  useEffect(() => {
+    if (!replayDone || loadingOlder || allHistoryLoaded || chatView !== 'main') return
+    const el = scrollRef.current
+    if (!el || el.clientHeight === 0) return
+    if (el.scrollHeight <= el.clientHeight + 1) requestOlderHistory()
+  })
 
   function onScroll() {
     const el = scrollRef.current
@@ -3461,13 +6337,22 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // Load-older pages main history; a sub-agent view has its whole run already.
     if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    pinnedRef.current = nearBottom
-    setPinned(nearBottom)
+    // While pinned, content can grow FASTER than the follow effects re-pin (a
+    // card expanding a tall clamped panel adds >40px between frames), so a
+    // momentarily large gap must not read as "the user scrolled away" - that
+    // froze the follow mid-expansion. Only an UPWARD move unpins; any
+    // downward/stationary scroll keeps the pin, and reaching the bottom
+    // (re)pins regardless.
+    const scrolledUp = el.scrollTop < prevScrollTopRef.current - 1
+    prevScrollTopRef.current = el.scrollTop
+    const pin = nearBottom || (pinnedRef.current && !scrolledUp)
+    pinnedRef.current = pin
+    setPinned(pin)
     // A hidden pane has no geometry; don't let a stray 0-measurement clobber
     // the remembered offset. A sub-agent view's offsets aren't remembered at
     // all - the saved spot belongs to the main conversation.
     if (!active || el.clientHeight === 0 || chatView !== 'main') return
-    lastScrollRef.current = { top: el.scrollTop, pinned: nearBottom }
+    lastScrollRef.current = { top: el.scrollTop, pinned: pin }
     if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
     persistScrollTimer.current = setTimeout(() => {
       const last = lastScrollRef.current
@@ -3486,15 +6371,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Composer: attachments ------------------------------------------------
 
-  const attachmentsRef = useRef<Attachment[]>([])
+  const attachmentsRef = useRef<Attachment[]>(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
     // Mirror to the per-agent cache so a switch away restores them.
     saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
   }, [attachments, projectId, agentId])
+  // Every preview object URL minted this session. We can't revoke on remove (an
+  // undo can bring the chip back) or on unmount (the attachments are stashed to
+  // the cache and restored on return), so URLs live until a send consumes the
+  // draft - then we revoke them all at once (and otherwise until reload).
+  const objectUrlsRef = useRef<Set<string>>(new Set())
   // On unmount (agent switch), keep the draft's attachments alive in the cache -
   // do NOT revoke their object URLs, so returning to the agent restores working
-  // thumbnails. They're freed on send/remove, or when the page fully reloads.
+  // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
       saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
@@ -3503,44 +6393,64 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     [projectId, agentId],
   )
 
-  function patchAttachment(id: number, patch: Partial<Attachment>) {
-    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
-  }
-
-  // numberGenericImage renames pasted / unnamed images to image1.png,
-  // image2.png, ... (per project+agent, persisted) so each gets a stable, unique
-  // on-disk name - like the spawn box (item 46). Named files keep their name.
-  function numberGenericImage(file: File): File {
-    if (!isImageFile(file)) return file
-    const stem = file.name.replace(/\.[^.]*$/, '')
-    if (stem !== '' && stem.toLowerCase() !== 'image') return file
-    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
-    const key = chatImageCounterKey(projectId, agentId)
-    const n = (Number(readLocal(key)) || 0) + 1
-    writeLocal(key, String(n))
-    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
-  }
-
-  function addFiles(rawFiles: File[]) {
+  // addFiles queues each dropped/pasted file as an attachment and uploads it.
+  // Generically-named images (image.png, or nameless pastes) are renamed
+  // image1.png, image2.png, ... so each gets a stable, unique on-disk name. The
+  // number is max(existing image<N> on the current attachments) + 1, computed
+  // fresh here rather than from an ever-growing counter: it resets to 1 once the
+  // attachments clear on send, and fills the gap after a removal (so removing #2
+  // and re-adding reuses 2, not 3). Each chip is its own undo step; the async
+  // upload result patches the chip across the whole timeline (reconcile) rather
+  // than pushing a step, so undoing to an earlier snapshot still shows the
+  // settled path, not a stale "uploading...".
+  function addFiles(rawFiles: File[]): string[] {
+    let nextN = nextGenericImageNumber(attachmentsRef.current)
+    const names: string[] = []
     for (const raw of rawFiles) {
-      const file = numberGenericImage(raw)
+      let file = raw
+      if (isImageFile(raw) && isGenericImageName(raw.name)) {
+        const ext = (raw.name.match(/\.([^.]+)$/)?.[1] || raw.type.split('/')[1] || 'png').toLowerCase()
+        file = new File([raw], `image${nextN}.${ext}`, { type: raw.type, lastModified: raw.lastModified })
+        nextN++
+      }
       const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      setAttachments((prev) => [
-        ...prev,
-        { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true },
-      ])
+      if (previewUrl) objectUrlsRef.current.add(previewUrl)
+      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+      commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
       uploadFile(projectId, file)
-        .then((res) => patchAttachment(id, { path: res.path, uploading: false }))
-        .catch((err) => patchAttachment(id, { uploading: false, error: formatError(err) }))
+        .then((res) => reconcile(id, { path: res.path, uploading: false }))
+        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      names.push(file.name || 'pasted-image')
     }
+    return names
   }
 
+  // Removing a chip is its own undo step. Don't revoke the preview URL here - an
+  // undo can bring the chip back; URLs are freed in bulk on send (objectUrlsRef).
   function removeAttachment(id: number) {
-    setAttachments((prev) => {
-      const target = prev.find((a) => a.id === id)
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
-      return prev.filter((a) => a.id !== id)
+    commit(
+      (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
+      false,
+    )
+  }
+
+  // Insert text into the composer at the caret, as its own undo step - used for
+  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
+  // paired with the chip's own step, walks the whole paste back).
+  function insertAtCaret(insert: string) {
+    const ta = textareaRef.current
+    const start = ta?.selectionStart ?? input.length
+    const end = ta?.selectionEnd ?? input.length
+    const caret = start + insert.length
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
+      false,
+    )
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = caret
     })
   }
 
@@ -3548,7 +6458,10 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
-    addFiles(files)
+    const names = addFiles(files)
+    // With the preference on, also reference the pasted attachments in the
+    // message text via "[filename]" markers at the caret.
+    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -3572,12 +6485,20 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   const slashMatches = useMemo(() => {
     if (slashQuery == null || slashDismissed || slashCommands.length === 0) return []
     const q = slashQuery.toLowerCase()
-    return slashCommands.filter((c) => c.toLowerCase().startsWith(q)).slice(0, 8)
+    // No cap: the popup is scrollable, so bare "/" can page through every
+    // advertised command instead of an arbitrary first-8 subset.
+    return slashCommands.filter((c) => c.toLowerCase().startsWith(q))
   }, [slashQuery, slashDismissed, slashCommands])
   useEffect(() => setSlashSel(0), [slashQuery])
+  // Keep the highlighted row visible as the selection moves through a list
+  // taller than the popup's max height.
+  useEffect(() => {
+    selectedSlashRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [slashSel])
 
   function acceptSlash(cmd: string) {
-    setInput('/' + cmd + ' ')
+    const value = '/' + cmd + ' '
+    commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
@@ -3602,7 +6523,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     ta.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
     ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
-    setComposerHeight(rows * lineHeight + pad)
+    // Bail when the height is unchanged (sub-pixel tolerance): a fractional
+    // lineHeight can make this recompute a hair-different value each pass, and an
+    // unconditional setState there would keep committing - a needless re-render at
+    // best, a feedback loop with any height-driven layout at worst.
+    const nextH = rows * lineHeight + pad
+    setComposerHeight((cur) => (Math.abs(cur - nextH) < 0.5 ? cur : nextH))
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -3660,7 +6586,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       // the thinking/response it triggers (item 26); the CLI's echo (which can
       // arrive after that response) is deduped by optimisticTextsRef.
       setItems((prev) => [...prev, { kind: 'user', id: optimisticIdRef.current--, text, sending: true }])
-      optimisticTextsRef.current.push(text)
+      optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
       if (status !== AgentStatus.NEEDS_INPUT) {
@@ -3679,12 +6605,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
     if (!finalText || !sendUserText(finalText)) return
-    setInput('')
     setSlashDismissed(false)
-    // All attachments are consumed by the send; free their preview URLs (the
-    // unmount handler no longer revokes - it preserves them for the draft cache).
-    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
-    setAttachments([])
+    // The message is sent - free every preview URL minted this session (including
+    // ones only reachable via undo history) and reset the composer + its history.
+    objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    objectUrlsRef.current.clear()
+    resetHistory(makeSnapshot('', [], 0, 0))
     setLightboxIndex(null)
   }
 
@@ -3752,16 +6678,60 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
 
   // --- Keyboard ----------------------------------------------------------------
 
+  // A typed edit: one coalesced undo step per typing burst, capturing the caret
+  // so undo/redo can restore it. Dismisses the slash popup like the old handler.
+  function handleInputChange(value: string) {
+    const ta = textareaRef.current
+    const selStart = ta?.selectionStart ?? value.length
+    const selEnd = ta?.selectionEnd ?? value.length
+    commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
+    setSlashDismissed(false)
+  }
+
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
-    setInput(input.slice(0, start) + '\n' + input.slice(end))
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + '\n' + prev.prompt.slice(end), prev.attachments, start + 1, start + 1),
+      false,
+    )
     requestAnimationFrame(() => {
       ta.selectionStart = ta.selectionEnd = start + 1
     })
   }
 
+  // Restore a snapshot returned by undo/redo: put the caret back where it was
+  // when that snapshot was current (after the controlled value commits, hence
+  // the rAF). The draft is re-persisted by the debounced `input` effect.
+  function restoreSnapshot(snap: ReturnType<typeof undo>) {
+    if (!snap) return
+    const ta = textareaRef.current
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = snap.selStart
+      ta.selectionEnd = snap.selEnd
+    })
+  }
+
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Undo/redo over the composer's own history (text + attachments). Our stack
+    // drives these because pastes-turned-chips call preventDefault, so the
+    // browser's native textarea undo never recorded them. Cmd/Ctrl+Z undo,
+    // +Shift redo, and Ctrl+Y redo (Windows convention).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const k = e.key.toLowerCase()
+      if (k === 'z') {
+        e.preventDefault()
+        restoreSnapshot(e.shiftKey ? redo() : undo())
+        return
+      }
+      if (k === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        restoreSnapshot(redo())
+        return
+      }
+    }
     if (slashMatches.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -3807,8 +6777,8 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         // raw upload paths pasted into the textarea (the send flow re-appends
         // them). Fresh ids keep them unique against later attachments.
         const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
-        setInput(body)
-        setAttachments(recalled.map((a) => ({ ...a, id: nextAttachmentId() })))
+        const restored = recalled.map((a) => ({ ...a, id: nextAttachmentId() }))
+        commit(() => makeSnapshot(body, restored, body.length, body.length), false)
         return
       }
     }
@@ -3878,7 +6848,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       const m = fence.exec(rest)
       if (!m) break
       const before = rest.slice(0, m.index)
-      if (before.trim()) parts.push(<Markdown key={key++} text={before} />)
+      if (before.trim()) parts.push(<Markdown key={key++} text={before} linkCtx={chatLinkCtx} />)
       const specs = parseQuestionBlock(m[1])
       if (specs) {
         parts.push(
@@ -3887,12 +6857,12 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           </div>,
         )
       } else {
-        parts.push(<Markdown key={key++} text={m[0]} />)
+        parts.push(<Markdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
       }
       rest = rest.slice(m.index + m[0].length)
     }
-    if (parts.length === 0) return <Markdown text={text} />
-    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} />)
+    if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }
 
@@ -3912,41 +6882,95 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         )
       }
       case 'cmdout':
-        return (
-          <pre
-            className={`${PANEL_CLASS} max-w-[95%] whitespace-pre-wrap break-words px-2.5 py-1.5 font-mono text-[11px] leading-4 text-stone-500 dark:text-stone-400`}
-          >
-            {item.text}
-          </pre>
-        )
-      case 'notice': {
-        // A "sub-agent finished" notice: when it links to a sub-agent we have,
-        // re-surface it at completion time (so the user needn't scroll up to the
-        // launch card) using the same SubagentCard as the launch, with a
-        // "finished" badge (#62, item 4). Other notices (background-task
-        // completions etc.) stay as a compact pill.
-        const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
-        if (sub) {
-          const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
-          return (
-            <SubagentCard
-              sub={sub}
-              tool={tool}
-              worktree={worktreePath}
-              serif={serif}
-              onOpenChat={() => openSubView(sub.agentId)}
-              finishedBadge
-            />
-          )
-        }
+        // A local command's stdout (in practice the "Set model to ..."
+        // confirmation): a short bookkeeping line, so render it as the same
+        // centered notification pill the notice/skill/meta chips use rather than
+        // a code panel.
         return (
           <div className="flex justify-center">
-            <div className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none" title={item.text}>
+            <div
+              className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none"
+              title={item.text}
+            >
+              <SlidersHorizontal className="w-3 h-3 shrink-0" />
               <span className="truncate">{item.text}</span>
             </div>
           </div>
         )
+      case 'notice': {
+        // Completion is a compact link back to the canonical launch card/chat;
+        // rendering the entire SubagentCard here duplicated prompt and report.
+        const sub = item.subagentKey ? subagents[item.subagentKey] : undefined
+        if (sub) {
+          const tool = sub.toolUseId ? taskToolByUse[sub.toolUseId] : undefined
+          const { desc } = subLabels(sub, tool)
+          return (
+            <div className="flex justify-center">
+              <button onClick={() => openSubView(sub.agentId)} className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer">
+                <span className="truncate">Sub-agent finished{desc ? `: ${desc}` : ''}</span>
+                <MessageSquare className="h-3 w-3 shrink-0" />
+              </button>
+            </div>
+          )
+        }
+        // A background sub-agent's completion notice resolves its sub-agent at
+        // render time (by the notification's task-id / tool-use-id) - clicking
+        // opens that agent's chat. A background command's notice (it carried an
+        // <output-file>) expands to show the command's output.
+        const linked = (item.taskId ? subagents[item.taskId] : undefined) ??
+          (item.toolUseId ? subByToolUse[item.toolUseId] : undefined)
+        // "finished" while the agent's own spawned sub-agents still run is the
+        // harness's stopped-notification, not the end of the work - relabel the
+        // chip until the subtree is quiet.
+        const noticeText =
+          linked && subsAwaitingChildren.has(linked.agentId)
+            ? item.text.replace(/\bfinished\b/, 'waiting on sub-agents')
+            : item.text
+        return (
+          <NoticePill
+            text={noticeText}
+            onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
+            outputFile={linked ? undefined : item.outputFile}
+            requestTaskOutput={requestTaskOutput}
+          />
+        )
       }
+      case 'commit': {
+        // A commit chip: the same centered notification-pill look as
+        // notice/cmdout, clickable to show just this commit in the diff view. A
+        // merge chip is its own component so it can own its expand/collapse state.
+        if (item.isMerge) {
+          return (
+            <div className="flex justify-center">
+              <MergeCommitChip item={item} onSelectCommit={onSelectCommit} />
+            </div>
+          )
+        }
+        const clickable = !!onSelectCommit
+        const activate = () => onSelectCommit?.(item.sha)
+        return (
+          <div className="flex justify-center">
+            <div
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? activate : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
+              className={`${COMMIT_PILL} max-w-[90%] ${clickable ? COMMIT_HOVER : ''}`}
+              title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
+            >
+              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+              <span className="font-mono shrink-0">{item.shortSha}</span>
+              <span className="truncate">{item.subject}</span>
+            </div>
+          </div>
+        )
+      }
+      case 'contextNote':
+        return <ContextNoteCard text={item.text} outOfContext={item.outOfContext} />
+      case 'skill':
+        return <SkillCard name={item.name} text={item.text} />
+      case 'meta':
+        return <MetaCard text={item.text} />
       case 'interrupted':
         return (
           <div className="flex justify-end">
@@ -3965,7 +6989,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         const sub = subByToolUse[item.toolUseId]
         if (sub)
           return (
-            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
@@ -3990,13 +7014,37 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             )
           }
         }
+        // A SendMessage knows which agent it addressed: resolve that sub-agent so
+        // the card can name it, show whether it is working, and link into its
+        // chat.
+        if (item.name === 'SendMessage') {
+          const to = sendMessageRecipient(item.input) || parseSendMessageResult(item.result)?.recipient || ''
+          const target = to ? subagents[to] : undefined
+          const targetTool = target?.toolUseId ? taskToolByUse[target.toolUseId] : undefined
+          const labels = target ? subLabels(target, targetTool) : null
+          return (
+            <ToolCard
+              item={item}
+              worktree={worktreePath}
+              recipientId={target?.agentId ?? to}
+              recipientLabel={labels ? labels.desc || labels.label : ''}
+              recipientRunning={target ? isSubRunning(target, targetTool) : false}
+              openSub={target ? openSubView : undefined}
+            />
+          )
+        }
         return <ToolCard item={item} worktree={worktreePath} />
       }
       case 'subagent': {
         // A sub-agent with no parent Task card (its meta lacked a tool_use id).
         const sub = subagents[item.agentId]
         if (!sub) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} onOpenChat={() => openSubView(sub.agentId)} />
+        // The link can land AFTER the standalone item was pushed (a meta frame
+        // that finally carried the tool_use id, or a nested sub's parent): once
+        // another card renders this sub, the standalone copy is a duplicate.
+        if (sub.parentAgentId) return null
+        if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
+        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question':
         return (
@@ -4076,6 +7124,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   }
 
   const modelLabel = modelDisplayLabel(model)
+  const contextWindow = contextWindowTokens(model)
+  // "Context left" percentage for the composer chip (item 40): null until the
+  // first usage sample lands. Clamped to 0-100.
+  const contextPct =
+    contextTokens > 0
+      ? Math.max(0, Math.min(100, Math.round(100 * (1 - contextTokens / contextWindow))))
+      : null
 
   // A turn's result footer (duration/cost) should show once. On a resume the
   // transcript backfill and the live stream can each end with their own result
@@ -4086,6 +7141,47 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     () => items.filter((it, i) => !(it.kind === 'result' && items[i + 1]?.kind === 'result')),
     [items],
   )
+  // Interleave the commit chips into the settled transcript by timestamp: a
+  // chip slots in before the first item stamped after it (so, right where the
+  // commit happened). Unstamped items (ring-replayed lines, optimistic sends)
+  // inherit their predecessor's position, and chips newer than everything
+  // append at the end - the live case, where the commit just landed. Chips
+  // older than the loaded window are held back until load-older paging reaches
+  // their part of the conversation (they'd otherwise pile up at the top of the
+  // tail as if they happened there). Gated on replayDone so chips never render
+  // above the "Loading conversation..." placeholder.
+  const mergedItems = useMemo(() => {
+    if (!replayDone || commitChips.length === 0) return visibleItems
+    const tsMap = itemTsRef.current
+    let firstTs: number | null = null
+    for (const it of visibleItems) {
+      const t = tsMap.get(it.id)
+      if (t != null) {
+        firstTs = t
+        break
+      }
+    }
+    const chips = allHistoryLoaded || firstTs == null
+      ? commitChips
+      : commitChips.filter((c) => c.ts >= firstTs)
+    if (chips.length === 0) return visibleItems
+    const out: ChatItem[] = []
+    let ci = 0
+    for (const it of visibleItems) {
+      const t = tsMap.get(it.id)
+      if (t != null) {
+        while (ci < chips.length && chips[ci].ts < t) out.push(chips[ci++])
+      }
+      out.push(it)
+    }
+    while (ci < chips.length) out.push(chips[ci++])
+    return out
+  }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
+  // The turn's end-of-turn "Crunched for Xs" footer (a result item) has landed.
+  // The agent status flip that clears isTurnRunning can lag a frame behind it, so
+  // gate the live "working" indicator on this too - otherwise both the footer and
+  // the live "<verb>..." line flash together for a split second at turn end.
+  const lastIsResult = visibleItems.length > 0 && visibleItems[visibleItems.length - 1].kind === 'result'
 
   // toolUseId -> sub-agent, so a Task tool card upgrades into a SubagentCard in
   // place (correct position, live and on backfill) without any marker item.
@@ -4094,6 +7190,13 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     for (const s of Object.values(subagents)) if (s.toolUseId) m[s.toolUseId] = s
     return m
   }, [subagents])
+
+  // Bundle for nested sub-agent rendering (SubagentCard -> SubagentTimeline
+  // recursion): see SubagentLinks.
+  const subagentLinks = useMemo<SubagentLinks>(
+    () => ({ subByToolUse, taskToolByUse, awaitingChildren: subsAwaitingChildren, openSubView }),
+    [subByToolUse, taskToolByUse, subsAwaitingChildren, openSubView],
+  )
 
   // The sub-agent whose chat the pane currently shows (undefined = main view,
   // also the fallback while a selected key is missing mid-replay).
@@ -4131,20 +7234,42 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }}
     >
       <div className="relative flex-1 min-h-0">
-        {/* The current-agents selector (main + sub-agents), floated top-left
-            once any sub-agent exists. */}
+        {/* Floating cards over the transcript: the current-agents selector
+            (top-left, once any sub-agent exists) and the plan panel
+            (top-right). Both are corner-anchored so expanding one never
+            relocates the other (no pushing/jumping); when they'd overlap on a
+            narrow pane, the OPEN card takes the higher z and simply layers
+            over the other's chip. */}
         {hasSubagents && (
           <ChatViewSelector
             chatView={viewSub ? chatView : 'main'}
             subagents={subagents}
             taskToolByUse={taskToolByUse}
+            awaitingChildren={subsAwaitingChildren}
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+            fadeIn={liveUiRef.current}
           />
         )}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        {/* Current plan (item 17): the agent's latest TodoWrite. Main view
+            only - it is the main agent's plan. */}
+        {todos.length > 0 && replayDone && !viewSub && (
+          <PlanPanel
+            todos={todos}
+            narrow={paneWidth > 0 && paneWidth < 560}
+            stacked={hasSubagents && paneWidth > 0 && paneWidth < 560}
+            fadeIn={liveUiRef.current}
+          />
+        )}
+        {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust
+            scrollTop to keep an arbitrary anchor node stable when content above
+            the fold grows (an expanding card), firing a scroll event that lands
+            outside the near-bottom threshold and un-pins the follow - whether it
+            happened depended on which node got picked as the anchor. Our own
+            pin/follow logic owns bottom-following instead. */}
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
-            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} />
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
           ) : (
           <>
           {!replayDone && items.length === 0 && (
@@ -4165,7 +7290,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             </div>
           )}
           <SettledMessages
-            items={visibleItems}
+            items={mergedItems}
             liveFromId={liveFromId}
             renderItem={renderItem}
             serif={serif}
@@ -4180,23 +7305,30 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
               auto-updating as tokens arrive. It's the current turn's response,
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
-              no blinking caret is appended here - it reflowed as text wrapped
-              and read as visual jitter (item 56). */}
+              no blinking caret or per-word opacity animation is applied here:
+              either one makes reparsed Markdown visibly flicker as delimiters
+              arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'assistant' && (
             <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} />
+              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
-              and the running output-token count when the CLI reports it. */}
-          {isTurnRunning && replayDone && (
+              and the running output-token count when the CLI reports it. While a
+              thinking block streams, "Thinking..." rides inside the brackets here
+              (after the duration and tokens) rather than as a separate line above,
+              so the reasoning<->working transition doesn't shift the layout. */}
+          {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
               <span className="text-[#c96442]">✳</span>
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
-              <span className="text-stone-400 dark:text-stone-500">
+              {/* tabular-nums so the ticking elapsed seconds / token count keep a
+                  fixed width and the line doesn't jitter horizontally as they change. */}
+              <span className="text-stone-400 dark:text-stone-500 tabular-nums">
                 ({formatDuration(elapsed * 1000)}
-                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''})
+                {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
+                {stream?.kind === 'thinking' ? ' · Thinking...' : ''})
               </span>
             </div>
           )}
@@ -4248,10 +7380,6 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <ArrowDown className="w-4 h-4" />
           </button>
         )}
-        {/* Current plan (item 17): the agent's latest TodoWrite, floated in the
-            top-right; collapses to a chip when the pane is narrow. Main view
-            only - it is the main agent's plan. */}
-        {todos.length > 0 && replayDone && !viewSub && <PlanPanel todos={todos} narrow={paneWidth > 0 && paneWidth < 560} />}
       </div>
 
       {/* A sub-agent's chat can only be read, not talked to: swap the composer
@@ -4279,17 +7407,18 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           onPointerDown={onComposerResizeStart}
           onPointerMove={onComposerResizeMove}
           onPointerUp={onComposerResizeEnd}
-          className="group flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
+          className="group/resize flex h-2.5 cursor-ns-resize touch-none items-center justify-center"
           title="Drag to resize"
         >
-          <div className="h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-stone-300 dark:group-hover:bg-stone-600" />
+          <ResizeGrip orientation="horizontal" />
         </div>
         <div className="relative mx-auto max-w-5xl">
           {slashMatches.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+            <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
               {slashMatches.map((c, i) => (
                 <button
                   key={c}
+                  ref={i === slashSel ? selectedSlashRef : undefined}
                   onClick={() => acceptSlash(c)}
                   onMouseEnter={() => setSlashSel(i)}
                   className={`flex w-full items-center px-3 py-1.5 text-left text-xs font-mono cursor-pointer transition-colors ${
@@ -4321,10 +7450,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
             <HighlightedTextarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                setSlashDismissed(false)
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
@@ -4358,6 +7484,28 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                     Enter to queue
                   </span>
                 )}
+                {/* Context-left chip (item 40): how much of the model's window
+                    the conversation still has free, left of the model selector.
+                    Amber under 20%, red under 10% - a quiet nudge that a compact
+                    is near. */}
+                {contextPct !== null && (
+                  <Tooltip
+                    content={`~${contextPct}% context left (${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} used)`}
+                    side="top"
+                  >
+                    <span
+                      className={`hidden sm:inline text-[11px] tabular-nums select-none ${
+                        contextPct < 10
+                          ? 'text-red-500 dark:text-red-400'
+                          : contextPct < 20
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-stone-400 dark:text-stone-500'
+                      }`}
+                    >
+                      {contextPct}%
+                    </span>
+                  </Tooltip>
+                )}
                 <div className="relative">
                   <button
                     onClick={() => setModelMenuOpen((o) => !o)}
@@ -4376,7 +7524,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setModelMenuOpen(false)} />
                       <div className="absolute bottom-full right-0 mb-1 z-20 w-36 rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
-                        {CLAUDE_MODELS.map((m) => (
+                        {(agentType === 'codex' ? CODEX_MODELS : CLAUDE_MODELS).map((m) => (
                           <button
                             key={m.id}
                             onClick={() => changeModel(m.id)}

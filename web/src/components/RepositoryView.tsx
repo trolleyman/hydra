@@ -12,7 +12,7 @@ import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompareArrows, ArrowRightLeft, PanelLeftOpen, Menu,
+  GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -21,13 +21,12 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
-import { IconButton } from './IconButton'
-import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
   type DiffSide,
 } from '../DiffViewer'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
+import { scrollCardToTop } from '../lib/diffScroll'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
@@ -824,12 +823,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
 
-  // The app's nav sidebar collapse state - the repository header hosts the
-  // "show sidebar" toggle while it's hidden (small screens), matching the agent
-  // page's top bar.
-  const collapsed = useSidebarStore((s) => s.collapsed)
-  const toggleSidebar = useSidebarStore((s) => s.toggle)
-
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [currentBranch, setCurrentBranch] = useState('')
 
@@ -1272,7 +1265,8 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     else diffFileRefs.current.delete(path)
   }
   const scrollToDiffFile = (path: string) => {
-    diffFileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = diffFileRefs.current.get(path)
+    if (el) scrollCardToTop(el)
   }
 
   // Clicking a changed file in the sidebar: in one-file mode it selects the file
@@ -1346,14 +1340,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       <div
         className={`shrink-0 h-12 px-3 sm:px-4 items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
       >
-        {collapsed && (
-          <Tooltip content="Show sidebar (Ctrl+.)">
-            <IconButton variant="panel" aria-label="Show sidebar" onClick={toggleSidebar} className="shrink-0 -ml-1">
-              <PanelLeftOpen className="w-5 h-5" />
-            </IconButton>
-          </Tooltip>
-        )}
-        <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
         {branches !== null ? (
           // The base picker always sizes to its own content (it stays
           // shrink-0 + truncates at its own max width). Keeping it un-shrinkable
@@ -1596,10 +1582,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               </div>
             </>
           ) : (
-            <>
-              <span className="text-sm text-gray-400 dark:text-gray-500">Repository</span>
-              <div className="ml-auto"><SettingsPopup settings={settings} onChange={setSettings} /></div>
-            </>
+            <div className="ml-auto"><SettingsPopup settings={settings} onChange={setSettings} /></div>
           )}
         </div>
 
@@ -1671,7 +1654,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <LoaderCircle className="w-5 h-5 animate-spin" />
             </div>
           ) : file ? (
-            <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightRange={selRange} onSelectLine={selectLine} />
+            // Keyed by path so a new file re-mounts + re-runs the fade-in.
+            <div key={viewPath} className="repo-file-in flex-1 flex flex-col min-h-0">
+              <FileContent file={file} wrap={settings.wrap} projectId={projectId} refStr={refStr} highlightRange={selRange} onSelectLine={selectLine} />
+            </div>
           ) : null}
         </div>
       </div>

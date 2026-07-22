@@ -15,6 +15,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -409,6 +410,18 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				if chatMode {
 					continue // raw bytes are not part of the chat framing
 				}
+				// A bare Enter submits the current agent prompt. Record this at the
+				// backend PTY boundary so providers without a prompt-submit hook
+				// (notably Codex terminal mode) leave waiting immediately. Shell tabs
+				// and Shift+Enter (ESC+CR) are deliberately excluded.
+				if !useShell && isTerminalPromptSubmit(data) {
+					if err := heads.MarkPromptSubmitted(s.DB, projectRoot, agentID); err != nil {
+						log.Printf("terminal ws: mark prompt submitted for %q: %v", agentID, err)
+					} else {
+						sendStatusUpdate(conn, string(api.Running))
+						s.notifyAgentsChanged(projectRoot, false)
+					}
+				}
 				if err := s.Sessions.Write(sessionID, data); err != nil {
 					return
 				}
@@ -583,6 +596,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// Wait for connection to close or container to stop
 	<-done
 	log.Printf("terminal ws: handler finished for agent %q", agentID)
+}
+
+func isTerminalPromptSubmit(data []byte) bool {
+	return len(data) == 1 && data[0] == '\r'
 }
 
 // looksLikeGitCommand returns true if the JSONL hook line contains a git command invocation.

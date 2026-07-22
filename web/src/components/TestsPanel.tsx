@@ -13,6 +13,7 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -67,7 +68,7 @@ function testsWsUrl(projectId: string, agentId: string, headRef?: string, includ
 // streaming state or a deliberate refreshKey bump.
 export const TestsPanel = memo(TestsPanelImpl)
 
-function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
+function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitted, refreshKey, groupResult, onGroupResultChange, useScope, onUseScopeChange, onScopeAvailable }: {
   projectId: string
   agentId: string
   // The ref (the agent's branch) to browse when a case/file/dir row's
@@ -81,11 +82,15 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
   includeUncommitted?: boolean
   // Bumped by the diff viewer's refresh control to force a fresh fetch.
   refreshKey?: number
-  // View modes from the diff viewer's settings cog (see AgentViewPrefs):
-  // groupResult renders per-status sections, useScope trees by class/describe
-  // scope instead of filesystem path.
+  // View modes (see AgentViewPrefs): groupResult renders per-status sections,
+  // useScope trees by class/describe scope instead of filesystem path. Their
+  // toggles live in this panel's own header cog (the *Change setters), so the
+  // state stays lifted in the diff viewer (shared with persistence) while the
+  // controls sit next to the tests they affect.
   groupResult?: boolean
+  onGroupResultChange?: (v: boolean) => void
   useScope?: boolean
+  onUseScopeChange?: (v: boolean) => void
   // Reports whether any loaded case carries a logical scope, so the cog can
   // grey the "Group by scope" checkbox when the axis doesn't exist.
   onScopeAvailable?: (has: boolean) => void
@@ -368,6 +373,19 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
             onAll={() => updateFilter({ ...filter, status: [] })}
             onClear={() => updateFilter({ ...filter, status: [...TEST_STATUS_ORDER] })}
           />
+          {/* Tests view options (were in the diff-toolbar cog): group cases into
+              per-status sections, and tree by class/describe scope. Scope greys
+              out when no loaded case carries one. */}
+          <SettingsPopover label="Test options" width={176}>
+            <SettingsGroupLabel className="mb-2">Group by</SettingsGroupLabel>
+            <div className="flex flex-col gap-0.5">
+              <SettingsOptionRow type="checkbox" checked={!!groupResult}
+                onChange={(v) => onGroupResultChange?.(v)} label="Result" />
+              <SettingsOptionRow type="checkbox" checked={!!useScope} disabled={!hasScope}
+                onChange={(v) => onUseScopeChange?.(v)} label="Scope"
+                title={hasScope ? undefined : 'No test case carries a class/describe scope'} />
+            </div>
+          </SettingsPopover>
         </div>
       </div>
       <div className="flex flex-col gap-2">
@@ -551,7 +569,9 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
   return (
     <CollapsibleCard
       sticky
-      icon={<FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
+      // translate-y-px optically re-centres the bottom-heavy flask glyph against
+      // the lowercase runner name - geometric centering leaves it reading high.
+      icon={<FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 translate-y-px" />}
       name={runner.name}
       status={status}
       actions={actions}
@@ -593,7 +613,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           the filter-surviving subset actually rendered as rows. Full-bleed
           (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
-        <div className="-mx-3 flex flex-col border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 flex flex-col">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
             : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
@@ -736,8 +756,12 @@ function liveDenominator(runner: TestRunResult): number {
 
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
+  // items-center (not items-baseline): the header height must not depend on the
+  // summary's contents, or it grows by a pixel when a settled run adds its mono
+  // `. 4.2s . junit` suffix - a visible layout jump the moment the loading bar
+  // finishes. Centering pins every child to the row's natural height.
   return (
-    <span className="flex items-baseline gap-2 text-sm font-medium shrink-0">
+    <span className="flex items-center gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
         <span>

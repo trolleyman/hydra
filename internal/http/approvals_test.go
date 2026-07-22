@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 // TestRememberApprovalHostGoesToDefaults verifies that a remembered WebFetch/egress
@@ -57,5 +58,33 @@ func TestRememberApprovalHostGoesToDefaults(t *testing.T) {
 	ac, ok := cfg.Agents["claude"]
 	if !ok || ac.Policy == nil || !slices.Contains(ac.Policy.MCPAllowed, "some-server") {
 		t.Errorf("mcp grant not in per-agent [claude.policy].mcp_allowed: %+v", ac.Policy)
+	}
+}
+
+func TestGrantHostForSessionUnblocksSiblingRequests(t *testing.T) {
+	dir := t.TempDir()
+	requests := []gate.Request{
+		{ReqID: "chosen", Kind: "webfetch", Target: "example.com"},
+		{ReqID: "sibling-fetch", Kind: "webfetch", Target: "example.com"},
+		{ReqID: "sibling-egress", Kind: "egress", Target: "example.com"},
+		{ReqID: "other", Kind: "webfetch", Target: "other.example"},
+	}
+	for _, request := range requests {
+		if err := gate.WriteRequest(dir, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grantHostForSession(dir, "chosen", "example.com")
+	if !slices.Contains(gate.LoadGrantedHosts(dir), "example.com") {
+		t.Fatal("one-shot host approval was not retained for the running session")
+	}
+	for _, id := range []string{"sibling-fetch", "sibling-egress"} {
+		decision, ok, err := gate.ReadDecision(dir, id)
+		if err != nil || !ok || decision.Decision != gate.Allow {
+			t.Errorf("%s decision = %+v, ok=%v, err=%v", id, decision, ok, err)
+		}
+	}
+	if _, ok, err := gate.ReadDecision(dir, "other"); err != nil || ok {
+		t.Errorf("unrelated host decision ok=%v err=%v", ok, err)
 	}
 }

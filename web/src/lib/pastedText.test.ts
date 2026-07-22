@@ -6,7 +6,9 @@ import {
   fenceCode,
   getClipboardText,
   isLargePaste,
+  pasteMarkerText,
   pastedTextExtension,
+  stripPasteMarker,
   PASTE_CHAR_THRESHOLD,
 } from './pastedText'
 
@@ -126,5 +128,40 @@ describe('extensionMime', () => {
     expect(extensionMime('md')).toBe('text/markdown')
     expect(extensionMime('html')).toBe('text/html')
     expect(extensionMime('ts')).toBe('text/plain')
+  })
+})
+
+describe('pasteMarkerText', () => {
+  it('wraps each filename in brackets with a trailing space', () => {
+    expect(pasteMarkerText(['image1.png'])).toBe('[image1.png] ')
+    expect(pasteMarkerText(['image1.png', 'image2.png'])).toBe('[image1.png] [image2.png] ')
+  })
+})
+
+describe('stripPasteMarker', () => {
+  it('removes the marker and its trailing space', () => {
+    expect(stripPasteMarker('fix this [pasted-text-1.txt] please', 'pasted-text-1.txt')).toEqual({
+      text: 'fix this please',
+      index: 9,
+      length: '[pasted-text-1.txt] '.length,
+    })
+  })
+
+  it('removes a marker with no trailing space (end of text)', () => {
+    expect(stripPasteMarker('fix [pasted-text-1.txt]', 'pasted-text-1.txt')).toEqual({
+      text: 'fix ',
+      index: 4,
+      length: '[pasted-text-1.txt]'.length,
+    })
+  })
+
+  it('returns null when the marker is absent', () => {
+    expect(stripPasteMarker('no marker here', 'pasted-text-1.txt')).toBeNull()
+  })
+
+  it('only removes the first occurrence', () => {
+    const r = stripPasteMarker('[a.txt] [a.txt] tail', 'a.txt')
+    expect(r?.text).toBe('[a.txt] tail')
+    expect(r?.index).toBe(0)
   })
 })

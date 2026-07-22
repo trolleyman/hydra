@@ -134,7 +134,7 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s); loopback ports spliced: %s", id, len(allowed), proxyURL, p.Addr(), egress.LoopbackPortSpec(loopbackPorts))
 			env = egress.ProxyEnv(proxyURL)
 			wrap = func(bwrapArgv []string, preExec string) []string {
-				return egress.HardWrapArgv(hm, port, loopbackPorts, 0, bwrapArgv, preExec)
+				return egress.HardWrapArgv(hm, port, loopbackPorts, 0, bwrapArgv, preExec, egress.PastaLogFile(id))
 			}
 			return env, wrap
 		}
@@ -294,8 +294,10 @@ const egressApprovalPoll = 500 * time.Millisecond
 // It runs on the host (inside the daemon), so unlike the in-sandbox `hydra gate`
 // hook it talks to the status/approval files directly rather than over env-var
 // paths. A granted host is added to the proxy's live allow-list by the proxy
-// itself; "always allow" additionally persists it to the project config via the
-// API's remember path (internal/http/approvals.go).
+// itself AND to granted-hosts.json (via the decision handler in
+// internal/http/approvals.go), the session grant store shared with the WebFetch
+// gate - so one allow covers both layers; "always allow" additionally persists
+// it to the project config via the API's remember path.
 //
 // Before parking a host it re-reads the on-disk config allow-list (liveAllowedHost)
 // and auto-allows silently if the host is there now: the proxy snapshots the
@@ -346,6 +348,16 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 		return true
 	}
 	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
+	// A host the user already allowed this session must not prompt again.
+	// granted-hosts.json is the shared session grant store written when any
+	// WebFetch or egress approval card is allowed; without this check, allowing
+	// a WebFetch prompt (which shows the URL before the tool runs) would be
+	// followed by a second, redundant prompt here when the fetch's actual
+	// connection reaches the proxy.
+	if gate.HostAllowed(gate.LoadGrantedHosts(dir), host) {
+		log.Printf("hydra egress[%s]: %q was already allowed this session; allowing without prompt", e.id, host)
+		return true
+	}
 	reqid := "egress-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	summary := "wants to connect to " + strconv.Quote(host)
 	req := gate.Request{

@@ -11,6 +11,10 @@ export type ApprovalDecisionRequest = {
      * When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
      */
     remember?: boolean;
+    /**
+     * For a host_command approval only: the exact command text the UI displayed and the user approved. The daemon runs THIS text verbatim (never re-reading the head-writable request file), which closes the TOCTOU window where an agent could swap the command after the user saw it. Ignored for every other kind.
+     */
+    command?: string;
 };
 export namespace ApprovalDecisionRequest {
     /**

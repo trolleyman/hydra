@@ -115,3 +115,31 @@ export function extensionMime(ext: string): string {
   if (ext === 'html') return 'text/html'
   return 'text/plain'
 }
+
+// ── Paste markers ────────────────────────────────────────────────────────────
+// When the paste-markers preference is on (see lib/composerPrefs.ts), pasting
+// an attachment also inserts "[filename]" into the composer text. These pure
+// helpers build and remove those markers.
+
+// The marker text inserted for a list of attached filenames, with a trailing
+// space so typing continues naturally: "[image1.png] [image2.png] ".
+export function pasteMarkerText(filenames: string[]): string {
+  return filenames.map((n) => `[${n}]`).join(' ') + ' '
+}
+
+// Remove the first "[filename]" marker (with its trailing space, when present)
+// from text - used when a re-paste inlines an attached block, so its stale
+// marker doesn't linger. Returns the stripped text plus where/how much was
+// removed (for caret adjustment), or null when no marker is present.
+export function stripPasteMarker(
+  text: string,
+  filename: string,
+): { text: string; index: number; length: number } | null {
+  for (const marker of [`[${filename}] `, `[${filename}]`]) {
+    const index = text.indexOf(marker)
+    if (index !== -1) {
+      return { text: text.slice(0, index) + text.slice(index + marker.length), index, length: marker.length }
+    }
+  }
+  return null
+}

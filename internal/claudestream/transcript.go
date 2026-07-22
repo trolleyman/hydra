@@ -1,6 +1,7 @@
 package claudestream
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -13,9 +14,14 @@ import (
 )
 
 // DefaultBackfillBytes bounds how much of a transcript tail is read for chat
-// backfill. Generous - a transcript line is typically well under 4KB - while
-// keeping a pathological multi-hundred-MB transcript from stalling an attach.
-const DefaultBackfillBytes = 4 * 1024 * 1024
+// backfill - the INITIAL window only; older conversation pages in on demand
+// via load_before (HistoryBefore), so this just decides how much a fresh
+// attach parses and renders before the page is interactive. Kept modest: a
+// long chat's multi-MB transcript replayed wholesale made "Loading
+// conversation..." crawl. When the tail's LAST conversation line alone
+// exceeds this, tailTranscript falls back to an unbounded read so at least
+// one message always backfills.
+const DefaultBackfillBytes = 1 * 1024 * 1024
 
 // LatestTranscript returns the newest session .jsonl in a Claude project
 // directory ("" when the directory or any transcript is absent). Claude Code
@@ -106,10 +112,16 @@ func firstLineIsSidechain(path string) bool {
 // transcript (agent-<id>.meta.json), linking the sub-agent to the Task tool_use
 // that spawned it. The chat client uses ToolUseID to fold the sub-agent's
 // activity into that Task card and AgentType/Description to label it.
+// A NESTED sub-agent (one spawned by another sub-agent) still lands in the same
+// flat subagents/ dir; its sidecar carries ParentAgentID (the spawning
+// sub-agent) and SpawnDepth (1 = spawned by the main agent), which the chat
+// client uses to fold it under its parent's card instead of the main flow.
 type SubagentMeta struct {
-	AgentType   string `json:"agentType"`
-	Description string `json:"description"`
-	ToolUseID   string `json:"toolUseId"`
+	AgentType     string `json:"agentType"`
+	Description   string `json:"description"`
+	ToolUseID     string `json:"toolUseId"`
+	ParentAgentID string `json:"parentAgentId"`
+	SpawnDepth    int    `json:"spawnDepth"`
 }
 
 // subagentsSubdir is the per-session directory Claude Code writes sub-agent
@@ -294,6 +306,101 @@ func (t *SubagentTailer) pollFile(path string) (lines [][]byte, ok bool) {
 	return lines, true
 }
 
+// taskNotificationMarker is the substring every <task-notification> record
+// carries, used to pick them out of the main transcript. A background/async
+// sub-agent (and a background bash task) reports completion ONLY through one of
+// these records.
+var taskNotificationMarker = []byte("<task-notification>")
+
+// queuedCommandMarker picks out "queued_command" attachment records. When the
+// CLI consumes a queued message INTO A RUNNING TURN (mid-turn steering - the
+// queue-operation "remove" path), it does NOT write a plain `user` event for
+// it; this attachment record, carrying the message text on attachment.prompt,
+// is the message's ONLY durable trace. Without relaying it, a message queued
+// while a turn ran vanished from the conversation on the next reattach (the
+// live view had shown it only via the sender's own optimistic bubble). A
+// message consumed while the CLI sits idle (the "dequeue" path) does get a
+// real user event and needs no special casing.
+var queuedCommandMarker = []byte(`"queued_command"`)
+
+// NotificationTailer incrementally tails the newest session's MAIN transcript
+// for <task-notification> records. A background/async sub-agent reports its
+// completion only through one of these, which the CLI writes into the main
+// transcript - as a queue-operation entry and an attachment entry - while the
+// parent turn sits idle. Those entries never reach the parent process stdout
+// (so the live stdout relay never sees them). The attach-time backfill does now
+// relay them (see tailTranscript) - which settles a background sub that had
+// already finished when the client connected - but a sub that finishes DURING a
+// live connection is only caught here. Without this tail such a sub would keep
+// reading "working" until the next turn consumed the notification. Only the
+// notification-bearing lines are returned; every other main line already arrives
+// via stdout + backfill.
+type NotificationTailer struct {
+	claudeProjectDir string
+	path             string
+	offset           int64
+}
+
+// NewNotificationTailer starts tailing at the current end of the newest
+// transcript, so only notifications appended AFTER it is created are returned -
+// anything already recorded came through the attach-time backfill / replay.
+func NewNotificationTailer(claudeProjectDir string) *NotificationTailer {
+	t := &NotificationTailer{claudeProjectDir: claudeProjectDir}
+	if p := LatestTranscript(claudeProjectDir); p != "" {
+		t.path = p
+		if info, err := os.Stat(p); err == nil {
+			t.offset = info.Size()
+		}
+	}
+	return t
+}
+
+// Poll returns every complete main-transcript line gained since the last Poll
+// that carries a task-notification. A session change (newer transcript file)
+// restarts the tail at the new file's start. Best-effort: an unreadable file is
+// retried next Poll with the offset unchanged; a trailing partial line waits for
+// its newline.
+func (t *NotificationTailer) Poll() [][]byte {
+	transcript := LatestTranscript(t.claudeProjectDir)
+	if transcript == "" {
+		return nil
+	}
+	if transcript != t.path {
+		t.path, t.offset = transcript, 0
+	}
+	f, err := os.Open(transcript)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	end := bytes.LastIndexByte(data, '\n')
+	if end < 0 {
+		return nil
+	}
+	t.offset += int64(end + 1)
+	var lines [][]byte
+	for line := range bytes.SplitSeq(data[:end], []byte{'\n'}) {
+		// queued_command attachments are relayed live alongside notifications:
+		// a queued message consumed into a running turn leaves no stdout trace,
+		// so an attached client would otherwise only ever see its own optimistic
+		// bubble (and another browser nothing at all).
+		if len(line) == 0 || (!bytes.Contains(line, taskNotificationMarker) && !bytes.Contains(line, queuedCommandMarker)) {
+			continue
+		}
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		lines = append(lines, cp)
+	}
+	return lines
+}
+
 // HistoryBatchBytes is how much older conversation one load-older request pulls.
 const HistoryBatchBytes = 512 * 1024
 
@@ -326,8 +433,16 @@ func HistoryBefore(path, beforeUUID string, maxBytes int64) (lines [][]byte, don
 	var used int64
 	i := anchor - 1
 	for ; i >= 0; i-- {
+		// Task-notification bookkeeping records (queue-operation/attachment) ride
+		// along whatever their type: they are the only durable trace of a
+		// background command/agent finishing, so an older page must carry them for
+		// the client to render the completion chip in place.
+		isNotif := bytes.Contains(all[i], taskNotificationMarker)
 		ev, ok := ParseEvent(all[i])
-		if !ok || ev.IsSidechain || (ev.Type != "user" && ev.Type != "assistant") {
+		// queued_command attachments ride along like task-notifications: they are
+		// the only durable trace of a message consumed into a running turn.
+		isQueuedCmd := ev.Type == "attachment" && bytes.Contains(all[i], queuedCommandMarker)
+		if !ok || ev.IsSidechain || (!isNotif && !isQueuedCmd && ev.Type != "user" && ev.Type != "assistant") {
 			continue
 		}
 		cp := make([]byte, len(all[i]))
@@ -357,37 +472,152 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 	return errtrace.Wrap3(tailTranscript(path, maxBytes, false))
 }
 
-// tailTranscript is the shared core of TailTranscript. keepSidechain relays
-// sub-agent sidechain user/assistant lines instead of dropping them - the
-// main-transcript backfill drops them (main conversation only), but a sub-agent
-// transcript IS entirely sidechain, so its own backfill keeps them.
-func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, err error) {
+// TranscriptLinesAfter returns complete JSONL records appended at or after a
+// durable byte offset and the next safe offset. A truncated file restarts at 0.
+func TranscriptLinesAfter(path string, offset int64) ([][]byte, int64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, offset, errtrace.Wrap(err)
+	}
+	if offset < 0 || offset > int64(len(data)) {
+		offset = 0
+	}
+	tail := data[offset:]
+	last := bytes.LastIndexByte(tail, '\n')
+	if last < 0 {
+		return nil, offset, nil
+	}
+	complete := tail[:last]
+	lines := make([][]byte, 0)
+	for line := range bytes.SplitSeq(complete, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			lines = append(lines, append([]byte(nil), line...))
+		}
+	}
+	return lines, offset + int64(last) + 1, nil
+}
+
+// TailTranscriptAndPrelude is TailTranscript plus the transcript's PRE-WINDOW
+// <task-notification> records (oldest-first): every bookkeeping record that
+// fell before the tail window. A byte-dense conversation (image reads) can push
+// a background command/agent's completion record out of the window in seconds -
+// without these the client can't tell a finished background task from a running
+// one after reconnect (its cards read "working" forever). The records are tiny
+// and rare, so relaying all of them costs nothing.
+//
+// The uuid set covers the ENTIRE transcript, not just the tail window: it
+// exists to dedup the scrollback-ring replay, and the ring (which holds the
+// live process's whole stdout) can reach back further than the byte-capped
+// window. A ring line recorded anywhere in the transcript is durable history -
+// already relayed, deliberately filtered, or reachable via load_before - so
+// replaying it would duplicate the conversation (the pre-window part appeared
+// once via the ring at the bottom and again when load_before paged it in).
+// Best-effort: a prefix scan failure returns the windowed lines and their
+// uuids alone.
+func TailTranscriptAndPrelude(path string, maxBytes int64) (lines, prelude [][]byte, uuids map[string]struct{}, err error) {
+	lines, uuids, windowStart, err := tailTranscriptWindowed(path, maxBytes, false)
+	if err != nil || windowStart <= 0 {
+		return lines, nil, uuids, errtrace.Wrap(err)
+	}
+	prelude, preUUIDs, scanErr := scanPrefixBefore(path, windowStart)
+	if scanErr != nil {
+		return lines, nil, uuids, nil
+	}
+	for u := range preUUIDs {
+		uuids[u] = struct{}{}
+	}
+	return lines, prelude, uuids, nil
+}
+
+// scanPrefixBefore streams the transcript's first `end` bytes (a whole number
+// of lines - the tail window's start offset) and returns every parseable line
+// carrying a <task-notification>, plus the uuid of every parseable line (see
+// TailTranscriptAndPrelude: ring-replay dedup needs the whole transcript's
+// uuids). Streams line-by-line so a multi-MB prefix costs no more memory than
+// its largest single line.
+func scanPrefixBefore(path string, end int64) (notifs [][]byte, uuids map[string]struct{}, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, errtrace.Wrap(err)
 	}
 	defer f.Close()
+	r := bufio.NewReaderSize(io.LimitReader(f, end), 64*1024)
+	uuids = make(map[string]struct{})
+	for {
+		line, readErr := r.ReadBytes('\n')
+		if trimmed := bytes.TrimRight(line, "\n"); len(trimmed) > 0 {
+			if ev, ok := ParseEvent(trimmed); ok {
+				if ev.UUID != "" {
+					uuids[ev.UUID] = struct{}{}
+				}
+				if bytes.Contains(trimmed, taskNotificationMarker) {
+					cp := make([]byte, len(trimmed))
+					copy(cp, trimmed)
+					notifs = append(notifs, cp)
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return notifs, uuids, nil
+}
+
+// tailTranscript is the shared core of TailTranscript. keepSidechain relays
+// sub-agent sidechain user/assistant lines instead of dropping them - the
+// main-transcript backfill drops them (main conversation only), but a sub-agent
+// transcript IS entirely sidechain, so its own backfill keeps them.
+//
+// Guarantees at least one conversation line when the transcript has any: if the
+// capped tail yields none (a single message larger than the whole budget - a
+// huge pasted tool result), it retries unbounded rather than backfilling an
+// empty conversation.
+func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, err error) {
+	lines, uuids, _, err = tailTranscriptWindowed(path, maxBytes, keepSidechain)
+	return lines, uuids, errtrace.Wrap(err)
+}
+
+// tailTranscriptWindowed is tailTranscript that also reports where the returned
+// window started (the byte offset of its first complete line; 0 when the whole
+// file was read), so a caller can scan what came before it.
+func tailTranscriptWindowed(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, windowStart int64, err error) {
+	lines, uuids, windowStart, truncated, err := tailTranscriptOnce(path, maxBytes, keepSidechain)
+	if err == nil && truncated && len(lines) == 0 {
+		lines, uuids, windowStart, _, err = tailTranscriptOnce(path, 0, keepSidechain)
+	}
+	return lines, uuids, windowStart, errtrace.Wrap(err)
+}
+
+func tailTranscriptOnce(path string, maxBytes int64, keepSidechain bool) (lines [][]byte, uuids map[string]struct{}, windowStart int64, truncated bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, 0, false, errtrace.Wrap(err)
+	}
+	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, errtrace.Wrap(err)
+		return nil, nil, 0, false, errtrace.Wrap(err)
 	}
-	truncated := false
 	if maxBytes > 0 && info.Size() > maxBytes {
-		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
-			return nil, nil, errtrace.Wrap(err)
+		windowStart = info.Size() - maxBytes
+		if _, err := f.Seek(windowStart, io.SeekStart); err != nil {
+			return nil, nil, 0, false, errtrace.Wrap(err)
 		}
 		truncated = true
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return nil, nil, errtrace.Wrap(err)
+		return nil, nil, 0, false, errtrace.Wrap(err)
 	}
 	if truncated {
 		// The seek landed mid-line; drop the fragment before the first newline.
 		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			windowStart += int64(idx + 1)
 			data = data[idx+1:]
 		} else {
+			windowStart += int64(len(data))
 			data = nil
 		}
 	}
@@ -401,12 +631,20 @@ func tailTranscript(path string, maxBytes int64, keepSidechain bool) (lines [][]
 		if ev.UUID != "" {
 			uuids[ev.UUID] = struct{}{}
 		}
-		if (ev.IsSidechain && !keepSidechain) || (ev.Type != "user" && ev.Type != "assistant") {
+		// Conversation lines (user/assistant, minus sidechains unless a sub-agent's
+		// own backfill) plus any <task-notification> record: a background/async
+		// sub-agent's completion is only ever one of those bookkeeping records
+		// (queue-operation/attachment), so relaying them here lets a reconnect
+		// settle a finished background sub - which the client can't otherwise tell
+		// from a still-running one after its live signal is gone.
+		isConversation := (!ev.IsSidechain || keepSidechain) && (ev.Type == "user" || ev.Type == "assistant")
+		if !isConversation && !bytes.Contains(line, taskNotificationMarker) &&
+			!(ev.Type == "attachment" && bytes.Contains(line, queuedCommandMarker)) {
 			continue
 		}
 		cp := make([]byte, len(line))
 		copy(cp, line)
 		lines = append(lines, cp)
 	}
-	return lines, uuids, nil
+	return lines, uuids, windowStart, truncated, nil
 }

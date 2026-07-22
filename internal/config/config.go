@@ -39,8 +39,9 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- To stop a background process you started, kill it by the PID you captured (`kill \"$PID\"`, where `PID=$!` right after you launch it) or by its port (`fuser -k <port>/tcp`). Do NOT use `pkill`/`killall` or any other kill-by-name/pattern: they match against each process's whole command line, so a generic pattern will also match your OWN agent process (its entire system prompt rides in the `--append-system-prompt` argv) and co-tenant sandboxed processes - killing your own session.\n" +
 	"- Don't reach out and drive host-OS applications or devices - e.g. the host's Google Chrome, Android `adb`, system services, or other users' processes. If you need a browser or similar tool, use a project-local/bundled one inside your worktree. Keep your effects confined to the sandbox + worktree.\n" +
 	"- Do NOT try to escape, weaken, or probe the sandbox (e.g. remounting paths, reading masked credentials, disabling seccomp, or reaching blocked hosts). The sandbox is a security boundary - treat it as fixed.\n" +
-	"- Do NOT operate Hydra itself. You are a head running *inside* Hydra; you must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket. Managing heads is the user's job, not yours - even if a task seems to call for it, stop and ask the user.\n" +
+	"- Do NOT operate Hydra itself. You are a head running *inside* Hydra; you must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket (the sole exception is the `host-run` escape hatch described below). Managing heads is the user's job, not yours - even if a task seems to call for it, stop and ask the user.\n" +
 	"- If you need something the environment does not provide - a system/global tool installed, a path made writable, network access, etc. - STOP and ask the user to change it for you. Do not work around it.\n" +
+	"- LAST-RESORT sandbox escape hatch: if a task genuinely cannot proceed inside the sandbox, you can ask the user to run ONE command on the host (outside the sandbox, in your worktree) with `/tmp/hydra-internal host-run -- <command>`. This pops an approval card in the UI showing the full command; nothing runs unless the user allows it, and an unanswered request is denied after 5 minutes. Treat this as EXTREMELY RARE - almost everything belongs inside the sandbox. Prefer editing config.toml (writable_paths, network, etc.) or just asking the user in chat; reach for host-run only when there is no in-sandbox way to proceed, expect most requests to be denied, and never use it to routinely work around the sandbox boundary.\n" +
 	"\n" +
 	"## What the user can change for you\n" +
 	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
@@ -333,6 +334,13 @@ type AgentConfig struct {
 //   - HYDRA_ARTIFACT_OUTPUT: directory the script must write image files into
 //   - HYDRA_ARTIFACT_SOURCE: the checkout directory (same as cwd)
 //   - HYDRA_ARTIFACT_REF:    the resolved git ref/sha being rendered (best-effort)
+//
+// Streaming (optional): after writing a file (and its `<file>.meta` sidecar) the
+// command may print `::hydra:artifact:: <path>` (path relative to
+// HYDRA_ARTIFACT_OUTPUT) on stdout; Hydra then scans and diffs just that file and
+// streams the tile to the UI immediately, rather than surfacing every output at
+// once when the command exits. Emitting no markers still works - the final
+// post-exit scan collects everything (see artifacts.FileMarker).
 type ArtifactScript struct {
 	// Name uniquely identifies the script; used as the UI label and cache dir.
 	Name string `toml:"name"`
@@ -2072,6 +2080,14 @@ func artifactsDocLines() []string {
 		docPrefix + " \"modified\".",
 		docPrefix + " The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),",
 		docPrefix + " HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).",
+		docPrefix + " Streaming: after writing a file (and its .meta sidecar) the command may print",
+		docPrefix + ` ::hydra:artifact:: <path> on stdout (path relative to HYDRA_ARTIFACT_OUTPUT, e.g.`,
+		docPrefix + ` echo "::hydra:artifact:: home-dark.png"). Hydra then scans and diffs just that file`,
+		docPrefix + " and streams the tile to the diff viewer immediately, so images trickle in as they",
+		docPrefix + " render instead of all appearing when the command exits. It is optional - emit no",
+		docPrefix + " markers and every output is still collected by the final scan on exit. Emit the",
+		docPrefix + " marker only once the file is fully written. (Print ::hydra:progress:: <text> to set",
+		docPrefix + " the live progress header shown while the command runs.)",
 		docPrefix + " Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta",
 		docPrefix + ` like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as`,
 		docPrefix + " labels and offers a filter. A \"category::value\" tag is a scoped label: only one",

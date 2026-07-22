@@ -409,6 +409,40 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 	return data, nil
 }
 
+// BuildCodexHooks merges Hydra's lifecycle observer into the user's Codex
+// hooks.json. Matching groups are appended because Codex runs every match and
+// Hydra's observer should not replace personal hooks.
+func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
+	type hooksFile struct {
+		Description string                       `json:"description,omitempty"`
+		Hooks       map[string][]json.RawMessage `json:"hooks"`
+	}
+	var file hooksFile
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &file); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("unmarshal codex hooks: %w", err))
+		}
+	}
+	if file.Hooks == nil {
+		file.Hooks = map[string][]json.RawMessage{}
+	}
+	group, err := json.Marshal(matcherGroup{Hooks: []hookHandler{{Type: "command", Command: HookCommand(hydraBin, "codex")}}})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	for _, event := range []string{
+		"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+		"PermissionRequest", "Stop", "SubagentStart", "SubagentStop",
+	} {
+		file.Hooks[event] = append(file.Hooks[event], json.RawMessage(group))
+	}
+	data, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal codex hooks: %w", err))
+	}
+	return data, nil
+}
+
 // AgentArgv returns the command line to run inside the sandbox for the given
 // agent type. resume runs the agent's own resume flow (continuing the prior
 // conversation, so no task prompt is passed); otherwise prompt (if non-empty)
@@ -429,7 +463,7 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // each model has its own prompt cache, trigger a full cache-missing re-read of
 // the conversation. Empty model inherits the CLI's own default.
 //
-// chatMode (Claude only) drives the CLI's structured stream-json
+// chatMode drives Claude or Codex through its structured protocol
 // interface instead of the interactive TUI: the process stays alive reading
 // user turns from stdin, and the task prompt is sent as the first stdin
 // message (see SpawnHead) rather than as argv.
@@ -442,8 +476,8 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // pass the newest non-sidechain transcript's id
 // (claudestream.LatestSessionID); empty falls back to --continue.
 func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID string) ([]string, error) {
-	if chatMode && agentType != AgentTypeClaude {
-		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude agents, not %q", agentType))
+	if chatMode && agentType != AgentTypeClaude && agentType != AgentTypeCodex {
+		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude and codex agents, not %q", agentType))
 	}
 	switch agentType {
 	case AgentTypeClaude:
@@ -531,7 +565,13 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		// --dangerously-skip-permissions). Codex has no --append-system-prompt
 		// flag, so the pre-prompt is seeded as ~/.codex/AGENTS.md (see seedHead)
 		// and systemPrompt is ignored here.
-		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+		if chatMode {
+			// app-server is Codex's persistent bidirectional rich-client
+			// protocol. Approval/sandbox policy is supplied on thread/start by the
+			// controller; Hydra's outer sandbox remains the enforcement boundary.
+			return []string{"codex", "--dangerously-bypass-hook-trust", "--enable", "default_mode_request_user_input", "app-server", "--listen", "stdio://"}, nil
+		}
+		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
 		}

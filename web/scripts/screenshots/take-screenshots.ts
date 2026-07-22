@@ -21,14 +21,19 @@
 // grid sizes a tile by its logical width (physical px ÷ dpi), so dpi 2 lays out the
 // same as dpi 1, only sharper. Absent ⇒ 1.
 //
-// Run with: bun scripts/screenshots/take-screenshots.ts  (from web/)
+// Run with: node scripts/screenshots/take-screenshots.ts  (from web/)
 //
 // Progress: each major step emits a one-line "::hydra:progress::" marker (build
 // phases and, during capture, "<name>.png <n>/<total>"). Hydra strips the prefix
 // and surfaces the rest as the live progress header - and, once it sees a marker,
 // stops treating ordinary stdout as progress, so the noisy subprocess output
-// (bun install, vite build) below can't hijack the header. Keep markers short and
+// (the install, vite build) below can't hijack the header. Keep markers short and
 // human-readable; everything still lands in the full build log.
+//
+// Streaming: right after writing each "<name>.png" (and its .meta sidecar) we emit
+// a "::hydra:artifact:: <name>.png" marker, so Hydra scans + diffs that one tile
+// and streams it into the panel as it renders, rather than surfacing every image
+// at once when this command exits.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -39,8 +44,9 @@ import { chromium } from 'playwright'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
-// scripts below. storage.ts is dependency-free, so it imports cleanly under bun.
-import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib/storage'
+// scripts below. storage.ts is dependency-free, so it imports cleanly under Node's
+// type stripping. The '.ts' extension is required - Node ESM does not guess it.
+import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib/storage.ts'
 
 // Identifiers seeded by the simulation server (internal/http/simulation.go),
 // named where they feed the shared key builders above.
@@ -111,7 +117,7 @@ const PASTED_HTML_DEMO = [
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root three
 // levels up from this script (web/scripts/screenshots/) so it also works by hand.
-const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dir, '..', '..', '..')
+const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dirname, '..', '..', '..')
 const REF = process.env.HYDRA_ARTIFACT_REF || '(unknown)'
 
 function required(name: string): string {
@@ -357,14 +363,21 @@ console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
 //    must happen before the go build. We invoke vite + the routes-regex
-//    generator directly rather than `bun run build` to skip the tsc typecheck
+//    generator directly rather than `npm run build` to skip the tsc typecheck
 //    (a type error in some checkout shouldn't block a screenshot) and the
 //    openapi/router codegen (their outputs are committed).
+//
+//    Install with aube when it is on PATH (much faster), else npm. Both read the
+//    committed package-lock.json, so node_modules comes out the same either way.
+//    Mirrors webPM() in magefiles/magefile.go.
 const webDir = join(SRC, 'web')
+const pm = spawnSync('aube', ['--version'], { stdio: 'ignore' }).status === 0 ? 'aube' : 'npm'
 progress('building frontend')
-run('bun', ['install'], webDir)
-run('bun', ['x', 'vite', 'build'], webDir)
-run('bun', ['scripts/generate-routes-regex.ts'], webDir)
+run(pm, ['install'], webDir)
+// aubx / npx here resolve the locally-installed vite bin (install just ran);
+// neither needs to fetch from the registry.
+run(pm === 'aube' ? 'aubx' : 'npx', ['vite', 'build'], webDir)
+run('node', ['scripts/generate-routes-regex.ts'], webDir)
 
 // 2. Build the hydra binary from the checkout into a throwaway dir.
 progress('building hydra binary')
@@ -855,8 +868,10 @@ try {
         toast: {
           message: '',
           type: 'warning',
+          // webfetch/egress allows are session-wide host grants, so the primary
+          // button is "Allow" (not "Allow once") - see useAgentNotifications.
           actions: [
-            { label: 'Allow once', variant: 'primary' },
+            { label: 'Allow', variant: 'primary' },
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
@@ -864,7 +879,7 @@ try {
         },
       },
       // 3e. A blocked egress host: the agent's proxy hit a host on neither the
-      // allow- nor block-list, so the connection is parked. Allow once opens it
+      // allow- nor block-list, so the connection is parked. Allow opens it
       // for the session; Always allow adds it to the network allow-list.
       {
         name: 'agent-approvals-egress',
@@ -873,14 +888,33 @@ try {
           message: '',
           type: 'warning',
           actions: [
-            { label: 'Allow once', variant: 'primary' },
+            { label: 'Allow', variant: 'primary' },
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
           approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
-      // 3f. An agent running in ANOTHER project: an amber folder+project
+      // 3f. The sandbox escape hatch: the agent asks to run a command on the HOST,
+      // outside its sandbox (`hydra host-run`). Loud red HOST identity, the full
+      // command shown in a red mono box - chain-split (a newline per top-level
+      // ;/&&) and bash syntax-highlighted for auditability - and one-shot only (no
+      // Always allow), the most dangerous ask there is. The target is a chained
+      // command so the shot exercises the splitting + highlighting.
+      {
+        name: 'agent-approvals-host-command',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'host_command', target: 'cd "$HOME/tools" && ./gen-certs.sh --local ; security add-trusted-cert -d dev-root.pem', agentName: 'Set up local HTTPS certs', agentId: 'agent-approval', projectId: 'sim-project' },
+        },
+      },
+      // 3g. An agent running in ANOTHER project: an amber folder+project
       // banner. Always allow is still offered (a remembered grant is
       // scoped to the project the approval resolves in).
       {
@@ -1606,8 +1640,10 @@ try {
         imageDiffMode: 'side-by-side',
         searchArtifacts: 'zzzznomatch',
       },
-      // The in-flight artifact card expanded to reveal its live generation logs:
-      // the two sides (Before / After) build in parallel, each a scrollable,
+      // The in-flight artifact card expanded, documenting the per-file
+      // ::hydra:artifact:: streaming: the tiles that have finished so far render at
+      // the top (they trickle in live over the WS, see HandleArtifactsWS), above
+      // the two sides' (Before / After) live generation logs - each a scrollable,
       // monospaced stdout+stderr stream (stderr in red), with the header showing
       // both sides' progress joined by "·" and elapsed time. agent-1's
       // "components" set is the generating one (internal/http/simulation.go).
@@ -1615,7 +1651,7 @@ try {
         name: 'artifact-log',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
-        viewport: { width: 1280, height: 1280 },
+        viewport: { width: 1280, height: 1400 },
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
       },
@@ -2186,6 +2222,13 @@ try {
             const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
             btn?.click()
           }, pg.expandArtifact)
+          // The "components" set streams its tiles in over time (the sim's
+          // ::hydra:artifact:: demo, see HandleArtifactsWS). Wait for the LAST tile
+          // ("toast.png") so the shot always captures the full streamed grid rather
+          // than a racy mid-trickle subset.
+          if (pg.expandArtifact === 'components') {
+            await page.waitForFunction(() => document.body.textContent?.includes('toast.png'), undefined, { timeout: 15000 })
+          }
           await settle(page)
         }
         if (pg.searchArtifacts) {
@@ -2626,6 +2669,11 @@ try {
         // absent dpi as 1, so desktop sidecars stay byte-identical to before.
         writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
+        // Announce the finished file so Hydra scans + diffs just this tile and
+        // streams it into the panel now, instead of waiting for the whole run to
+        // exit. The path is relative to HYDRA_ARTIFACT_OUTPUT, and both the image
+        // and its .meta sidecar are already written above.
+        console.log(`::hydra:artifact:: ${pg.name}${suffix}.png`)
         await ctx.close()
         done++
         // Progress marker surfaced live by Hydra as the header, e.g.

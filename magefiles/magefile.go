@@ -63,6 +63,12 @@ const devRestartExitCode = 42
 // Vite dev server runs on 26600 and proxies /api, /health, /ws to this port.
 const devFastAPIPort = "17842"
 
+// demoAPIPort is the port the simulation server listens on in Demo mode. An
+// arbitrary out-of-the-way port (NOT hydra's real 26600) so `mage demo` never
+// collides with a real hydra server/daemon; users browse through the Vite dev
+// server (http://localhost:5173), which proxies /api + /ws to this port.
+const demoAPIPort = "14512"
+
 var (
 	// Matching bun
 	colorCommandDollar = style(colorReset, colorDim, colorMagenta)
@@ -911,6 +917,29 @@ func BuildGoDeps() error {
 	return nil
 }
 
+// webPMOnce guards the one-time PATH lookup behind webPM.
+var (
+	webPMOnce sync.Once
+	webPMName string
+)
+
+// webPM returns the Node package manager used to install deps and run the
+// frontend's package.json scripts: aube when it is on PATH, else npm.
+//
+// Both drive the committed web/package-lock.json (aube reads and writes npm's
+// lockfile in place), so the choice never shows up in the repo - it only buys
+// a faster install for developers who have aube. npm is the documented
+// baseline because it ships with Node, so a fresh checkout always builds.
+func webPM() string {
+	webPMOnce.Do(func() {
+		webPMName = "npm"
+		if _, err := exec.LookPath("aube"); err == nil {
+			webPMName = "aube"
+		}
+	})
+	return webPMName
+}
+
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
 	isDev := os.Getenv("HYDRA_DEV_BUILD") == "1"
@@ -938,8 +967,8 @@ func BuildWeb() error {
 		return nil
 	}
 
-	// Run bun install + build
-	if err := runInDirV("web", "bun", "install"); err != nil {
+	// Run install + build
+	if err := runInDirV("web", webPM(), "install"); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -950,7 +979,7 @@ func BuildWeb() error {
 		buildArgs = append(buildArgs, "--", "--mode", "development")
 	}
 
-	if err := runInDirWithEnvV("web", env, "bun", buildArgs...); err != nil {
+	if err := runInDirWithEnvV("web", env, webPM(), buildArgs...); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -1140,8 +1169,8 @@ func DevFast() error {
 	}
 
 	startVite := func() (*exec.Cmd, error) {
-		printCmdBackground("bun", "run", "dev")
-		cmd := exec.Command("bun", "run", "dev")
+		printCmdBackground(webPM(), "run", "dev")
+		cmd := exec.Command(webPM(), "run", "dev")
 		cmd.Dir = "web"
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -1222,8 +1251,8 @@ func DevAutoReload() error {
 	}
 
 	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
-	printCmdBackground("bun", "run", "dev")
-	viteCmd := exec.Command("bun", "run", "dev")
+	printCmdBackground(webPM(), "run", "dev")
+	viteCmd := exec.Command(webPM(), "run", "dev")
 	viteCmd.Dir = "web"
 	viteCmd.Stdout = os.Stdout
 	viteCmd.Stderr = os.Stderr
@@ -1384,7 +1413,8 @@ func Preview() error {
 
 // Demo runs the Hydra server in simulation mode with mock data, serving the
 // frontend through the Vite dev server (HMR on http://localhost:5173, which
-// proxies /api + /ws to the sim server on :8080). Frontend edits hot-reload
+// proxies /api + /ws to the sim server on :demoAPIPort - an out-of-the-way
+// port so a real hydra server on 26600 is untouched). Frontend edits hot-reload
 // through Vite without a restart; the UI reload button rebuilds the Go backend
 // and relaunches the sim server (exit code devRestartExitCode), so a change to
 // the mock data in internal/http/simulation.go goes live with one click. This is
@@ -1413,11 +1443,12 @@ func Demo() error {
 	// Start the Vite dev server once (frontend with HMR on http://localhost:5173).
 	// It stays up across backend restarts - HMR handles frontend edits live, and
 	// the reload button only needs to rebuild + relaunch the Go sim server.
-	printCmdBackground("bun", "run", "dev")
-	viteCmd := exec.Command("bun", "run", "dev")
+	printCmdBackground(webPM(), "run", "dev")
+	viteCmd := exec.Command(webPM(), "run", "dev")
 	viteCmd.Dir = "web"
 	viteCmd.Stdout = os.Stdout
 	viteCmd.Stderr = os.Stderr
+	viteCmd.Env = append(os.Environ(), "API_PORT="+demoAPIPort)
 	if err := viteCmd.Start(); err != nil {
 		return errtrace.Wrap(fmt.Errorf("failed to start Vite dev server: %w", err))
 	}
@@ -1439,8 +1470,12 @@ func Demo() error {
 		serverCmd.Stderr = os.Stderr
 		// HYDRA_DEV_RESTART=1 arms the sim server's reload button (SimulationServer.
 		// DevRestart), so a click exits with devRestartExitCode and this loop
-		// rebuilds. Vite proxies /api + /ws to :26600 (the sim server's default).
-		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
+		// rebuilds. Vite proxies /api + /ws to :demoAPIPort, keeping the sim
+		// server off hydra's real 26600.
+		serverCmd.Env = append(os.Environ(),
+			"HYDRA_DEV_RESTART=1",
+			"HYDRA_API_ADDR=localhost:"+demoAPIPort,
+		)
 
 		serverErr := serverCmd.Run()
 		if serverErr != nil {

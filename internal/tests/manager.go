@@ -920,11 +920,20 @@ func errored(rep Report, msg string) Report {
 func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, ref string) (*sandbox.Spec, error) {
 	home, _ := os.UserHomeDir()
 
-	env := append([]string{}, os.Environ()...)
+	env := make([]string, 0, len(os.Environ())+8)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "TMPDIR" && key != "TMP" && key != "TEMP" {
+			env = append(env, entry)
+		}
+	}
 	if home != "" {
 		env = append(env, "HOME="+home)
 	}
 	env = append(env,
+		"TMPDIR=/tmp",
+		"TMP=/tmp",
+		"TEMP=/tmp",
 		"HYDRA_TEST_OUTPUT="+outputDir,
 		"HYDRA_TEST_SOURCE="+runDir,
 		"HYDRA_TEST_REF="+ref,

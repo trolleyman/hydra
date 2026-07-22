@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
+import { pinCardToTop } from '../lib/diffScroll'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
 // icons at rest and brighten ONLY the icon the pointer is actually over - a
@@ -132,8 +133,21 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
     return () => clearTimeout(t)
   }, [collapsed])
   const open = expanded && mounted
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Collapsing a card whose top has scrolled above the viewport would leave the
+  // scroll at a random depth of whatever content replaces the folded body -
+  // pin the (now short) card to the top instead, docked under the sticky
+  // chrome (see pinCardToTop for why it's a pin, not a one-shot scroll).
+  const handleToggle = () => {
+    if (!collapsed && rootRef.current) pinCardToTop(rootRef.current)
+    onToggleCollapsed()
+  }
   return (
-    <div className={`border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 ${sticky ? '' : 'overflow-hidden'}`}>
+    <div
+      ref={rootRef}
+      style={{ scrollMarginTop: `calc(${STICKY_CARD_TOP} + 8px)` }}
+      className={`border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 ${sticky ? '' : 'overflow-hidden'}`}
+    >
       <div
         style={sticky ? { top: STICKY_CARD_TOP } : undefined}
         className={
@@ -143,7 +157,7 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
         }
       >
         <button
-          onClick={onToggleCollapsed}
+          onClick={handleToggle}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
           <ChevronDown className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${collapsed ? '-rotate-90' : ''}`} />

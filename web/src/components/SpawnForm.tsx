@@ -9,11 +9,13 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
-import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
-import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
-import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime } from '../lib/pastedText'
+import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
+import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
@@ -25,29 +27,35 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(n
 // (AGENT_ACCENT) can both be rendered directly from the id.
 const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'claude', label: 'Claude', color: AGENT_ACCENT.claude },
+  { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
   { id: 'gemini', label: 'Gemini', color: AGENT_ACCENT.gemini },
   { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
-  { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
 ]
 
 // Curated model aliases per agent type, shown as a sub-list under each agent in
 // the picker. Every agent also gets an implicit "Default" row (model '') meaning
-// "don't pass --model" so the CLI uses its own default. Only Claude and Gemini
-// expose concrete aliases here; Copilot/Codex offer just Default because their
-// model slugs are less stable and pinning a wrong id would fail the launch.
+// "don't pass --model" so the CLI uses its own default. Claude, Codex and
+// Gemini expose a small curated set; Copilot stays on its CLI-managed default.
 const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
   claude: [
+    { id: 'fable', label: 'Fable' },
     { id: 'opus', label: 'Opus' },
     { id: 'sonnet', label: 'Sonnet' },
     { id: 'haiku', label: 'Haiku' },
-    { id: 'fable', label: 'Fable' },
   ],
   gemini: [
     { id: 'gemini-2.5-pro', label: '2.5 Pro' },
     { id: 'gemini-2.5-flash', label: '2.5 Flash' },
   ],
   copilot: [],
-  codex: [],
+  codex: [
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+    { id: 'gpt-5.5', label: 'GPT-5.5' },
+    { id: 'gpt-5.4', label: 'GPT-5.4' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+  ],
 }
 
 // Short label for the currently-selected model, shown next to the brand icon on
@@ -146,7 +154,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
         // Measure the trigger before opening so the fixed-position menu lands in
         // the right spot on its first paint; scroll/resize keep it pinned after.
         onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer pr-1.5 ${trigger} ${
+        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
           open
             ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
             : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -314,8 +322,8 @@ const SpawnOptionsMenu = memo(function SpawnOptionsMenu({
             </button>
           ))}
 
-          {/* Chat view (Claude only) */}
-          {agentType === 'claude' && (
+          {/* Chat view (Claude + Codex - CLIs with a structured transport) */}
+          {(agentType === 'claude' || agentType === 'codex') && (
             <>
               <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
               <button
@@ -384,7 +392,7 @@ export const SpawnForm = memo(function SpawnForm({
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
-  // Chat mode (Claude only): drive the head via stream-json and
+  // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model.
   const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
   // Per-head git-isolation override ('' = use the project's policy default, so the
@@ -419,9 +427,8 @@ export const SpawnForm = memo(function SpawnForm({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // Numbers generically-named pasted images (image.png, image.png, ...) as
   // image1.png, image2.png, ... so each can be referred to distinctly in the
-  // prompt. Per project + layout (persisted via imageCounterKey) so the count
-  // doesn't bleed across projects, and reset after a successful spawn.
-  const imageCounterRef = useRef(0)
+  // prompt (see addFiles - the number is max(current) + 1, so it resets when the
+  // box clears and fills gaps after a removal).
   // Numbers pasted-text attachments (pasted-text-1.txt, ...) so each large paste
   // gets a distinct, referenceable filename. Session-only, reset after a spawn.
   const pastedTextCounterRef = useRef(0)
@@ -429,12 +436,15 @@ export const SpawnForm = memo(function SpawnForm({
   // immediate re-paste of the SAME text inlines it instead (dropping the chip),
   // fenced when `lang` is set. Cleared on a different paste, spawn, or project
   // switch so a stale block can't be "re-pasted" later.
-  const lastPasteRef = useRef<{ text: string; attachmentId: number; lang: string | null } | null>(null)
+  const lastPasteRef = useRef<{ text: string; attachmentId: number; filename: string; lang: string | null } | null>(null)
   // Set by a Ctrl/Cmd+Shift+V keystroke (the "paste as plain text" gesture, see
   // handleKeyDown) so the paste it triggers inserts literally instead of being
   // attached. Read-and-cleared by the next handlePaste; a timer clears it too in
   // case no paste follows (e.g. an empty clipboard), so it can't go stale.
   const literalPasteRef = useRef(false)
+  // Whether pasting an attachment also inserts its "[filename]" marker (a
+  // Browser preference, default on).
+  const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Mirrors `attachments` into a ref so the project-switch effect can stash the
   // outgoing project's attachments without depending on (and re-running for)
@@ -571,10 +581,10 @@ export const SpawnForm = memo(function SpawnForm({
     return (
       <div
         onPointerDown={handleCardResizeStart}
-        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
+        className="group/resize shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
         title="Drag to resize"
       >
-        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+        <ResizeGrip orientation="horizontal" />
       </div>
     )
   }
@@ -624,7 +634,6 @@ export const SpawnForm = memo(function SpawnForm({
   // attachments live in an in-session module cache (their thumbnails are object
   // URLs that can't be persisted); the counter is mirrored to localStorage.
   const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
-  const counterKey = projectId ? imageCounterKey(projectId, compact) : null
   const prevStoreKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -637,15 +646,9 @@ export const SpawnForm = memo(function SpawnForm({
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
     const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
-    if (storeKey) {
-      resetHistory(makeSnapshot(loadedPrompt, loadAttachments(storeKey), 0, 0))
-      imageCounterRef.current = Number(readLocal(counterKey!)) || 0
-    } else {
-      resetHistory(makeSnapshot(loadedPrompt, [], 0, 0))
-      imageCounterRef.current = 0
-    }
+    resetHistory(makeSnapshot(loadedPrompt, storeKey ? loadAttachments(storeKey) : [], 0, 0))
     prevStoreKeyRef.current = storeKey
-  }, [storeKey, counterKey, draftKey, resetHistory])
+  }, [storeKey, draftKey, resetHistory])
 
   // Persist the current box's attachments to the cache on unmount (the
   // full-page form remounts when navigating between projects).
@@ -660,17 +663,6 @@ export const SpawnForm = memo(function SpawnForm({
   // ends up with several indistinguishable attachments. Rename those generic
   // (or unnamed) images to image1.png, image2.png, ... so the on-disk path - and
   // therefore the reference the user can type in the prompt - is unique. Files
-  // with a real name (e.g. a dragged "diagram.png") keep it.
-  function numberGenericImage(file: File): File {
-    if (!isImageFile(file)) return file
-    const stem = file.name.replace(/\.[^.]*$/, '')
-    if (stem !== '' && stem.toLowerCase() !== 'image') return file
-    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
-    const n = ++imageCounterRef.current
-    if (counterKey) writeLocal(counterKey, String(imageCounterRef.current))
-    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
-  }
-
   // Track one file as an uploading attachment chip, returning its id. The
   // uploaded path is appended to the prompt on submit (and so wired through to
   // the agent).
@@ -690,19 +682,54 @@ export const SpawnForm = memo(function SpawnForm({
     return id
   }
 
-  // Upload each file as an attachment chip.
-  function addFiles(rawFiles: File[]) {
-    for (const file of rawFiles.map(numberGenericImage)) uploadAttachment(file)
+  // Upload each file as an attachment chip. Generically-named images are
+  // renamed image<N>.ext, N = max(current) + 1 (running within the batch).
+  // Returns the final (possibly renamed) filenames, for the paste markers.
+  function addFiles(rawFiles: File[]): string[] {
+    let nextN = nextGenericImageNumber(attachments)
+    const names: string[] = []
+    for (const raw of rawFiles) {
+      let file = raw
+      if (isImageFile(raw) && isGenericImageName(raw.name)) {
+        const ext = (raw.name.match(/\.([^.]+)$/)?.[1] || raw.type.split('/')[1] || 'png').toLowerCase()
+        file = new File([raw], `image${nextN}.${ext}`, { type: raw.type, lastModified: raw.lastModified })
+        nextN++
+      }
+      uploadAttachment(file)
+      names.push(file.name || 'pasted-image')
+    }
+    return names
   }
 
   // Attach a large text paste as a numbered file so it rides along like any
   // other attachment instead of burying the task description. The extension
   // comes from the clipboard's declared language (markdown -> .md, code -> its
   // ext), falling back to .txt, so the agent gets a correctly-typed file.
-  function attachPastedText(text: string, dt: DataTransfer | null): number {
+  function attachPastedText(text: string, dt: DataTransfer | null): { id: number; filename: string } {
     const n = ++pastedTextCounterRef.current
     const ext = pastedTextExtension(dt)
-    return uploadAttachment(new File([text], `pasted-text-${n}.${ext}`, { type: extensionMime(ext) }))
+    const filename = `pasted-text-${n}.${ext}`
+    return { id: uploadAttachment(new File([text], filename, { type: extensionMime(ext) })), filename }
+  }
+
+  // Insert text into the prompt at the caret, as its own undo step - used for
+  // the "[filename]" paste markers.
+  function insertAtCaret(insert: string) {
+    const ta = textareaRef.current
+    const start = ta?.selectionStart ?? prompt.length
+    const end = ta?.selectionEnd ?? prompt.length
+    const caret = start + insert.length
+    const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
+    commit(
+      (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
+      false,
+    )
+    if (draftKey) writeLocal(draftKey, nextPrompt || null)
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = caret
+    })
   }
 
   // Stable (memo'd AttachmentChips takes it as a prop): `commit` never changes.
@@ -728,11 +755,14 @@ export const SpawnForm = memo(function SpawnForm({
     const literal = literalPasteRef.current
     literalPasteRef.current = false
 
-    // Pasted files (screenshots, copied files) keep their upload behavior.
+    // Pasted files (screenshots, copied files) keep their upload behavior -
+    // plus, with the preference on, "[filename]" markers at the caret so the
+    // prompt references them explicitly.
     const files = extractFiles(e.clipboardData)
     if (files.length > 0) {
       e.preventDefault()
-      addFiles(files)
+      const names = addFiles(files)
+      if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
       return
     }
 
@@ -749,21 +779,31 @@ export const SpawnForm = memo(function SpawnForm({
       // Second paste of the same block: the user wants it inline after all. Drop
       // the chip AND splice the text in (fenced if it's code) as ONE undo step,
       // so a single Ctrl+Z reverses the inline - putting the block back in a chip.
+      // The chip's "[filename]" marker (if the markers preference inserted one)
+      // is stripped too, with the caret adjusted when it sat before it.
       e.preventDefault()
       const insert = last.lang ? fenceCode(text, last.lang) : text
       const ta = textareaRef.current
-      const start = ta?.selectionStart ?? prompt.length
-      const end = ta?.selectionEnd ?? prompt.length
+      let start = ta?.selectionStart ?? prompt.length
+      let end = ta?.selectionEnd ?? prompt.length
+      const stripped = stripPasteMarker(prompt, last.filename)
+      if (stripped) {
+        if (stripped.index < start) start = Math.max(stripped.index, start - stripped.length)
+        if (stripped.index < end) end = Math.max(stripped.index, end - stripped.length)
+      }
+      const base = stripped?.text ?? prompt
       const caret = start + insert.length
-      const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
+      const nextPrompt = base.slice(0, start) + insert + base.slice(end)
       commit(
-        (prev) =>
-          makeSnapshot(
-            prev.prompt.slice(0, start) + insert + prev.prompt.slice(end),
+        (prev) => {
+          const prevBase = stripPasteMarker(prev.prompt, last.filename)?.text ?? prev.prompt
+          return makeSnapshot(
+            prevBase.slice(0, start) + insert + prevBase.slice(end),
             prev.attachments.filter((a) => a.id !== last.attachmentId),
             caret,
             caret,
-          ),
+          )
+        },
         false,
       )
       if (draftKey) writeLocal(draftKey, nextPrompt || null)
@@ -778,8 +818,9 @@ export const SpawnForm = memo(function SpawnForm({
 
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
-    const id = attachPastedText(text, e.clipboardData)
-    lastPasteRef.current = { text, attachmentId: id, lang: detectCodeLanguage(e.clipboardData) }
+    const { id, filename } = attachPastedText(text, e.clipboardData)
+    if (pasteMarkers) insertAtCaret(pasteMarkerText([filename]))
+    lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -825,9 +866,9 @@ export const SpawnForm = memo(function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
-        // chat_mode is Claude-only; the toggle is hidden for other agent types,
-        // and a remembered value must not leak into their spawns.
-        ...(agentType === 'claude' && chatMode ? { chat_mode: true } : {}),
+        // Structured chat is available for Claude and Codex; a remembered value
+        // must not leak into another agent type's spawn.
+        ...((agentType === 'claude' || agentType === 'codex') && chatMode ? { chat_mode: true } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         // Omit git_isolation when '' so the server applies the project policy default.
         ...(gitIsolation ? { git_isolation: gitIsolation } : {}),
@@ -844,10 +885,8 @@ export const SpawnForm = memo(function SpawnForm({
       resetHistory(makeSnapshot('', [], 0, 0))
       if (storeKey) saveAttachments(storeKey, [])
       setLightboxIndex(null)
-      imageCounterRef.current = 0
       pastedTextCounterRef.current = 0
       lastPasteRef.current = null
-      if (counterKey) writeLocal(counterKey, null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))

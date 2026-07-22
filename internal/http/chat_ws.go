@@ -1,8 +1,10 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,7 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -42,6 +46,10 @@ type chatClientMsg struct {
 	// load_before (infinite scroll) request - the daemon returns the batch
 	// older than it.
 	Before string `json:"before,omitempty"`
+	// Cursor is the opaque normalized-event history cursor. It coexists with
+	// Before while the Claude UUID history API is migrated.
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
 	// Content is the content-block array of a user_message, forwarded to the
 	// CLI verbatim (the client owns the block shapes; the daemon only wraps
 	// them in the stdin envelope).
@@ -51,6 +59,18 @@ type chatClientMsg struct {
 	// Response is a control_response payload (e.g. AskUserQuestion answers),
 	// forwarded verbatim like Content.
 	Response json.RawMessage `json:"response,omitempty"`
+	// File is the <output-file> path of a task_output request: the background
+	// task's output file as the SANDBOXED agent saw it (its private /tmp).
+	File string `json:"file,omitempty"`
+}
+
+// chatTaskOutputFrame answers a task_output request: the (tail of the)
+// background task's output file, or an error when it can't be read.
+type chatTaskOutputFrame struct {
+	terminalEvent
+	File    string `json:"file"`
+	Content string `json:"content,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // chatQueueFrame is the server -> client snapshot of a head's queued messages,
@@ -67,6 +87,23 @@ type chatEventFrame struct {
 	Event json.RawMessage `json:"event"`
 }
 
+type normalizedChatEventFrame struct {
+	terminalEvent
+	Event chat.Event `json:"event"`
+}
+
+type chatStateSnapshotFrame struct {
+	terminalEvent
+	State chat.Projection `json:"state"`
+}
+
+type normalizedChatHistoryFrame struct {
+	terminalEvent
+	Events     []chat.Event `json:"events"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	Done       bool         `json:"done"`
+}
+
 // chatSubagentMetaFrame links a sub-agent (Task tool) to the Task tool_use that
 // spawned it, so the chat client can fold the sub-agent's sidechain activity
 // into that Task card and label it. Sent once per sub-agent, ahead of (or during
@@ -78,6 +115,9 @@ type chatSubagentMetaFrame struct {
 	ToolUseID   string `json:"toolUseId,omitempty"`
 	AgentType   string `json:"agentType,omitempty"`
 	Description string `json:"description,omitempty"`
+	// The sub-agent that spawned this one (empty for a main-agent spawn): the
+	// client folds a nested sub-agent under its parent's card, not the main flow.
+	ParentAgentID string `json:"parentAgentId,omitempty"`
 }
 
 // subagentResolver emits one subagent_meta frame per distinct sidechain
@@ -118,6 +158,7 @@ func sendSubagentMeta(conn *safeConn, agentID string, meta *claudestream.Subagen
 	f := chatSubagentMetaFrame{terminalEvent: terminalEvent{Type: "subagent_meta"}, AgentID: agentID}
 	if meta != nil {
 		f.ToolUseID, f.AgentType, f.Description = meta.ToolUseID, meta.AgentType, meta.Description
+		f.ParentAgentID = meta.ParentAgentID
 	}
 	frame, err := json.Marshal(f)
 	if err != nil {
@@ -144,10 +185,19 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		return
 	}
 	switch msg.Type {
+	case "load_events_before":
+		s.sendNormalizedHistory(conn, sessionID, msg.Cursor, msg.Limit)
+		return
 	case "load_before":
 		// Infinite scroll: send the batch of conversation history older than the
 		// client's current oldest line (msg.Before is that line's uuid).
 		sendChatHistoryBefore(conn, worktree, sessionID, msg.Before)
+		return
+	case "task_output":
+		// The expandable background-task chip asking for the task's output file
+		// (the <output-file> path its <task-notification> carried). sessionID is
+		// the head ID for a chat socket, which keys the head's private /tmp.
+		sendChatTaskOutput(conn, projectRoot, sessionID, msg.File)
 		return
 	case "user_message":
 		if !json.Valid(msg.Content) {
@@ -162,12 +212,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			s.ChatQueues.Submit(projectRoot, sessionID, heads.QueuedMessage{ID: msg.ID, Content: msg.Content}, msg.Queued)
 			return
 		}
-		line, err := claudestream.UserMessageLine(msg.Content)
-		if err != nil {
-			log.Printf("chat ws: bad user_message content for %q: %v", sessionID, err)
-			return
-		}
-		if err := s.Sessions.Write(sessionID, line); err != nil {
+		if err := s.Sessions.SendChatUser(sessionID, msg.Content); err != nil {
 			log.Printf("chat ws: write user message to %q: %v", sessionID, err)
 		}
 	case "dequeue":
@@ -176,8 +221,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			s.ChatQueues.Dequeue(projectRoot, sessionID, msg.ID)
 		}
 	case "interrupt":
-		id := fmt.Sprintf("hydra-interrupt-%d", chatInterruptSeq.Add(1))
-		if err := s.Sessions.Write(sessionID, claudestream.InterruptLine(id)); err != nil {
+		if err := s.Sessions.InterruptChat(sessionID); err != nil {
 			log.Printf("chat ws: write interrupt to %q: %v", sessionID, err)
 		} else if s.ChatQueues != nil {
 			// The CLI answers an interrupt by ending the turn with a `result`
@@ -191,19 +235,17 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			log.Printf("chat ws: set_model without a model for %q", sessionID)
 			return
 		}
-		id := fmt.Sprintf("hydra-set-model-%d", chatInterruptSeq.Add(1))
-		if err := s.Sessions.Write(sessionID, claudestream.SetModelLine(id, msg.Model)); err != nil {
+		if err := s.Sessions.SetChatModel(sessionID, msg.Model); err != nil {
 			log.Printf("chat ws: write set_model to %q: %v", sessionID, err)
+			return
+		}
+		if s.ChatEvents != nil {
+			_, _ = s.ChatEvents.Append(sessionID, "model_changed", map[string]any{"model": msg.Model})
 		}
 	case "control_response":
 		// The client answers a CLI control_request (AskUserQuestion) with a
 		// payload the daemon forwards verbatim.
-		line, err := claudestream.ControlResponseLine(msg.Response)
-		if err != nil {
-			log.Printf("chat ws: bad control_response for %q: %v", sessionID, err)
-			return
-		}
-		if err := s.Sessions.Write(sessionID, line); err != nil {
+		if err := s.Sessions.RespondChat(sessionID, msg.Response); err != nil {
 			log.Printf("chat ws: write control_response to %q: %v", sessionID, err)
 		}
 	case "resize":
@@ -213,9 +255,41 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	}
 }
 
+func (s *Server) sendNormalizedHistory(conn *safeConn, agentID, cursor string, limit int) {
+	if s.ChatEvents == nil {
+		return
+	}
+	events, next, done, err := s.ChatEvents.Before(agentID, cursor, limit)
+	if err != nil {
+		log.Printf("chat ws: normalized history for %q: %v", agentID, err)
+		return
+	}
+	data, err := json.Marshal(normalizedChatHistoryFrame{
+		terminalEvent: terminalEvent{Type: "chat_history"},
+		Events:        events, NextCursor: next, Done: done,
+	})
+	if err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+func sendNormalizedEvent(conn *safeConn, event chat.Event) bool {
+	data, err := json.Marshal(normalizedChatEventFrame{terminalEvent: terminalEvent{Type: "chat_event"}, Event: event})
+	if err != nil {
+		return true
+	}
+	return conn.WriteMessage(websocket.TextMessage, data) == nil
+}
+
 // sendChatEventLine relays one stream-json line as a claude_event frame.
 // Returns false once the socket write fails.
 func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
+	// Drop the CLI's internal resume placeholders (the injected "Continue from
+	// where you left off." / "No response requested." pair); its own UI hides
+	// them and they'd otherwise render as spurious chat bubbles.
+	if claudestream.IsHiddenChatMessage(line) {
+		return true
+	}
 	frame, err := json.Marshal(chatEventFrame{
 		terminalEvent: terminalEvent{Type: "claude_event"},
 		Event:         json.RawMessage(line),
@@ -231,20 +305,152 @@ func sendChatEventLine(conn *safeConn, line []byte, agentID string) bool {
 	return true
 }
 
+// taskOutputMaxBytes caps how much of a background task's output file one
+// task_output reply carries (the tail - the end of a long log is what matters).
+const taskOutputMaxBytes = 256 * 1024
+
+// validTaskOutputPath accepts only the path shape the CLI's <task-notification>
+// records actually carry - an absolute, clean /tmp/.../tasks/<id>.output file -
+// so the socket can't be used to read arbitrary files.
+func validTaskOutputPath(file string) bool {
+	return strings.HasPrefix(file, "/tmp/") &&
+		filepath.Clean(file) == file &&
+		!strings.Contains(file, "..") &&
+		strings.Contains(file, "/tasks/") &&
+		strings.HasSuffix(file, ".output")
+}
+
+// sendChatTaskOutput answers a task_output request with the (tail of the)
+// background task's output file. The path arrives as the SANDBOXED agent saw it
+// (/tmp/claude-.../tasks/<id>.output); on a sandboxed head /tmp is the head's
+// private dir (heads.HeadTmpDir), so that translation is tried first and the
+// raw path second (an unsandboxed head whose /tmp is the real one).
+func sendChatTaskOutput(conn *safeConn, projectRoot, headID, file string) {
+	frame := chatTaskOutputFrame{terminalEvent: terminalEvent{Type: "task_output"}, File: file}
+	if !validTaskOutputPath(file) {
+		frame.Error = "invalid output file path"
+	} else {
+		var candidates []string
+		if tmp := heads.HeadTmpDir(projectRoot, headID); tmp != "" {
+			candidates = append(candidates, filepath.Join(tmp, strings.TrimPrefix(file, "/tmp/")))
+		}
+		candidates = append(candidates, file)
+		frame.Error = "output file not found (it may have been cleaned up)"
+		for _, p := range candidates {
+			content, err := readFileTail(p, taskOutputMaxBytes)
+			if err == nil {
+				frame.Content, frame.Error = content, ""
+				break
+			}
+		}
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// readFileTail reads up to the last maxBytes of a file (whole file when
+// smaller), dropping a leading partial line after a mid-file start.
+func readFileTail(path string, maxBytes int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	truncated := false
+	if info.Size() > maxBytes {
+		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
+			return "", errtrace.Wrap(err)
+		}
+		truncated = true
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if truncated {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			data = data[idx+1:]
+		}
+		return "[... earlier output truncated ...]\n" + string(data), nil
+	}
+	return string(data), nil
+}
+
+// chatStreamDebug traces the arrival cadence of live token deltas (stream_event
+// lines) to the daemon log. Off by default; enable with HYDRA_CHAT_STREAM_DEBUG=1
+// (read once at start, so restart the daemon after setting it). It exists to
+// answer one question the code alone can't: does the `claude` CLI flush its token
+// deltas per line (smooth) or in bursts (chunky)? The whole Hydra relay is
+// already per-line-immediate (see relayChatChunk / session.readLoop), so any
+// remaining chunkiness lives in the CLI's own stdout buffering over its pipe -
+// this trace measures exactly that boundary. Mirrors HYDRA_EGRESS_DEBUG.
+var chatStreamDebug = os.Getenv("HYDRA_CHAT_STREAM_DEBUG") != ""
+
+// streamTimer accumulates per-connection token-delta timing for chatStreamDebug.
+// One per live chat connection (its inter-delta gaps must not interleave with
+// another connection's), created in pumpChatOutput.
+type streamTimer struct {
+	last  time.Time
+	count int
+}
+
+// note logs one live token-delta line's inter-arrival gap and byte size. No-op
+// unless chatStreamDebug is on; nil-safe so non-live callers pass nil. Consecutive
+// deltas at +0ms then a jump means the CLI block-buffered a burst into one read;
+// a steady small gap per delta means it flushes per line.
+func (t *streamTimer) note(agentID string, line []byte) {
+	if !chatStreamDebug || t == nil {
+		return
+	}
+	now := time.Now()
+	var gapMS int64
+	if !t.last.IsZero() {
+		gapMS = now.Sub(t.last).Milliseconds()
+	}
+	t.last = now
+	t.count++
+	log.Printf("chat stream[%s]: delta #%d +%dms %dB", agentID, t.count, gapMS, len(line))
+}
+
 // relayChatChunk feeds one output chunk through the line reassembler and
 // relays each complete stream-json line as a claude_event frame. Non-protocol
 // lines (pre-spawn-script output sharing the stdout pipe, a mid-line ring-wrap
 // fragment at the start of a replay) are skipped, as are lines whose uuid was
 // already delivered by the transcript backfill. Relayed uuids are added to
 // skip so the sub-agent transcript tailer never re-delivers a line an (older)
-// CLI also put on stdout. Returns false once the socket write fails.
-func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver) bool {
+// CLI also put on stdout. Returns false once the socket write fails. timer is
+// the chatStreamDebug tracer (nil on non-live paths, e.g. the ring replay).
+func relayChatChunk(conn *safeConn, lb *claudestream.LineBuffer, chunk []byte, agentID string, skip map[string]struct{}, subs *subagentResolver, dropResults bool, timer *streamTimer) bool {
 	for _, line := range lb.Feed(chunk) {
 		ev, ok := claudestream.ParseEvent(line)
 		if !ok {
 			if len(line) > 0 {
 				log.Printf("chat ws: skipping non-protocol line for %q (%d bytes)", agentID, len(line))
 			}
+			continue
+		}
+		// (The active model on a system:init line is captured by the session's
+		// RingFilter.OnModel, browser-independent - not here.)
+		// A live token delta (partial-message stream_event): trace its cadence.
+		if ev.Type == "stream_event" {
+			timer.note(agentID, line)
+		}
+		// Drop `result` events during the scrollback-ring replay. The durable
+		// transcript carries none, so a past turn's result only exists in the ring
+		// - which replays AFTER the whole transcript backfill, landing a finished
+		// turn's "Crunched for Xs" footer at the very bottom of the conversation,
+		// right above the live "working" indicator (it reads as "this running turn
+		// already finished"). Each backfilled turn already gets an in-place footer
+		// synthesized from its assistant usage, so the ring copy is just misplaced
+		// noise. Live results (dropResults=false) stream in order and are kept.
+		if dropResults && ev.Type == "result" {
 			continue
 		}
 		if ev.UUID != "" {
@@ -298,6 +504,60 @@ func tailSubagentGrowth(dir string, stop <-chan struct{}, out chan<- []claudestr
 	}
 }
 
+// tailNotifications polls the newest session's main transcript for
+// <task-notification> records and sends each Poll's growth on out until stop
+// closes. Runs as a goroutine per chat connection; the pump goroutine owns all
+// socket writes and dedup. These records (a background/async sub-agent's
+// completion) are never on the parent stdout, so this is the only live source
+// for settling a finished background sub-agent's card.
+func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
+	tail := claudestream.NewNotificationTailer(dir)
+	ticker := time.NewTicker(subagentPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			lines := tail.Poll()
+			if len(lines) == 0 {
+				continue
+			}
+			select {
+			case out <- lines:
+			case <-stop:
+				return
+			}
+		}
+	}
+}
+
+// emitThinkingDurations replays the head's measured thinking-block durations
+// (from its .hydra/local/thinking/<id>.json sidecar) as synthetic hydra_thinking
+// claude_event frames. Sent BEFORE the transcript backfill so the client has
+// every duration in hand by the time it builds the matching thinking items -
+// letting a reload/resume render "Thought for Xs" (and keep empty
+// silently-reasoned thoughts visible) without the browser having timed them.
+// Best-effort: no sidecar (a head that never produced a thought) sends nothing.
+func emitThinkingDurations(conn *safeConn, projectRoot, agentID string) {
+	if projectRoot == "" || agentID == "" {
+		return
+	}
+	for messageID, durationMS := range heads.LoadThinkingDurations(projectRoot, agentID) {
+		line, err := json.Marshal(map[string]any{
+			"type":        "hydra_thinking",
+			"message_id":  messageID,
+			"duration_ms": durationMS,
+		})
+		if err != nil {
+			continue
+		}
+		if !sendChatEventLine(conn, line, agentID) {
+			return
+		}
+	}
+}
+
 // backfillChatHistory relays the head's conversation history from its Claude
 // transcript file (~/.claude/projects/<cwd-slug>/<session>.jsonl) as
 // claude_event frames. The scrollback ring only covers the current process
@@ -315,10 +575,28 @@ func backfillChatHistory(conn *safeConn, agentID, dir string, subs *subagentReso
 	if transcript == "" {
 		return nil
 	}
-	lines, uuids, err := claudestream.TailTranscript(transcript, claudestream.DefaultBackfillBytes)
+	lines, prelude, uuids, err := claudestream.TailTranscriptAndPrelude(transcript, claudestream.DefaultBackfillBytes)
 	if err != nil {
 		log.Printf("chat ws: backfill transcript for %q: %v", agentID, err)
 		return nil
+	}
+	// Pre-window <task-notification> records first, as settle-only frames: a
+	// byte-dense conversation pushes a background task's completion record out
+	// of the tail window in seconds, and without it the client can't tell a
+	// finished background sub-agent from a running one (its card would read
+	// "working" forever). The distinct frame type lets the client apply the
+	// completion WITHOUT rendering a chronologically misplaced notice chip.
+	for _, line := range prelude {
+		frame, err := json.Marshal(chatEventFrame{
+			terminalEvent: terminalEvent{Type: "notification_backfill"},
+			Event:         json.RawMessage(line),
+		})
+		if err != nil {
+			continue
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+			return uuids
+		}
 	}
 	for _, line := range lines {
 		if !sendChatEventLine(conn, line, agentID) {
@@ -346,6 +624,37 @@ func backfillChatHistory(conn *safeConn, agentID, dir string, subs *subagentReso
 		}
 	}
 	return uuids
+}
+
+// chatPlanFrame carries the daemon-tracked plan/to-do list, sent once per
+// attach right after the transcript backfill.
+type chatPlanFrame struct {
+	terminalEvent
+	Plan string `json:"plan"`
+}
+
+// sendPlan hands the client the daemon's copy of the head's plan/to-do list -
+// the live session tracker when it has one (freshest, and covers changes whose
+// DB write is still in flight), else the persisted Agent.Plan. The client's
+// own reconstruction only sees the backfill tail window, so without this a
+// plan whose Task* creates predate the window - a head that ran unwatched, or
+// a byte-dense conversation - never resurfaces (the scroll-older page
+// deliberately leaves the panel alone). Best-effort: no plan sends nothing.
+func (s *Server) sendPlan(conn *safeConn, agentID string) {
+	planJSON := s.Sessions.ChatPlanJSON(agentID)
+	if planJSON == "" {
+		if ag, err := s.DB.GetAgent(agentID); err == nil && ag != nil {
+			planJSON = ag.Plan
+		}
+	}
+	if planJSON == "" {
+		return
+	}
+	frame, err := json.Marshal(chatPlanFrame{terminalEvent: terminalEvent{Type: "plan"}, Plan: planJSON})
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
 // chatTranscriptPath resolves the head's newest Claude transcript file, or ""
@@ -377,6 +686,11 @@ func sendChatHistoryBefore(conn *safeConn, worktree, agentID, beforeUUID string)
 		} else {
 			frame.Done = done
 			for _, line := range lines {
+				// Same resume-placeholder filter as the live/backfill relay
+				// (sendChatEventLine); this scroll-older path builds frames directly.
+				if claudestream.IsHiddenChatMessage(line) {
+					continue
+				}
 				frame.Events = append(frame.Events, json.RawMessage(line))
 			}
 		}
@@ -406,21 +720,57 @@ func claudeProjectDir(worktree string) string {
 // snapshot, then live events - merged with live sub-agent transcript growth
 // (the tail goroutine; current CLIs keep sub-agent steps off the main stdout).
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
+	var normalized <-chan chat.Event
+	normalizedMode := false
+	if s.ChatEvents != nil {
+		if err := s.ChatEvents.Flush(agentID); err != nil {
+			log.Printf("chat ws: flush normalized events for %q: %v", agentID, err)
+		} else if snapshot, live, cancel, err := s.ChatEvents.Watch(agentID); err != nil {
+			log.Printf("chat ws: watch normalized events for %q: %v", agentID, err)
+		} else {
+			defer cancel()
+			normalized = live
+			normalizedMode = true
+			if data, err := json.Marshal(chatStateSnapshotFrame{terminalEvent: terminalEvent{Type: "state_snapshot"}, State: snapshot}); err == nil {
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+			}
+			// The initial display window ends exactly at the snapshot watermark;
+			// live contains only events appended after it.
+			s.sendNormalizedHistory(conn, agentID, fmt.Sprintf("%d", snapshot.Through+1), 100)
+		}
+	}
 	dir := claudeProjectDir(worktree)
 	subs := newSubagentResolver(dir)
-	skip := backfillChatHistory(conn, agentID, dir, subs)
+	// Replay measured thinking durations first, so the client has them before it
+	// builds the thinking items the transcript backfill is about to produce.
+	if !normalizedMode {
+		emitThinkingDurations(conn, projectRoot, agentID)
+	}
+	var skip map[string]struct{}
+	if !normalizedMode {
+		skip = backfillChatHistory(conn, agentID, dir, subs)
+	}
 	if skip == nil {
 		skip = map[string]struct{}{}
 	}
+	if !normalizedMode {
+		s.sendPlan(conn, agentID)
+	}
 
 	lb := &claudestream.LineBuffer{}
+	// Per-connection token-delta cadence tracer (HYDRA_CHAT_STREAM_DEBUG); nil-safe
+	// and a no-op unless enabled.
+	streamDbg := &streamTimer{}
 	// Attach queues the ring snapshot synchronously before returning, so a
 	// non-blocking receive here reliably distinguishes "history exists" from
 	// "nothing yet" - the client needs replay_done to know when the live
 	// stream starts.
 	select {
 	case data, ok := <-att.Output:
-		if ok && !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+		// dropResults: this is the ring-snapshot replay (one atomic chunk, queued
+		// before Attach returned) - drop its misplaced past-turn result footers.
+		// nil timer: replayed history isn't live streaming, so don't trace it.
+		if ok && !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, true, nil) {
 			return
 		}
 	default:
@@ -440,23 +790,36 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		s.ChatQueues.OnAttach(projectRoot, agentID)
 	}
 
-	// Live sub-agent activity: tail the session's subagents/*.jsonl growth in
-	// a goroutine and relay it here, so all socket writes and uuid dedup stay
-	// on this goroutine.
+	// Live sub-agent activity: tail the session's subagents/*.jsonl growth (its
+	// inner steps) and the main transcript's <task-notification> records (a
+	// background/async sub-agent's completion) in goroutines and relay both here,
+	// so all socket writes and uuid dedup stay on this goroutine.
 	var subGrowth chan []claudestream.SubagentGrowth
+	var notif chan [][]byte
 	if dir != "" {
 		subGrowth = make(chan []claudestream.SubagentGrowth, 1)
+		notif = make(chan [][]byte, 1)
 		stop := make(chan struct{})
 		defer close(stop)
 		go tailSubagentGrowth(dir, stop, subGrowth)
+		go tailNotifications(dir, stop, notif)
 	}
 
 	for {
 		select {
 		case <-att.Done:
 			return
+		case ev, ok := <-normalized:
+			if !ok {
+				normalized = nil
+				continue
+			}
+			if !sendNormalizedEvent(conn, ev) {
+				return
+			}
 		case growth := <-subGrowth:
 			for _, g := range growth {
+				meta, _ := claudestream.ReadSubagentMeta(dir, g.SessionID, g.AgentID)
 				for _, line := range g.Lines {
 					ev, ok := claudestream.ParseEvent(line)
 					if !ok {
@@ -468,19 +831,43 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 						}
 						skip[ev.UUID] = struct{}{}
 					}
-					if !subs.resolve(conn, g.AgentID, g.SessionID) {
+					if !normalizedMode && !subs.resolve(conn, g.AgentID, g.SessionID) {
 						return
 					}
-					if !sendChatEventLine(conn, line, agentID) {
+					if s.ChatEvents != nil {
+						s.ChatEvents.ObserveClaudeSidechain(agentID, g.AgentID, meta, line)
+					}
+					if !normalizedMode && !sendChatEventLine(conn, line, agentID) {
 						return
 					}
+				}
+			}
+		case lines := <-notif:
+			// A background/async sub-agent's completion notification, off the main
+			// transcript (never on stdout). Relay it verbatim - the client folds it
+			// into a notice and settles the matching sub-agent card. Dedup the
+			// attachment copy by uuid against stdout/backfill; the queue-operation
+			// copy has none, so the client dedups the duplicate by content.
+			for _, line := range lines {
+				if ev, ok := claudestream.ParseEvent(line); ok && ev.UUID != "" {
+					if _, dup := skip[ev.UUID]; dup {
+						continue
+					}
+					skip[ev.UUID] = struct{}{}
+				}
+				if s.ChatEvents != nil {
+					s.ChatEvents.ObserveProviderLine(agentID, "claude", line)
+				}
+				if !normalizedMode && !sendChatEventLine(conn, line, agentID) {
+					return
 				}
 			}
 		case data, ok := <-att.Output:
 			if !ok {
 				return
 			}
-			if !relayChatChunk(conn, lb, data, agentID, skip, subs) {
+			// Live stream (post replay_done): results arrive in order, so keep them.
+			if !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
 				return
 			}
 		}

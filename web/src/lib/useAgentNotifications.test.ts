@@ -1,11 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
+import { isValidElement, type ReactElement } from 'react'
 import { useAgentNotifications } from './useAgentNotifications'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
-import { useToastStore } from '../stores/toastStore'
-import type { AgentResponse } from '../api'
+import { useToastStore, type Toast } from '../stores/toastStore'
+import type { AgentTransitionSpec } from './agentToast'
+import type { AgentResponse, ApprovalRequest } from '../api'
 import { AgentStatus } from '../api'
+
+// The approval-lifetime tests drive the gate's parked-request fetch. Mock the API
+// client so we control exactly what listAgentApprovals returns each tick.
+vi.mock('../stores/apiClient', () => ({
+  api: {
+    default: {
+      listAgentApprovals: vi.fn(),
+      decideAgentApproval: vi.fn(() => Promise.resolve({})),
+    },
+  },
+}))
+import { api } from '../stores/apiClient'
 
 // react-router's useNavigate touches a live router context we don't set up here;
 // the transition-toast path only needs it to exist, so stub it to a no-op.
@@ -20,7 +34,14 @@ vi.mock('./notifyPrefs', () => ({
   fireNotification: vi.fn(),
   dismissNotification: vi.fn(),
 }))
-import { dismissNotification } from './notifyPrefs'
+import { dismissNotification, fireNotification } from './notifyPrefs'
+
+// Resolving a real icon needs a canvas; the hook only forwards whatever URL the
+// cache holds, so stub it to a fixed one and assert the hand-off.
+vi.mock('./projectIconUrl', () => ({
+  ensureProjectIconUrl: vi.fn(() => Promise.resolve('icon-url')),
+  projectIconUrl: vi.fn(() => 'icon-url'),
+}))
 
 const PROJECT = 'proj-1'
 
@@ -47,14 +68,20 @@ function seedAgents(agents: AgentResponse[]) {
   })
 }
 
+// Agent-transition toasts carry a rich element `message` (the AgentTransitionRow
+// from lib/agentToast); plain toasts have a string message. So an element message
+// identifies a transition toast, and its props are the AgentTransitionSpec.
 const transitionToasts = () =>
-  useToastStore.getState().toasts.filter((t) => t.agentTransition !== undefined)
+  useToastStore.getState().toasts.filter((t) => isValidElement(t.message))
+const specOf = (t: Toast) => (t.message as ReactElement<AgentTransitionSpec>).props
 
 beforeEach(() => {
   useToastStore.setState(useToastStore.getInitialState(), true)
   useAgentStore.setState(useAgentStore.getInitialState(), true)
   useProjectStore.setState({ projects: [] })
   vi.mocked(dismissNotification).mockClear()
+  vi.mocked(fireNotification).mockClear()
+  vi.mocked(api.default.listAgentApprovals).mockReset()
 })
 
 afterEach(() => {
@@ -74,7 +101,7 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
   it('pops a finished transition toast when a different branch is selected', () => {
     runTransition('other-agent', AgentStatus.FINISHED)
     expect(transitionToasts()).toHaveLength(1)
-    expect(transitionToasts()[0].agentTransition?.agentId).toBe('a1')
+    expect(specOf(transitionToasts()[0]).agentId).toBe('a1')
   })
 
   it('pops a needs_input transition toast when no branch is selected', () => {
@@ -96,13 +123,59 @@ describe('useAgentNotifications - suppress toasts for the selected branch', () =
     runTransition('other-agent', AgentStatus.ERRORED)
     const toasts = transitionToasts()
     expect(toasts).toHaveLength(1)
-    expect(toasts[0].agentTransition?.status).toBe('errored')
+    expect(specOf(toasts[0]).status).toBe('errored')
     expect(toasts[0].type).toBe('error')
   })
 
   it('suppresses the error toast when its own branch is the selected one', () => {
     runTransition('a1', AgentStatus.ERRORED)
     expect(transitionToasts()).toHaveLength(0)
+  })
+})
+
+// Out of tab (pageActive=false) the OS notification leads with "Hydra agent in
+// <project>" and carries the agent name as the body - the toast's agent-first
+// wording is the in-app case, where the project is already obvious.
+describe('useAgentNotifications - OS notification copy', () => {
+  // Same as runTransition but backgrounded, which is what lets fireNotification run.
+  function runBackgroundTransition(to: AgentStatus, agent?: AgentResponse) {
+    seedAgents([makeAgent('a1', AgentStatus.RUNNING)])
+    renderHook(() => useAgentNotifications(PROJECT, false, undefined))
+    seedAgents([agent ?? makeAgent('a1', to)])
+    return vi.mocked(fireNotification).mock.calls[0]?.[0]
+  }
+
+  it('titles a finished notification with the project id and bodies it with the agent', () => {
+    const opts = runBackgroundTransition(AgentStatus.FINISHED)
+    expect(opts?.title).toBe('Hydra agent in proj-1 finished')
+    expect(opts?.body).toBe('a1')
+  })
+
+  it('titles a needs_input notification with the project id', () => {
+    const opts = runBackgroundTransition(AgentStatus.NEEDS_INPUT)
+    expect(opts?.title).toBe('Hydra agent in proj-1 needs input')
+    expect(opts?.body).toBe('a1')
+  })
+
+  it('titles an errored notification with the project id', () => {
+    const opts = runBackgroundTransition(AgentStatus.ERRORED)
+    expect(opts?.title).toBe('Hydra agent in proj-1 hit an API error')
+  })
+
+  it('uses the agent title, not its id, as the body when it has one', () => {
+    const titled = { ...makeAgent('a1', AgentStatus.FINISHED), title: 'Fix the parser' }
+    const opts = runBackgroundTransition(AgentStatus.FINISHED, titled)
+    expect(opts?.body).toBe('Fix the parser')
+  })
+
+  it("forwards the project's icon so the tray shows which project woke you", () => {
+    const opts = runBackgroundTransition(AgentStatus.FINISHED)
+    expect(opts?.icon).toBe('icon-url')
+  })
+
+  it('stays silent while the tab is in front (the toast covers it)', () => {
+    runTransition(undefined, AgentStatus.FINISHED)
+    expect(fireNotification).not.toHaveBeenCalled()
   })
 })
 
@@ -137,5 +210,88 @@ describe('useAgentNotifications - retract OS notifications when state clears', (
     seedAgents([makeAgent('a1', AgentStatus.FINISHED, true)])
 
     expect(dismissNotification).not.toHaveBeenCalledWith('finished:a1')
+  })
+})
+
+// A parked network/gate request lives on disk for the whole approval window and
+// listAgentApprovals reads it directly, so a card's lifetime follows its REQUEST -
+// not the head's momentary status. The head routinely leaves the policy_approval
+// wait mid-park (the in-sandbox client times out the held connection and the
+// agent's own hook rewrites status to "running"), and the card must survive that
+// so the user still gets to grant the host (which persists it for the retry).
+describe('useAgentNotifications - approval cards outlive the policy_approval status', () => {
+  // A head parked on the gate: needs_input with a policy_approval notification.
+  function parkedAgent(id: string, timestamp = 'park-1'): AgentResponse {
+    return {
+      ...makeAgent(id, AgentStatus.NEEDS_INPUT),
+      agent_status: { status: AgentStatus.NEEDS_INPUT, timestamp, notification_type: 'policy_approval' },
+    }
+  }
+  // The same head after its own hook rewrote status off the wait (client gave up).
+  function runningAgent(id: string, timestamp: string): AgentResponse {
+    return { ...makeAgent(id, AgentStatus.RUNNING), agent_status: { status: AgentStatus.RUNNING, timestamp } }
+  }
+  function egressReq(reqid: string, target = 'example.com'): ApprovalRequest {
+    return { reqid, tool: 'egress', kind: 'egress', target, summary: `wants to connect to "${target}"` }
+  }
+  const mockApprovals = (reqs: ApprovalRequest[]) =>
+    vi.mocked(api.default.listAgentApprovals).mockResolvedValue({ approvals: reqs })
+  // Cards that are actually visible (a dismiss flags `exiting` before the removal
+  // animation, so filter those out - they're on their way off screen).
+  const visibleCards = () =>
+    useToastStore.getState().toasts.filter((t) => t.approval?.kind === 'egress' && !t.exiting)
+  // Let the effect's async listAgentApprovals fetch settle.
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+  it('surfaces an egress approval card while the head is parked', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+  })
+
+  it('keeps the card up after the head leaves the wait while the request is still parked', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // The agent's PostToolUse hook rewrites status to running, but the egress
+    // connection is still parked server-side (the request is still returned).
+    seedAgents([runningAgent('a1', 'run-1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+  })
+
+  it('tears the card down once the parked request is withdrawn (timeout/decided)', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    seedAgents([runningAgent('a1', 'run-1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // The approval window elapses: the proxy withdraws the request. Any later
+    // re-render re-polls the lingering card and finds it gone.
+    mockApprovals([])
+    seedAgents([runningAgent('a1', 'run-2')])
+    await settle()
+    expect(visibleCards()).toHaveLength(0)
+  })
+
+  it('tears the card down when the head disappears from the list entirely', async () => {
+    mockApprovals([egressReq('egress-1')])
+    renderHook(() => useAgentNotifications(PROJECT, true, undefined))
+    seedAgents([parkedAgent('a1')])
+    await settle()
+    expect(visibleCards()).toHaveLength(1)
+
+    // Killed/merged: gone from the agent list, so its card is torn down silently.
+    seedAgents([])
+    await settle()
+    expect(visibleCards()).toHaveLength(0)
   })
 })

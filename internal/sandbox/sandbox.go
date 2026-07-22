@@ -10,6 +10,7 @@ package sandbox
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -205,7 +206,10 @@ func ProviderHostGroups() []ProviderHostGroup {
 			"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
 			"platform.claude.com", "http-intake.logs.us5.datadoghq.com",
 		}},
-		{AgentTypeCodex, []string{"api.openai.com", "*.openai.com", "chatgpt.com"}}, // OpenAI / Codex
+		{AgentTypeCodex, []string{
+			"api.openai.com", "*.openai.com",
+			"chatgpt.com", "*.chatgpt.com", "*.oaiusercontent.com",
+		}}, // OpenAI / Codex
 		{AgentTypeGemini, []string{"*.googleapis.com"}},
 		{AgentTypeCopilot, []string{"*.githubcopilot.com"}},
 	}
@@ -652,4 +656,37 @@ func expandAll(paths []string, home string) []string {
 		out = append(out, e)
 	}
 	return out
+}
+
+// ensureWritableDir best-effort creates a configured writable_path that does not
+// yet exist on the host, so a freshly-added cache/store dir (e.g.
+// ~/.local/share/aube) is present for the sandbox to bind (Linux) or allow
+// (macOS). Without this a writable_path pointing at a not-yet-created dir is
+// silently skipped - bwrap won't bind a missing source, and a Seatbelt
+// file-write rule can't write under a missing parent.
+//
+// Scoped to HOME-anchored paths: a config typo can then only ever create a stray
+// dir under the user's own HOME, never a system path, and MkdirAll on an absolute
+// system path would usually fail on permissions anyway. p must already be
+// expanded (see expandPath). Failures are logged and non-fatal - the path is left
+// missing and skipped downstream, exactly as before this call existed.
+func ensureWritableDir(p, home string) {
+	if p == "" || home == "" {
+		return
+	}
+	if _, err := os.Stat(p); err == nil {
+		return // already exists - nothing to do
+	} else if !os.IsNotExist(err) {
+		return // a stat error other than "missing" (e.g. EACCES) - don't touch it
+	}
+	// Only auto-create paths that resolve to somewhere under HOME.
+	rel, err := filepath.Rel(home, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		log.Printf("sandbox: could not create writable_path %s: %v (leaving it unbound)", p, err)
+		return
+	}
+	log.Printf("sandbox: created missing writable_path %s", p)
 }

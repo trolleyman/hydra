@@ -15,10 +15,6 @@ export const StorageKeys = {
   // explicit toggle persists this; the small-screen auto-close on navigation is
   // transient so it doesn't clobber the desktop preference.
   sidebarCollapsed: 'hydra-sidebar-collapsed',
-  // '0' when the user has opted OUT of the new two-pane agent layout, falling
-  // back to the classic single-scroll stacked layout. Absent/'1' = the new split
-  // layout (the default). Browser-scoped, global (see lib/layout.ts).
-  splitLayoutEnabled: 'hydra-split-layout',
   // The left (working) pane's share of the agent-page split, as a stored float
   // fraction in [0,1] (e.g. '0.4' = 40% terminal / 60% inspector). Global, like
   // sidebarWidth. See AgentDetail / lib/layout.ts.
@@ -37,7 +33,7 @@ export const StorageKeys = {
   // spawn form seeds the next spawn of that same agent type. '' / absent = the
   // CLI's own default.
   defaultModel: 'hydra-default-model',
-  // 'true' when the spawn form's chat-mode toggle (Claude only)
+  // 'true' when the spawn form's structured chat-mode toggle
   // was last on, so the next spawn defaults to the same mode.
   defaultChatMode: 'hydra-default-chat-mode',
   // '1' when the Settings Review section is collapsed (it starts collapsed).
@@ -47,6 +43,16 @@ export const StorageKeys = {
   // messages (the default is serif, Claude-app style). User text stays sans
   // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
   chatSerif: 'hydra-chat-serif',
+  // '0' when the user turned OFF the paste markers: pasting an attachment
+  // (image / large text) into a composer also inserts its "[filename]" at the
+  // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
+  pasteMarkers: 'hydra-paste-markers',
+  // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
+  // text. Default (absent) = on: incoming token bursts are revealed at a steady
+  // per-frame rate so the text reads as continuous typing rather than landing in
+  // ~quarter-second chunks (the claude CLI flushes deltas ~5x/sec). Client-only,
+  // global (localStorage, like Theme). See lib/chatPrefs.
+  chatSmoothStreaming: 'hydra-chat-smooth-streaming',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
@@ -58,6 +64,8 @@ export const StorageKeys = {
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
+  // Whether the diff's file-list column is hidden (the Files header's toggle).
+  diffFilesListHidden: 'hydra-diff-files-list-hidden',
   diffImageMode: 'hydra-diff-image-mode',
   // Artifact masonry layout: JSON map of file name → column span override, set by
   // dragging a tile's edge. Tiles without an entry auto-span by aspect ratio.

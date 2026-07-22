@@ -1,8 +1,8 @@
-import { Check, Copy, Tag } from 'lucide-react'
+import { Check, Copy, GitBranch } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { copyBranchName } from '../lib/branch'
 
-// BranchTag renders an agent's branch as a mono tag with a tag icon, plus a
+// BranchTag renders an agent's branch as a mono tag with a branch icon, plus a
 // copy button just after the name (the "B" keyboard shortcut copies the same
 // thing - see AgentDetail).
 //
@@ -25,7 +25,7 @@ export function BranchTag({ branch }: { branch: string }) {
         e.clipboardData.setData('text/plain', cleaned)
       }}
     >
-      <Tag className="w-3.5 h-3.5" />
+      <GitBranch className="w-3.5 h-3.5" />
       {branch}
       <button
         type="button"

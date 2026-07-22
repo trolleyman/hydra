@@ -267,6 +267,12 @@ function ArtifactFilterBarImpl({
   showChangeFilter?: boolean
   className?: string
 }) {
+  // Collapsible search: the box shows as just a magnifier button and animates
+  // open into a full input on focus, staying open while it holds text.
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [searchFocused, setSearchFocused] = useState(false)
+  const searchExpanded = searchFocused || search.length > 0
+
   // Every tag offered by any file, partitioned into scoped categories and free-form
   // tags. Drives the per-scope dropdowns.
   const collectedTags = useMemo(() => collectTags(files, pendingTags), [files, pendingTags])
@@ -325,16 +331,34 @@ function ArtifactFilterBarImpl({
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ''}`}>
       {/* Search box, leftmost: a split-word fuzzy match + rank over each file's name
           and tags (see searchScore). Narrows the grid live and reorders the best
-          matches first; non-matching cards drop out entirely. */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" />
+          matches first; non-matching cards drop out entirely. Collapsed it's a
+          plain magnifier button; clicking it focuses the (opacity-faded) input,
+          which animates its width open. It re-collapses on blur unless it holds
+          text. overflow-hidden clips the input while narrow. */}
+      <div
+        className={`relative h-7 shrink-0 rounded-md border overflow-hidden transition-[width,border-color] duration-200 bg-white dark:bg-gray-700 ${searchFocused ? 'border-blue-500' : 'border-gray-200 dark:border-gray-600'}`}
+        style={{ width: searchExpanded ? 144 : 28 }}
+      >
+        <button
+          type="button"
+          onClick={() => searchInputRef.current?.focus()}
+          aria-label="Search artifacts by name or tag"
+          tabIndex={searchExpanded ? -1 : 0}
+          className="absolute left-0 top-0 h-7 w-7 flex items-center justify-center text-gray-400 dark:text-gray-500 cursor-pointer"
+        >
+          <Search className="w-3 h-3" />
+        </button>
         <input
+          ref={searchInputRef}
           type="text"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
           placeholder="search"
           aria-label="Search artifacts by name or tag"
-          className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+          style={{ pointerEvents: searchExpanded ? 'auto' : 'none' }}
+          className={`h-7 w-full pl-7 pr-6 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none transition-opacity duration-150 ${searchExpanded ? 'opacity-100' : 'opacity-0'}`}
         />
         {search && (
           <button

@@ -26,7 +26,7 @@ func TestInboundPortSpec(t *testing.T) {
 func TestPastaArgsInboundForward(t *testing.T) {
 	// The forwarded port must ride -t bound to host loopback only; everything
 	// else stays off.
-	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 38913)
+	args := PastaArgs("/usr/bin/pasta", MapAddr, nil, 38913, "")
 	if !argHasValue(args, "-t", "127.0.0.1/38913") {
 		t.Errorf("PastaArgs must forward the inbound port via -t: %v", args)
 	}
@@ -38,7 +38,7 @@ func TestPastaArgsInboundForward(t *testing.T) {
 func TestHardWrapArgvInboundForward(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--", "bash"}
-	argv := HardWrapArgv(hm, 54321, nil, 38913, bwrap, "")
+	argv := HardWrapArgv(hm, 54321, nil, 38913, bwrap, "", "")
 	if !argHasValue(argv, "-t", "127.0.0.1/38913") {
 		t.Errorf("HardWrapArgv must thread the inbound forward to pasta -t: %v", argv)
 	}

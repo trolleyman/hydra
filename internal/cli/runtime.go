@@ -11,6 +11,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
@@ -140,14 +141,78 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// the registry's stdout hooks so the queue drains even with no client
 	// attached (the agent keeps working through the queue).
 	chatQueues := heads.NewChatQueueManager(reg, store)
+	chatEvents := chat.NewManager(func(id string) (chat.HeadContext, bool) {
+		agent, err := store.GetAgent(id)
+		if err != nil || agent == nil {
+			return chat.HeadContext{}, false
+		}
+		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt, AgentType: agent.AgentType, Plan: agent.Plan}
+		return ctx, true
+	})
+	chatQueues.SetEventSink(func(id, eventType string, payload any) {
+		if _, err := chatEvents.Append(id, eventType, payload); err != nil {
+			log.Printf("warn: persist normalized queue event for %s: %v", id, err)
+		}
+	})
+	reg.SetOnChatLine(func(id, provider string, line []byte) {
+		chatEvents.ObserveProviderLine(id, provider, line)
+	})
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
 	reg.SetOnChatStep(chatQueues.OnTurnStep)
+	// Persist each thinking block's measured duration to the head's sidecar, so a
+	// reload/resume can show "Thought for Xs" for it (and keep empty
+	// silently-reasoned thoughts visible) without the browser having timed it.
+	reg.SetOnChatThinking(func(id, messageID string, durationMS int64) {
+		agent, err := store.GetAgent(id)
+		if err != nil || agent == nil {
+			return // unknown or archived head - nothing to record.
+		}
+		heads.RecordThinkingDuration(agent.ProjectPath, id, messageID, durationMS)
+		if _, err := chatEvents.Append(id, "reasoning_duration", map[string]any{"message_id": messageID, "duration_ms": durationMS}); err != nil {
+			log.Printf("warn: persist normalized thinking duration for %s: %v", id, err)
+		}
+	})
 	// Auto-approve the ExitPlanMode plan gate for chat heads: with
 	// --permission-prompt-tool stdio it arrives as a can_use_tool control_request
 	// nothing answers, so the head would hang leaving plan mode. Answer it
 	// daemon-side (mirrors the terminal-mode PermissionRequest hook auto-approve),
 	// so it fires even with no browser attached.
 	reg.SetOnChatPlanApproval(chatQueues.OnPlanApproval)
+	// The daemon owns the durable plan/to-do list: each chat session's tracker
+	// seeds from the persisted copy and every live change is written back, so
+	// the plan survives with no browser attached. The write re-reads the
+	// session's CURRENT plan rather than trusting the dispatched snapshot: the
+	// per-change goroutines can land out of order (a burst of TaskCreates), and
+	// re-reading makes the last write the freshest state no matter the order.
+	reg.SetOnChatPlanSeed(func(id string) string {
+		agent, err := store.GetAgent(id)
+		if err != nil || agent == nil {
+			return ""
+		}
+		return agent.Plan
+	})
+	// Persist the active model from each system:init line (session start and
+	// every /model change) - daemon-side, so a mid-session model change is
+	// captured even with no browser attached. The registry dedupes per session.
+	reg.SetOnChatModel(func(id, model string) {
+		if _, err := chatEvents.Append(id, "model_changed", map[string]any{"model": model}); err != nil {
+			log.Printf("warn: persist normalized model for %s: %v", id, err)
+		}
+		if err := store.UpdateAgentModel(id, model); err != nil {
+			log.Printf("warn: persist model for %s: %v", id, err)
+		}
+	})
+	reg.SetOnChatPlanChange(func(id, planJSON string) {
+		if cur := reg.ChatPlanJSON(id); cur != "" {
+			planJSON = cur
+		}
+		if err := store.UpdateAgentPlan(id, planJSON); err != nil {
+			log.Printf("warn: persist plan for %s: %v", id, err)
+		}
+		if _, err := chatEvents.Append(id, "plan_updated", chat.JSONPayload(map[string]any{"provider": "claude"}, "plan", []byte(planJSON))); err != nil {
+			log.Printf("warn: persist normalized plan for %s: %v", id, err)
+		}
+	})
 
 	// Fans change events to web clients over the events WS, replacing per-tab
 	// polling. A supervised service's state transition pushes services_changed.
@@ -171,6 +236,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		Services:        svcMgr,
 		Events:          eventHub,
 		ChatQueues:      chatQueues,
+		ChatEvents:      chatEvents,
 		BackgroundCtx:   ctx,
 	}
 

@@ -32,11 +32,14 @@ import (
 // Head represents a Hydra agent unit: an ID with optional branch, worktree, and
 // running sandbox session.
 type Head struct {
-	ID          string
-	Title       string  // mutable, user-facing display name (empty falls back to ID)
-	Branch      *string // "hydra/<id>", nil if the git branch does not exist
-	Worktree    *string // path to the worktree directory, nil if it does not exist
-	ProjectPath string
+	ID             string
+	Title          string  // mutable, user-facing display name (empty falls back to ID)
+	Plan           string  // client-owned chat plan/to-do JSON, opaque to the server
+	Model          string  // chat model id, captured by the daemon from system:init
+	ConversationID string  // exact structured-provider conversation/thread id
+	Branch         *string // "hydra/<id>", nil if the git branch does not exist
+	Worktree       *string // path to the worktree directory, nil if it does not exist
+	ProjectPath    string
 	// SessionPID is the running sandbox process PID (0 if not running);
 	// SessionStatus is the session status (running|exited|stopped|...).
 	SessionPID    int
@@ -46,8 +49,7 @@ type Head struct {
 	Prompt        string
 	BaseBranch    string
 	Ephemeral     bool
-	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only).
+	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	ChatMode bool
 	// GitIsolation is the head's per-head git-isolation override (off/refs/readonly/
 	// clone; "" = agent-type policy default). See GIT_ISOLATION.md.
@@ -122,6 +124,9 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		h := Head{
 			ID:               a.ID,
 			Title:            a.Title,
+			Plan:             a.Plan,
+			Model:            a.Model,
+			ConversationID:   a.ConversationID,
 			Branch:           branch,
 			Worktree:         worktree,
 			ProjectPath:      a.ProjectPath,
@@ -300,22 +305,25 @@ func archivedHead(a *db.Agent) Head {
 		branch = &b
 	}
 	return Head{
-		ID:           a.ID,
-		Title:        a.Title,
-		Branch:       branch,
-		Worktree:     nil,
-		ProjectPath:  a.ProjectPath,
-		AgentType:    sandbox.AgentType(a.AgentType),
-		PrePrompt:    a.PrePrompt,
-		Prompt:       a.Prompt,
-		BaseBranch:   a.BaseBranch,
-		GitIsolation: a.GitIsolation,
-		Ephemeral:    a.Ephemeral,
-		ChatMode:     a.ChatMode,
-		CreatedAt:    a.CreatedAt.Unix(),
-		AgentStatus:  archivedAgentStatus(a),
-		Archived:     true,
-		EndState:     a.EndState,
+		ID:             a.ID,
+		Title:          a.Title,
+		Plan:           a.Plan,
+		Model:          a.Model,
+		ConversationID: a.ConversationID,
+		Branch:         branch,
+		Worktree:       nil,
+		ProjectPath:    a.ProjectPath,
+		AgentType:      sandbox.AgentType(a.AgentType),
+		PrePrompt:      a.PrePrompt,
+		Prompt:         a.Prompt,
+		BaseBranch:     a.BaseBranch,
+		GitIsolation:   a.GitIsolation,
+		Ephemeral:      a.Ephemeral,
+		ChatMode:       a.ChatMode,
+		CreatedAt:      a.CreatedAt.Unix(),
+		AgentStatus:    archivedAgentStatus(a),
+		Archived:       true,
+		EndState:       a.EndState,
 	}
 }
 
@@ -344,8 +352,7 @@ type SpawnHeadOptions struct {
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
 	BaseBranch string            // empty = current HEAD branch
 	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
-	// ChatMode drives the head via the Claude CLI's stream-json interface and
-	// renders a chat view instead of a terminal (Claude only).
+	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
 	// GitIsolation overrides the agent-type policy's git_isolation default for this
@@ -608,7 +615,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// real user turn makes it (and its --replay-user-messages echo) part of the
 	// conversation the chat view reconstructs. The pipe buffers it while the
 	// CLI boots.
-	if opts.ChatMode && !opts.Resume && opts.Prompt != "" {
+	if opts.ChatMode && opts.AgentType == sandbox.AgentTypeCodex {
+		if err := startCodexChatController(reg, store, projectRoot, opts.ID, worktreePath, opts.Model, "", opts.Prompt); err != nil {
+			spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start Codex chat controller: %w", err))
+			return nil, errtrace.Wrap(err)
+		}
+	} else if opts.ChatMode && !opts.Resume && opts.Prompt != "" {
 		if err := reg.Write(opts.ID, claudestream.TextUserMessageLine(opts.Prompt)); err != nil {
 			log.Printf("warn: send initial chat prompt to %s: %v", opts.ID, err)
 		}
@@ -632,7 +644,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		if bgCtx == nil {
 			bgCtx = context.Background()
 		}
-		generateTitleAsync(bgCtx, store, opts.ID, opts.Prompt, opts.OnTitleChange)
+		generateTitleAsync(bgCtx, store, projectRoot, opts.ID, opts.Prompt, opts.OnTitleChange)
 	}
 
 	return &Head{
@@ -1156,6 +1168,11 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	if head.ChatMode && head.AgentType == sandbox.AgentTypeCodex {
+		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, head.ConversationID, ""); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
 	// A resumed agent restores its prior conversation and then sits idle waiting
 	// for the user - it is not actively working. Report it as waiting rather than
 	// letting it inherit a stale "running" (or the "stopped" left by a daemon
@@ -1186,19 +1203,31 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			log.Printf("warn: update resume agent status for %s: %v", head.ID, err)
 		}
 	}
-	// Chat mode is Claude-only, and `claude --continue` re-prompts the agent to
-	// continue on its own (it injects a "Continue from where you left off." turn),
-	// so Hydra's extra nudge is redundant: it just adds a duplicate "Continue"
-	// turn - and the pair reads as noise in the chat transcript (item 40). So the
-	// nudge is only sent to terminal heads, whose TUI won't auto-continue.
-	if willNudge && !head.ChatMode {
-		// The agent restored its prior conversation but won't act on it on its
-		// own, so type the nudge to make it continue. Done async because the TUI
-		// can take a while to finish rendering a large restored conversation, and
-		// ResumeHead must not block its callers (daemon boot, terminal attach).
-		// The agent's own hooks flip its status back to running once the nudge
-		// submits, so the "waiting" written above is only momentary.
-		go nudgeResumedAgent(reg, head.ID, nudge)
+	// A resumed agent restores its prior conversation but does NOT act on it on
+	// its own - neither the terminal TUI nor chat mode auto-continues. Chat mode
+	// used to be skipped here on the belief that `claude --continue` re-prompts
+	// itself, but a stream-json `--resume`/`--continue` run just replays the
+	// SessionStart hook and then waits on stdin (spike-verified): the head sits
+	// idle until the user manually types "Continue". So both modes get a nudge -
+	// only the delivery differs.
+	if willNudge {
+		if head.ChatMode {
+			// Chat heads have no TUI, so keystrokes are meaningless: write the
+			// nudge as a stream-json user turn to stdin, exactly like the initial
+			// task prompt (SpawnHead). The pipe buffers it while the CLI boots and
+			// restores the conversation; --replay-user-messages echoes it back so
+			// the chat view renders the "Continue" bubble, and the agent then acts
+			// on it with the full restored context.
+			go nudgeResumedChatAgent(reg, head.ID, nudge)
+		} else {
+			// The agent won't act on its restored conversation on its own, so type
+			// the nudge to make it continue. Done async because the TUI can take a
+			// while to finish rendering a large restored conversation, and
+			// ResumeHead must not block its callers (daemon boot, terminal attach).
+			// The agent's own hooks flip its status back to running once the nudge
+			// submits, so the "waiting" written above is only momentary.
+			go nudgeResumedAgent(reg, head.ID, nudge)
+		}
 	}
 	return nil
 }
@@ -1319,6 +1348,18 @@ var defaultResumeNudge = resumeNudgeTiming{
 // continue is to inject keystrokes once it is interactive.
 func nudgeResumedAgent(reg *session.Registry, id, message string) {
 	nudgeResumedAgentWith(reg, id, message, defaultResumeNudge)
+}
+
+// nudgeResumedChatAgent makes a resumed chat-mode (Claude stream-json) head
+// continue by writing the nudge as a user turn to its stdin. Unlike a terminal
+// head there is no TUI to type into and no need to wait for it to settle: the
+// CLI reads stdin as a message stream, so the pipe buffers the line while the
+// process boots and restores the conversation (the same buffering SpawnHead
+// relies on for the initial task prompt), and the agent acts on it once ready.
+func nudgeResumedChatAgent(reg *session.Registry, id, message string) {
+	if err := reg.SendChatUser(id, claudestream.TextUserContent(message)); err != nil {
+		log.Printf("warn: resume chat nudge: write to %s: %v", id, err)
+	}
 }
 
 func nudgeResumedAgentWith(reg *session.Registry, id, message string, t resumeNudgeTiming) {

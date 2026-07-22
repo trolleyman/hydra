@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"sync"
 	"syscall"
@@ -78,6 +79,7 @@ type Session struct {
 	// and would wrap the ring several times faster. Guarded by mu, like the
 	// ring it feeds.
 	ringFilter *claudestream.RingFilter
+	chatDriver ChatDriver
 
 	mu        sync.Mutex
 	attachers map[*attacher]struct{}
@@ -99,6 +101,16 @@ type Session struct {
 	// kill, an agent pkill-ing itself), which is what auto-restart acts on.
 	// Guarded by mu.
 	stopRequested bool
+}
+
+// ChatDriver translates provider-neutral user controls into a chat provider's
+// stdin protocol. Claude uses Registry's built-in stream-json fallback; Codex
+// installs its app-server controller here after launch.
+type ChatDriver interface {
+	SendUser(content json.RawMessage) error
+	Interrupt() error
+	Respond(response json.RawMessage) error
+	SetModel(model string) error
 }
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before
@@ -176,15 +188,24 @@ func (s *Session) readLoop(onExit func(*Session)) {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			s.mu.Lock()
+			var injected []byte
 			if s.ringFilter != nil {
-				if kept := s.ringFilter.Filter(data); len(kept) > 0 {
+				kept, inj := s.ringFilter.Filter(data)
+				if len(kept) > 0 {
 					s.scroll.Write(kept)
 				}
+				injected = inj
 			} else {
 				s.scroll.Write(data)
 			}
 			for a := range s.attachers {
 				a.send(data)
+				// Synthetic hydra_thinking lines the filter measured from this
+				// chunk's stream_event partials: streamed live to attachers but not
+				// persisted in the ring (a reconnect replays them from the sidecar).
+				if len(injected) > 0 {
+					a.send(injected)
+				}
 			}
 			s.mu.Unlock()
 		}
@@ -324,6 +345,19 @@ type Info struct {
 // PID returns the sandbox process PID (0 if not started).
 func (s *Session) PID() int {
 	return s.proc.Pid()
+}
+
+// PlanJSON returns the session's incrementally-tracked chat plan as PlanEntry
+// JSON ("" for terminal sessions or when no plan exists). Persist consumers
+// re-read this at write time so a delayed dispatch always writes the freshest
+// state instead of a stale snapshot (see Registry.SetOnChatPlanChange).
+func (s *Session) PlanJSON() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ringFilter == nil || s.ringFilter.Plan == nil {
+		return ""
+	}
+	return s.ringFilter.Plan.JSON()
 }
 
 // alive reports whether the underlying OS process is still running, via a

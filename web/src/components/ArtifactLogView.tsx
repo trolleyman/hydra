@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { ArtifactSet, ArtifactLogLine } from '../api'
 import { useIsDark } from '../lib/theme'
+import { useLiveLogLines } from './artifactLogStore'
 
 // LOG_SCROLLBACK bounds the xterm scrollback for build logs. The live in-memory
 // log is capped at maxLogLines (5000) backend-side; persisted logs can run longer,
@@ -275,10 +276,14 @@ function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: Arti
 // LiveLogPanes shows both in-flight builds side by side while the set generates,
 // each side falling back to its persisted log once it finishes (see LiveLogColumn).
 export function LiveLogPanes({ set }: { set: ArtifactSet }) {
+  // Live lines come from the log store (keyed by set+side), so a streamed frame
+  // re-renders only this component - not the whole artifacts panel.
+  const left = useLiveLogLines(`${set.name}\0left`)
+  const right = useLiveLogLines(`${set.name}\0right`)
   return (
     <div className="flex gap-2 my-2">
-      <LiveLogColumn label="Before" log={set.left_log ?? []} logUrl={set.left_log_url} error={set.left_error} />
-      <LiveLogColumn label="After" log={set.right_log ?? []} logUrl={set.right_log_url} error={set.right_error} />
+      <LiveLogColumn label="Before" log={left} logUrl={set.left_log_url} error={set.left_error} />
+      <LiveLogColumn label="After" log={right} logUrl={set.right_log_url} error={set.right_error} />
     </div>
   )
 }

@@ -24,7 +24,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'bun e2e/serve.ts',
+    command: 'node e2e/serve.ts',
     url: baseURL,
     timeout: 180_000,
     reuseExistingServer: !process.env.CI,

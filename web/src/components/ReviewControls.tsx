@@ -59,18 +59,20 @@ export function MRStateChip({ agent }: { agent: AgentResponse }) {
   const review = agent.review
   if (!review) return null
   const st = review.state
-  const stateLabel = st?.state ?? 'MR'
+  // The chip names the MR ("MR 41") - the state (open/draft/merged) is carried
+  // by the tone color and spelled out in the tooltip.
+  const label = review.id != null ? `MR ${review.id}` : 'MR'
   return (
     <span className="inline-flex items-center gap-1.5">
       <a
         href={review.url}
         target="_blank"
         rel="noreferrer"
-        title={`Open ${review.provider} MR #${review.id}`}
+        title={`Open ${review.provider} MR #${review.id}${st?.state ? ` (${st.state})` : ''}`}
         className="no-underline"
       >
         <Badge tone={mrStateTone(st?.state)} icon={<ProviderIcon provider={review.provider} className="w-3 h-3" />}>
-          {stateLabel}
+          {label}
           <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-60" />
         </Badge>
       </a>
@@ -115,7 +117,7 @@ export function DownstreamBranchEditor({
   if (editing && !linked) {
     return (
       <span className="text-xs font-mono flex items-center gap-1.5">
-        <span className="font-sans text-gray-400 dark:text-gray-500">push as</span>
+        <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
         <input
           autoFocus
           value={draft}
@@ -141,7 +143,7 @@ export function DownstreamBranchEditor({
 
   return (
     <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-      <span className="font-sans text-gray-400 dark:text-gray-500">push as</span>
+      <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
       <button
         type="button"
         disabled={linked || saving}

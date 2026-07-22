@@ -107,26 +107,68 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	}
 	remember := request.Body.Remember != nil && *request.Body.Remember
 
+	// host_command is the sandbox escape hatch (`hydra host-run`): on allow, the
+	// DAEMON runs the command host-side and the CLI relays the result. It is handled
+	// on its own path - it is never "remembered", and on allow we kick off host-side
+	// execution before writing the decision the CLI is polling for.
+	if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok && req.Kind == "host_command" {
+		if allow {
+			// Run EXACTLY the command text the UI echoed back (what the user saw and
+			// approved), not req.Target from the head-writable request file - that echo
+			// is the TOCTOU defense. An allow with no echoed command is treated as a
+			// deny (nothing to safely run).
+			command := ""
+			if request.Body.Command != nil {
+				command = *request.Body.Command
+			}
+			if command == "" {
+				_ = gate.WriteDecision(dir, request.Reqid, gate.DecisionFile{Decision: gate.Deny})
+				s.Events.AgentsChanged(projectRoot)
+				return api.DecideAgentApproval204Response{}, nil
+			}
+			worktree := ""
+			if head.Worktree != nil {
+				worktree = *head.Worktree
+			}
+			go runApprovedHostCommand(dir, request.Reqid, worktree, command)
+		}
+		if err := gate.WriteDecision(dir, request.Reqid, gate.DecisionFile{Decision: decision}); err != nil {
+			return api.DecideAgentApproval500JSONResponse{
+				Code:    500,
+				Error:   api.ErrorResponseErrorInternalError,
+				Details: err.Error(),
+			}, nil
+		}
+		s.Events.AgentsChanged(projectRoot)
+		return api.DecideAgentApproval204Response{}, nil
+	}
+
 	// Persist a remembered "always allow" to the trusted config BEFORE writing the
 	// decision file, so the allow-list update can't be lost if the next launch
 	// races the agent unblocking. Best-effort: a persistence failure still lets
 	// the one-shot decision through.
 	var grantedMCPKind string // "mcp"/"mcp_tool" when a remembered MCP grant was persisted
-	var grantedHost string    // webfetch/egress host a remembered grant now covers
+	var grantedHost string    // webfetch/egress host this session grant now covers
+	var approvedReq gate.Request
+	var haveApprovedReq bool
+	if allow {
+		approvedReq, haveApprovedReq, _ = gate.ReadRequest(dir, request.Reqid)
+		if haveApprovedReq && (approvedReq.Kind == "webfetch" || approvedReq.Kind == "egress") {
+			grantedHost = approvedReq.Target
+		}
+	}
 	if allow && remember {
-		if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok {
-			if err := rememberApproval(projectRoot, string(head.AgentType), req.Kind, req.Target); err != nil {
+		if haveApprovedReq {
+			if err := rememberApproval(projectRoot, string(head.AgentType), approvedReq.Kind, approvedReq.Target); err != nil {
 				return api.DecideAgentApproval500JSONResponse{
 					Code:    500,
 					Error:   api.ErrorResponseErrorInternalError,
 					Details: "remember approval: " + err.Error(),
 				}, nil
 			}
-			switch req.Kind {
+			switch approvedReq.Kind {
 			case "mcp", "mcp_tool":
-				grantedMCPKind = req.Kind
-			case "webfetch", "egress":
-				grantedHost = req.Target
+				grantedMCPKind = approvedReq.Kind
 			}
 		}
 	}
@@ -139,15 +181,16 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 		}, nil
 	}
 
-	// An "always allow" for a host now covers every OTHER parked WebFetch/egress
-	// request for the same host, so allow those too - their toasts close on the next
-	// poll instead of forcing the user to clear each one by hand. Also record the
-	// grant live for the running session so later fetches to it don't re-park: the
-	// seeded gate policy is read-only, so a persisted host only binds on the next
-	// launch (see gate.AddGrantedHost / cli gate hook).
+	// Any host approval covers the rest of this running session ("always allow"
+	// additionally persisted it above). Resolve every OTHER parked WebFetch/egress
+	// request for the same host, so a parallel WebFetch + shell request cannot show
+	// two identical prompts or leave one half of the tool batch blocked. The seeded
+	// gate policy is read-only, so granted-hosts.json is its live session overlay -
+	// read by the in-sandbox gate hook AND by the egress approver before parking a
+	// connection, so allowing a WebFetch prompt also pre-clears the fetch's actual
+	// connection at the proxy (and vice versa).
 	if grantedHost != "" {
-		_ = gate.AddGrantedHost(dir, grantedHost)
-		resolveSiblingHostApprovals(dir, request.Reqid, grantedHost)
+		grantHostForSession(dir, request.Reqid, grantedHost)
 	}
 
 	// Nudge the UI to refresh: once the gate reads the decision and proceeds the
@@ -173,10 +216,15 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	return api.DecideAgentApproval204Response{}, nil
 }
 
+func grantHostForSession(dir, exceptReqID, host string) {
+	_ = gate.AddGrantedHost(dir, host)
+	resolveSiblingHostApprovals(dir, exceptReqID, host)
+}
+
 // resolveSiblingHostApprovals allows every still-parked WebFetch/egress request in
 // dir whose host matches the just-granted host (except the one already decided).
-// It runs after an "always allow": the host is now trusted, so the sibling requests
-// no longer need a separate click - writing their decisions unblocks the gate/proxy
+// It runs after a host is allowed for the session: sibling requests no longer
+// need a separate click - writing their decisions unblocks the gate/proxy
 // and the UI drops their toasts on the next poll. Best-effort; a write failure just
 // leaves that sibling to be resolved normally.
 func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
@@ -201,9 +249,9 @@ func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
 // [sandbox.network] allowed_hosts - one shared list applied to every agent, since
 // the egress allow-list is a project-wide posture, not a per-agent capability. An
 // egress host also goes live for the current session in the running proxy's
-// allow-list (handled where the proxy reads the Allow decision), and a WebFetch host
-// goes live via gate.AddGrantedHost (see the caller). Any other kind is one-shot and
-// not persisted (default case).
+// allow-list (handled where the proxy reads the Allow decision), and any host goes
+// live for both network layers via gate.AddGrantedHost (see the caller). Any other
+// kind is one-shot and not persisted (default case).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil

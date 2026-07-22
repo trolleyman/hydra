@@ -15,6 +15,17 @@
   --font-serif: 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
 }
 
+/* The prompt/chat input font (HighlightedTextarea). Pinned to Roboto Flex (loaded
+   in index.html) so the textarea and its highlight backdrop share exact metrics
+   on every OS, and so *italic* runs can be slanted via the font's `slnt` axis
+   (below) rather than a narrower cursive italic that would drift the caret. The
+   fallback stack matches Tailwind's font-sans so alignment holds before the font
+   loads. Applied to BOTH layers via .prompt-input-font. */
+.prompt-input-font {
+  font-family: 'Roboto Flex', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
 :root {
   color-scheme: light;
 }
@@ -72,6 +83,16 @@ body {
 
 .animate-fade-in-out {
   animation: fade-in-out 2s ease-in-out forwards;
+}
+
+/* Repository file-content swap: a quick fade so selecting a file eases in
+   instead of hard-cutting (keyed by the file path so it re-runs per file). */
+@keyframes repo-file-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.repo-file-in {
+  animation: repo-file-in 0.16s ease-out;
 }
 
 /* Gentle "whirring" breathe for the status dot while an agent is actively
@@ -283,7 +304,7 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    class + em sizing. */
 .chat-serif {
   font-family: var(--font-serif);
-  font-size: 0.9375rem; /* 15px */
+  font-size: 14px;
   line-height: 1.6;
 }
 .chat-serif strong,
@@ -305,22 +326,6 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   animation: chat-item-in 0.2s ease-out;
 }
 
-/* Height-animated disclosure for tool cards / thinking: the 0fr <-> 1fr
-   grid-row transition animates to the content's intrinsic height without
-   measuring it in JS. The single child must be allowed to shrink (min-height
-   0) and hide its overflow while mid-transition. */
-.chat-expandable {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.22s ease;
-}
-.chat-expandable.chat-expandable-open {
-  grid-template-rows: 1fr;
-}
-.chat-expandable > * {
-  overflow: hidden;
-  min-height: 0;
-}
 
 /* Shimmering "Thinking..." label while thought tokens stream: a gradient swept
    through the text itself (background-clip: text), light and dark variants. */
@@ -351,8 +356,8 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
-  .animate-chat-sheet-up { animation: none; }
-  .chat-expandable { transition: none; }
+  .animate-chat-sheet-up,
+  .repo-file-in { animation: none; }
   .chat-text-shimmer {
     animation: none;
     background-image: none;
@@ -438,10 +443,19 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
    browser's spellcheck squiggles (drawn at the TEXTAREA's glyph positions)
    land offset under the visible words, reading as doubled text. A text stroke
    thickens the strokes without touching the advance widths, so it looks bold
-   while staying glyph-for-glyph aligned. (Italic gets no fake: an italic face
-   has different advances, and a skew transform needs inline-block which breaks
-   wrapping - so italic source shows only its dimmed markers.) */
+   while staying glyph-for-glyph aligned (Roboto Flex is not duplexed, so its
+   wght axis WOULD widen glyphs - hence the stroke, not a weight change). */
 .md-src-bold { -webkit-text-stroke: 0.035em currentColor; }
+
+/* Inline *italic* emphasis in that backdrop. Unlike bold, italic CAN be shown for
+   real: the input font is pinned to Roboto Flex (.prompt-input-font), whose `slnt`
+   axis is an oblique - a shear of the upright outlines that preserves each glyph's
+   advance width - so the slanted backdrop text stays glyph-for-glyph aligned with
+   the upright textarea caret underneath. (A cursive `ital` italic would be
+   narrower and drift; slnt is the metric-safe route.) If Roboto Flex hasn't loaded
+   yet, a fallback font without a slnt axis simply ignores this and stays upright -
+   no drift either way. */
+.md-src-italic { font-variation-settings: 'slnt' -10; }
 
 /* GFM task-list items (react-markdown + remark-gfm): the <ul> is styled
    list-none/pl-0 by the Markdown component, so give the disabled checkbox a

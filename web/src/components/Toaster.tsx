@@ -1,24 +1,11 @@
 import React from 'react'
-import { Link } from '@tanstack/react-router'
-import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, Clock, X } from 'lucide-react'
-import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
+import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { useToastStore, ToastDismissContext, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 import { CrossProjectBanner } from './CrossProjectBanner'
-import { Badge } from './Badge'
-import { BranchPill } from './BranchPill'
-import { agentStatusBadge } from '../lib/agentDisplay'
-
-// withBranchPills renders toast copy with `backtick` spans as inline mono pills
-// (branch names - "Synced with `origin/main`", "merged into `main`"), matching
-// how the dialogs embed branch names mid-sentence. Unpaired backticks stay
-// literal; text without backticks passes through untouched.
-function withBranchPills(text: string): React.ReactNode {
-  const parts = text.split(/`([^`]*)`/) // odd indices are the quoted spans
-  if (parts.length === 1) return text
-  return parts.map((part, i) => (i % 2 === 1 ? <BranchPill key={i}>{part}</BranchPill> : part))
-}
+import { withBranchPills } from '../lib/branchPills'
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
@@ -68,72 +55,21 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     )
   }
 
-  const { Icon, wrap, bar } = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
-
-  // Agent status transitions (and the merge-lifecycle toasts reusing the same
-  // card) render as "<bot> <agent> <before> <status pill> <after>", the agent
-  // label linking through to the agent (so there's no View button).
-  if (toast.agentTransition) {
-    const t = toast.agentTransition
-    const badge = t.status ? agentStatusBadge(t.status) : undefined
-    const before = t.before ?? 'transitioned to'
-    // The queued-merge toast swaps the bot tile for the app's "merge queued"
-    // identity - the emerald Clock of the armed pill / queue-merge button.
-    const tile = t.icon === 'merge-queued'
-      ? { Icon: Clock, wrap: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300', bar: 'bg-emerald-500' }
-      : { Icon: Bot, wrap, bar }
-    const openAgent = () => {
-      // Match a cross-project View: select the project (a no-op for the current
-      // one) before the link routes, then tear the toast down. Left-click only -
-      // middle/Ctrl-click open the agent in a new tab and leave the toast up.
-      useProjectStore.getState().setSelectedProjectId(t.projectId)
-      onDismiss()
-    }
-    return (
-      <div
-        role="status"
-        className={`relative min-w-[17rem] max-w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${
-          toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
-        }`}
-      >
-        {t.projectName && <CrossProjectBanner project={t.projectName} tone="neutral" projectId={t.projectId} icon={t.projectIcon} />}
-        <div className="p-4">
-          <div className="flex items-start gap-3">
-            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${tile.wrap}`}>
-              <tile.Icon className="w-[18px] h-[18px]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <Link
-                to="/project/$projectId/agent/$agentId"
-                params={{ projectId: t.projectId, agentId: t.agentId }}
-                onClick={openAgent}
-                title="Open this agent"
-                className="block max-w-full truncate text-left text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
-              >
-                {t.agentName}
-              </Link>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
-                {before && <span>{withBranchPills(before)}</span>}
-                {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
-                {t.after && <span>{withBranchPills(t.after)}</span>}
-              </div>
-            </div>
-            <IconButton onClick={onDismiss}>
-              <X className="w-4 h-4" />
-            </IconButton>
-          </div>
-        </div>
-        {showCountdown && (
-          <div
-            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${tile.bar}`}
-            style={{ animationDuration: `${toast.duration}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
-          />
-        )}
-      </div>
-    )
-  }
+  const base = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
+  // The tile glyph, tile tint and countdown-bar colour all default to the type
+  // identity; a toast may override the glyph (`icon`, e.g. a Bot for agent rows)
+  // and the tint+bar pair (`accent`, e.g. the emerald "merge queued" card).
+  const iconNode = toast.icon ?? <base.Icon className="w-[18px] h-[18px]" />
+  const wrap = toast.accent?.wrap ?? base.wrap
+  const bar = toast.accent?.bar ?? base.bar
+  // A plain string message is a single line, vertically centred against the tile;
+  // a rich node (e.g. the two-line agent-transition row) tops out with the tile.
+  const isStringMessage = typeof toast.message === 'string'
   const hasActions = toast.actions && toast.actions.length > 0
   return (
+    // Provider so rich `message` content (e.g. an agent link) can close its own
+    // toast via ToastDismissContext instead of threading the id through show().
+    <ToastDismissContext.Provider value={onDismiss}>
     <div
       role="status"
       className={`relative min-w-[17rem] max-w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${
@@ -146,9 +82,23 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       <div className="p-4">
         <div className="flex items-start gap-3">
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
-            <Icon className="w-[18px] h-[18px]" />
+            {iconNode}
           </div>
-          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message)}</p>
+          <div className={`min-w-0 flex-1 ${isStringMessage ? 'self-center' : ''}`}>
+            {isStringMessage
+              ? <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message as string)}</p>
+              : toast.message}
+            {toast.code && (
+              <div className="mt-2 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-900/60">
+                {toast.codeLang && (
+                  <div className="px-2.5 pt-1.5 text-[10px] font-mono uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    {toast.codeLang}
+                  </div>
+                )}
+                <pre className={`max-h-40 overflow-auto px-2.5 pb-2 text-[11px] leading-relaxed font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words ${toast.codeLang ? 'pt-1' : 'pt-2'}`}>{toast.code}</pre>
+              </div>
+            )}
+          </div>
           <IconButton onClick={onDismiss}>
             <X className="w-4 h-4" />
           </IconButton>
@@ -174,6 +124,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
         />
       )}
     </div>
+    </ToastDismissContext.Provider>
   )
 }
 

@@ -448,6 +448,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/restart-session:
+    post:
+      summary: Restart just the agent process (keeps the worktree, branch and conversation)
+      description: >-
+        Stops the running CLI process (claude/codex/...) and relaunches it in a
+        fresh sandbox, resuming the same conversation. Unlike restartAgent this
+        does no teardown: the worktree, branch, DB record and transcript are
+        untouched.
+      operationId: restartAgentSession
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (agent process restarted)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (agent is archived, or an operation is in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/resume:
     post:
       summary: Resume an archived (killed/merged) agent, restoring its conversation
@@ -2548,6 +2591,13 @@ components:
         path:
           type: string
           description: Absolute filesystem path to the project root
+        display_path:
+          type: string
+          description: >-
+            The project path for display, with the server's home directory
+            abbreviated to "~" (e.g. "~/code/hydra"). Computed server-side
+            because only the server knows its HOME. Falls back to `path`
+            verbatim when the path is not under HOME.
         name:
           type: string
           description: Human-readable project name (last path component)
@@ -2654,8 +2704,8 @@ components:
         chat_mode:
           type: boolean
           description: >-
-            Drive the head via the Claude CLI's stream-json interface and render
-            a chat view instead of a terminal (Claude only; rejected for other
+            Drive the head via its structured protocol and render a chat view
+            instead of a terminal (Claude and Codex only; rejected for other
             agent types). The prompt is delivered as the first chat turn.
         ephemeral:
           type: boolean
@@ -2703,11 +2753,9 @@ components:
         chat_mode:
           type: boolean
           description: >-
-            Switch the head between terminal and chat mode (Claude only;
-            rejected for other agent types). When the value actually changes
-            and a session is live, the Claude process is stopped and relaunched
-            in the new mode with --continue - the conversation is preserved
-            (terminal and chat mode share one transcript).
+            Switch the head between terminal and chat mode (Claude and Codex
+            only; rejected for other agent types). When the value changes, a
+            live process is relaunched and its provider conversation is resumed.
 
     AgentStatus:
       type: string
@@ -2767,6 +2815,12 @@ components:
         title:
           type: string
           description: Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+        plan:
+          type: string
+          description: The chat plan/to-do list JSON the daemon tracks from the head's live Task*/TodoWrite events (empty if none).
+        model:
+          type: string
+          description: The chat head's current model id, captured by the daemon from the CLI's system:init line (empty if not yet observed).
         branch_name:
           type: string
           nullable: true
@@ -2794,7 +2848,7 @@ components:
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
         chat_mode:
           type: boolean
-          description: True when the head runs in chat mode (stream-json + chat view; Claude only).
+          description: True when the head runs in structured chat mode (Claude or Codex).
         created_at:
           type: integer
           format: int64
@@ -3462,10 +3516,10 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)"
         target:
           type: string
-          description: The MCP server name, '<server>__<tool>', host, or command the approval is about
+          description: The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
         reason:
           type: string
           description: One-line explanation of why the gate parked the call
@@ -3511,6 +3565,14 @@ components:
         remember:
           type: boolean
           description: "When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again"
+        command:
+          type: string
+          description: >-
+            For a host_command approval only: the exact command text the UI
+            displayed and the user approved. The daemon runs THIS text verbatim
+            (never re-reading the head-writable request file), which closes the
+            TOCTOU window where an agent could swap the command after the user
+            saw it. Ignored for every other kind.
 
     NetworkConfig:
       type: object
@@ -4395,4 +4457,3 @@ components:
               type: integer
             rows:
               type: integer
-

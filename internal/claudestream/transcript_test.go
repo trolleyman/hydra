@@ -1,6 +1,7 @@
 package claudestream
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 func TestRingFilterDropsStreamEvents(t *testing.T) {
 	f := &RingFilter{}
 	var kept string
-	feed := func(chunk string) { kept += string(f.Filter([]byte(chunk))) }
+	feed := func(chunk string) { k, _ := f.Filter([]byte(chunk)); kept += string(k) }
 
 	feed(`{"type":"assistant","uuid":"a1"}` + "\n")
 	feed(`{"type":"stream_event","event":{"type":"content_block_delta"}}` + "\n")
@@ -42,6 +43,7 @@ func TestTailTranscript(t *testing.T) {
 		`{"type":"user","message":{"role":"user","content":[]},"uuid":"side1","isSidechain":true}`,
 		`not json at all`,
 		`{"type":"assistant","message":{"id":"m2","content":[]},"uuid":"a2"}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -51,8 +53,11 @@ func TestTailTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TailTranscript: %v", err)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("relayed %d lines, want 3 (user + 2 assistant, no summary/sidechain/garbage): %s", len(lines), lines)
+	if len(lines) != 4 {
+		t.Fatalf("relayed %d lines, want 4 (user + 2 assistant + task-notification, no summary/sidechain/garbage): %s", len(lines), lines)
+	}
+	if !bytes.Contains(lines[3], []byte("<task-notification>")) {
+		t.Errorf("backfill dropped the task-notification line: %q", lines)
 	}
 	for _, u := range []string{"s1", "u1", "a1", "side1", "a2"} {
 		if _, ok := uuids[u]; !ok {
@@ -68,7 +73,7 @@ func TestTailTranscript(t *testing.T) {
 		t.Fatalf("TailTranscript capped: %v", err)
 	}
 	for _, l := range lines {
-		if ev, ok := ParseEvent(l); !ok || ev.UUID == "" {
+		if _, ok := ParseEvent(l); !ok {
 			t.Errorf("capped tail returned a non-parseable line: %q", l)
 		}
 	}
@@ -130,6 +135,182 @@ func TestHistoryBefore(t *testing.T) {
 	// Unknown anchor -> empty, done.
 	if lines, done, _ := HistoryBefore(path, "nope", 1<<20); len(lines) != 0 || !done {
 		t.Fatalf("unknown anchor = (%d, %v), want (0, true)", len(lines), done)
+	}
+}
+
+func TestTranscriptLinesAfterUsesCompleteByteWatermark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("one\ntwo\npartial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, offset, err := TranscriptLinesAfter(path, 0)
+	if err != nil || len(lines) != 2 || string(lines[1]) != "two" || offset != int64(len("one\ntwo\n")) {
+		t.Fatalf("lines=%q offset=%d err=%v", lines, offset, err)
+	}
+	if err := os.WriteFile(path, []byte("one\ntwo\npartial-three\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, next, err := TranscriptLinesAfter(path, offset)
+	if err != nil || len(lines) != 1 || string(lines[0]) != "partial-three" || next <= offset {
+		t.Fatalf("lines=%q next=%d err=%v", lines, next, err)
+	}
+}
+
+func TestBackfillIncludesQueuedCommands(t *testing.T) {
+	// A queued message consumed INTO a running turn is recorded only as a
+	// queued_command attachment (no plain user event) - both the attach-time
+	// tail and the load-older page must relay it, or the message vanishes from
+	// the conversation on reattach.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	queuedLine := `{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"steer the turn please"}],"commandMode":"prompt"}}`
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"oldest"}]},"uuid":"u1"}`,
+		`{"type":"queue-operation","operation":"remove"}`,
+		queuedLine,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"newest"}]},"uuid":"u2"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, uuids, err := TailTranscript(path, 0)
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("relayed %d lines, want 3 (2 user + queued_command, no bare queue-operation): %s", len(lines), lines)
+	}
+	if !bytes.Equal(lines[1], []byte(queuedLine)) {
+		t.Errorf("backfill dropped the queued_command attachment: %q", lines)
+	}
+	if _, ok := uuids["q1"]; !ok {
+		t.Errorf("uuid set missing the queued_command entry (needed for ring dedup)")
+	}
+
+	older, done, err := HistoryBefore(path, "u2", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done || len(older) != 2 {
+		t.Fatalf("got (%d lines, done=%v), want (2, true): the queued_command record must page in with the conversation", len(older), done)
+	}
+	if !bytes.Equal(older[1], []byte(queuedLine)) {
+		t.Errorf("load-older dropped the queued_command attachment: %q", older)
+	}
+}
+
+func TestNotificationTailerRelaysQueuedCommands(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"uuid":"u1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tailer := NewNotificationTailer(dir)
+	queuedLine := `{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"consumed mid-turn"}],"commandMode":"prompt"}}`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"assistant","message":{"id":"m1","content":[]},"uuid":"a1"}` + "\n" + queuedLine + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	lines := tailer.Poll()
+	if len(lines) != 1 || !bytes.Equal(lines[0], []byte(queuedLine)) {
+		t.Fatalf("Poll = %q, want just the queued_command line", lines)
+	}
+}
+
+func TestHistoryBeforeIncludesNotifications(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"oldest"}]},"uuid":"u1"}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`,
+		`{"type":"attachment","uuid":"att1","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"newest"}]},"uuid":"u2"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, done, err := HistoryBefore(path, "u2", 1<<20)
+	if err != nil {
+		t.Fatalf("HistoryBefore: %v", err)
+	}
+	if !done || len(lines) != 3 {
+		t.Fatalf("got (%d lines, done=%v), want (3, true): the queue-operation and attachment notification records must page in with the conversation", len(lines), done)
+	}
+	for _, l := range lines[1:] {
+		if !bytes.Contains(l, taskNotificationMarker) {
+			t.Errorf("expected a task-notification record, got %q", l)
+		}
+	}
+}
+
+func TestTailTranscriptAndPrelude(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	notif := `{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}`
+	oldLines := []string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"a long-scrolled-away message"}]},"uuid":"u1"}`,
+		notif,
+	}
+	// Pad the tail so the two lines above fall OUTSIDE the byte window.
+	var recent []string
+	for i := range 20 {
+		recent = append(recent, `{"type":"assistant","message":{"id":"m`+string(rune('a'+i))+`","content":[{"type":"text","text":"recent recent recent recent recent recent"}]},"uuid":"r`+string(rune('a'+i))+`"}`)
+	}
+	content := strings.Join(append(oldLines, recent...), "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Window sized to cover only the recent padding: the notification (and the
+	// old user line) are pre-window; the notification alone must come back as
+	// prelude.
+	window := int64(len(strings.Join(recent, "\n")) - 50)
+	lines, prelude, uuids, err := TailTranscriptAndPrelude(path, window)
+	if err != nil {
+		t.Fatalf("TailTranscriptAndPrelude: %v", err)
+	}
+	if len(prelude) != 1 || !bytes.Contains(prelude[0], taskNotificationMarker) {
+		t.Fatalf("prelude = %q, want exactly the pre-window task-notification record", prelude)
+	}
+	for _, l := range lines {
+		if bytes.Contains(l, []byte(`"u1"`)) {
+			t.Errorf("pre-window conversation line leaked into the windowed backfill")
+		}
+	}
+	// The uuid set must cover the WHOLE transcript, pre-window lines included:
+	// it dedups the scrollback-ring replay, which can reach back further than
+	// the byte-capped window - a pre-window uuid missing from the set would let
+	// the ring re-deliver that line at the bottom of the conversation, and
+	// load_before would then page the same line in at the top (duplicates).
+	if _, ok := uuids["u1"]; !ok {
+		t.Error("pre-window uuid u1 missing from the dedup set")
+	}
+	if _, ok := uuids["ra"]; !ok {
+		t.Error("windowed uuid ra missing from the dedup set")
+	}
+
+	// A window covering the whole file yields no prelude (nothing pre-window),
+	// and the notification rides in the windowed lines instead.
+	lines, prelude, _, err = TailTranscriptAndPrelude(path, 0)
+	if err != nil {
+		t.Fatalf("TailTranscriptAndPrelude uncapped: %v", err)
+	}
+	if len(prelude) != 0 {
+		t.Fatalf("uncapped prelude = %q, want none", prelude)
+	}
+	found := false
+	for _, l := range lines {
+		if bytes.Contains(l, taskNotificationMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("uncapped tail lost the task-notification record")
 	}
 }
 
@@ -295,6 +476,55 @@ func TestSubagentTailer(t *testing.T) {
 	}
 }
 
+func TestNotificationTailer(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "session-1"
+	path := filepath.Join(dir, sessionID+".jsonl")
+	// Seed a couple of ordinary lines that already exist at attach time - the
+	// tailer starts at end-of-file, so these must NOT be returned.
+	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"u1"}`+"\n"+`{"type":"assistant","uuid":"a1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(s string) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tail := NewNotificationTailer(dir)
+	// Nothing appended since construction.
+	if lines := tail.Poll(); len(lines) != 0 {
+		t.Fatalf("Poll(no growth) = %v, want none", lines)
+	}
+
+	// Append a normal assistant line (no notification) then the queue-operation
+	// and attachment copies of a completion notification, plus a trailing partial.
+	write(`{"type":"assistant","uuid":"a2"}` + "\n" +
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}` + "\n" +
+		`{"type":"attachment","uuid":"nat1","attachment":{"commandMode":"task-notification","prompt":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}}` + "\n" +
+		`{"type":"attachment","uuid":"partial"`)
+	lines := tail.Poll()
+	// Only the two notification-bearing lines are returned; the assistant line is
+	// skipped (it arrives via stdout+backfill) and the partial waits for a newline.
+	if len(lines) != 2 {
+		t.Fatalf("Poll relayed %d lines, want 2 (the two notification copies): %q", len(lines), lines)
+	}
+	if !bytes.Contains(lines[0], []byte(`"queue-operation"`)) || !bytes.Contains(lines[1], []byte(`"attachment"`)) {
+		t.Fatalf("Poll returned unexpected lines: %q", lines)
+	}
+
+	// Completing the partial (a non-notification line) yields nothing.
+	write("}\n")
+	if lines := tail.Poll(); len(lines) != 0 {
+		t.Fatalf("Poll(partial completed, no notif) = %q, want none", lines)
+	}
+}
+
 func TestLatestSessionID(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite := func(name, content string, age time.Duration) {
@@ -318,5 +548,45 @@ func TestLatestSessionID(t *testing.T) {
 	}
 	if got := LatestSessionID(filepath.Join(dir, "absent")); got != "" {
 		t.Errorf("LatestSessionID(absent) = %q, want empty", got)
+	}
+}
+
+func TestTailTranscriptMinOneMessage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-1.jsonl")
+	// The LAST conversation line alone is far bigger than the byte cap - the
+	// capped tail would land mid-line and yield nothing. The fallback must
+	// re-read unbounded so at least one message backfills.
+	huge := strings.Repeat("x", 4096)
+	content := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"uuid":"u1"}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"` + huge + `"}]},"uuid":"a1"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, uuids, err := TailTranscript(path, 64)
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("capped tail backfilled nothing; want the unbounded fallback to relay at least one message")
+	}
+	if _, ok := uuids["a1"]; !ok {
+		t.Errorf("uuid set missing a1 after fallback: %v", uuids)
+	}
+
+	// A cap that fits the last line (but cuts into the first) does NOT trigger
+	// the fallback: only the whole trailing lines within budget relay.
+	lines, _, err = TailTranscript(path, int64(len(content)-20))
+	if err != nil {
+		t.Fatalf("TailTranscript: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("relayed %d lines, want just the last (in-budget) message", len(lines))
+	}
+	if !bytes.Contains(lines[0], []byte(`"a1"`)) {
+		t.Errorf("expected the last assistant line, got: %.80s", lines[0])
 	}
 }

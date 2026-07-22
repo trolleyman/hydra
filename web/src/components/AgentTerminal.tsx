@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
@@ -158,8 +159,12 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     lastSentSize.current = { cols, rows }
   }
 
-  // Poll until the container width repeats across two frames (or we've waited
-  // long enough), then send the one settled size. Used both on socket open and
+  // Poll until the container geometry repeats across three frames (or we've
+  // waited long enough), then send the one settled size. Width-only settling
+  // raced a chat -> terminal switch: the split's width was already stable while
+  // its flex height was still changing, leaving Codex's TUI blank/corrupted
+  // until the user moved the divider and triggered another ResizeObserver tick.
+  // Used both on socket open and
   // when a previously-hidden pane is re-shown: in either case the flex layout
   // can still be moving, and measuring mid-transition yields too few columns.
   // While this runs, settlingRef suppresses the ResizeObserver's own sends so
@@ -170,7 +175,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
     settlingRef.current = true
-    let lastWidth = -1
+    let lastGeometry = ''
+    let stableFrames = 0
     let frames = 0
     const tick = () => {
       const node = containerRef.current
@@ -178,13 +184,14 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         settlingRef.current = false
         return
       }
-      const w = node.clientWidth
-      if ((w > 0 && w === lastWidth) || frames > 30) {
+      const geometry = `${node.clientWidth}x${node.clientHeight}`
+      stableFrames = geometry === lastGeometry ? stableFrames + 1 : 0
+      if ((node.clientWidth > 0 && node.clientHeight > 0 && stableFrames >= 2) || frames > 30) {
         settlingRef.current = false
         fitAndSend.current(true)
         return
       }
-      lastWidth = w
+      lastGeometry = geometry
       frames++
       stabilizeRafRef.current = requestAnimationFrame(tick)
     }
@@ -659,6 +666,7 @@ function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
 
 interface Props {
   agentId: string
+  agentType?: string
   projectId: string | null
   isEphemeral?: boolean
   // chatMode renders the agent tab as a chat view (stream-json framing)
@@ -670,9 +678,16 @@ interface Props {
   // all artifacts of being a window inside a scroll column, so they're inert
   // here. Omitted -> the classic fixed-height dragged window.
   fill?: boolean
+  // reconnectSignal: bumping this number from the parent reconnects the agent
+  // tab's socket, the same way the title bar's Refresh button does. Used after
+  // restarting the agent process, so the pane attaches to the new session
+  // instead of sitting on the closed one.
+  reconnectSignal?: number
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // Chat mode only: a commit chip was clicked - show that commit's diff.
+  onSelectCommit?: (sha: string) => void
 }
 
 // memo: AgentDetail re-renders on every live tick of its agent (activity line,
@@ -680,7 +695,7 @@ interface Props {
 // so those ticks skip the whole tab strip + xterm/chat subtree.
 export const AgentTerminal = memo(AgentTerminalImpl)
 
-function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reconnectSignal, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -837,6 +852,13 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
     onRefresh?.()
   }
 
+  // Parent-driven reconnect (e.g. after restarting the agent process): folded
+  // into the agent tab's reconnect count so bumping it remounts that pane - it
+  // drops the closed socket and re-attaches to the fresh session (which replays
+  // scrollback). Only the 'terminal' tab is the agent process; bash tabs are
+  // unaffected. Derived rather than an effect so it can't cascade renders.
+  const terminalReconnect = (reconnectKeys.terminal ?? 0) + (reconnectSignal ?? 0)
+
   const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   const isNeedsInput = status === AgentStatus.NEEDS_INPUT
   const isWaiting = status === AgentStatus.WAITING
@@ -945,10 +967,11 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
               </Tooltip>
               {shellMenuOpen && (
                 <>
-                  {/* click-away backdrop */}
-                  <div className="fixed inset-0 z-10" onClick={() => setShellMenuOpen(false)} />
+                  {/* click-away backdrop. z-30 keeps it above the chat pane's
+                      ChatViewSelector (z-20) so this dropdown wins the overlap. */}
+                  <div className="fixed inset-0 z-30" onClick={() => setShellMenuOpen(false)} />
                   <div
-                    className={`absolute left-0 top-full mt-1 z-20 w-56 rounded-md border shadow-lg py-1 text-xs ${
+                    className={`absolute left-0 top-full mt-1 z-40 w-56 rounded-md border shadow-lg py-1 text-xs ${
                       chatActive
                         ? 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e]'
                         : 'border-gray-700 bg-gray-800'
@@ -1025,11 +1048,13 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
           {tab.id === 'terminal' && chatMode ? (
             <ChatPane
               agentId={agentId}
+              agentType={agentType}
               projectId={projectId}
               active={activeTabId === tab.id}
-              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              reconnectAttempt={terminalReconnect}
               onStatusUpdate={handleStatusUpdate}
               onDiffRefresh={onDiffRefresh}
+              onSelectCommit={onSelectCommit}
             />
           ) : (
             <TerminalPane
@@ -1039,7 +1064,7 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
               sandboxed={tab.sandboxed}
               shellId={tab.id}
               active={activeTabId === tab.id}
-              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              reconnectAttempt={tab.id === 'terminal' ? terminalReconnect : (reconnectKeys[tab.id] ?? 0)}
               onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
               onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
               onMetrics={reportMetrics}
@@ -1057,9 +1082,10 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
           onPointerDown={onResizeStart}
           onPointerMove={onResizeMove}
           onPointerUp={onResizeEnd}
-          className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
+          title="Drag to resize"
+          className="group/resize absolute bottom-0 left-0 right-0 h-2 flex items-end justify-center cursor-ns-resize z-20 touch-none"
         >
-          <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
+          <ResizeGrip orientation="horizontal" />
         </div>
       )}
     </div>

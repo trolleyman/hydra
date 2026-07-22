@@ -161,10 +161,9 @@ function ProjectSettingsPage() {
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Single "Settings" header bar with a small save button (always shown,
           never grayed - except on the Browser tab, whose preferences apply
-          instantly). The show-sidebar toggle joins it when collapsed. */}
+          instantly). */}
       <PageTopBar
         title="Settings"
-        always
         onBack={canGoBack ? () => router.history.back() : undefined}
         right={
           tab !== 'browser' ? (

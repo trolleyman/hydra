@@ -79,7 +79,10 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // wrap text at different widths, and the mismatch drifts the visible
           // (highlighted) text away from the real (selectable) text.
           style={{ scrollbarGutter: 'stable' }}
-          className={`absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
+          // prompt-input-font pins Roboto Flex on BOTH layers so their metrics
+          // match exactly and the backdrop's *italic* runs can slant via the
+          // font's slnt axis without drifting the textarea caret (see index.css).
+          className={`prompt-input-font absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
         >
           {renderMarkdownSource(value)}
           {/* Trailing newline keeps the backdrop's height matching the textarea
@@ -96,7 +99,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // Match the backdrop's reserved scrollbar gutter so both layers wrap
           // text at the same width (see the backdrop above).
           style={{ scrollbarGutter: 'stable', ...style }}
-          className={`absolute inset-0 w-full h-full resize-none bg-transparent text-transparent ${caretClassName} focus:outline-none ${textClassName}`}
+          className={`prompt-input-font absolute inset-0 w-full h-full resize-none bg-transparent text-transparent ${caretClassName} focus:outline-none ${textClassName}`}
           {...rest}
         />
       </div>

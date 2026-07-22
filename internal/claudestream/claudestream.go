@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 )
@@ -51,6 +52,11 @@ type Event struct {
 	// transcript, so the daemon can detect it live and flip the head into an error
 	// status. The text of the error is in the message's single text block.
 	IsAPIError bool `json:"isApiErrorMessage,omitempty"`
+	// Model is the active model id, carried on the `system`/`init` line the CLI
+	// emits at the start of every (re)connect. The daemon reads it to persist the
+	// head's current model so the chat selector shows the right one on load,
+	// without the client having to observe and echo it back.
+	Model string `json:"model,omitempty"`
 }
 
 // apiErrorMessage is the minimal decode of an isApiErrorMessage assistant line,
@@ -91,6 +97,95 @@ func ParseEvent(line []byte) (Event, bool) {
 		return Event{}, false
 	}
 	return ev, true
+}
+
+// ResumeContinuePrompt is the synthetic user turn Claude injects into a resumed
+// conversation whose last turn was INTERRUPTED (the process was killed
+// mid-response, e.g. a daemon restart mid-turn): an isMeta
+// "Continue from where you left off." message. Because the CLI runs headless
+// (replyOnResume defaults false in -p mode), it pairs this with a
+// synthetic-model "No response requested." assistant reply that marks the
+// prompt as deliberately unanswered - so the agent does NOT actually continue.
+// The pair is written to the transcript (spike-verified against claude 2.1.204:
+// getResumePrompt() = CLAUDE_CODE_RESUME_PROMPT || this string), and Claude's
+// own UI hides both as internal placeholders. See IsHiddenChatMessage.
+const ResumeContinuePrompt = "Continue from where you left off."
+
+// syntheticModel is the model value the CLI stamps on placeholder assistant
+// messages it fabricates locally ("No response requested.", "(no content)", ...)
+// rather than receiving from the API.
+const syntheticModel = "<synthetic>"
+
+// hiddenMsgProbe is the minimal decode used by IsHiddenChatMessage.
+type hiddenMsgProbe struct {
+	Type    string `json:"type"`
+	IsMeta  bool   `json:"isMeta"`
+	Message struct {
+		Model   string          `json:"model"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+// IsHiddenChatMessage reports whether a stream-json / transcript line is one of
+// the CLI's internal resume placeholders that its own UI hides, and which the
+// chat view therefore must not render:
+//
+//   - any assistant message stamped with the synthetic model (the local
+//     "No response requested." / "(no content)" placeholders), and
+//   - the isMeta ResumeContinuePrompt user turn the CLI injects when resuming an
+//     interrupted turn.
+//
+// Without this these two surface as a spurious "Continue from where you left
+// off." user bubble answered by "No response requested." - noise the user can't
+// act on (the agent is separately nudged to continue for real, see
+// heads.nudgeResumedChatAgent). They appear only in transcript backfill (a
+// resumed process replays nothing on stdout), but the predicate is cheap and
+// applied on every relay path for safety. A line that isn't a JSON object
+// returns false (relayed unchanged).
+func IsHiddenChatMessage(line []byte) bool {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || line[0] != '{' {
+		return false
+	}
+	var p hiddenMsgProbe
+	if err := json.Unmarshal(line, &p); err != nil {
+		return false
+	}
+	switch p.Type {
+	case "assistant":
+		return p.Message.Model == syntheticModel
+	case "user":
+		return p.IsMeta && messageContentText(p.Message.Content) == ResumeContinuePrompt
+	}
+	return false
+}
+
+// messageContentText extracts the plain text of a user/assistant message's
+// content, which is either a JSON string or an array of content blocks (only
+// text blocks contribute). Returns "" for anything else.
+func messageContentText(content json.RawMessage) string {
+	content = bytes.TrimSpace(content)
+	if len(content) == 0 {
+		return ""
+	}
+	if content[0] == '"' {
+		var s string
+		if json.Unmarshal(content, &s) != nil {
+			return ""
+		}
+		return strings.TrimSpace(s)
+	}
+	var blocks []textBlock
+	if json.Unmarshal(content, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 // controlRequest is the minimal decode of a control_request stdout line the CLI
@@ -310,6 +405,12 @@ func (b *LineBuffer) Feed(chunk []byte) [][]byte {
 // session lock, and Pending is read under the same lock (see Session.attach).
 type RingFilter struct {
 	lb LineBuffer
+	// OnLine observes every complete protocol line in read order, including
+	// stream_event token deltas. Hydra's normalized adapter needs those deltas
+	// for live rendering even though the scrollback ring intentionally retains
+	// only completed events. The callback runs under the session lock and should
+	// enqueue work rather than doing disk IO itself.
+	OnLine func(line []byte)
 	// OnAPIError, if set, is called (synchronously, once per line) with the error
 	// text whenever a complete assistant line flagged isApiErrorMessage passes
 	// through - the signal that a turn failed mid-response. It runs under the
@@ -346,17 +447,149 @@ type RingFilter struct {
 	// hooks - the callback dispatches the actual stdin write off the read
 	// goroutine.
 	OnPlanApproval func(requestID string, input json.RawMessage)
+	// Plan, if set, incrementally folds each complete line into the head's
+	// plan/to-do list (TaskCreate/TaskUpdate/TodoWrite and their results) - the
+	// daemon-owned durable copy, maintained whether or not any browser is
+	// attached. OnPlanChange fires (once per line that changed the plan) with
+	// the new PlanEntry JSON; the daemon wires it to persist onto Agent.Plan.
+	// Same under-the-session-lock cheapness rule as the other hooks - the
+	// tracker's substring pre-filter dismisses almost every line without JSON
+	// work, and the callback dispatches the DB write off the read goroutine.
+	Plan         *PlanTracker
+	OnPlanChange func(planJSON string)
+	// OnModel, if set, is called with the active model id whenever a
+	// system:init line carries one - session start and every /model change.
+	// The daemon wires it to persist the head's current model. Living here
+	// (not the per-connection relay) means it fires with no browser attached,
+	// so a mid-session /model change survives a daemon restart even if nobody
+	// reattached in between. Same under-the-session-lock cheapness rule as the
+	// other hooks.
+	OnModel func(model string)
+	// OnThinking, if set, fires once per completed thinking block with the block's
+	// message id and the wall-clock duration Hydra measured for it (from the
+	// block's content_block_start to its content_block_stop on the live stream).
+	// The daemon wires this to persist the duration to a small per-head sidecar,
+	// so a reload/resume can show "Thought for Xs" without the browser having to
+	// time it. Same under-the-session-lock cheapness rule as the other hooks - the
+	// callback dispatches the disk write off the read goroutine. Filter ALSO emits
+	// a synthetic hydra_thinking line (see Filter's injected return) so an
+	// already-attached client gets the duration live.
+	OnThinking func(messageID string, durationMS int64)
+	// timer measures thinking-block durations from the stream_event partial deltas
+	// that Filter otherwise drops. Lazily initialised on first stream_event.
+	timer thinkingTimer
+	// pendingInjected holds synthetic hydra_thinking lines measured mid-chunk,
+	// released to attachers only once the chunk stream reaches a line boundary
+	// (see Filter) so they never splice into a half-buffered line.
+	pendingInjected []byte
+}
+
+// nowFunc is the clock thinkingTimer reads; a package var so tests can pin it.
+// The production stream is live, so real wall-clock time is what we want.
+var nowFunc = time.Now
+
+// thinkingTimer tracks the currently-streaming assistant message id and the
+// start time of each in-flight thinking content block, so it can report a
+// block's duration when its content_block_stop arrives. Not safe for concurrent
+// use; it runs under the session lock inside RingFilter.Filter.
+type thinkingTimer struct {
+	msgID string
+	// starts maps a thinking block's stream content-block index to when its
+	// content_block_start was seen. Only thinking blocks get an entry, so a
+	// content_block_stop with no entry is a non-thinking block we ignore.
+	starts map[int]time.Time
+}
+
+// streamEventEnvelope is the minimal decode of a stream_event line: enough to
+// follow message boundaries and thinking content-block start/stop. Everything
+// else in the partial-delta stream is ignored.
+type streamEventEnvelope struct {
+	Event struct {
+		Type    string `json:"type"`
+		Index   int    `json:"index"`
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+		ContentBlock struct {
+			Type string `json:"type"`
+		} `json:"content_block"`
+	} `json:"event"`
+}
+
+// feed advances the timer with one stream_event line. When a thinking block's
+// content_block_stop is seen it returns that block's message id and duration
+// (ok=true); otherwise ok=false. A message_start resets the per-message index
+// map (indices are scoped to one message).
+func (t *thinkingTimer) feed(line []byte) (messageID string, durationMS int64, ok bool) {
+	var env streamEventEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return "", 0, false
+	}
+	switch env.Event.Type {
+	case "message_start":
+		t.msgID = env.Event.Message.ID
+		t.starts = nil
+	case "content_block_start":
+		if env.Event.ContentBlock.Type == "thinking" {
+			if t.starts == nil {
+				t.starts = map[int]time.Time{}
+			}
+			t.starts[env.Event.Index] = nowFunc()
+		}
+	case "content_block_stop":
+		start, isThinking := t.starts[env.Event.Index]
+		if !isThinking {
+			return "", 0, false
+		}
+		delete(t.starts, env.Event.Index)
+		// A message with no message_start (shouldn't happen on a live stream, but
+		// be defensive) has no id to key on - skip rather than record an orphan.
+		if t.msgID == "" {
+			return "", 0, false
+		}
+		return t.msgID, nowFunc().Sub(start).Milliseconds(), true
+	}
+	return "", 0, false
+}
+
+// thinkingLine builds the synthetic hydra_thinking stream line Filter injects so
+// an attached client learns a thinking block's measured duration live. The
+// client keys it by message_id (the same id its settled assistant event carries)
+// and shows "Thought for Xs"; on reload the daemon replays these from the head's
+// sidecar (see the http backfill).
+func thinkingLine(messageID string, durationMS int64) []byte {
+	line, _ := json.Marshal(map[string]any{
+		"type":        "hydra_thinking",
+		"message_id":  messageID,
+		"duration_ms": durationMS,
+	})
+	return append(line, '\n')
 }
 
 // Filter feeds chunk through the line reassembler and returns the bytes to
-// persist (complete non-stream_event lines, newline-terminated). A line the CLI
-// flagged as an API error fires OnAPIError as a side effect; a `result` line
-// (turn end) fires OnResult.
-func (f *RingFilter) Filter(chunk []byte) []byte {
+// persist (kept: complete non-stream_event lines, newline-terminated) plus any
+// synthetic lines to also stream live to attachers (injected: hydra_thinking
+// duration events - NOT persisted in the ring, since the daemon's per-head
+// sidecar is what a reconnect replays them from). A line the CLI flagged as an
+// API error fires OnAPIError; a `result` line (turn end) fires OnResult; a
+// completed thinking block fires OnThinking (for the sidecar write).
+func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 	var out []byte
 	for _, line := range f.lb.Feed(chunk) {
 		ev, ok := ParseEvent(line)
+		if f.OnLine != nil && len(bytes.TrimSpace(line)) > 0 {
+			f.OnLine(line)
+		}
 		if ok && ev.Type == "stream_event" {
+			// stream_event partials aren't persisted, but they carry the thinking
+			// block timing: measure it here and, on completion, queue a synthetic
+			// hydra_thinking line (live) + fire OnThinking (durable sidecar write).
+			if msgID, durMS, done := f.timer.feed(line); done {
+				f.pendingInjected = append(f.pendingInjected, thinkingLine(msgID, durMS)...)
+				if f.OnThinking != nil {
+					f.OnThinking(msgID, durMS)
+				}
+			}
 			continue
 		}
 		if ok && ev.IsAPIError && f.OnAPIError != nil {
@@ -373,10 +606,26 @@ func (f *RingFilter) Filter(chunk []byte) []byte {
 				f.OnPlanApproval(req.RequestID, req.Input)
 			}
 		}
+		if ok && f.Plan != nil && f.Plan.Feed(line) && f.OnPlanChange != nil {
+			f.OnPlanChange(f.Plan.JSON())
+		}
+		if ok && ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && f.OnModel != nil {
+			f.OnModel(ev.Model)
+		}
 		out = append(out, line...)
 		out = append(out, '\n')
 	}
-	return out
+	// Flush queued hydra_thinking lines to attachers only at a line boundary -
+	// i.e. when this chunk left no partial line buffered. Attachers receive the
+	// RAW chunk stream and reassemble it themselves (same bytes this filter sees),
+	// so their reassembler is at a boundary exactly when ours is; injecting a
+	// synthetic line mid-partial would splice into the half-line and corrupt both.
+	// A held line just waits for the next chunk that lands on a boundary.
+	if len(f.lb.buf) == 0 && len(f.pendingInjected) > 0 {
+		injected = f.pendingInjected
+		f.pendingInjected = nil
+	}
+	return out, injected
 }
 
 // Pending returns the buffered partial line not yet persisted. A new attacher

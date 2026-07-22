@@ -167,6 +167,33 @@ func TestSpawnProxyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestForceRevalidate checks the proxy's ModifyResponse hook downgrades
+// freshness to no-cache while preserving the upstream's validators, so previews
+// of the live worktree never serve stale content but still get cheap 304s.
+func TestForceRevalidate(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Cache-Control", "public, max-age=31536000, immutable")
+	resp.Header.Set("Expires", "Wed, 21 Oct 2026 07:28:00 GMT")
+	resp.Header.Set("ETag", `"abc123"`)
+	resp.Header.Set("Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT")
+
+	if err := forceRevalidate(resp); err != nil {
+		t.Fatalf("forceRevalidate: %v", err)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", got)
+	}
+	if got := resp.Header.Get("Expires"); got != "" {
+		t.Errorf("Expires = %q, want removed", got)
+	}
+	if got := resp.Header.Get("ETag"); got != `"abc123"` {
+		t.Errorf("ETag = %q, want preserved", got)
+	}
+	if got := resp.Header.Get("Last-Modified"); got == "" {
+		t.Errorf("Last-Modified was dropped, want preserved")
+	}
+}
+
 // TestLoadingPageWhileStarting checks a browser navigation during startup gets
 // the holding page (not a hung request), and the status endpoint reports state.
 func TestLoadingPageWhileStarting(t *testing.T) {

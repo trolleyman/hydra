@@ -7,6 +7,7 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
@@ -20,11 +21,12 @@ import { closeWebSocket } from '../lib/ws'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
-import { ABControlsContext } from './artifactDiffContext'
+import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
+import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -1102,9 +1104,22 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
       // new height rather than snapping.
       glideKey={buildLogVisible}
     >
-          {/* While generating, stream both builds' live logs side by side; a side
-              that finishes first shows its final log instead of "waiting". */}
-          {status === 'generating' && <LiveLogPanes set={set} />}
+          {/* While generating, both builds' live logs sit at the top, with tiles
+              streaming in below as each file finishes (a ::hydra:artifact:: marker
+              fired and both sides could be compared). Keeping the logs pinned above
+              means the live build output stays put as tiles are appended, rather
+              than getting pushed down. Same filter/threshold as the settled grid,
+              so a screenshot identical to its base stays hidden by default - only
+              real changes surface as they render. The full authoritative grid
+              replaces this the moment the set settles. */}
+          {status === 'generating' && (
+            <>
+              <LiveLogPanes set={set} />
+              {visibleFiles.length > 0 && (
+                <FileGrid files={visibleFiles} mode={mode} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
+              )}
+            </>
+          )}
           {status === 'error' && (
             <>
               {/* Both sides failed: the red-bordered build-log terminals (the
@@ -1178,6 +1193,27 @@ type ArtifactWSMessage =
   | { type: 'set'; set: ArtifactSet }
   | { type: 'log'; script: string; side: ArtifactSide; line: ArtifactLogLine }
   | { type: 'progress'; script: string; side: ArtifactSide; progress: string }
+  // A single output file finished + was compared mid-run (a ::hydra:artifact::
+  // marker fired), so its tile can render before the whole set settles. Upserted
+  // into the set by name; the authoritative "set" at settle reconciles the list.
+  | { type: 'file'; script: string; file: ArtifactFile }
+
+// upsertArtifactFile merges one streamed file into a set's file list: it replaces
+// an existing entry of the same name (a re-emit is idempotent) or inserts it in
+// name order, matching the server's sorted list so the settled "set" doesn't
+// reshuffle the grid.
+function upsertArtifactFile(files: ArtifactFile[], file: ArtifactFile): ArtifactFile[] {
+  const idx = files.findIndex((f) => f.name === file.name)
+  if (idx >= 0) {
+    const next = files.slice()
+    next[idx] = file
+    return next
+  }
+  const insert = files.findIndex((f) => f.name > file.name)
+  const next = files.slice()
+  next.splice(insert < 0 ? files.length : insert, 0, file)
+  return next
+}
 
 function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: string, headRef?: string, includeUncommitted?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -1196,7 +1232,7 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
 // only re-renders for its own WS/stream state or a deliberate prop change.
 export const ArtifactsPanel = memo(ArtifactsPanelImpl)
 
-function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactScale, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
+function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -1204,8 +1240,13 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   includeUncommitted?: boolean
   refreshKey: number
   imageDiffMode: ImageDiffMode
-  // Global tile-size multiplier (diff settings size slider), forwarded to every card.
+  // The image-diff mode (before/after, slider, side-by-side, onion) and the tile
+  // size multiplier - their controls live in this panel's own header cog (were in
+  // the diff-toolbar cog), so the state stays lifted in the diff viewer.
+  onImageDiffModeChange: (v: ImageDiffMode) => void
+  // Global tile-size multiplier (the size slider), forwarded to every card.
   artifactScale: number
+  onArtifactScaleChange: (v: number) => void
   // Global before/after view + "highlight" for A/B tiles, owned by the diff viewer so
   // they persist and so the header controls + B/H keyboard shortcuts drive every tile.
   artifactView: 'before' | 'after'
@@ -1216,6 +1257,10 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   onArtifactSpanChange: (key: string, span: number | null) => void
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
+  // Streamed live-log lines live here (not in `sets`) so a log frame re-renders
+  // only its LogView. Seeded/reset from snapshot/set/refresh below to mirror the
+  // old sets[].left_log semantics exactly.
+  const liveLog = useLiveLogStore()
   const [error, setError] = useState<string | null>(null)
   // Connection mode: WS while live, polling if the socket can't connect or drops.
   const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
@@ -1300,17 +1345,11 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   // tick, and appending each on its own would re-copy the whole growing log
   // array per line (O(n^2)). Queue them by script+side and apply one batch per
   // ~frame. The key packs both axes so left/right stay separate.
+  // A flushed batch appends into the live-log store (keyed set+side), NOT into
+  // `sets` - so a chatty log re-renders only the subscribed LogView, not the whole
+  // panel. The keys already match the store's (`${name}\0${side}`).
   const { enqueue: enqueueLog, flushNow: flushLogs } = useLogCoalescer<ArtifactLogLine>((batches) => {
-    setSets((prev) => prev?.map((s) => {
-      const left = batches.get(`${s.name}\0left`)
-      const right = batches.get(`${s.name}\0right`)
-      if (!left && !right) return s
-      return {
-        ...s,
-        ...(left ? { left_log: [...(s.left_log ?? []), ...left] } : {}),
-        ...(right ? { right_log: [...(s.right_log ?? []), ...right] } : {}),
-      }
-    }) ?? prev)
+    for (const [key, lines] of batches) liveLog.append(key, lines)
   })
 
   // Apply a server→client WS message to local state.
@@ -1326,16 +1365,43 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     // so they land in order on the current set before it changes.
     flushLogs()
     if (msg.type === 'snapshot') {
-      setSets(msg.scripts ?? [])
+      const scripts = msg.scripts ?? []
+      // Seed the live-log store with each side's authoritative buffer (replace),
+      // matching how the old code set sets[].left_log from the snapshot.
+      for (const s of scripts) {
+        liveLog.set(`${s.name}\0left`, s.left_log ?? [])
+        liveLog.set(`${s.name}\0right`, s.right_log ?? [])
+      }
+      setSets(scripts)
     } else if (msg.type === 'set') {
-      setSets((prev) => (prev ? prev.map((s) => (s.name === msg.set.name ? msg.set : s)) : [msg.set]))
+      liveLog.set(`${msg.set.name}\0left`, msg.set.left_log ?? [])
+      liveLog.set(`${msg.set.name}\0right`, msg.set.right_log ?? [])
+      setSets((prev) => {
+        if (!prev) return [msg.set]
+        return prev.map((s) => {
+          if (s.name !== msg.set.name) return s
+          // A "set" arriving while the run is still in flight (e.g. one side settled
+          // but the other is still generating) carries no compared files yet - don't
+          // let it wipe the tiles already streamed in via "file" messages. The
+          // authoritative "set" at final settle DOES carry the full file list and
+          // replaces them. So: keep the incoming set's files when it has any, else
+          // preserve what we've accumulated.
+          const files = msg.set.files.length > 0 ? msg.set.files : s.files
+          return { ...msg.set, files }
+        })
+      })
+    } else if (msg.type === 'file') {
+      setSets((prev) => prev?.map((s) => {
+        if (s.name !== msg.script) return s
+        return { ...s, files: upsertArtifactFile(s.files, msg.file) }
+      }) ?? prev)
     } else if (msg.type === 'progress') {
       setSets((prev) => prev?.map((s) => {
         if (s.name !== msg.script) return s
         return msg.side === 'left' ? { ...s, left_progress: msg.progress } : { ...s, right_progress: msg.progress }
       }) ?? prev)
     }
-  }, [enqueueLog, flushLogs])
+  }, [enqueueLog, flushLogs, liveLog])
 
   // Primary path: stream updates over a WebSocket so progress/log update instantly.
   // Falls back to polling (below) if the socket fails to open or later drops.
@@ -1402,6 +1468,10 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     // only zeroes that side - the other keeps its existing log/progress so it isn't
     // visually thrown away while it stays cached.
     const both = side === undefined
+    // Clear the refreshed side(s) in the live-log store too, so the empty log shows
+    // immediately (mirrors the left_log: [] reset on the set below).
+    if (both || side === 'left') liveLog.set(`${name}\0left`, [])
+    if (both || side === 'right') liveLog.set(`${name}\0right`, [])
     setSets((prev) => prev?.map((s) => (s.name === name
       ? {
           ...s,
@@ -1421,7 +1491,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
       refreshScriptRef.current = { name, side }
       setRefreshNonce((n) => n + 1)
     }
-  }, [mode])
+  }, [mode, liveLog])
 
   // What to render: the live sets once they arrive, otherwise a skeleton built
   // from the cached chrome (one collapsed, "generating" card per script name) so
@@ -1480,6 +1550,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   return (
     // Publish the measured filter-bar height so card headers can dock flush beneath
     // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
+    <LiveLogProvider value={liveLog}>
     <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
@@ -1513,6 +1584,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
           <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types - <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> - are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg ... -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
           <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script - handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) - Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
+          <p><strong>Streaming tiles.</strong> Print <code className="text-blue-300">::hydra:artifact:: home-dark.png</code> right after writing a file (and its <code className="text-blue-300">.meta</code> sidecar) and Hydra scans and diffs just that tile immediately, rendering it while the rest of the run continues - so images trickle in as they render instead of all appearing at the end. The path is relative to <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>; emit the marker only once the file is fully written. It is optional - a script that emits none still has every output collected by the final scan when it exits.</p>
           <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. The sidecar can also carry an optional <code className="text-blue-300">dpi</code> (the device-scale factor the shot was captured at, e.g. <code className="text-blue-300">{'{'}"dpi": 2{'}'}</code>) - the grid then sizes a tile by its <em>logical</em> width (pixels / dpi), so a 2× shot lays out like a 1× one, just sharper. For a video, an optional <code className="text-blue-300">fps</code> (e.g. <code className="text-blue-300">{'{'}"fps": 60{'}'}</code>) sets the frame rate the frame-step buttons use, since HTML5 video exposes none of its own. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label - only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right - how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) - the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
         </InfoTooltip>
         {/* Right cluster: the global A/B before/after + highlight controls (only
@@ -1554,6 +1626,30 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
             onSearchChange={setSearch}
             showChangeFilter
           />
+          {/* Artifact view options (were in the diff-toolbar cog): the image-diff
+              mode and the global tile-size multiplier. */}
+          <SettingsPopover label="Artifact options" width={208}>
+            <SettingsGroupLabel className="mb-2">Image Diff</SettingsGroupLabel>
+            <div className="flex flex-col gap-0.5">
+              {IMAGE_DIFF_MODES.map((opt) => (
+                <SettingsOptionRow key={opt.value} type="radio" name="hydra-image-diff-mode"
+                  checked={imageDiffMode === opt.value} onChange={() => onImageDiffModeChange(opt.value)} label={opt.label} />
+              ))}
+            </div>
+            {/* The grid auto-sizes each tile by aspect ratio; this scales every
+                tile up or down from there (drag a tile's edge to override one). */}
+            <div className="mt-3 flex items-center gap-2">
+              <SettingsGroupLabel className="shrink-0">Size</SettingsGroupLabel>
+              <input
+                type="range" min={0.5} max={2} step={0.25} value={artifactScale}
+                onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
+                className="flex-1 accent-blue-500 cursor-pointer"
+                title="Scale every artifact tile up or down"
+              />
+              <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
+          </SettingsPopover>
         </div>
       </div>
       <div className="flex flex-col gap-2">
@@ -1571,5 +1667,6 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
         </ABControlsContext.Provider>
       </div>
     </div>
+    </LiveLogProvider>
   )
 }

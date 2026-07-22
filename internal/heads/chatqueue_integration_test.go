@@ -272,8 +272,8 @@ func TestChatPlanApprovalViaRegistry(t *testing.T) {
 // real CLI), so the daemon itself must flip the head out of "running". End to
 // end minus the CLI: mark the interrupt (as the chat WS handler does), feed the
 // CLI's actual post-interrupt output, and expect the status written as
-// "waiting" plus the queued message drained to stdin.
-func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
+// "finished" plus the queued message drained to stdin.
+func TestChatInterruptWritesFinishedStatusAndDrains(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 	reg := mgr.reg
 	reg.SetOnChatResult(mgr.OnTurnEnd)
@@ -291,8 +291,8 @@ func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
 
 	waitUntil(t, func() bool {
 		s := ReadAgentStatus(root, "agent-x")
-		return s != nil && s.Status == api.Waiting
-	}, "interrupted turn end did not write the waiting status")
+		return s != nil && s.Status == api.Finished
+	}, "interrupted turn end did not write the finished status")
 	waitUntil(t, func() bool { return strings.Contains(pty.written(), "AFTER-INTERRUPT") },
 		"interrupted turn end did not drain the queued message")
 }
@@ -334,7 +334,7 @@ func TestChatIdleInterruptSettleInvalidated(t *testing.T) {
 	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	// The turn end consumed the mark (and wrote waiting); a hook then flipped
+	// The turn end consumed the mark (and wrote finished); a hook then flipped
 	// the head back to running (the drained message's UserPromptSubmit).
 	mgr.MarkInterrupted("agent-x")
 	mgr.OnTurnEnd("agent-x")
@@ -374,20 +374,19 @@ func TestChatQueuedSubmitWhileRestingDrains(t *testing.T) {
 	}
 }
 
-// A normal (un-interrupted) turn end must not touch the status file - that is
-// the Stop hook's job - and a stale interrupt mark (one whose turn never
-// answered, superseded by a later user send) must not relabel a later turn.
-func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
+// Every provider turn end is authoritative even when Claude's Stop hook is
+// delayed or missing. Stale interrupt marks must not prevent that transition.
+func TestChatTurnEndAlwaysSettlesStatus(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 
 	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Plain turn end: no mark, no status write.
+	// Plain turn end: no interrupt mark, but the daemon still settles it.
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("un-interrupted turn end rewrote the status: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
+		t.Fatalf("un-interrupted turn end did not settle status: %+v", s)
 	}
 
 	// A mark followed by a new user send is stale: the send starts a fresh turn
@@ -398,8 +397,8 @@ func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
 		t.Fatalf("direct send not written to stdin: %q", pty.written())
 	}
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("stale interrupt mark relabeled a later turn end: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
+		t.Fatalf("later turn end did not settle status: %+v", s)
 	}
 
 	// An expired mark (interrupt that never produced a turn end) is discarded.
@@ -408,7 +407,7 @@ func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
 	mgr.interrupted["agent-x"] = time.Now().Add(-2 * interruptMarkTTL)
 	mgr.mu.Unlock()
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("expired interrupt mark relabeled a later turn end: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
+		t.Fatalf("turn end with expired mark did not settle status: %+v", s)
 	}
 }
