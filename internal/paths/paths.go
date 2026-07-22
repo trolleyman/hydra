@@ -205,6 +205,27 @@ func GetChatQueueJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetChatQueueDirFromProjectRoot(projectRoot), id+".json")
 }
 
+// GetChatEventsDirFromProjectRoot returns the directory containing the
+// provider-neutral, sequenced chat event logs. Each head owns one JSONL file.
+func GetChatEventsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-events")
+}
+
+func GetChatEventsJSONLFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatEventsDirFromProjectRoot(projectRoot), id+".jsonl")
+}
+
+// GetChatStateDirFromProjectRoot returns the directory containing materialized
+// chat-state checkpoints. They are kept separate from event logs so a partial
+// checkpoint replacement can never damage durable history.
+func GetChatStateDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-state")
+}
+
+func GetChatStateJSONFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetChatStateDirFromProjectRoot(projectRoot), id+".json")
+}
+
 func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetBuildLogDirFromProjectRoot(projectRoot), id+".log")
 }

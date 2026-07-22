@@ -56,4 +56,6 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState("review json", paths.GetReviewJsonFromProjectRoot(projectRoot, id))
 	removeState("subagents dir", paths.GetSubagentsDirFromProjectRoot(projectRoot, id))
 	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
+	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
+	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))
 }

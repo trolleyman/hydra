@@ -20,6 +20,8 @@ func TestPerHeadStatePathsNoCollision(t *testing.T) {
 		{"foo", GetStatusLogFromProjectRoot, "status-log"},
 		{"foo", GetBuildLogFromProjectRoot, "build-log"},
 		{"foo", GetChatQueueJsonFromProjectRoot, "queue"},
+		{"foo", GetChatEventsJSONLFromProjectRoot, "chat-events"},
+		{"foo", GetChatStateJSONFromProjectRoot, "chat-state"},
 	}
 	for _, c := range cases {
 		companion := c.bGet(root, c.a)
@@ -36,11 +38,13 @@ func TestPerHeadStatePathsNoCollision(t *testing.T) {
 		t.Error("status and review share a path")
 	}
 	dirs := map[string]string{
-		"status-log": GetStatusLogDirFromProjectRoot(root),
-		"build-log":  GetBuildLogDirFromProjectRoot(root),
-		"review":     GetReviewDirFromProjectRoot(root),
-		"subagents":  GetSubagentsBaseDirFromProjectRoot(root),
-		"queue":      GetChatQueueDirFromProjectRoot(root),
+		"status-log":  GetStatusLogDirFromProjectRoot(root),
+		"build-log":   GetBuildLogDirFromProjectRoot(root),
+		"review":      GetReviewDirFromProjectRoot(root),
+		"subagents":   GetSubagentsBaseDirFromProjectRoot(root),
+		"queue":       GetChatQueueDirFromProjectRoot(root),
+		"chat-events": GetChatEventsDirFromProjectRoot(root),
+		"chat-state":  GetChatStateDirFromProjectRoot(root),
 	}
 	seen := map[string]bool{}
 	for name, dir := range dirs {
