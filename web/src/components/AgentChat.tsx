@@ -1191,6 +1191,7 @@ function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
 
 function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: string | null }) {
   if (!Array.isArray(changes)) return null
+  const showFileHeaders = changes.length > 1
   return (
     <div className="space-y-1.5">
       {changes.map((raw, i) => {
@@ -1202,11 +1203,13 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
-            <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-              <FileText className="h-3 w-3 shrink-0 text-blue-500" />
-              <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
-              <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
-            </div>
+            {showFileHeaders && (
+              <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
+                <FileText className="h-3 w-3 shrink-0 text-blue-500" />
+                <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+                <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
+              </div>
+            )}
             {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
           </div>
         )
@@ -1586,7 +1589,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
           {isFileChanges && (
             <HeaderChangeIcon
-              className={`h-3.5 w-3.5 shrink-0 ${headerChangeKind === 'add' ? 'text-emerald-500' : headerChangeKind === 'delete' ? 'text-red-500' : 'text-amber-500'}`}
+              className={`h-3.5 w-3.5 shrink-0 self-center ${headerChangeKind === 'add' ? 'text-emerald-500' : headerChangeKind === 'delete' ? 'text-red-500' : 'text-amber-500'}`}
               aria-label={headerChangeKind}
             />
           )}

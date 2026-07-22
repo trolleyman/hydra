@@ -3107,6 +3107,10 @@ func handleSimCodexChatWS(conn *safeConn) {
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "TOOL_DEMO.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-draft\n+complete\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "output": "File updated", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "input": map[string]any{"prompt": "Inspect chat replay and report the key invariant.", "description": "Inspect chat replay", "_raw": map[string]any{"tool": "spawnAgent"}}}},
 		{"subagent_started", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "description": "Inspect chat replay", "prompt": "Inspect chat replay and report the key invariant.", "status": "running"}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-child-report", "agent_id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "sidechain": true, "text": "Replay uses the same sequenced normalized events as live delivery."}},
