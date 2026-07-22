@@ -95,6 +95,9 @@ interface NormalizedChatEvent {
 interface ChatProjectionSnapshot {
   plan?: unknown
   turn?: { id?: string; status?: string }
+  // The block being produced right now, accumulated from the deltas that landed
+  // before this client attached (see seedStream).
+  stream?: { kind?: string; message_id?: string; text?: string }
   subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; prompt?: string; status?: string; activity?: string }>
 }
 
@@ -4346,6 +4349,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       if (streamFrame != null) return
       streamFrame = requestAnimationFrame(onStreamFrame)
     }
+    // Adopt the partial block the daemon reports in its attach snapshot: this
+    // client connected mid-response, and the live socket only carries the
+    // deltas from here on. Revealed in full rather than paced - that text was
+    // produced before we connected, so typing it out would replay it at the
+    // wrong moment - after which the remaining deltas stream normally.
+    const seedStream = (kind: 'assistant' | 'thinking', text: string) => {
+      streamBuf = { kind, text }
+      revealed = text.length
+      streamedKinds.add(kind)
+      setStream({ kind, text })
+    }
     const clearStream = () => {
       streamBuf = null
       revealed = 0
@@ -5597,6 +5611,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             const subID = sub.id || key
             handleSubagentMeta(subID, sub.parent_item_id ?? '', sub.agent_type ?? '', sub.description ?? '', sub.parent_id ?? '', sub.prompt ?? '')
             if (sub.status && sub.status !== 'running') ensureSubagent(subID).status = 'done'
+          }
+          const partial = msg.state?.stream
+          if (partial?.text) {
+            const kind = partial.kind === 'thinking' ? 'thinking' : 'text'
+            // Register the id the continuing deltas will resolve to, so they
+            // append to this preview instead of opening a second one (which
+            // would drop the prefix), and so the completed message settles it.
+            const streamID = partial.message_id || `${kind}:snapshot`
+            normalizedStreams.add(streamID)
+            if (kind === 'text') activeNormalizedAssistantStream = streamID
+            else activeNormalizedReasoningStream = streamID
+            seedStream(kind === 'text' ? 'assistant' : 'thinking', partial.text)
           }
           return
         }
