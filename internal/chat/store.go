@@ -289,6 +289,18 @@ func (s *Store) HasType(eventType string) bool {
 	return false
 }
 
+// Events returns a detached copy of the durable timeline. Manager-side
+// reconciliation uses it to rebuild provider echo state after a restart.
+func (s *Store) Events() []Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]Event(nil), s.events...)
+	for i := range out {
+		out[i].Payload = append(json.RawMessage(nil), out[i].Payload...)
+	}
+	return out
+}
+
 // Watch atomically captures the current projection watermark and subscribes to
 // every later append. A slow subscriber is closed instead of blocking provider
 // ingestion; reconnect/cursor replay recovers the missed tail.

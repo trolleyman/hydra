@@ -39,10 +39,10 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
 // Gemini expose a small curated set; Copilot stays on its CLI-managed default.
 const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
   claude: [
+    { id: 'fable', label: 'Fable' },
     { id: 'opus', label: 'Opus' },
     { id: 'sonnet', label: 'Sonnet' },
     { id: 'haiku', label: 'Haiku' },
-    { id: 'fable', label: 'Fable' },
   ],
   gemini: [
     { id: 'gemini-2.5-pro', label: '2.5 Pro' },
@@ -50,10 +50,12 @@ const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
   ],
   copilot: [],
   codex: [
-    { id: 'gpt-5.6', label: 'GPT-5.6' },
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+    { id: 'gpt-5.5', label: 'GPT-5.5' },
     { id: 'gpt-5.4', label: 'GPT-5.4' },
-    { id: 'gpt-5.3-codex-spark', label: 'Codex Spark' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
   ],
 }
 

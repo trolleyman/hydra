@@ -158,6 +158,18 @@ func (r *Registry) SetOnChatModel(fn func(id, model string)) {
 	r.mu.Unlock()
 }
 
+// ObserveChatModel persists a model resolved by a provider controller rather
+// than a provider stdout filter. Codex app-server's model/list response is the
+// authoritative account-specific source for its default model.
+func (r *Registry) ObserveChatModel(id, model string) {
+	r.mu.RLock()
+	fn := r.onChatModel
+	r.mu.RUnlock()
+	if fn != nil && model != "" {
+		go fn(id, model)
+	}
+}
+
 // SetOnChatLine registers the ordered provider-line observer used by the
 // normalized chat event adapter. The callback must remain cheap.
 func (r *Registry) SetOnChatLine(fn func(id, provider string, line []byte)) {

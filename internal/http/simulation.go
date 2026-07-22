@@ -3130,6 +3130,10 @@ func handleSimCodexChatWS(conn *safeConn) {
 		// output-file must keep it out of the sub-agent projection on replay.
 		{"notice", map[string]any{"text": "<task-notification><task-id>sim-background-command</task-id><status>completed</status><summary>Background command completed</summary><output-file>/tmp/sim-background-command.log</output-file></task-notification>"}},
 		{"subagent_completed", map[string]any{"id": "sim-background-command", "status": "completed"}},
+		// Opus can report a real measured reasoning span without exposing any
+		// reasoning text. The UI must still render its duration-only thought.
+		{"reasoning_completed", map[string]any{"message_id": "sim-hidden-reasoning", "text": ""}},
+		{"reasoning_duration", map[string]any{"message_id": "sim-hidden-reasoning", "duration_ms": 4200}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
 		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
 		{"user_message", map[string]any{"id": "sim-codex-interrupt-user", "content": []map[string]any{{"type": "text", "text": "Start an answer that I will interrupt."}}}},
@@ -3139,6 +3143,15 @@ func handleSimCodexChatWS(conn *safeConn) {
 		// Legacy compatibility: older normalized logs retained the cancellation
 		// status but labelled this event turn_completed.
 		{"turn_completed", map[string]any{"id": "sim-codex-interrupt-turn", "status": "cancelled"}},
+		{"turn_started", map[string]any{"id": "sim-codex-error-turn", "status": "running"}},
+		{"turn_error", map[string]any{"error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
+		{"turn_failed", map[string]any{"id": "sim-codex-error-turn", "status": "failed", "error": map[string]any{
+			"message":        `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The selected model is unavailable for this account."}}`,
+			"codexErrorInfo": "other",
+		}}},
 	}
 	for i, event := range events {
 		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)

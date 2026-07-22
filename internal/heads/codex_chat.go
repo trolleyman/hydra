@@ -28,6 +28,7 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 				log.Printf("warn: persist Codex thread for %s: %v", id, err)
 			}
 		},
+		OnModel: func(model string) { reg.ObserveChatModel(id, model) },
 		OnTurnStart: func(string) {
 			if err := MarkPromptSubmitted(store, projectRoot, id); err != nil {
 				log.Printf("warn: mark Codex turn running for %s: %v", id, err)

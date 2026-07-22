@@ -129,6 +129,11 @@ The persisted Codex model is also restored into the resumed controller. When
 no model was explicitly selected, Hydra labels the selector `Default`: an
 omitted app-server model intentionally uses the user's Codex configuration, and
 the thread lifecycle does not echo a concrete replacement model id.
+Before starting or resuming a thread, the controller calls the documented
+`model/list` method and resolves the account-specific `isDefault` entry to its
+canonical `model` id. This avoids inheriting a stale config alias that the
+current account rejects. Older app-server versions that lack `model/list` fall
+back to the requested/configured behavior instead of failing initialization.
 
 Add a provider conversation id to the agent record (for example,
 `conversation_id`; avoid a Claude- or Codex-named column). A thread id is part of
@@ -245,6 +250,9 @@ The daemon persists the same transition at the turn boundary. A connected chat
 also consumes the live normalized `turn_started` and terminal turn events so
 the sidebar and Stop control settle immediately, without waiting for the next
 project-status refresh. Replayed history cannot change current head status.
+Structured provider failures remain in the normalized payload. The browser
+unwraps app-server's nested JSON error messages and renders the provider type,
+HTTP status, and human-readable message instead of a generic turn-error label.
 
 Map Codex plan-update items into the existing persisted plan model. Map command,
 file-change, MCP, web-search, and other item variants to generic tool cards; keep
@@ -494,6 +502,20 @@ and the browser deduplicates normalized delivery by sequence number across
 history/live catch-up. Replay also suppresses the redundant agent notification
 found in logs written before this rule, so existing conversations converge to
 the same one-chip rendering as new ones.
+
+Hydra persists a submitted user message before handing it to a provider. Claude
+can later repeat that message through `--replay-user-messages` with a different
+UUID. Ingestion pairs that echo with the pending Hydra event and persists a
+`user_message_echoed` reconciliation marker rather than a second visible
+message. The marker makes repeated identical messages unambiguous after a
+restart. The client also performs the same one-to-one pairing while reading
+older logs created before the marker existed.
+
+Reasoning text and reasoning duration are separate normalized events. Some
+Claude models expose an empty reasoning block but still provide a measured
+duration. Replay pairs those events in either order and renders the
+duration-only block as `Thought for Xs`, so hidden reasoning remains visible
+without inventing thought content.
 
 The shared presentation reducer also keeps Claude partial content on one active
 stream until its completed message arrives. Claude's machine-readable

@@ -181,6 +181,9 @@ func (w *worker) run(id string) {
 			specs = w.settleCodexPartialOnInterrupt(specs)
 		}
 		for _, spec := range specs {
+			if (item.provider == "claude" || item.provider == "claude_history") && spec.eventType == "user_message" && w.reconcileClaudeUserEcho(spec) {
+				continue
+			}
 			if _, _, err := w.store.AppendSource(spec.sourceID, spec.eventType, spec.payload); err != nil {
 				log.Printf("warn: chat events: append %s event for %s: %v", item.provider, id, err)
 			}
@@ -189,6 +192,75 @@ func (w *worker) run(id string) {
 			}
 		}
 	}
+}
+
+// reconcileClaudeUserEcho folds Claude's --replay-user-messages echo into the
+// user_message Hydra already persisted when it wrote the message to stdin.
+// The marker is intentionally durable: without it, two identical messages sent
+// in separate turns cannot be paired correctly after a daemon restart.
+func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
+	payload, ok := spec.payload.(map[string]any)
+	if !ok || payload["sidechain"] == true {
+		return false
+	}
+	key := userMessageContentKey(payload)
+	if key == "" {
+		return false
+	}
+	pending := make([]uint64, 0, 1)
+	for _, event := range w.store.Events() {
+		var stored map[string]any
+		if json.Unmarshal(event.Payload, &stored) != nil {
+			continue
+		}
+		switch event.Type {
+		case "user_message":
+			if userMessageContentKey(stored) != key {
+				continue
+			}
+			if strings.HasPrefix(event.SourceID, "claude:") {
+				if len(pending) > 0 {
+					pending = pending[1:]
+				}
+			} else {
+				pending = append(pending, event.Seq)
+			}
+		case "user_message_echoed":
+			if userMessageContentKey(stored) == key && len(pending) > 0 {
+				pending = pending[1:]
+			}
+		}
+	}
+	if len(pending) == 0 {
+		return false
+	}
+	_, _, err := w.store.AppendSource(spec.sourceID, "user_message_echoed", map[string]any{
+		"user_seq": pending[0],
+		"content":  payload["content"],
+	})
+	return err == nil
+}
+
+func userMessageContentKey(payload map[string]any) string {
+	content, ok := payload["content"]
+	if !ok {
+		return ""
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return ""
+	}
+	// Provider payloads may use structs while replayed store payloads use maps.
+	// Round-trip through interface values so object key ordering is canonical.
+	var canonical any
+	if json.Unmarshal(raw, &canonical) != nil {
+		return ""
+	}
+	raw, err = json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func (w *worker) settleCodexPartialOnInterrupt(specs []eventSpec) []eventSpec {

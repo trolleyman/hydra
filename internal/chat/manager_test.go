@@ -62,6 +62,38 @@ func TestManagerSeedsInitialPromptOnce(t *testing.T) {
 	}
 }
 
+func TestManagerReconcilesClaudeUserEchoDurably(t *testing.T) {
+	root := t.TempDir()
+	resolve := func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" }
+	m := NewManager(resolve)
+	if _, err := m.Append("head", "user_message", map[string]any{"id": "client-1", "content": []map[string]any{{"type": "text", "text": "same text"}}}); err != nil {
+		t.Fatal(err)
+	}
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"claude-1","message":{"content":[{"type":"text","text":"same text"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ := m.Before("head", "", 10)
+	if len(events) != 2 || events[0].Type != "user_message" || events[1].Type != "user_message_echoed" {
+		t.Fatalf("events = %+v", events)
+	}
+
+	// Reopening the store must remember that the first identical message was
+	// paired, while still allowing a later identical turn to pair once.
+	m = NewManager(resolve)
+	if _, err := m.Append("head", "user_message", map[string]any{"id": "client-2", "content": []map[string]any{{"type": "text", "text": "same text"}}}); err != nil {
+		t.Fatal(err)
+	}
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"claude-2","message":{"content":[{"type":"text","text":"same text"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ = m.Before("head", "", 10)
+	if len(events) != 4 || events[3].Type != "user_message_echoed" {
+		t.Fatalf("reopened events = %+v", events)
+	}
+}
+
 func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
