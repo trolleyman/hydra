@@ -16,12 +16,25 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay("bash -lc 'cd web && bun test'", '/repo')).toBe('cd web &&\nbun test')
   })
 
-  it('leaves ambiguous launchers untouched', () => {
-    expect(unwrapBashLoginCommand('bash -lc echo hi')).toBe('bash -lc echo hi')
+  it.each([
+    ['bash -lc echo hi', 'echo hi'],
+    ["bash -lc 'echo hi'", 'echo hi'],
+    ['bash -lc "echo hi"', 'echo hi'],
+    ['/bin/bash -lc echo hi', 'echo hi'],
+    ["/bin/bash -c 'echo hi'", 'echo hi'],
+    ['/usr/bin/bash -c "echo hi"', 'echo hi'],
+    ['/usr/bin/bash -lc echo hi', 'echo hi'],
+  ])('unwraps %s', (command, expected) => {
+    expect(unwrapBashLoginCommand(command)).toBe(expected)
   })
 
-	it('renders a bare command as the same shell script', () => {
-		expect(formatBashForDisplay('echo 123123')).toBe('echo 123123')
-		expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')
-	})
+  it('leaves non-bash launchers untouched', () => {
+    expect(unwrapBashLoginCommand("sh -lc 'echo hi'")).toBe("sh -lc 'echo hi'")
+    expect(unwrapBashLoginCommand("zsh -c 'echo hi'")).toBe("zsh -c 'echo hi'")
+  })
+
+  it('renders a bare command as the same shell script', () => {
+    expect(formatBashForDisplay('echo 123123')).toBe('echo 123123')
+    expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')
+  })
 })
