@@ -187,9 +187,11 @@ The guardrails (own-branch-only, inside-worktree) that today live in the in-sand
   common dir (today); `refs` = writable common dir with `refs/` + `packed-refs`
   re-bound read-only on top; `readonly` = `--ro-bind` the whole common dir; `clone`
   binds no common dir (the head is a standalone clone - see the `clone` section).
-- **Web:** a git-isolation dropdown on the spawn box, grouped with the chat-mode and
-  base-branch controls under a kebab/overflow menu; a matching selector in project
-  Settings for the config default.
+- **Web:** a git-isolation dropdown on the spawn box (`SpawnForm.tsx`'s
+  `SpawnOptionsMenu`), grouped with the chat-mode and base-branch controls under a
+  kebab/overflow menu. There is no dedicated control in project Settings yet - the
+  per-agent config default is set through `.hydra/config.toml`
+  (`[<agent>.policy] git_isolation`) directly.
 
 ## Rollout / status
 
