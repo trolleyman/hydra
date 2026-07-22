@@ -71,6 +71,17 @@ func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexSpawnWithoutChildIDRemainsActive(t *testing.T) {
+	got := normalizeCodex([]byte(`{"method":"item/completed","params":{"item":{"id":"a1","type":"collabAgentToolCall","tool":"spawnAgent","status":"completed","prompt":"inspect"}}}`))
+	if len(got) != 1 {
+		t.Fatalf("events = %+v", got)
+	}
+	payload := got[0].payload.(map[string]any)
+	if payload["output"] != "Async agent launched successfully. The agent is working in the background." {
+		t.Fatalf("output = %#v", payload["output"])
+	}
+}
+
 func TestNormalizeCodexFriendlyToolPayloads(t *testing.T) {
 	tests := []struct {
 		line string
@@ -140,12 +151,13 @@ func TestCodexChildThreadDecoration(t *testing.T) {
 	if len(specs) != 1 {
 		t.Fatalf("events = %+v", specs)
 	}
-	raw, _ := json.Marshal(withCodexSidechain(specs[0].payload, threadID))
+	raw, _ := json.Marshal(withCodexSidechain(specs[0].payload, threadID, "spawn"))
 	var payload struct {
 		Sidechain bool   `json:"sidechain"`
 		AgentID   string `json:"agent_id"`
+		ParentID  string `json:"parent_item_id"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" {
+	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" || payload.ParentID != "spawn" {
 		t.Fatalf("payload = %s (%v)", raw, err)
 	}
 }

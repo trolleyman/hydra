@@ -190,10 +190,13 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 			if completed && isCodexAgentDone(status) {
 				subKind = "subagent_completed"
 			}
-			if completed && item.Tool == "spawn_agent" && status == "running" {
+			if completed && codexCollabTool(item.Tool) == "spawnagent" && status == "running" {
 				out[0].payload.(map[string]any)["output"] = "Async agent launched successfully. The agent is working in the background."
 			}
 			out = append(out, eventSpec{sourceID: source + ":" + subKind, eventType: subKind, payload: map[string]any{"id": subID, "parent_id": item.SenderThreadID, "parent_item_id": item.ID, "agent_type": "codex", "description": item.Prompt, "prompt": item.Prompt, "status": status}})
+		}
+		if completed && codexCollabTool(item.Tool) == "spawnagent" && len(item.Result) == 0 {
+			out[0].payload.(map[string]any)["output"] = "Async agent launched successfully. The agent is working in the background."
 		}
 		return out
 	case "sleep":
@@ -241,6 +244,10 @@ func codexCollabPresentation(item codexItem) (string, map[string]any) {
 		input["agent_id"] = item.ReceiverThreadID
 	}
 	return name, input
+}
+
+func codexCollabTool(tool string) string {
+	return strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(tool))
 }
 
 func codexAgentStatus(raw json.RawMessage, agentID string) string {

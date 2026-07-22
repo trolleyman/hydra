@@ -11,6 +11,8 @@ import {
   CircleStop,
   ClipboardList,
   FilePen,
+  FileMinus2,
+  FilePlus2,
   FileText,
   GitCommitHorizontal,
   Globe,
@@ -446,6 +448,15 @@ function contentText(content: unknown): string {
       .join('\n')
   }
   return ''
+}
+
+// Claude appends a machine-oriented continuation/usage trailer to completed
+// side-agent text. It belongs to the transport, not the human-readable report.
+function cleanSubagentReport(text: string): string {
+  return text
+    .replace(/\n?agentId:\s*[^\n]+(?:\n<usage>[\s\S]*?<\/usage>)?\s*$/i, '')
+    .replace(/\n?<usage>[\s\S]*?<\/usage>\s*$/i, '')
+    .trimEnd()
 }
 
 // Bridge the provider-neutral backend timeline into the mature presentation
@@ -1186,14 +1197,15 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
+        const ChangeIcon = kind === 'add' ? FilePlus2 : kind === 'delete' ? FileMinus2 : FilePen
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
               <FileText className="h-3 w-3 shrink-0 text-blue-500" />
               <span className="min-w-0 flex-1 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
-              <span className="shrink-0 capitalize text-[10px] text-stone-400 dark:text-stone-500">{kind}</span>
+              <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
             </div>
-            {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} />}
+            {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
           </div>
         )
       })}
@@ -1201,10 +1213,10 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
   )
 }
 
-function UnifiedDiffPanel({ diff, lang }: { diff: string; lang: string }) {
+function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
   const rows = useMemo(() => {
-    let oldLine = 0
-    let newLine = 0
+    let oldLine = kind === 'delete' ? 1 : 0
+    let newLine = kind === 'add' ? 1 : 0
     return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
       const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
       if (hunk) {
@@ -1212,20 +1224,20 @@ function UnifiedDiffPanel({ diff, lang }: { diff: string; lang: string }) {
         newLine = Number(hunk[2])
         return []
       }
-      const added = line.startsWith('+') && !line.startsWith('+++')
-      const removed = line.startsWith('-') && !line.startsWith('---')
+      const added = kind === 'add' || (line.startsWith('+') && !line.startsWith('+++'))
+      const removed = kind === 'delete' || (line.startsWith('-') && !line.startsWith('---'))
       const oldNo = added ? '' : String(oldLine++)
       const newNo = removed ? '' : String(newLine++)
       return [{ text: (added || removed || line.startsWith(' ')) ? line.slice(1) : line, added, removed, oldNo, newNo }]
     })
-  }, [diff])
+  }, [diff, kind])
   const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
   return (
-    <div className="max-h-72 overflow-y-auto bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
+    <div className="bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
       {rows.map((row, i) => (
-        <div key={i} className={`grid grid-cols-[2.25rem_2.25rem_1fr] ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
-          <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>
-          <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>
+        <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
+          {kind !== 'add' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
+          {kind !== 'delete' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
           <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
         </div>
       ))}
@@ -3956,7 +3968,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // card upgrades into the SubagentCard in place) and labels it. A frame
     // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
     // into, so it gets a standalone 'subagent' item instead.
-    const markedStandalone = new Set<string>()
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
@@ -3997,16 +4008,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // A viewer parked on the placeholder follows it to the real key.
           setChatView((cur) => (cur === phKey ? agentId : cur))
         }
-      } else if (!sub.parentAgentId && (agentType || description) && !markedStandalone.has(agentId)) {
-        // No Task card to fold into AND no parent sub-agent: a standalone card
-        // in the main flow. A NESTED sub missing its tool_use link stays out of
-        // the main flow (it belongs under its parent, and is still reachable
-        // through the view selector). A frame with no meta at all is the
-        // sidecar-not-flushed-yet backfill case - pushing then would drop an
-        // unlabeled empty "Sub-agent" card that turns into a duplicate once the
-        // real meta links the sub to its Task card, so wait for that meta.
-        markedStandalone.add(agentId)
-        push({ kind: 'subagent', agentId })
       }
       scheduleSubFlush()
     }
@@ -4140,10 +4141,28 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // the queue) - those render as plain items or are ignored.
     const routeSidechain = (ev: ProviderEvent) => {
       const parentTool = typeof ev.parent_tool_use_id === 'string' ? ev.parent_tool_use_id : ''
+      if (!ev.agentId && !parentTool) return
       // Transcript lines name their sub-agent; a live stdout line carries only
       // the spawning Task tool_use - land it in the linked sub if the meta
       // frame already arrived, else in a placeholder merged later.
-      const agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
+      let agentId = ev.agentId || (parentTool ? (toolUseToSub.get(parentTool) ?? 'tool:' + parentTool) : '_sub')
+      // Older Codex logs knew the child thread id but did not persist its spawn
+      // tool id. Bind the first unclaimed child sidechain to the oldest Agent
+      // placeholder so those logs self-heal on replay. New logs carry
+      // parent_item_id and take the direct route above.
+      if (ev.agentId && !parentTool && !subLocal[ev.agentId]) {
+        const childID = ev.agentId
+        const placeholderKey = Object.keys(subLocal).find((key) => key.startsWith('tool:'))
+        const placeholder = placeholderKey ? subLocal[placeholderKey] : undefined
+        if (placeholder?.toolUseId) {
+          // In old logs the spawn tool's own completion was mistaken for the
+          // child's completion. Seeing the real child sidechain proves it is
+          // still active, so reopen the placeholder before merging it.
+          placeholder.status = 'running'
+          handleSubagentMeta(childID, placeholder.toolUseId, placeholder.agentType ?? '', placeholder.description ?? '', placeholder.parentAgentId ?? '', placeholder.prompt ?? '')
+          agentId = childID
+        }
+      }
       const sub = ensureSubagent(agentId)
       if (parentTool && !sub.toolUseId) sub.toolUseId = parentTool
       if (parentTool) markBackground(sub, parentTool)
@@ -4182,7 +4201,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (msgId && seen.has(key)) continue
             if (msgId) seen.add(key)
             if (block.type === 'text' && block.text?.trim()) {
-              sub.items.push({ kind: 'assistant', id: meta.nextId++, text: block.text })
+              const report = cleanSubagentReport(block.text)
+              if (report) sub.items.push({ kind: 'assistant', id: meta.nextId++, text: report })
             } else if (block.type === 'thinking' && block.thinking?.trim()) {
               const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
               sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
@@ -4914,6 +4934,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       setCommitChips((prev) => [...prev, chip])
     }
     const normalizedStreams = new Set<string>()
+    let activeNormalizedAssistantStream = ''
+    let activeNormalizedReasoningStream = ''
 
     const ws = new WebSocket(getWsUrl(agentId, projectId))
     wsRef.current = ws
@@ -5004,9 +5026,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             scheduleSubFlush()
             return
           }
-          const streamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : String(normalized.seq)
+          const explicitStreamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : ''
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
+            if (normalized.payload?.sidechain === true) {
+              // Sub-agent cards consume their completed blocks; routing child
+              // token deltas through the main stream created a second partial
+              // response and corrupted replay state.
+              return
+            }
             const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
+            let streamID = explicitStreamID
+            if (!streamID) {
+              streamID = kind === 'text' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream
+              if (!streamID) streamID = `${kind}:${normalized.seq}`
+            }
+            if (kind === 'text') activeNormalizedAssistantStream = streamID
+            else activeNormalizedReasoningStream = streamID
             if (!normalizedStreams.has(streamID)) {
               normalizedStreams.add(streamID)
               handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } } })
@@ -5015,8 +5050,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             handleProviderEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
             return
           }
+          const streamID = explicitStreamID || (normalized.type === 'assistant_message' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream)
           if ((normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)) {
             handleProviderEvent({ type: 'stream_event', event: { type: 'message_stop' } })
+            if (normalized.type === 'assistant_message') activeNormalizedAssistantStream = ''
+            else activeNormalizedReasoningStream = ''
           }
           if (normalized.type === 'plan_updated') {
             const rawPlan = normalized.payload?.plan
@@ -5055,6 +5093,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 const rawPlan = event.payload?.plan
                 const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
                 if (entries.length) plan.adoptServer(entries)
+              }
+              if (event.type === 'tool_started' || event.type === 'tool_completed') {
+                const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+                const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+                if (toolID && toolName && event.payload && 'input' in event.payload) {
+                  patchToolMetadata(toolID, toolName, event.payload.input)
+                }
               }
               for (const converted of normalizedToProviderEvents(event)) handleProviderEvent(converted)
             }

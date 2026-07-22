@@ -444,6 +444,20 @@ into the durable sub-agent projection. Thus live display, reconnect replay, and
 completion notices all refer to one rich card rather than a raw Agent card plus
 a second standalone result.
 
+App-server's `spawnAgent` completion does not always contain the new child
+thread id. The ordered ingestion worker therefore remembers pending spawn items
+and links the next previously unseen sidechain thread to the oldest pending
+spawn before persisting it. The resulting `subagent_started`, sidechain display
+events, and `subagent_completed` events all carry the same `parent_item_id`.
+This correlation is rebuilt while processing `thread/read`, so daemon restart
+and transcript recovery use the same event contract as a live run.
+
+The shared presentation reducer also keeps Claude partial content on one active
+stream until its completed message arrives. Claude's machine-readable
+sub-agent continuation and usage trailer is removed from the visible report,
+and a sidechain transcript is folded into its originating agent tool card
+instead of creating a second standalone card.
+
 Head lifecycle follows both `turn/started` and `item/started`. The latter is a
 bounded fallback for resumed or version-skewed app-server streams where item
 activity becomes visible before the corresponding turn notification; it keeps

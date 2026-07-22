@@ -46,6 +46,14 @@ type worker struct {
 	ctx         HeadContext
 	imported    bool
 	codexThread string
+	codexSpawns []codexSpawn
+	codexSubs   map[string]codexSpawn
+}
+
+type codexSpawn struct {
+	ToolID   string
+	Prompt   string
+	ParentID string
 }
 
 func NewManager(resolve ContextResolver) *Manager {
@@ -66,7 +74,7 @@ func (m *Manager) store(id string) (*Store, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx}
+	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}}
 	m.workers[id] = w
 	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
 		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
@@ -135,13 +143,31 @@ func (w *worker) run(id string) {
 			specs = normalizeClaudeHistory(item.line)
 		case "codex":
 			specs = normalizeCodex(item.line)
+			if spawn, ok := codexSpawnFromLine(item.line); ok {
+				w.codexSpawns = append(w.codexSpawns, spawn)
+			}
 			threadID, startedThread := codexLineThreads(item.line)
 			if w.codexThread == "" && startedThread != "" {
 				w.codexThread = startedThread
 			}
 			if threadID != "" && w.codexThread != "" && threadID != w.codexThread {
+				spawn, linked := w.codexSubs[threadID]
+				if !linked && len(w.codexSpawns) > 0 {
+					spawn = w.codexSpawns[0]
+					w.codexSpawns = w.codexSpawns[1:]
+					w.codexSubs[threadID] = spawn
+					linked = true
+					specs = append([]eventSpec{{
+						sourceID:  "codex:subagent:" + threadID,
+						eventType: "subagent_started",
+						payload:   map[string]any{"id": threadID, "parent_id": spawn.ParentID, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "running"},
+					}}, specs...)
+				}
 				for i := range specs {
-					specs[i].payload = withCodexSidechain(specs[i].payload, threadID)
+					specs[i].payload = withCodexSidechain(specs[i].payload, threadID, spawn.ToolID)
+					if (specs[i].eventType == "turn_completed" || specs[i].eventType == "turn_failed") && linked {
+						specs = append(specs, eventSpec{sourceID: "codex:subagent:" + threadID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": threadID, "parent_id": spawn.ParentID, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "completed"}})
+					}
 				}
 			}
 		default:
@@ -173,7 +199,7 @@ func codexLineThreads(line []byte) (threadID, startedThread string) {
 	return params.ThreadID, startedThread
 }
 
-func withCodexSidechain(payload any, threadID string) any {
+func withCodexSidechain(payload any, threadID, parentItemID string) any {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return payload
@@ -184,7 +210,26 @@ func withCodexSidechain(payload any, threadID string) any {
 	}
 	value["sidechain"] = true
 	value["agent_id"] = threadID
+	if parentItemID != "" {
+		value["parent_item_id"] = parentItemID
+	}
 	return value
+}
+
+func codexSpawnFromLine(line []byte) (codexSpawn, bool) {
+	var msg codexMessage
+	if json.Unmarshal(line, &msg) != nil || msg.Method != "item/started" {
+		return codexSpawn{}, false
+	}
+	var params codexParams
+	if json.Unmarshal(msg.Params, &params) != nil {
+		return codexSpawn{}, false
+	}
+	var item codexItem
+	if json.Unmarshal(params.Item, &item) != nil || item.Type != "collabAgentToolCall" || codexCollabTool(item.Tool) != "spawnagent" {
+		return codexSpawn{}, false
+	}
+	return codexSpawn{ToolID: item.ID, Prompt: item.Prompt, ParentID: item.SenderThreadID}, item.ID != ""
 }
 
 func causalItemID(payload any) string {

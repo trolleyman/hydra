@@ -62,6 +62,47 @@ func TestManagerSeedsInitialPromptOnce(t *testing.T) {
 	}
 }
 
+func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
+	lines := []string{
+		`{"method":"thread/started","params":{"thread":{"id":"root"}}}`,
+		`{"method":"item/started","params":{"item":{"id":"spawn-1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"root","prompt":"inspect repo"}}}`,
+		`{"method":"item/completed","params":{"threadId":"child","item":{"id":"report","type":"agentMessage","text":"done"}}}`,
+		`{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"child-turn","status":"completed"}}}`,
+	}
+	for _, line := range lines {
+		m.ObserveProviderLine("head", "codex", []byte(line))
+	}
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, err := m.Before("head", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started, report, completed bool
+	for _, event := range events {
+		var payload struct {
+			AgentID      string `json:"agent_id"`
+			ID           string `json:"id"`
+			ParentItemID string `json:"parent_item_id"`
+		}
+		_ = json.Unmarshal(event.Payload, &payload)
+		switch event.Type {
+		case "subagent_started":
+			started = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+		case "assistant_message":
+			report = payload.AgentID == "child" && payload.ParentItemID == "spawn-1"
+		case "subagent_completed":
+			completed = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+		}
+	}
+	if !started || !report || !completed {
+		t.Fatalf("linked lifecycle missing: started=%v report=%v completed=%v events=%+v", started, report, completed, events)
+	}
+}
+
 func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	repo := t.TempDir()
 	run := func(args ...string) {

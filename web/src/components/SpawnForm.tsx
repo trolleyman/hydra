@@ -4,7 +4,7 @@ import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, Circle, GitBranch, MessageSquare } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -138,9 +138,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
         className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
       >
         <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
-        {selected && (m.id
-          ? <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />
-          : <Circle className="w-3 h-3 ml-auto shrink-0 fill-blue-500 text-blue-500" />)}
+        {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
       </button>
     )
   }
@@ -155,7 +153,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
         // Measure the trigger before opening so the fixed-position menu lands in
         // the right spot on its first paint; scroll/resize keep it pinned after.
         onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer pr-1.5 ${trigger} ${
+        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
           open
             ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
             : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
