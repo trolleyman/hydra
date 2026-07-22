@@ -341,6 +341,32 @@ export class DefaultService {
         });
     }
     /**
+     * Restart just the agent process (keeps the worktree, branch and conversation)
+     * Stops the running CLI process (claude/codex/...) and relaunches it in a fresh sandbox, resuming the same conversation. Unlike restartAgent this does no teardown: the worktree, branch, DB record and transcript are untouched.
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public restartAgentSession(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/restart-session',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                409: `Conflict (agent is archived, or an operation is in progress)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Resume an archived (killed/merged) agent, restoring its conversation
      * Revives a killed or merged agent: recreates its worktree and branch off the current base, un-archives the record, and relaunches the agent so it continues from its saved conversation transcript (the file changes start fresh on a clean branch). Depends on the host conversation transcript still existing.
      * @param projectId Project ID

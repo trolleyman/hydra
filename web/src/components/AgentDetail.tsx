@@ -17,7 +17,7 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
-import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
+import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -680,6 +680,10 @@ export function AgentDetail({
   onRefresh?: () => void
 }) {
   const [killing, setKilling] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  // Bumped after a successful process restart to tell AgentTerminal to reconnect
+  // its agent tab onto the fresh session.
+  const [restartSignal, setRestartSignal] = useState(0)
   const [merging, setMerging] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
@@ -934,6 +938,37 @@ export function AgentDetail({
       const dialog = useDialogStore.getState()
       if (dialog.isOpen && dialog.variant === 'kill') dialog.update({ details: { lostFiles, loading: false } })
     })()
+  }
+
+  // handleRestart restarts just the agent's CLI process (claude/codex/...): it
+  // stops the running process and relaunches it in a fresh sandbox, resuming the
+  // same conversation. The worktree, branch and diff are untouched - this is not
+  // Kill. On success we bump restartSignal so the terminal reconnects onto the
+  // new session.
+  function handleRestart() {
+    useDialogStore.getState().show({
+      title: 'Restart this agent?',
+      message: `Stops the running ${agentTypeLabel(agent.agent_type)} process and starts it again, continuing the same conversation. Your worktree, branch and changes are kept.`,
+      type: 'confirm',
+      variant: 'restart',
+      confirmLabel: 'Restart agent',
+      onConfirm: async () => {
+        setRestarting(true)
+        try {
+          await api.default.restartAgentSession(projectId ?? '', agent.id)
+          setRestartSignal((n) => n + 1)
+          useToastStore.getState().show({ message: `Agent "${agent.title || agent.id}" restarting...`, type: 'info' })
+        } catch (err) {
+          useDialogStore.getState().show({
+            title: 'Restart Failed',
+            message: `Failed to restart agent: ${formatError(err)}`,
+            type: 'error',
+          })
+        } finally {
+          setRestarting(false)
+        }
+      },
+    })
   }
 
   // executeMerge runs the actual merge POST (optionally force, bypassing the test
@@ -1639,6 +1674,7 @@ export function AgentDetail({
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
+          { label: 'Restart', icon: <RotateCcw className="w-4 h-4" />, onClick: handleRestart, variant: 'segment', disabled: merging || killing || restarting },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
@@ -1731,6 +1767,7 @@ export function AgentDetail({
                   isEphemeral={agent.ephemeral}
                   chatMode={agent.chat_mode === true}
                   fill
+                  reconnectSignal={restartSignal}
                   onRefresh={onRefresh}
                   onDiffRefresh={handleDiffRefresh}
                   onSelectCommit={handleSelectCommit}
@@ -1825,6 +1862,7 @@ export function AgentDetail({
                 isEphemeral={agent.ephemeral}
                 chatMode={agent.chat_mode === true}
                 fill
+                reconnectSignal={restartSignal}
                 onRefresh={onRefresh}
                 onDiffRefresh={handleDiffRefresh}
                 onSelectCommit={handleSelectCommit}

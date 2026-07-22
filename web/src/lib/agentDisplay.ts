@@ -121,6 +121,25 @@ export function agentTypePill(agentType: string): string {
   }
 }
 
+// Human-facing name for an agent type, used in prose (e.g. "Stops the running
+// Claude process..."). Falls back to the raw type for anything unmapped.
+export function agentTypeLabel(agentType: string): string {
+  switch (agentType) {
+    case 'claude':
+      return 'Claude'
+    case 'gemini':
+      return 'Gemini'
+    case 'copilot':
+      return 'Copilot'
+    case 'codex':
+      return 'Codex'
+    case 'bash':
+      return 'shell'
+    default:
+      return agentType || 'agent'
+  }
+}
+
 export function agentStatusBadge(status: string | undefined): { label: string; className: string } {
   const entry = status ? AGENT_STATUS[status] : undefined
   if (entry) return { label: entry.label, className: TONE_BADGE[entry.badge] }
