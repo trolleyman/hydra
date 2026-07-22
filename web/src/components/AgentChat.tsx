@@ -3300,6 +3300,15 @@ function QuestionCard({
                       selectOther(qi)
                     }}
                     onFocus={() => selectOther(qi)}
+                    onKeyDown={(e) => {
+                      // Enter submits the card, like the composer. Ignored while
+                      // an IME is composing, and a no-op if another question is
+                      // still unanswered (submit() gates on `complete`).
+                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      submit()
+                    }}
                     disabled={answered}
                     placeholder="Other..."
                     className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
