@@ -314,6 +314,16 @@ received in `state_snapshot`. This is the separation that lets a user scroll to
 the beginning while a live turn continues without the current plan or active
 sub-agent panel jumping backward.
 
+The normalized log is also the presentation source of truth. A history page
+must not discard normalized semantics by converting it through a provider-only
+backfill reducer. In particular, a completed tool event can carry richer input
+than its earlier started event, and a sidechain report can be separated from
+its spawn by a page boundary. The browser retains completed tool metadata by
+item id, enriches the matching start card, and routes paged sub-agent lifecycle
+and sidechain events through the same projection used for live delivery. A
+remount or scroll-back therefore renders the same search query, plan activity,
+and sub-agent report as the original live session.
+
 Queued messages follow the same state/history boundary. While a message is
 queued, it exists only in the checkpointed queue projection and is included in
 `state_snapshot` with its stable client-generated id, enqueue sequence/time, and

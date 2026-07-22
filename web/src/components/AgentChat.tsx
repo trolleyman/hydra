@@ -501,6 +501,16 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
       const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
       return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed' }] } }]
     }
+    case 'plan_updated': {
+      const plan = Array.isArray(p.plan) ? p.plan : []
+      const completed = plan.filter((entry) => entry && typeof entry === 'object' && (entry as { status?: unknown }).status === 'completed').length
+      const summary = `${plan.length} task${plan.length === 1 ? '' : 's'} · ${completed} completed`
+      const toolID = `plan:${ev.seq}`
+      return [
+        { ...base, type: 'assistant', message: { id: `tool:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'UpdatePlan', input: { description: summary, plan } }] } },
+        { ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: 'Plan updated' }] } },
+      ]
+    }
     case 'content_stream_started':
       return [{ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: p.kind === 'reasoning' ? 'thinking' : String(p.kind ?? 'text') } } }]
     case 'content_stream_completed':
@@ -680,7 +690,7 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
   if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
-  return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent' } as Record<string, string>)[name] ?? name
+  return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
 // collapseHome rewrites an absolute home path (/home/<user>/..., /Users/<user>/
@@ -1447,6 +1457,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   Agent: Bot,
   TaskCreate: ListPlus,
   TaskUpdate: ListChecks,
+  UpdatePlan: ListChecks,
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
@@ -1512,20 +1523,6 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []
-  const headerChangeKinds = isFileChanges
-    ? (input!.changes as unknown[]).map((raw) => {
-        if (!raw || typeof raw !== 'object') return 'update'
-        const kind = (raw as { kind?: unknown }).kind
-        if (typeof kind === 'string') return kind
-        return kind && typeof kind === 'object' && typeof (kind as { type?: unknown }).type === 'string'
-          ? (kind as { type: string }).type
-          : 'update'
-      })
-    : []
-  const headerChangeKind = headerChangeKinds.length > 0 && headerChangeKinds.every((kind) => kind === headerChangeKinds[0])
-    ? headerChangeKinds[0]
-    : 'update'
-  const HeaderChangeIcon = headerChangeKind === 'add' ? SquarePlus : headerChangeKind === 'delete' ? SquareMinus : SquareDot
   const summary = mem
     ? `memory ${mem}`
     : isWebSearch
@@ -1587,12 +1584,6 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
           <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
-          {isFileChanges && (
-            <HeaderChangeIcon
-              className={`h-3.5 w-3.5 shrink-0 self-center ${headerChangeKind === 'add' ? 'text-emerald-500' : headerChangeKind === 'delete' ? 'text-red-500' : 'text-amber-500'}`}
-              aria-label={headerChangeKind}
-            />
-          )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
         {pending && (
@@ -4998,6 +4989,50 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     const normalizedStreams = new Set<string>()
     const replayedAssistantTexts = new Set<string>()
+    // Codex often reveals semantic tool fields only on tool_completed. Keep the
+    // richest payload by id so an older tool_started page can be enriched before
+    // the history reducer creates its card (pagination arrives newest-first).
+    const normalizedToolMetadata = new Map<string, { name: string; input: unknown }>()
+    const rememberNormalizedToolMetadata = (event: NormalizedChatEvent) => {
+      if (event.type !== 'tool_started' && event.type !== 'tool_completed') return
+      const id = typeof event.payload?.id === 'string' ? event.payload.id : ''
+      const name = typeof event.payload?.name === 'string' ? event.payload.name : ''
+      if (id && name && event.payload && 'input' in event.payload) {
+        const prior = normalizedToolMetadata.get(id)
+        const input = event.payload.input
+        // A completion wins; an empty started payload must not overwrite it
+        // when an older page is loaded after the newer completion page.
+        if (event.type === 'tool_completed' || !prior) normalizedToolMetadata.set(id, { name, input })
+      }
+    }
+    const enrichNormalizedTool = (event: NormalizedChatEvent): NormalizedChatEvent => {
+      if (event.type !== 'tool_started') return event
+      const id = typeof event.payload?.id === 'string' ? event.payload.id : ''
+      const rich = normalizedToolMetadata.get(id)
+      return rich ? { ...event, payload: { ...event.payload, name: rich.name, input: rich.input } } : event
+    }
+    const handleNormalizedSubagent = (event: NormalizedChatEvent): boolean => {
+      if (event.type !== 'subagent_started' && event.type !== 'subagent_updated' && event.type !== 'subagent_completed') return false
+      const sub = event.payload ?? {}
+      const subID = typeof sub.id === 'string' ? sub.id : ''
+      if (subID && backgroundCommandTaskIDs.has(subID)) return true
+      handleSubagentMeta(
+        subID,
+        typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',
+        typeof sub.agent_type === 'string' ? sub.agent_type : '',
+        typeof sub.description === 'string' ? sub.description : '',
+        typeof sub.parent_id === 'string' ? sub.parent_id : '',
+        typeof sub.prompt === 'string' ? sub.prompt : '',
+      )
+      if (subID && event.type === 'subagent_completed') {
+        const completedSub = ensureSubagent(subID)
+        const wasRunning = completedSub.status === 'running'
+        completedSub.status = 'done'
+        if (wasRunning && !completedSub.parentAgentId) noticeSubDone(subID, completedSub)
+      }
+      scheduleSubFlush()
+      return true
+    }
     let activeNormalizedAssistantStream = ''
     let activeNormalizedReasoningStream = ''
 
@@ -5070,27 +5105,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
           if (!normalized) return
-          if (normalized.type === 'subagent_started' || normalized.type === 'subagent_updated' || normalized.type === 'subagent_completed') {
-            const sub = normalized.payload ?? {}
-            const subID = typeof sub.id === 'string' ? sub.id : ''
-            if (subID && backgroundCommandTaskIDs.has(subID)) return
-            handleSubagentMeta(
-              subID,
-              typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',
-              typeof sub.agent_type === 'string' ? sub.agent_type : '',
-              typeof sub.description === 'string' ? sub.description : '',
-              typeof sub.parent_id === 'string' ? sub.parent_id : '',
-              typeof sub.prompt === 'string' ? sub.prompt : '',
-            )
-            if (subID && normalized.type === 'subagent_completed') {
-              const completedSub = ensureSubagent(subID)
-              const wasRunning = completedSub.status === 'running'
-              completedSub.status = 'done'
-              if (wasRunning && !completedSub.parentAgentId) noticeSubDone(subID, completedSub)
-            }
-            scheduleSubFlush()
-            return
-          }
+          rememberNormalizedToolMetadata(normalized)
+          if (handleNormalizedSubagent(normalized)) return
           const explicitStreamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : ''
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
             if (normalized.payload?.sidechain === true) {
@@ -5159,12 +5175,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
           oldestEventCursorRef.current = msg.next_cursor ?? null
-          for (const event of normalized) recordNormalizedCommit(event)
+          for (const event of normalized) {
+            recordNormalizedCommit(event)
+            rememberNormalizedToolMetadata(event)
+          }
           if (loadingOlderRef.current) {
-            const converted = normalized.flatMap(normalizedToProviderEvents)
-            handleHistoryBefore(converted, msg.done === true)
+            const main: ProviderEvent[] = []
+            for (const rawEvent of normalized) {
+              if (handleNormalizedSubagent(rawEvent)) continue
+              const event = enrichNormalizedTool(rawEvent)
+              if (event.payload?.sidechain === true) {
+                if (event.type === 'tool_started' || event.type === 'tool_completed') {
+                  const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+                  const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+                  if (toolID && toolName && 'input' in event.payload) patchToolMetadata(toolID, toolName, event.payload.input)
+                }
+                for (const converted of normalizedToProviderEvents(event)) handleProviderEvent(converted)
+              } else {
+                main.push(...normalizedToProviderEvents(event))
+              }
+            }
+            handleHistoryBefore(main, msg.done === true)
           } else {
-            for (const event of normalized) {
+            for (const rawEvent of normalized) {
+              if (handleNormalizedSubagent(rawEvent)) continue
+              const event = enrichNormalizedTool(rawEvent)
               if (event.type === 'assistant_message') {
                 const text = typeof event.payload?.text === 'string' ? event.payload.text : ''
                 if (text && replayedAssistantTexts.has(text)) continue
