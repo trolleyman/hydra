@@ -134,7 +134,9 @@ function applySgr(s: SgrState, params: number[]): void {
 // text after the final \r on each line - enough to settle a progress spinner to
 // its final frame without a full terminal grid.
 function collapseCr(input: string): string {
-  return input
+  // PTYs use CRLF for ordinary newlines. Resolve that pair first so only a
+  // remaining bare CR is treated as an in-place progress-line overwrite.
+  return input.replace(/\r\n/g, '\n')
     .split('\n')
     .map((line) => (line.includes('\r') ? line.slice(line.lastIndexOf('\r') + 1) : line))
     .join('\n')

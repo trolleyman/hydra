@@ -324,6 +324,14 @@ and sidechain events through the same projection used for live delivery. A
 remount or scroll-back therefore renders the same search query, plan activity,
 and sub-agent report as the original live session.
 
+Tool cards keep the provider's distinct started and completed envelopes for
+Raw inspection while presenting their merged semantic state normally. An
+interactive shell launcher such as `bash -lc bash` may receive its real command
+through stdin; when app-server exposes that command only as the first PTY echo,
+the UI promotes the echo to the command panel and renders the remaining cleaned
+terminal transcript as output. CRLF is a newline, while only a bare carriage
+return has terminal overwrite semantics.
+
 Queued messages follow the same state/history boundary. While a message is
 queued, it exists only in the checkpointed queue projection and is included in
 `state_snapshot` with its stable client-generated id, enqueue sequence/time, and

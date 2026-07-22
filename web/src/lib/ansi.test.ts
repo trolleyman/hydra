@@ -41,6 +41,10 @@ describe('ansiToHtml', () => {
     expect(ansiToHtml('10%\r50%\r100% done')).toBe('100% done')
   })
 
+  it('preserves ordinary PTY CRLF lines', () => {
+    expect(ansiToHtml(`command\r\n${ESC}[?2004l\r\nresult\r\n`)).toBe('command\n\nresult\n')
+  })
+
   it('turns OSC 8 hyperlinks into anchor tags', () => {
     const html = ansiToHtml(`${ESC}]8;;https://example.com${ESC}\\link${ESC}]8;;${ESC}\\!`)
     expect(html).toBe('<a href="https://example.com" target="_blank" rel="noreferrer" class="ansi-link">link</a>!')

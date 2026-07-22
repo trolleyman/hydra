@@ -315,6 +315,7 @@ interface ProviderEvent {
   isSidechain?: boolean
   agentId?: string
   parent_tool_use_id?: string | null
+  subagentNotice?: { key: string; label: string; description: string }
   // Set by the CLI on machine-injected context that rides in a `user` envelope
   // but was never typed by the user - the resume nudge, and a Skill's auto-loaded
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
@@ -511,6 +512,12 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
         { ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: 'Plan updated' }] } },
       ]
     }
+    case 'subagent_completed': {
+      const key = typeof p.id === 'string' ? p.id : ''
+      const label = typeof p.agent_type === 'string' ? p.agent_type : 'Sub-agent'
+      const description = typeof p.description === 'string' ? p.description : ''
+      return key ? [{ ...base, type: 'hydra_subagent_completed', isSidechain: false, agentId: undefined, parent_tool_use_id: null, subagentNotice: { key, label, description } }] : []
+    }
     case 'content_stream_started':
       return [{ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: p.kind === 'reasoning' ? 'thinking' : String(p.kind ?? 'text') } } }]
     case 'content_stream_completed':
@@ -683,6 +690,37 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
   } catch {
     return { text: '', prose: false }
   }
+}
+
+function mergeToolInputHistory(previous: unknown, next: unknown): unknown {
+  if (!next || typeof next !== 'object') return next
+  const merged = { ...(next as Record<string, unknown>) }
+  const raws: unknown[] = []
+  const collect = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    const obj = value as Record<string, unknown>
+    if (Array.isArray(obj._raw_events)) raws.push(...obj._raw_events)
+    else if (obj._raw != null) raws.push(obj._raw)
+  }
+  collect(previous)
+  collect(next)
+  const unique = raws.filter((raw, index) => raws.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(raw)) === index)
+  if (unique.length > 1) merged._raw_events = unique
+  return merged
+}
+
+function interactiveShellTranscript(command: string, output: string): { command: string; output: string } | null {
+  if (!/^(?:(?:\/usr\/bin|\/bin)\/)?(?:ba|z|)sh(?:\s+(?:-[il]*c\s+)?(?:(?:\/usr\/bin|\/bin)\/)?(?:ba|z|)sh)?$/.test(command.trim())) return null
+  const clean = stripAnsi(output).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = clean.split('\n')
+  const entered = lines.find((line) => line.trim() && !/^\[\d+\]\s+\d+\s*$/.test(line.trim()))?.trim()
+  if (!entered || entered === 'exit') return null
+  const rest = lines
+    .slice(lines.indexOf(lines.find((line) => line.trim() === entered) ?? '') + 1)
+    .filter((line) => line.trim() !== 'exit' && !/^[^\n]*[$#]\s+exit\s*$/.test(line))
+    .join('\n')
+    .trimEnd()
+  return { command: entered, output: rest }
 }
 
 // Keep provider protocol identifiers in Raw while making MCP calls scan like
@@ -1485,6 +1523,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
   const displayedCommand = isBash ? formatBashForDisplay(command, commandCwd === worktree ? '' : commandCwd) : ''
+  const executableCommand = isBash ? formatBashForDisplay(command, '') : ''
+  const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
+  const visibleCommand = interactiveTranscript?.command ?? displayedCommand
+  const renderedResult = interactiveTranscript?.output ?? visibleResult
   const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
@@ -1529,7 +1571,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
       ? (typeof input?.query === 'string' && input.query.trim() ? input.query : 'Preparing search…')
     : isFileChanges
       ? changedPaths.join(', ')
-      : collapseHome(trimWorktreePaths(isBash ? description || displayedCommand.replace(/\n/g, ' ') : summarized.text, worktree))
+      : collapseHome(trimWorktreePaths(isBash ? description || visibleCommand.replace(/\n/g, ' ') : summarized.text, worktree))
   // File paths render in the UI sans font (item 23/2); code-like summaries (a
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
   // description / task subject / prose input field (a ScheduleWakeup prompt)
@@ -1550,11 +1592,14 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
+		const protocolEvents = rawInput?._raw_events
 		const protocolInput = rawInput?._raw
-		const raw: Record<string, unknown> = protocolInput && typeof protocolInput === 'object'
+		const raw: Record<string, unknown> = Array.isArray(protocolEvents)
+			? { events: protocolEvents }
+			: protocolInput && typeof protocolInput === 'object'
 			? { ...(protocolInput as Record<string, unknown>) }
 			: { input: item.input }
-		if (visibleResult !== undefined && !('aggregatedOutput' in raw) && !('result' in raw)) raw.result = visibleResult
+		if (visibleResult !== undefined && !('aggregatedOutput' in raw) && !('result' in raw) && !('events' in raw)) raw.result = visibleResult
     return JSON.stringify(raw, null, 2)
 	}, [showRaw, rawInput, item.input, visibleResult])
 
@@ -1610,7 +1655,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           ) : (
             <>
               {isBash ? (
-                <CodePanel code={trimWorktreePaths(displayedCommand, worktree)} lang="bash" />
+                <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
               ) : isWebSearch && typeof input?.query === 'string' && input.query.trim() ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
               ) : isWebSearch && pending ? (
@@ -1635,7 +1680,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
-				{(visibleResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
+				{(renderedResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
@@ -1669,18 +1714,18 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                       })}
                     </div>
                   )}
-					{visibleResult !== undefined && !(visibleResult === '' && item.resultImages?.length) && (
+					{renderedResult !== undefined && !(renderedResult === '' && item.resultImages?.length) && (
                     mem && !item.isError
-						? <MemoryPanel text={visibleResult} />
+						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
+							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
-                          ? <WebSearchOutput text={visibleResult} serif={serif} />
+                          ? <WebSearchOutput text={renderedResult} serif={serif} />
                         : isWebFetch && !item.isError
-                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
+                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
                         : isRead && !item.isError
-								? <ReadOutputPanel text={visibleResult} lang={outputLang} />
-								: <OutputPanel text={visibleResult} lang={outputLang} isError={item.isError} />
+								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
+								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}
@@ -3245,6 +3290,11 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
       pushNotification(notifText)
       continue
     }
+    if (ev.type === 'hydra_subagent_completed' && ev.subagentNotice) {
+      const notice = ev.subagentNotice
+      push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: true })
+      continue
+    }
     // A queued message consumed into a running turn: its queued_command
     // attachment is its only durable record (no plain user event exists) -
     // rebuild the user bubble from it, settling the prior turn's footer like
@@ -4304,7 +4354,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // raw started-frame id or empty input.
     const patchToolMetadata = (toolUseId: string, name: string, input: unknown) => {
       const patch = (it: ChatItem): ChatItem =>
-        it.kind === 'tool' && it.toolUseId === toolUseId ? { ...it, name: name || it.name, input } : it
+        it.kind === 'tool' && it.toolUseId === toolUseId
+          ? { ...it, name: name || it.name, input: mergeToolInputHistory(it.input, input) }
+          : it
       const pendingIndex = pending.findIndex((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
       if (pendingIndex >= 0) pending[pendingIndex] = patch(pending[pendingIndex])
       else setItems((prev) => prev.map(patch))
@@ -4713,6 +4765,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // and just renders the proposed plan as a card (see PlanCard).
           return
         }
+        case 'hydra_subagent_completed': {
+          if (ev.subagentNotice) {
+            const notice = ev.subagentNotice
+            push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: replaying || undefined })
+          }
+          return
+        }
         case 'user': {
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
@@ -4999,10 +5058,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const name = typeof event.payload?.name === 'string' ? event.payload.name : ''
       if (id && name && event.payload && 'input' in event.payload) {
         const prior = normalizedToolMetadata.get(id)
-        const input = event.payload.input
+        const input = mergeToolInputHistory(prior?.input, event.payload.input)
         // A completion wins; an empty started payload must not overwrite it
         // when an older page is loaded after the newer completion page.
         if (event.type === 'tool_completed' || !prior) normalizedToolMetadata.set(id, { name, input })
+        else normalizedToolMetadata.set(id, { name: prior.name, input })
       }
     }
     const enrichNormalizedTool = (event: NormalizedChatEvent): NormalizedChatEvent => {
@@ -5016,19 +5076,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const sub = event.payload ?? {}
       const subID = typeof sub.id === 'string' ? sub.id : ''
       if (subID && backgroundCommandTaskIDs.has(subID)) return true
+      const rawParentID = typeof sub.parent_id === 'string' ? sub.parent_id : ''
+      // Codex puts the root conversation thread in parent_id too. It is only a
+      // nested-agent relationship when that id names an actual known child.
+      const parentID = rawParentID && subLocal[rawParentID] ? rawParentID : ''
       handleSubagentMeta(
         subID,
         typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',
         typeof sub.agent_type === 'string' ? sub.agent_type : '',
         typeof sub.description === 'string' ? sub.description : '',
-        typeof sub.parent_id === 'string' ? sub.parent_id : '',
+        parentID,
         typeof sub.prompt === 'string' ? sub.prompt : '',
       )
       if (subID && event.type === 'subagent_completed') {
         const completedSub = ensureSubagent(subID)
-        const wasRunning = completedSub.status === 'running'
         completedSub.status = 'done'
-        if (wasRunning && !completedSub.parentAgentId) noticeSubDone(subID, completedSub)
       }
       scheduleSubFlush()
       return true
@@ -5106,7 +5168,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
           if (!normalized) return
           rememberNormalizedToolMetadata(normalized)
-          if (handleNormalizedSubagent(normalized)) return
+          if (handleNormalizedSubagent(normalized)) {
+            const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+            if (normalized.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+              for (const converted of normalizedToProviderEvents(normalized)) handleProviderEvent(converted)
+            }
+            return
+          }
           const explicitStreamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : ''
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
             if (normalized.payload?.sidechain === true) {
@@ -5182,7 +5250,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (loadingOlderRef.current) {
             const main: ProviderEvent[] = []
             for (const rawEvent of normalized) {
-              if (handleNormalizedSubagent(rawEvent)) continue
+              if (handleNormalizedSubagent(rawEvent)) {
+                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+                  main.push(...normalizedToProviderEvents(rawEvent))
+                }
+                continue
+              }
               const event = enrichNormalizedTool(rawEvent)
               if (event.payload?.sidechain === true) {
                 if (event.type === 'tool_started' || event.type === 'tool_completed') {
@@ -5198,7 +5272,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             handleHistoryBefore(main, msg.done === true)
           } else {
             for (const rawEvent of normalized) {
-              if (handleNormalizedSubagent(rawEvent)) continue
+              if (handleNormalizedSubagent(rawEvent)) {
+                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
+                  for (const converted of normalizedToProviderEvents(rawEvent)) handleProviderEvent(converted)
+                }
+                continue
+              }
               const event = enrichNormalizedTool(rawEvent)
               if (event.type === 'assistant_message') {
                 const text = typeof event.payload?.text === 'string' ? event.payload.text : ''
