@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
-import { pinCardToTop } from '../lib/collapseScroll'
+import { pinCardToTop } from '../lib/diffScroll'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
 // icons at rest and brighten ONLY the icon the pointer is actually over - a
