@@ -33,6 +33,15 @@ describe('Codex bash display', () => {
     expect(unwrapBashLoginCommand("zsh -c 'echo hi'")).toBe("zsh -c 'echo hi'")
   })
 
+  it('drops line-continuation backslashes but keeps the line breaks', () => {
+    const command = `\\\nperl -pi -e 's/a/b/g' docs/screenshots.md && \\\ngrep -rn "bun" docs/screenshots.md`
+    expect(formatBashForDisplay(command)).toBe(`perl -pi -e 's/a/b/g' docs/screenshots.md &&\ngrep -rn "bun" docs/screenshots.md`)
+  })
+
+  it('leaves a backslash-newline inside single quotes alone', () => {
+    expect(formatBashForDisplay(`printf 'a\\\nb'\n`)).toBe(`printf 'a\\\nb'`)
+  })
+
   it('renders a bare command as the same shell script', () => {
     expect(formatBashForDisplay('echo 123123')).toBe('echo 123123')
     expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')
