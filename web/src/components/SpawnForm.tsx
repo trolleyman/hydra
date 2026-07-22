@@ -4,7 +4,7 @@ import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, Circle, GitBranch, MessageSquare } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -28,16 +28,15 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(n
 // (AGENT_ACCENT) can both be rendered directly from the id.
 const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'claude', label: 'Claude', color: AGENT_ACCENT.claude },
+  { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
   { id: 'gemini', label: 'Gemini', color: AGENT_ACCENT.gemini },
   { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
-  { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
 ]
 
 // Curated model aliases per agent type, shown as a sub-list under each agent in
 // the picker. Every agent also gets an implicit "Default" row (model '') meaning
-// "don't pass --model" so the CLI uses its own default. Only Claude and Gemini
-// expose concrete aliases here; Copilot/Codex offer just Default because their
-// model slugs are less stable and pinning a wrong id would fail the launch.
+// "don't pass --model" so the CLI uses its own default. Claude, Codex and
+// Gemini expose a small curated set; Copilot stays on its CLI-managed default.
 const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
   claude: [
     { id: 'opus', label: 'Opus' },
@@ -50,7 +49,12 @@ const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
     { id: 'gemini-2.5-flash', label: '2.5 Flash' },
   ],
   copilot: [],
-  codex: [],
+  codex: [
+    { id: 'gpt-5.6', label: 'GPT-5.6' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+    { id: 'gpt-5.4', label: 'GPT-5.4' },
+    { id: 'gpt-5.3-codex-spark', label: 'Codex Spark' },
+  ],
 }
 
 // Short label for the currently-selected model, shown next to the brand icon on
@@ -134,7 +138,9 @@ const AgentModelPicker = memo(function AgentModelPicker({
         className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
       >
         <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
-        {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+        {selected && (m.id
+          ? <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />
+          : <Circle className="w-3 h-3 ml-auto shrink-0 fill-blue-500 text-blue-500" />)}
       </button>
     )
   }

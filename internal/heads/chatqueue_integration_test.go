@@ -272,8 +272,8 @@ func TestChatPlanApprovalViaRegistry(t *testing.T) {
 // real CLI), so the daemon itself must flip the head out of "running". End to
 // end minus the CLI: mark the interrupt (as the chat WS handler does), feed the
 // CLI's actual post-interrupt output, and expect the status written as
-// "waiting" plus the queued message drained to stdin.
-func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
+// "finished" plus the queued message drained to stdin.
+func TestChatInterruptWritesFinishedStatusAndDrains(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 	reg := mgr.reg
 	reg.SetOnChatResult(mgr.OnTurnEnd)
@@ -291,8 +291,8 @@ func TestChatInterruptWritesWaitingStatusAndDrains(t *testing.T) {
 
 	waitUntil(t, func() bool {
 		s := ReadAgentStatus(root, "agent-x")
-		return s != nil && s.Status == api.Waiting
-	}, "interrupted turn end did not write the waiting status")
+		return s != nil && s.Status == api.Finished
+	}, "interrupted turn end did not write the finished status")
 	waitUntil(t, func() bool { return strings.Contains(pty.written(), "AFTER-INTERRUPT") },
 		"interrupted turn end did not drain the queued message")
 }
@@ -334,7 +334,7 @@ func TestChatIdleInterruptSettleInvalidated(t *testing.T) {
 	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	// The turn end consumed the mark (and wrote waiting); a hook then flipped
+	// The turn end consumed the mark (and wrote finished); a hook then flipped
 	// the head back to running (the drained message's UserPromptSubmit).
 	mgr.MarkInterrupted("agent-x")
 	mgr.OnTurnEnd("agent-x")
@@ -385,7 +385,7 @@ func TestChatTurnEndAlwaysSettlesStatus(t *testing.T) {
 
 	// Plain turn end: no interrupt mark, but the daemon still settles it.
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
 		t.Fatalf("un-interrupted turn end did not settle status: %+v", s)
 	}
 
@@ -397,7 +397,7 @@ func TestChatTurnEndAlwaysSettlesStatus(t *testing.T) {
 		t.Fatalf("direct send not written to stdin: %q", pty.written())
 	}
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
 		t.Fatalf("later turn end did not settle status: %+v", s)
 	}
 
@@ -407,7 +407,7 @@ func TestChatTurnEndAlwaysSettlesStatus(t *testing.T) {
 	mgr.interrupted["agent-x"] = time.Now().Add(-2 * interruptMarkTTL)
 	mgr.mu.Unlock()
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Finished {
 		t.Fatalf("turn end with expired mark did not settle status: %+v", s)
 	}
 }

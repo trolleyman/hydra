@@ -30,6 +30,9 @@ export interface RepoLinkContext {
   projectId: string
   refStr: string
   filePath: string
+  // Chat messages may contain absolute paths emitted by an agent. Strip this
+  // worktree prefix before routing them into the repository browser.
+  worktreePath?: string
 }
 
 type Variant = 'chat' | 'doc'
@@ -83,16 +86,25 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
   let path = hashIdx >= 0 ? href.slice(0, hashIdx) : href
   const q = path.indexOf('?')
   if (q >= 0) path = path.slice(0, q)
+  let lineHash = hash
+  const line = /:(\d+)(?::\d+)?$/.exec(path)
+  if (line) {
+    path = path.slice(0, -line[0].length)
+    if (!lineHash) lineHash = `#L${line[1]}`
+  }
+  if (ctx.worktreePath && (path === ctx.worktreePath || path.startsWith(ctx.worktreePath + '/'))) {
+    path = path.slice(ctx.worktreePath.length).replace(/^\/+/, '')
+  }
   const resolved = resolveRepoPath(dirOf(ctx.filePath), path)
   const splat = resolved ? `${ctx.refStr}/${resolved}` : ctx.refStr
-  const url = `/project/${encodePath(ctx.projectId)}/repository/${encodePath(splat)}${hash}`
+  const url = `/project/${encodePath(ctx.projectId)}/repository/${encodePath(splat)}${lineHash}`
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
     navigate({
       to: '/project/$projectId/repository/$',
       params: { projectId: ctx.projectId, _splat: splat },
-      hash: hash ? hash.slice(1) : undefined,
+      hash: lineHash ? lineHash.slice(1) : undefined,
     })
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>

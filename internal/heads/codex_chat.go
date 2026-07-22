@@ -34,11 +34,6 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 			}
 		},
 		OnTurnEnd: func(string) {
-			ts := time.Now().Format(time.RFC3339Nano)
-			if err := WriteAgentStatus(projectRoot, id, &api.AgentStatusInfo{Status: api.Waiting, Timestamp: ts}); err != nil {
-				log.Printf("warn: mark Codex turn waiting for %s: %v", id, err)
-			}
-			_ = store.UpdateAgentStatus(id, string(api.Waiting), ts, false)
 			reg.ChatTurnEnded(id)
 		},
 		OnError: func(controllerErr error) {

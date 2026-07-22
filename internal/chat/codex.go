@@ -162,7 +162,7 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		}
 	case "user_message", "userMessage":
 		return nil // recorded at Hydra's input/queue boundary with its client id
-	case "collabToolCall":
+	case "collabToolCall", "collabAgentToolCall":
 		kind := "tool_started"
 		if completed {
 			kind = "tool_completed"
@@ -288,12 +288,28 @@ func codexToolPayload(item codexItem) map[string]any {
 	}
 	name := item.Type
 	input := any(item)
-	if item.Type == "commandExecution" || item.Type == "command_execution" {
+	switch item.Type {
+	case "commandExecution", "command_execution":
 		name = "Bash"
 		input = map[string]any{"command": item.Command, "cwd": item.CWD, "_raw": item}
-	}
-	if item.Type == "mcpToolCall" {
-		name = item.Server + ":" + item.Tool
+	case "fileChange", "file_change":
+		name = "Edit Files"
+		input = map[string]any{"changes": item.Changes, "_raw": item}
+		if output == "" {
+			output = "Files updated"
+		}
+	case "webSearch", "web_search":
+		name = "WebSearch"
+		input = map[string]any{"query": item.Query, "_raw": item}
+		if output == "" && item.Query != "" {
+			output = "Search completed"
+		}
+	case "imageView", "image_view":
+		name = "View Image"
+		input = map[string]any{"path": item.Path, "_raw": item}
+	case "mcpToolCall":
+		name = "MCP " + item.Server + "::" + item.Tool
+		input = map[string]any{"arguments": item.Arguments, "_raw": item}
 	}
 	return map[string]any{
 		"id": item.ID, "name": name, "command": item.Command, "cwd": item.CWD,

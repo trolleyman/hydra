@@ -863,6 +863,11 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			if !ok {
 				return
 			}
+			if normalizedMode && s.ChatEvents != nil {
+				for _, line := range lb.Feed(data) {
+					s.ChatEvents.ObserveProviderLine(agentID, "claude", line)
+				}
+			}
 			// Live stream (post replay_done): results arrive in order, so keep them.
 			if !normalizedMode && !relayChatChunk(conn, lb, data, agentID, skip, subs, false, streamDbg) {
 				return

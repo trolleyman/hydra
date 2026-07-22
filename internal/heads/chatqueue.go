@@ -160,7 +160,7 @@ type ChatQueueManager struct {
 	// with a `result` line (subtype error_during_execution) but fires NO Stop
 	// hook, so nothing in-sandbox ever flips status.json out of "running" - the
 	// head would spin forever and a queue restored on attach would never drain.
-	// OnTurnEnd consumes the mark and writes the "waiting" status itself.
+	// OnTurnEnd consumes the mark and writes the resting status itself.
 	interrupted map[string]time.Time
 	// onEvent mirrors queue/input transitions into the normalized durable chat
 	// stream. Optional so focused queue tests and legacy callers stay lightweight.
@@ -360,12 +360,18 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 		return
 	}
 	m.takeInterrupted(id)
+	status := api.Finished
+	if entries, err := os.ReadDir(paths.GetSubagentsDirFromProjectRoot(root, id)); err == nil && len(entries) > 0 {
+		status = api.Running
+	}
+	ts := time.Now().Format(time.RFC3339Nano)
 	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
-		Status:    api.Waiting,
-		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Status:    status,
+		Timestamp: ts,
 	}); err != nil {
 		log.Printf("warn: write post-turn status for %s: %v", id, err)
 	}
+	_ = m.store.UpdateAgentStatus(id, string(status), ts, false)
 	m.drainAll(root, id)
 }
 

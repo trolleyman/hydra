@@ -4,10 +4,34 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
 )
+
+func TestBuildCommandSpecUsesSandboxTempDirectory(t *testing.T) {
+	root := t.TempDir()
+	output := t.TempDir()
+	t.Setenv("TMPDIR", "/host/read-only/tmp")
+	t.Setenv("TMP", "/host/read-only/tmp")
+	t.Setenv("TEMP", "/host/read-only/tmp")
+	m := NewManager(root)
+	launch, err := m.buildCommandSpec(config.TestScript{Name: "env", Command: "true", UnsafeHost: true}, root, output, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer launch.Cleanup()
+	joined := "\n" + strings.Join(launch.Env, "\n") + "\n"
+	for _, want := range []string{"TMPDIR=/tmp", "TMP=/tmp", "TEMP=/tmp"} {
+		if !strings.Contains(joined, "\n"+want+"\n") {
+			t.Errorf("environment missing %q", want)
+		}
+	}
+	if strings.Contains(joined, "/host/read-only/tmp") {
+		t.Fatalf("inherited host temporary directory leaked into environment")
+	}
+}
 
 // initGitRepo makes dir a git repo with a single commit, so WorktreeStateHash
 // (git rev-parse HEAD + status) works for the worktree cache key.

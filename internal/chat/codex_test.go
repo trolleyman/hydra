@@ -65,9 +65,32 @@ func TestNormalizeCodexRichItems(t *testing.T) {
 }
 
 func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
-	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"a1","type":"collabToolCall","tool":"spawn_agent","status":"inProgress","senderThreadId":"root","newThreadId":"child","prompt":"inspect"}}}`))
+	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"a1","type":"collabAgentToolCall","tool":"spawn_agent","status":"inProgress","senderThreadId":"root","newThreadId":"child","prompt":"inspect"}}}`))
 	if len(got) != 2 || got[0].eventType != "tool_started" || got[1].eventType != "subagent_started" {
 		t.Fatalf("events = %+v", got)
+	}
+}
+
+func TestNormalizeCodexFriendlyToolPayloads(t *testing.T) {
+	tests := []struct {
+		line string
+		name string
+		key  string
+	}{
+		{`{"method":"item/completed","params":{"item":{"id":"w1","type":"webSearch","query":"Hydra docs","status":"completed"}}}`, "WebSearch", "query"},
+		{`{"method":"item/completed","params":{"item":{"id":"f1","type":"fileChange","changes":[{"path":"x.go","kind":{"type":"update"},"diff":"package x"}],"status":"completed"}}}`, "Edit Files", "changes"},
+		{`{"method":"item/started","params":{"item":{"id":"v1","type":"imageView","path":"shot.png"}}}`, "View Image", "path"},
+	}
+	for _, tc := range tests {
+		got := normalizeCodex([]byte(tc.line))
+		if len(got) != 1 {
+			t.Fatalf("%s => %+v", tc.line, got)
+		}
+		payload := got[0].payload.(map[string]any)
+		input, _ := payload["input"].(map[string]any)
+		if payload["name"] != tc.name || input[tc.key] == nil {
+			t.Errorf("payload = %+v, want name %q and input %q", payload, tc.name, tc.key)
+		}
 	}
 }
 

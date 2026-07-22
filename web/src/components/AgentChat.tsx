@@ -656,6 +656,13 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
   }
 }
 
+// Keep provider protocol identifiers in Raw while making MCP calls scan like
+// namespace-qualified operations in the normal card header.
+function displayToolName(name: string): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  return mcp ? `MCP ${mcp[1]}::${mcp[2]}` : name
+}
+
 // collapseHome rewrites an absolute home path (/home/<user>/..., /Users/<user>/
 // ... on macOS) to ~/... for display (item 5) - the machine's home prefix is
 // noise in a tool summary. Applied everywhere it appears in the string.
@@ -1111,8 +1118,9 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
 
 // OutputPanel renders a tool's textual output on the shared quiet panel,
 // syntax highlighted when a language is known (item 3, e.g. a Read of a .ts
-// file) and tinted red on error. Tall output scrolls within a capped height.
-function OutputPanel({ text, lang, isError }: { text: string; lang: string; isError?: boolean }) {
+// file). The card border/status carries failure semantics; keeping the output
+// neutral means a long mostly-successful script does not become a wall of red.
+function OutputPanel({ text, lang }: { text: string; lang: string; isError?: boolean }) {
   // Code output (a Read of a known extension) is stripped of any stray ANSI and
   // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
   // to spans. Neither path ever shows raw escape garbage.
@@ -1120,11 +1128,54 @@ function OutputPanel({ text, lang, isError }: { text: string; lang: string; isEr
     () => (lang ? highlightHtml(stripAnsi(text), lang) : hasAnsi(text) ? ansiToHtml(text) : null),
     [text, lang],
   )
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 ${
-    isError ? 'text-red-600 dark:text-red-300' : 'text-stone-600 dark:text-stone-300'
-  }`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
+}
+
+function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
+  const parsed = (() => {
+    const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
+    if (!match) return { body: text, links: [] as { title: string; url: string }[] }
+    try {
+      const links = JSON.parse(match[1]) as unknown
+      if (!Array.isArray(links)) return { body: text, links: [] as { title: string; url: string }[] }
+      const clean = links.filter((v): v is { title: string; url: string } =>
+        !!v && typeof v === 'object' && typeof (v as { title?: unknown }).title === 'string' && typeof (v as { url?: unknown }).url === 'string')
+      return { body: (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim(), links: clean }
+    } catch {
+      return { body: text, links: [] as { title: string; url: string }[] }
+    }
+  })()
+  return (
+    <div className={`space-y-2 break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+      {parsed.links.length > 0 && (
+        <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
+          <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
+          <ul className="space-y-1">
+            {parsed.links.map((link, i) => <li key={`${link.url}:${i}`}><a className="text-blue-600 dark:text-blue-400 hover:underline" href={link.url} target="_blank" rel="noreferrer">{link.title}</a></li>)}
+          </ul>
+        </div>
+      )}
+      {parsed.body && <Markdown text={parsed.body} />}
+    </div>
+  )
+}
+
+function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: string | null }) {
+  if (!Array.isArray(changes)) return null
+  return (
+    <div className="space-y-1.5">
+      {changes.map((raw, i) => {
+        const change = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+        const path = typeof change.path === 'string' ? trimWorktreePaths(change.path, worktree) : `file ${i + 1}`
+        const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
+        const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
+        const diff = typeof change.diff === 'string' ? change.diff : ''
+        return <div key={`${path}:${i}`}><div className="mb-0.5 text-[10px] font-medium text-stone-500 dark:text-stone-400"><span className="capitalize">{kind}</span> {path}</div>{diff && <CodePanel code={diff} lang={langFromPath(path)} />}</div>
+      })}
+    </div>
+  )
 }
 
 // GutterCodePanel renders code lines beside a line-number gutter, one grid row
@@ -1377,6 +1428,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // Task tools carry a prose subject, not a path/command - shown in the header.
   const isTaskTool = item.name === 'TaskCreate' || item.name === 'TaskUpdate'
   const isWebSearch = item.name === 'WebSearch'
+  const isFileChanges = item.name === 'Edit Files' && Array.isArray(input?.changes)
 
   // A Bash header shows the human description when the agent provided one (the
   // script itself lives in the expanded card); a memory Read shows "memory
@@ -1436,7 +1488,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{item.name}</span>
+          <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
@@ -1465,6 +1517,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
             <>
               {isBash ? (
                 <CodePanel code={trimWorktreePaths(displayedCommand, worktree)} lang="bash" />
+              ) : isWebSearch && typeof input?.query === 'string' ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
+              ) : isFileChanges ? (
+                <FileChangesPanel changes={input?.changes} worktree={worktree} />
               ) : isWrite ? (
                 <NumberedCodePanel code={trimWorktreePaths(input!.content as string, worktree)} lang={fileLang} />
               ) : isEdit ? (
@@ -1519,7 +1575,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                       : isTaskTool && !item.isError
 							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
                         : isWebSearch && !item.isError
-                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
+                          ? <WebSearchOutput text={visibleResult} serif={serif} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={visibleResult} lang={outputLang} />
 								: <OutputPanel text={visibleResult} lang={outputLang} isError={item.isError} />
@@ -3545,6 +3601,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const worktreePath = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
+  const branchName = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
+  )
+  const chatLinkCtx = projectId
+    ? { projectId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+    : undefined
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value
@@ -4092,6 +4154,27 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return it
         }),
       )
+    }
+
+    // Some Codex items only reveal useful fields on item/completed. Refresh
+    // the existing card before applying its result so it does not retain the
+    // raw started-frame id or empty input.
+    const patchToolMetadata = (toolUseId: string, name: string, input: unknown) => {
+      const patch = (it: ChatItem): ChatItem =>
+        it.kind === 'tool' && it.toolUseId === toolUseId ? { ...it, name: name || it.name, input } : it
+      const pendingIndex = pending.findIndex((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
+      if (pendingIndex >= 0) pending[pendingIndex] = patch(pending[pendingIndex])
+      else setItems((prev) => prev.map(patch))
+      let subChanged = false
+      for (const key in subLocal) {
+        const sub = subLocal[key]
+        const next = sub.items.map(patch)
+        if (next.some((it, i) => it !== sub.items[i])) {
+          sub.items = next
+          subChanged = true
+        }
+      }
+      if (subChanged) scheduleSubFlush()
     }
 
 		const appendToolOutput = (toolUseId: string, delta: string) => {
@@ -4849,6 +4932,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
             if (entries.length) plan.adoptServer(entries)
           }
+					if (normalized.type === 'tool_started' || normalized.type === 'tool_completed') {
+						const toolID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+						const toolName = typeof normalized.payload?.name === 'string' ? normalized.payload.name : ''
+						if (toolID && toolName && normalized.payload && 'input' in normalized.payload) {
+							patchToolMetadata(toolID, toolName, normalized.payload.input)
+						}
+					}
 					if (normalized.type === 'tool_delta') {
 						const toolID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
 						const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
@@ -5803,7 +5893,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const m = fence.exec(rest)
       if (!m) break
       const before = rest.slice(0, m.index)
-      if (before.trim()) parts.push(<Markdown key={key++} text={before} />)
+      if (before.trim()) parts.push(<Markdown key={key++} text={before} linkCtx={chatLinkCtx} />)
       const specs = parseQuestionBlock(m[1])
       if (specs) {
         parts.push(
@@ -5812,12 +5902,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>,
         )
       } else {
-        parts.push(<Markdown key={key++} text={m[0]} />)
+        parts.push(<Markdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
       }
       rest = rest.slice(m.index + m[0].length)
     }
-    if (parts.length === 0) return <Markdown text={text} />
-    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} />)
+    if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }
 
@@ -6245,7 +6335,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               and read as visual jitter (item 56). */}
           {stream && stream.kind === 'assistant' && (
             <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
-              <Markdown text={closeOpenFence(stream.text)} streamFade />
+              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} streamFade />
             </div>
           )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}

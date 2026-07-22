@@ -59,3 +59,14 @@ func TestNormalizeClaudeHistoryIncludesPlainUser(t *testing.T) {
 		t.Fatalf("events = %+v", got)
 	}
 }
+
+func TestNormalizeClaudeTaskNotificationSettlesSubagent(t *testing.T) {
+	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>agent-7</task-id><status>completed</status><summary>done</summary></task-notification>"}`))
+	if len(got) != 2 || got[0].eventType != "notice" || got[1].eventType != "subagent_completed" {
+		t.Fatalf("events = %+v", got)
+	}
+	payload := got[1].payload.(map[string]any)
+	if payload["id"] != "agent-7" || payload["status"] != "completed" {
+		t.Fatalf("completion payload = %+v", payload)
+	}
+}

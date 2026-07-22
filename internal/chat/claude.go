@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type eventSpec struct {
@@ -131,12 +132,30 @@ func normalizeClaude(line []byte) []eventSpec {
 		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageID, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageID, "duration_ms": ev.DurationMS}}}
 	}
 	if ev.Content != "" {
-		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
+		out := []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
+		if taskID := taskNotificationField(ev.Content, "task-id"); taskID != "" && strings.EqualFold(taskNotificationField(ev.Content, "status"), "completed") {
+			out = append(out, eventSpec{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}})
+		}
+		return out
 	}
 	if len(ev.Attachment.Prompt) > 0 && string(ev.Attachment.Prompt) != "null" {
 		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": textFromClaudeContent(ev.Attachment.Prompt)})}}
 	}
 	return nil
+}
+
+func taskNotificationField(text, field string) string {
+	start, end := "<"+field+">", "</"+field+">"
+	i := strings.Index(text, start)
+	if i < 0 {
+		return ""
+	}
+	rest := text[i+len(start):]
+	j := strings.Index(rest, end)
+	if j < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:j])
 }
 
 func normalizeClaudeHistory(line []byte) []eventSpec {
