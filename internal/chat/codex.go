@@ -181,7 +181,9 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		if subID == "" {
 			subID = item.ReceiverThreadID
 		}
-		if subID != "" {
+		// Receiver ids on send/resume/close identify the target of an ordinary
+		// collaboration control; only spawnAgent owns a new child lifecycle.
+		if subID != "" && codexCollabTool(item.Tool) == "spawnagent" {
 			subKind := "subagent_started"
 			status := codexAgentStatus(item.AgentStatus, subID)
 			if status == "" {
@@ -225,14 +227,14 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 
 func codexCollabPresentation(item codexItem) (string, map[string]any) {
 	name := "Agent"
-	switch item.Tool {
+	switch codexCollabTool(item.Tool) {
 	case "wait":
 		name = "Wait"
-	case "send_input", "send_message":
+	case "sendinput", "sendmessage":
 		name = "SendMessage"
-	case "resume_agent":
+	case "resumeagent":
 		name = "ResumeAgent"
-	case "close_agent":
+	case "closeagent":
 		name = "CloseAgent"
 	}
 	input := map[string]any{"_raw": item}

@@ -42,7 +42,13 @@ export function splitBashChains(cmd: string): string {
     if (!isChain) continue
     if (ch !== ';') out += cmd[++i]
     while (cmd[i + 1] === ' ') i++
-    if (i + 1 < cmd.length) out += '\n'
+    // Keep the conventional error-suppression suffixes attached to the command
+    // they qualify. Splitting `command -v bun || true` (or `... || :`) leaves a
+    // visually orphaned no-op on its own line and makes the script harder, not
+    // easier, to scan. Other control chains still split normally.
+    const rest = cmd.slice(i + 1).trim()
+    const trivialFallback = ch === '|' && /^(?:true|:)\s*$/.test(rest)
+    if (i + 1 < cmd.length) out += trivialFallback ? ' ' : '\n'
   }
   return out
 }

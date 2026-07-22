@@ -75,6 +75,13 @@ func TestNormalizeClaudeTaskNotificationSettlesSubagent(t *testing.T) {
 	}
 }
 
+func TestNormalizeClaudeBackgroundCommandDoesNotCreateSubagent(t *testing.T) {
+	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>command-7</task-id><status>completed</status><summary>command done</summary><output-file>/tmp/command-7.log</output-file></task-notification>"}`))
+	if len(got) != 1 || got[0].eventType != "notice" {
+		t.Fatalf("events = %+v", got)
+	}
+}
+
 func TestNormalizeClaudeAgentResultDropsContinuationTrailer(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"user","uuid":"u4","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":[{"type":"text","text":"Useful report"},{"type":"text","text":"agentId: child-1 (use SendMessage...)\n<usage>subagent_tokens: 12</usage>"}]}]}}`))
 	if len(got) != 1 || got[0].eventType != "tool_completed" {

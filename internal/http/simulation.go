@@ -219,6 +219,8 @@ const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Matc
 // page renders the chat view instead of a terminal.
 const simAgentChatPrompt = "Add a retry with exponential backoff to the artifact uploader, and cover the giving-up path with a test."
 
+const simAgentCodexPrompt = "Exercise Codex chat tools, file edits, and a sub-agent, then report the result."
+
 // simAgentChat is the chat-mode demo agent, shared by ListAgents and GetAgent.
 func simAgentChat() api.AgentResponse {
 	createdAt := simNow().Add(-45 * time.Minute).Unix()
@@ -240,6 +242,20 @@ func simAgentChat() api.AgentResponse {
 			Status:    api.Waiting,
 			Timestamp: simNow().Format(time.RFC3339),
 		},
+	}
+}
+
+// simAgentCodex is the provider-neutral chat-event demo. Keeping it separate
+// from agent-chat means the simulation exercises both the legacy Claude input
+// adapter and the normalized Codex replay path in a real rendered page.
+func simAgentCodex() api.AgentResponse {
+	createdAt := simNow().Add(-40 * time.Minute).Unix()
+	return api.AgentResponse{
+		Id: "agent-chat-codex", Title: ptr("Exercise Codex chat events"), AgentType: "codex",
+		BaseBranch: "main", BranchName: ptr("hydra/sim-codex-chat"), SessionPid: 1007,
+		SessionStatus: "running", CreatedAt: &createdAt, Prompt: simAgentCodexPrompt,
+		ChatMode: ptr(true), Model: ptr("gpt-5.4"),
+		AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 	}
 }
 
@@ -332,6 +348,8 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode demo agent: its detail page renders the chat view instead of
 		// a terminal; HandleTerminalWS serves it chat framing.
 		simAgentChat(),
+		// Same presentation over the durable provider-neutral Codex event stream.
+		simAgentCodex(),
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.
 		simAgentAsk(),
@@ -556,6 +574,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 	if id == "agent-chat" {
 		write(simAgentChat())
+		return
+	}
+	if id == "agent-chat-codex" {
+		write(simAgentCodex())
 		return
 	}
 	if id == "agent-ask" {
@@ -3053,6 +3075,64 @@ func sendSimThinking(conn *safeConn, messageID string, durationMS int64) {
 	sendSimChatEvent(conn, string(line))
 }
 
+func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, payload map[string]any) {
+	event := map[string]any{
+		"seq": seq, "type": eventType,
+		"timestamp": simNow().Add(time.Duration(seq) * time.Millisecond).Format(time.RFC3339Nano),
+		"payload":   payload,
+	}
+	frame, _ := json.Marshal(map[string]any{"type": "chat_event", "event": event})
+	_ = conn.WriteMessage(websocket.TextMessage, frame)
+}
+
+// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. It
+// includes the regressions that are otherwise difficult to reproduce on demand:
+// a rich multi-file edit, a spawn whose transport result is merely "completed",
+// and a later closeAgent control that must remain an ordinary tool rather than
+// creating an empty child conversation.
+func handleSimCodexChatWS(conn *safeConn) {
+	sendStatusUpdate(conn, "finished")
+	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{"subagents": map[string]any{}}})
+	_ = conn.WriteMessage(websocket.TextMessage, state)
+	events := []struct {
+		typ string
+		p   map[string]any
+	}{
+		{"conversation_started", map[string]any{"model": "gpt-5.4"}},
+		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
+		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+			map[string]any{"path": "docs/codex-chat.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Codex chat\n+# Codex chat support\n"},
+			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
+		}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "input": map[string]any{"prompt": "Inspect chat replay and report the key invariant.", "description": "Inspect chat replay", "_raw": map[string]any{"tool": "spawnAgent"}}}},
+		{"subagent_started", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "description": "Inspect chat replay", "prompt": "Inspect chat replay and report the key invariant.", "status": "running"}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-child-report", "agent_id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "sidechain": true, "text": "Replay uses the same sequenced normalized events as live delivery."}},
+		{"subagent_completed", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "status": "completed"}},
+		{"tool_completed", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "output": "completed", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "input": map[string]any{"agent_id": "sim-codex-child", "_raw": map[string]any{"tool": "closeAgent"}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-close", "name": "CloseAgent", "output": "completed", "status": "completed"}},
+		// Compatibility regression: old Claude logs incorrectly followed a
+		// background-command notice with this lifecycle event. The notice's
+		// output-file must keep it out of the sub-agent projection on replay.
+		{"notice", map[string]any{"text": "<task-notification><task-id>sim-background-command</task-id><status>completed</status><summary>Background command completed</summary><output-file>/tmp/sim-background-command.log</output-file></task-notification>"}},
+		{"subagent_completed", map[string]any{"id": "sim-background-command", "status": "completed"}},
+		{"assistant_message", map[string]any{"message_id": "sim-codex-final", "text": "Codex event replay completed with one sub-agent and no orphan cards."}},
+		{"turn_completed", map[string]any{"id": "sim-codex-turn", "status": "completed"}},
+	}
+	for i, event := range events {
+		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)
+	}
+	sendTerminalEvent(conn, "replay_done")
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
 // handleSimChatWS speaks the chat framing (see chat_ws.go) for the simulated
 // chat-mode agent: replay the canned conversation, mark replay_done, then
 // answer each user_message with an echoed user turn and a scripted assistant
@@ -3786,6 +3866,10 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	// bash tabs (shell=true) still get the plain simulated terminal below.
 	if agentID == "agent-chat" && r.URL.Query().Get("shell") != "true" {
 		handleSimChatWS(conn)
+		return
+	}
+	if agentID == "agent-chat-codex" && r.URL.Query().Get("shell") != "true" {
+		handleSimCodexChatWS(conn)
 		return
 	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {

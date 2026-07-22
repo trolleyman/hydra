@@ -11,8 +11,6 @@ import {
   CircleStop,
   ClipboardList,
   FilePen,
-  FileMinus2,
-  FilePlus2,
   FileText,
   GitCommitHorizontal,
   Globe,
@@ -27,6 +25,9 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  SquareDot,
+  SquareMinus,
+  SquarePlus,
   SquareTerminal,
   Wrench,
   X,
@@ -118,7 +119,7 @@ type ChatItem =
   // own tags) let the pill resolve its background sub-agent at render time, and
   // outputFile (the <output-file> tag) makes a background command's pill
   // expandable to show the command's output.
-  | { kind: 'notice'; id: number; text: string; subagentKey?: string; taskId?: string; toolUseId?: string; outputFile?: string }
+  | { kind: 'notice'; id: number; text: string; subagentKey?: string; taskId?: string; toolUseId?: string; outputFile?: string; noEntrance?: boolean }
   // The CLI-injected "session continued" preamble after a context compaction
   // (auto/out-of-context or /compact): a bookkeeping summary, not a real user
   // turn, so it collapses behind an expander (item 39). outOfContext labels the
@@ -678,7 +679,8 @@ function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
 // namespace-qualified operations in the normal card header.
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  return mcp ? `MCP ${mcp[1]}::${mcp[2]}` : name
+  if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
+  return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent' } as Record<string, string>)[name] ?? name
 }
 
 // collapseHome rewrites an absolute home path (/home/<user>/..., /Users/<user>/
@@ -1197,12 +1199,12 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
-        const ChangeIcon = kind === 'add' ? FilePlus2 : kind === 'delete' ? FileMinus2 : FilePen
+        const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
               <FileText className="h-3 w-3 shrink-0 text-blue-500" />
-              <span className="min-w-0 flex-1 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+              <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
               <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
             </div>
             {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
@@ -1431,7 +1433,7 @@ function TaskToolFields({ input, serif }: { input: Record<string, unknown>; seri
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: SquareTerminal,
   Read: FileText,
-  Edit: FilePen,
+  Edit: SquareDot,
   Write: FilePen,
   NotebookEdit: FilePen,
   Grep: Search,
@@ -1507,6 +1509,20 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []
+  const headerChangeKinds = isFileChanges
+    ? (input!.changes as unknown[]).map((raw) => {
+        if (!raw || typeof raw !== 'object') return 'update'
+        const kind = (raw as { kind?: unknown }).kind
+        if (typeof kind === 'string') return kind
+        return kind && typeof kind === 'object' && typeof (kind as { type?: unknown }).type === 'string'
+          ? (kind as { type: string }).type
+          : 'update'
+      })
+    : []
+  const headerChangeKind = headerChangeKinds.length > 0 && headerChangeKinds.every((kind) => kind === headerChangeKinds[0])
+    ? headerChangeKinds[0]
+    : 'update'
+  const HeaderChangeIcon = headerChangeKind === 'add' ? SquarePlus : headerChangeKind === 'delete' ? SquareMinus : SquareDot
   const summary = mem
     ? `memory ${mem}`
     : isWebSearch
@@ -1519,7 +1535,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (typeof input.file_path === 'string' || typeof input.path === 'string')
+    !isBash && !mem && !!input && (isFileChanges || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
@@ -1565,9 +1581,15 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
+          {!isFileChanges && <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />}
           <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
           <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          {isFileChanges && (
+            <HeaderChangeIcon
+              className={`h-3.5 w-3.5 shrink-0 ${headerChangeKind === 'add' ? 'text-emerald-500' : headerChangeKind === 'delete' ? 'text-red-500' : 'text-amber-500'}`}
+              aria-label={headerChangeKind}
+            />
+          )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
         {pending && (
@@ -2053,6 +2075,23 @@ function isLaunchBoilerplate(s: string): boolean {
   return /Async agent launched successfully|internal metadata/i.test(s)
 }
 
+// Codex exposes all collaboration controls through collabAgentToolCall. Only a
+// spawn owns a child conversation; wait/send/resume/close are ordinary tool
+// calls and must not create empty sub-agent cards. Claude's Agent tool has no
+// `_raw.tool` discriminator, but its prompt/subagent_type shape is a spawn.
+function isAgentSpawnInput(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const input = value as Record<string, unknown>
+  const raw = input._raw && typeof input._raw === 'object' ? input._raw as Record<string, unknown> : null
+  const rawTool = typeof raw?.tool === 'string' ? raw.tool.replace(/[_-]/g, '').toLowerCase() : ''
+  if (rawTool) return rawTool === 'spawnagent'
+  return typeof input.prompt === 'string' || typeof input.subagent_type === 'string'
+}
+
+function isAgentStatusOnlyResult(tool: ToolItem | undefined, result: string): boolean {
+  return tool?.name === 'Agent' && /^(?:completed|complete|done|success|succeeded)$/i.test(result.trim())
+}
+
 // subReport resolves what a sub-agent reported back. Normally that is the Task
 // tool_result; but for a background/async agent the tool_result is only the
 // launch boilerplate, so the sub-agent's own final assistant message is the real
@@ -2061,7 +2100,7 @@ function isLaunchBoilerplate(s: string): boolean {
 function subReport(sub: SubagentView, tool?: ToolItem): SubReport | null {
   const res = tool?.result?.trim()
   if (tool?.isError && res) return { text: cleanSubagentReport(tool!.result!), isError: true }
-  if (res && !isLaunchBoilerplate(res)) return { text: cleanSubagentReport(tool!.result!), isError: false }
+  if (res && !isLaunchBoilerplate(res) && !isAgentStatusOnlyResult(tool, res)) return { text: cleanSubagentReport(tool!.result!), isError: false }
   for (let i = sub.items.length - 1; i >= 0; i--) {
     const it = sub.items[i]
     if (it.kind === 'assistant' && it.text.trim()) return { text: it.text, isError: false, itemId: it.id }
@@ -3121,7 +3160,7 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
     const dedupKey = `${taskId ?? ''}\0${toolUseId ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
     if (seenNotifs.has(dedupKey)) return
     seenNotifs.add(dedupKey)
-    push({ kind: 'notice', text: decodeEntities(summary || 'Background task update'), taskId, toolUseId, outputFile })
+    push({ kind: 'notice', text: decodeEntities(summary || 'Background task update'), taskId, toolUseId, outputFile, noEntrance: true })
   }
   const routeUser = (rawText: string, isMeta?: boolean) => {
     // Machine-injected context (a skill body etc.) is not a user turn - route it
@@ -4035,14 +4074,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       settleSubagentByToolUse(toolUseId, result)
     }
     // noticeSubDone drops a compact "finished" notice (with a View link to the
-    // sub-agent's chat) into the main flow when a sub-agent completes LIVE -
-    // replayed history stays quiet (the folded card already tells the story).
+    // sub-agent's chat) into the main flow. It is derived from the sequenced
+    // lifecycle event, so replay must restore it as well as the launch card.
     const noticeSubDone = (key: string, sub: SubagentView) => {
-      if (replaying) return
       const info = sub.toolUseId ? taskInputByUse.get(sub.toolUseId) : undefined
       const label = sub.agentType || info?.type || 'Sub-agent'
       const desc = sub.description || info?.desc || ''
-      push({ kind: 'notice', text: `${label} finished${desc ? ': ' + desc : ''}`, subagentKey: key })
+      push({ kind: 'notice', text: `${label} finished${desc ? ': ' + desc : ''}`, subagentKey: key, noEntrance: replaying || undefined })
     }
     // settleSubagentByToolUse marks the sub-agent spawned by a Task tool_use as
     // done - the parent tool_result arriving is the authoritative live end
@@ -4084,6 +4122,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // created or linked later still settles (mirrors backgroundToolUses, which
     // exists for the same "signal arrives before the sub" reason).
     const completedNotifs = new Set<string>()
+    // Older normalized logs may contain a subagent_completed event for a
+    // background command because Claude uses the same task-notification
+    // envelope for both. Remember output-file task ids so those historical
+    // events cannot create a transient empty agent card during replay/live
+    // catch-up. New backend events no longer emit the bogus lifecycle event.
+    const backgroundCommandTaskIDs = new Set<string>()
     // The latest completion notice pushed per task-id: an agent that stops, is
     // messaged/resumed, and stops again notifies more than once, and rendering
     // every summary reads as the same agent "finishing" twice. A newer
@@ -4102,6 +4146,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
       const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
       const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
+      if (outputFile && taskId) backgroundCommandTaskIDs.add(taskId)
       const dedupKey = `${taskId ?? ''}\0${noticeToolUse ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
       if (seenNotif.has(dedupKey)) return
       seenNotif.add(dedupKey)
@@ -4136,6 +4181,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         taskId,
         toolUseId: noticeToolUse,
         outputFile,
+        noEntrance: replaying || undefined,
       })
       if (!stillRunning && taskId) noticeIdByTask.set(taskId, noticeId)
     }
@@ -4759,7 +4805,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     type: typeof inp.subagent_type === 'string' ? inp.subagent_type : undefined,
                     desc: typeof inp.description === 'string' ? inp.description : undefined,
                   })
-                  if (block.name === 'Agent') {
+                  if (block.name === 'Agent' && isAgentSpawnInput(block.input)) {
                     // Codex may not reveal the child thread id until the spawn
                     // item completes. Give the spawn card a linked placeholder
                     // immediately; handleSubagentMeta merges it into the real
@@ -4933,6 +4979,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
         ts: Date.parse(normalized.timestamp) || Date.now(),
+        noEntrance: replaying || undefined,
       }
       st.cache.set(sha, chip)
       setCommitChips((prev) => [...prev, chip])
@@ -5014,6 +5061,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (normalized.type === 'subagent_started' || normalized.type === 'subagent_updated' || normalized.type === 'subagent_completed') {
             const sub = normalized.payload ?? {}
             const subID = typeof sub.id === 'string' ? sub.id : ''
+            if (subID && backgroundCommandTaskIDs.has(subID)) return
             handleSubagentMeta(
               subID,
               typeof sub.parent_item_id === 'string' ? sub.parent_item_id : '',

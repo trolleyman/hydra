@@ -133,7 +133,13 @@ func normalizeClaude(line []byte) []eventSpec {
 	}
 	if ev.Content != "" {
 		out := []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
-		if taskID := taskNotificationField(ev.Content, "task-id"); taskID != "" && strings.EqualFold(taskNotificationField(ev.Content, "status"), "completed") {
+		// Claude uses the same task-notification envelope for spawned agents and
+		// background shell commands. An output-file identifies the latter; it is
+		// rendered as an expandable command notice and must not create a phantom
+		// sub-agent lifecycle.
+		if taskID := taskNotificationField(ev.Content, "task-id"); taskID != "" &&
+			strings.EqualFold(taskNotificationField(ev.Content, "status"), "completed") &&
+			taskNotificationField(ev.Content, "output-file") == "" {
 			out = append(out, eventSpec{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}})
 		}
 		return out

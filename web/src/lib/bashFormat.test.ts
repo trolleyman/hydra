@@ -38,6 +38,14 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')
   })
 
+  it.each([
+    ['command -v bun || true', 'command -v bun || true'],
+    ['test -e optional.conf || :', 'test -e optional.conf || :'],
+    ['command -v bun || echo missing', 'command -v bun ||\necho missing'],
+  ])('formats conventional fallbacks in %s', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
   it('decodes concatenated shell quoting and nested bash wrappers from app-server', () => {
     const command = `/usr/bin/bash -lc "bash -lc '(sleep 2; printf \\"background finished at %s\\\\n\\" \\""'$(date -Is)" > .feature-demo-background.txt) & echo $!'"'"`
     expect(unwrapBashLoginCommand(command)).toBe(`(sleep 2; printf "background finished at %s\\n" "$(date -Is)" > .feature-demo-background.txt) & echo $!`)

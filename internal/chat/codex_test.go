@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +80,28 @@ func TestNormalizeCodexSpawnWithoutChildIDRemainsActive(t *testing.T) {
 	payload := got[0].payload.(map[string]any)
 	if payload["output"] != "Async agent launched successfully. The agent is working in the background." {
 		t.Fatalf("output = %#v", payload["output"])
+	}
+}
+
+func TestNormalizeCodexCamelCaseAgentControls(t *testing.T) {
+	tests := []struct {
+		tool string
+		name string
+	}{
+		{"sendMessage", "SendMessage"},
+		{"resumeAgent", "ResumeAgent"},
+		{"closeAgent", "CloseAgent"},
+	}
+	for _, tc := range tests {
+		line := `{"method":"item/completed","params":{"item":{"id":"a1","type":"collabAgentToolCall","tool":"TOOL","status":"completed","receiverThreadId":"child"}}}`
+		line = strings.Replace(line, "TOOL", tc.tool, 1)
+		got := normalizeCodex([]byte(line))
+		if len(got) != 1 {
+			t.Fatalf("%s => %+v", tc.tool, got)
+		}
+		if name := got[0].payload.(map[string]any)["name"]; name != tc.name {
+			t.Errorf("%s name = %v, want %s", tc.tool, name, tc.name)
+		}
 	}
 }
 

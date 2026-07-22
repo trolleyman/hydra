@@ -421,7 +421,11 @@ and process exit mid-turn.
 - Backend tests for fresh spawn, initial prompt, resume by exact thread id,
   queued follow-up, interrupt, daemon reconnect, and terminal/chat switching.
 - Reducer tests for every normalized event and unknown-event fallback.
-- Simulation fixtures for a Codex chat head, including command/file/plan items.
+- Simulation fixtures include `/agent/agent-chat` for Claude's legacy provider
+  frames and `/agent/agent-chat-codex` for the normalized Codex contract. The
+  Codex fixture covers shell-wrapper display, multi-file edits, a real child
+  report, status-only spawn completion, and close-agent controls so replay and
+  live rendering can be checked against the same deterministic input.
 - Playwright coverage for spawn, streaming response, queueing, interrupt,
   reconnect replay, and mode switching, with console and page errors captured.
 - Gate Codex chat behind a config feature flag for one release if supported
