@@ -1854,7 +1854,7 @@ function LowlitPath({ path }: { path: string }) {
   const slash = path.lastIndexOf('/')
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
   const name = slash >= 0 ? path.slice(slash + 1) : path
-  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-500 dark:text-stone-400">{name}</span></>
+  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-400 dark:text-stone-500">{name}</span></>
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
