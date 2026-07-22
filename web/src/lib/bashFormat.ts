@@ -54,18 +54,64 @@ export function splitBashChains(cmd: string): string {
 // on platform/launch path, spells the executable as bash, /bin/bash, or
 // /usr/bin/bash. Unquoted remainders are accepted because this is a display
 // formatter for the provider's command string, not an argv parser.
-export function unwrapBashLoginCommand(command: string): string {
+function parseOneShellWord(source: string): string | null {
+  let out = ''
+  let quote: "'" | '"' | null = null
+  let escaped = false
+  let started = false
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]
+    if (escaped) {
+      out += ch
+      escaped = false
+      started = true
+      continue
+    }
+    if (quote === "'") {
+      if (ch === "'") quote = null
+      else out += ch
+      started = true
+      continue
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null
+      else if (ch === '\\' && /[\\"$`\n]/.test(source[i + 1] ?? '')) escaped = true
+      else out += ch
+      started = true
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      started = true
+    } else if (ch === '\\') {
+      escaped = true
+      started = true
+    } else if (/\s/.test(ch)) {
+      if (started && source.slice(i).trim()) return null
+    } else {
+      out += ch
+      started = true
+    }
+  }
+  return quote || escaped || !started ? null : out
+}
+
+function unwrapOneBashCommand(command: string): string {
   const match = command.match(/^(?:\/usr\/bin\/|\/bin\/)?bash\s+-(?:l)?c\s+([\s\S]+)$/)
   if (!match) return command
   const arg = match[1].trim()
   if (!arg) return command
-  if (arg[0] === "'" && arg.at(-1) === "'") {
-    return arg.slice(1, -1).replace(/'"'"'/g, "'")
+  return parseOneShellWord(arg) ?? arg
+}
+
+export function unwrapBashLoginCommand(command: string): string {
+  let current = command
+  for (let depth = 0; depth < 3; depth++) {
+    const next = unwrapOneBashCommand(current)
+    if (next === current) break
+    current = next
   }
-  if (arg[0] === '"' && arg.at(-1) === '"') {
-    return arg.slice(1, -1).replace(/\\([\\"$`])/g, '$1').replace(/\\\n/g, '')
-  }
-  return arg
+  return current
 }
 
 function quoteShellPath(path: string): string {

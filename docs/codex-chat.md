@@ -458,6 +458,14 @@ sub-agent continuation and usage trailer is removed from the visible report,
 and a sidechain transcript is folded into its originating agent tool card
 instead of creating a second standalone card.
 
+Captured app-server event logs are also used as regression inputs for the
+display boundary. In particular, command strings are decoded as shell-quoted
+arguments (including concatenated quote segments and nested `bash -lc`), while
+the untouched in-progress or completed app-server item remains available under
+Raw. A completed normalized message replaces its streamed preview in the same
+render batch so the preview cannot briefly disappear before the final Markdown
+is committed.
+
 Head lifecycle follows both `turn/started` and `item/started`. The latter is a
 bounded fallback for resumed or version-skewed app-server streams where item
 activity becomes visible before the corresponding turn notification; it keeps

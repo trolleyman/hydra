@@ -292,6 +292,10 @@ export function useAgentNotifications(
           // Leave existing toasts in place; a later stamp bump will retry.
           return
         }
+        // A newer status transition may have resolved/withdrawn this approval
+        // while the request was in flight. Never let an older HTTP response
+        // resurrect the just-dismissed card (seen as a quick identical popup).
+        if (approvalStamp.current.get(agentId) !== stamp) return
         let reqMap = approvalToasts.current.get(agentId)
         if (!reqMap) {
           reqMap = new Map()

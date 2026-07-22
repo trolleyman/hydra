@@ -1509,6 +1509,8 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
     : []
   const summary = mem
     ? `memory ${mem}`
+    : isWebSearch
+      ? (typeof input?.query === 'string' && input.query.trim() ? input.query : 'Preparing search…')
     : isFileChanges
       ? changedPaths.join(', ')
       : collapseHome(trimWorktreePaths(isBash ? description || displayedCommand.replace(/\n/g, ' ') : summarized.text, worktree))
@@ -1533,8 +1535,10 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
 		const protocolInput = rawInput?._raw
-		const raw: Record<string, unknown> = { input: protocolInput ?? item.input }
-		if (visibleResult !== undefined) raw.result = visibleResult
+		const raw: Record<string, unknown> = protocolInput && typeof protocolInput === 'object'
+			? { ...(protocolInput as Record<string, unknown>) }
+			: { input: item.input }
+		if (visibleResult !== undefined && !('aggregatedOutput' in raw) && !('result' in raw)) raw.result = visibleResult
     return JSON.stringify(raw, null, 2)
 	}, [showRaw, rawInput, item.input, visibleResult])
 
@@ -4934,6 +4938,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       setCommitChips((prev) => [...prev, chip])
     }
     const normalizedStreams = new Set<string>()
+    const replayedAssistantTexts = new Set<string>()
     let activeNormalizedAssistantStream = ''
     let activeNormalizedReasoningStream = ''
 
@@ -5051,11 +5056,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             return
           }
           const streamID = explicitStreamID || (normalized.type === 'assistant_message' ? activeNormalizedAssistantStream : activeNormalizedReasoningStream)
-          if ((normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)) {
-            handleProviderEvent({ type: 'stream_event', event: { type: 'message_stop' } })
-            if (normalized.type === 'assistant_message') activeNormalizedAssistantStream = ''
-            else activeNormalizedReasoningStream = ''
-          }
+          const settlesNormalizedStream =
+            (normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)
           if (normalized.type === 'plan_updated') {
             const rawPlan = normalized.payload?.plan
             const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
@@ -5073,9 +5075,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 						const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
 						appendToolOutput(toolID, delta)
 						return
-					}
+          }
           recordNormalizedCommit(normalized)
+          if (replaying && normalized.type === 'assistant_message') {
+            const text = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+            if (text && replayedAssistantTexts.has(text)) return
+            if (text) replayedAssistantTexts.add(text)
+          }
           for (const converted of normalizedToProviderEvents(normalized)) handleProviderEvent(converted)
+          if (settlesNormalizedStream) {
+            // Commit the completed message and remove its streamed preview in
+            // one React batch. Clearing first and flushing the settled item in
+            // a microtask produced a visible blank/full-message flicker.
+            flush()
+            handleProviderEvent({ type: 'stream_event', event: { type: 'message_stop' } })
+            if (normalized.type === 'assistant_message') activeNormalizedAssistantStream = ''
+            else activeNormalizedReasoningStream = ''
+          }
           return
         }
         case 'chat_history': {
@@ -5089,6 +5105,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             handleHistoryBefore(converted, msg.done === true)
           } else {
             for (const event of normalized) {
+              if (event.type === 'assistant_message') {
+                const text = typeof event.payload?.text === 'string' ? event.payload.text : ''
+                if (text && replayedAssistantTexts.has(text)) continue
+                if (text) replayedAssistantTexts.add(text)
+              }
               if (event.type === 'plan_updated') {
                 const rawPlan = event.payload?.plan
                 const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
