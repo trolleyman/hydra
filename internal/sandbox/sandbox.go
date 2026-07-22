@@ -155,7 +155,10 @@ func ProviderHostGroups() []ProviderHostGroup {
 			"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
 			"platform.claude.com", "http-intake.logs.us5.datadoghq.com",
 		}},
-		{AgentTypeCodex, []string{"api.openai.com", "*.openai.com", "chatgpt.com"}}, // OpenAI / Codex
+		{AgentTypeCodex, []string{
+			"api.openai.com", "*.openai.com",
+			"chatgpt.com", "*.chatgpt.com", "*.oaiusercontent.com",
+		}}, // OpenAI / Codex
 		{AgentTypeGemini, []string{"*.googleapis.com"}},
 		{AgentTypeCopilot, []string{"*.githubcopilot.com"}},
 	}
