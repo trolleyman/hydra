@@ -111,8 +111,18 @@ func normalizeClaude(line []byte) []eventSpec {
 				return out
 			}
 		}
-		if strings.HasPrefix(strings.TrimSpace(textFromClaudeContent(ev.Message.Content)), "[Request interrupted by user") {
+		userText := textFromClaudeContent(ev.Message.Content)
+		if strings.HasPrefix(strings.TrimSpace(userText), "[Request interrupted by user") {
 			return []eventSpec{{sourceID: base, eventType: "turn_interrupted", payload: map[string]any{"status": "interrupted"}}}
+		}
+		// Claude records an agent's completion notification TWICE: as the
+		// standalone bookkeeping record (collapsed below) and as the user turn that
+		// resumed the parent. Collapse both to the same canonical source id so the
+		// second is a no-op append rather than a second "finished" chip - without
+		// this the history normalizer's user-event fallback re-emitted it as a
+		// user_message, which the client rendered as its own notice.
+		if spec := claudeAgentCompletionSpec(userText); spec != nil {
+			return spec
 		}
 		// Hydra records submitted user messages (and their stable client ids) at
 		// the queue/input boundary. Claude echoes them here; emitting the echo too
@@ -135,15 +145,8 @@ func normalizeClaude(line []byte) []eventSpec {
 		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageID, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageID, "duration_ms": ev.DurationMS}}}
 	}
 	if ev.Content != "" {
-		// Claude uses the same task-notification envelope (and output-file field)
-		// for spawned agents and background shell commands. Agent summaries carry
-		// the lifecycle distinction and become ONE canonical completion event;
-		// command summaries remain expandable notices. Emitting both rendered two
-		// indistinguishable completion chips.
-		if taskID := taskNotificationField(ev.Content, "task-id"); taskID != "" &&
-			strings.EqualFold(taskNotificationField(ev.Content, "status"), "completed") &&
-			(taskNotificationField(ev.Content, "output-file") == "" || strings.HasPrefix(strings.ToLower(taskNotificationField(ev.Content, "summary")), "agent ")) {
-			return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}}}
+		if spec := claudeAgentCompletionSpec(ev.Content); spec != nil {
+			return spec
 		}
 		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
 	}
@@ -191,6 +194,29 @@ func taskNotificationField(text, field string) string {
 		return ""
 	}
 	return strings.TrimSpace(rest[:j])
+}
+
+// claudeAgentCompletionSpec collapses a spawned agent's completion
+// <task-notification> into the one canonical subagent_completed event, or
+// returns nil when the text is not one.
+//
+// Claude uses the same envelope (and output-file field) for spawned agents and
+// background shell commands: agent summaries carry the lifecycle distinction
+// and become the completion event; command summaries stay expandable notices.
+// The source id is derived from the task id alone, so every copy of the same
+// notification - the bookkeeping record and the user turn that consumed it -
+// dedups to a single stored event instead of rendering two indistinguishable
+// "finished" chips.
+func claudeAgentCompletionSpec(text string) []eventSpec {
+	taskID := taskNotificationField(text, "task-id")
+	if taskID == "" || !strings.EqualFold(taskNotificationField(text, "status"), "completed") {
+		return nil
+	}
+	if taskNotificationField(text, "output-file") != "" &&
+		!strings.HasPrefix(strings.ToLower(taskNotificationField(text, "summary")), "agent ") {
+		return nil
+	}
+	return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}}}
 }
 
 func normalizeClaudeHistory(line []byte) []eventSpec {

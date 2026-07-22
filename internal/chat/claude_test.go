@@ -96,6 +96,30 @@ func TestNormalizeClaudeAgentOutputFileStillSettlesSubagent(t *testing.T) {
 	}
 }
 
+// Claude records an agent's completion notification twice - the bookkeeping
+// record AND the user turn that consumed it. Both must collapse to the same
+// subagent_completed source id, or the history normalizer's plain-user fallback
+// emits a second user_message the client renders as its own "finished" chip.
+func TestNormalizeClaudeAgentNotificationUserTurnDedups(t *testing.T) {
+	const notif = `<task-notification><task-id>agent-9</task-id><tool-use-id>toolu_1</tool-use-id><output-file>/tmp/agent-9.output</output-file><status>completed</status><summary>Agent &quot;Trace wiring&quot; finished</summary></task-notification>`
+	record := normalizeClaude([]byte(`{"type":"queue-operation","content":"` + notif + `"}`))
+	turn := normalizeClaudeHistory([]byte(`{"type":"user","uuid":"u9","message":{"content":` + mustJSON(notif) + `}}`))
+	if len(record) != 1 || len(turn) != 1 {
+		t.Fatalf("record = %+v, turn = %+v", record, turn)
+	}
+	if turn[0].eventType != "subagent_completed" || turn[0].sourceID != record[0].sourceID {
+		t.Fatalf("turn = %+v, want same source as %+v", turn[0], record[0])
+	}
+}
+
+func mustJSON(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func TestNormalizeClaudeAgentResultDropsContinuationTrailer(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"user","uuid":"u4","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":[{"type":"text","text":"Useful report"},{"type":"text","text":"agentId: child-1 (use SendMessage...)\n<usage>subagent_tokens: 12</usage>"}]}]}}`))
 	if len(got) != 1 || got[0].eventType != "tool_completed" {
