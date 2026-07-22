@@ -132,16 +132,17 @@ func normalizeClaude(line []byte) []eventSpec {
 		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageID, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageID, "duration_ms": ev.DurationMS}}}
 	}
 	if ev.Content != "" {
-		out := []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
 		// Claude uses the same task-notification envelope (and output-file field)
 		// for spawned agents and background shell commands. Agent summaries carry
-		// the lifecycle distinction; command summaries remain expandable notices.
+		// the lifecycle distinction and become ONE canonical completion event;
+		// command summaries remain expandable notices. Emitting both rendered two
+		// indistinguishable completion chips.
 		if taskID := taskNotificationField(ev.Content, "task-id"); taskID != "" &&
 			strings.EqualFold(taskNotificationField(ev.Content, "status"), "completed") &&
 			(taskNotificationField(ev.Content, "output-file") == "" || strings.HasPrefix(strings.ToLower(taskNotificationField(ev.Content, "summary")), "agent ")) {
-			out = append(out, eventSpec{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}})
+			return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}}}
 		}
-		return out
+		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
 	}
 	if len(ev.Attachment.Prompt) > 0 && string(ev.Attachment.Prompt) != "null" {
 		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": textFromClaudeContent(ev.Attachment.Prompt)})}}

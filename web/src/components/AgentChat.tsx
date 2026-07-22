@@ -543,7 +543,7 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent): ProviderEvent[] {
     case 'messages_retracted':
       return [{ type: 'system', subtype: 'model_refusal_fallback', retractedMessageUuids: Array.isArray(p.message_ids) ? p.message_ids.filter((v): v is string => typeof v === 'string') : [] }]
     case 'notice':
-      return [{ ...base, type: 'queue-operation', content: text }]
+      return text && !isAgentCompletionNotification(text) ? [{ ...base, type: 'queue-operation', content: text }] : []
     case 'interaction_requested': {
       const interaction = p.interaction && typeof p.interaction === 'object' ? p.interaction as Record<string, unknown> : {}
       if (p.provider === 'claude') {
@@ -600,6 +600,16 @@ function stripLocalCommandCaveat(text: string): string {
 // relay channels (ev.content / attachment.prompt) that aren't pre-trimmed.
 function isTaskNotification(text: string): boolean {
   return text.trimStart().startsWith('<task-notification>')
+}
+
+// Logs written before agent completion became one canonical lifecycle event
+// contain both this machine notification and subagent_completed. Suppress the
+// former during replay so old conversations are idempotent too.
+function isAgentCompletionNotification(text: string): boolean {
+  if (!isTaskNotification(text)) return false
+  const status = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
+  const summary = decodeEntities(/<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim() ?? '')
+  return status === 'completed' && /^Agent\b/i.test(summary)
 }
 
 // queuedCommandText extracts the message text from a queued_command attachment
@@ -1509,6 +1519,13 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
 }
 
+function LowlitPath({ path }: { path: string }) {
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-500 dark:text-stone-400">{name}</span></>
+}
+
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
 const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<ChatItem, { kind: 'tool' }>; worktree: string | null }) {
@@ -1589,6 +1606,11 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   // are prose (sans) already.
   const isPathSummary =
     !isBash && !mem && !!input && (isFileChanges || typeof input.file_path === 'string' || typeof input.path === 'string')
+  const summaryPaths = isFileChanges
+    ? changedPaths
+    : isPathSummary
+      ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+      : []
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
@@ -1639,7 +1661,13 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
           <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
-          <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          {isPathSummary ? (
+            <span className="truncate">
+              {summaryPaths.map((path, index) => <span key={`${path}:${index}`}>{index > 0 && <span className="text-stone-400 dark:text-stone-500">, </span>}<LowlitPath path={path} /></span>)}
+            </span>
+          ) : (
+            <span className={`truncate ${summaryMono ? 'font-mono' : ''} text-stone-400 dark:text-stone-500`}>{summary}</span>
+          )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
         {pending && (
@@ -5065,6 +5093,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       setCommitChips((prev) => [...prev, chip])
     }
     const normalizedStreams = new Set<string>()
+    // A reconnect boundary or version-skewed server can deliver the same
+    // durable event in history and live catch-up. Seq is its canonical identity;
+    // reducing it twice is especially visible for completion/commit chips.
+    const seenNormalizedSeq = new Set<number>()
+    const firstNormalizedDelivery = (event: NormalizedChatEvent): boolean => {
+      if (!Number.isFinite(event.seq)) return true
+      if (seenNormalizedSeq.has(event.seq)) return false
+      seenNormalizedSeq.add(event.seq)
+      return true
+    }
     const replayedAssistantTexts = new Set<string>()
     // Codex often reveals semantic tool fields only on tool_completed. Keep the
     // richest payload by id so an older tool_started page can be enriched before
@@ -5184,7 +5222,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
-          if (!normalized) return
+          if (!normalized || !firstNormalizedDelivery(normalized)) return
           rememberNormalizedToolMetadata(normalized)
           if (handleNormalizedSubagent(normalized)) {
             const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
@@ -5264,6 +5302,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+            .filter(firstNormalizedDelivery)
           oldestEventCursorRef.current = msg.next_cursor ?? null
           for (const event of normalized) {
             recordNormalizedCommit(event)

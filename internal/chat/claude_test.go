@@ -66,10 +66,10 @@ func TestNormalizeClaudeHistoryIncludesPlainUser(t *testing.T) {
 
 func TestNormalizeClaudeTaskNotificationSettlesSubagent(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>agent-7</task-id><status>completed</status><summary>done</summary></task-notification>"}`))
-	if len(got) != 2 || got[0].eventType != "notice" || got[1].eventType != "subagent_completed" {
+	if len(got) != 1 || got[0].eventType != "subagent_completed" {
 		t.Fatalf("events = %+v", got)
 	}
-	payload := got[1].payload.(map[string]any)
+	payload := got[0].payload.(map[string]any)
 	if payload["id"] != "agent-7" || payload["status"] != "completed" {
 		t.Fatalf("completion payload = %+v", payload)
 	}
@@ -84,7 +84,7 @@ func TestNormalizeClaudeBackgroundCommandDoesNotCreateSubagent(t *testing.T) {
 
 func TestNormalizeClaudeAgentOutputFileStillSettlesSubagent(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>agent-8</task-id><status>completed</status><summary>Agent &quot;Explore code&quot; finished</summary><output-file>/tmp/agent-8.output</output-file></task-notification>"}`))
-	if len(got) != 2 || got[0].eventType != "notice" || got[1].eventType != "subagent_completed" {
+	if len(got) != 1 || got[0].eventType != "subagent_completed" {
 		t.Fatalf("events = %+v", got)
 	}
 }

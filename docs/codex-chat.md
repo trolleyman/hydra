@@ -474,6 +474,13 @@ events, and `subagent_completed` events all carry the same `parent_item_id`.
 This correlation is rebuilt while processing `thread/read`, so daemon restart
 and transcript recovery use the same event contract as a live run.
 
+`subagent_completed` is the single presentation event for a completion chip.
+Claude's task-notification normalizer uses it instead of also emitting a notice,
+and the browser deduplicates normalized delivery by sequence number across
+history/live catch-up. Replay also suppresses the redundant agent notification
+found in logs written before this rule, so existing conversations converge to
+the same one-chip rendering as new ones.
+
 The shared presentation reducer also keeps Claude partial content on one active
 stream until its completed message arrives. Claude's machine-readable
 sub-agent continuation and usage trailer is removed from the visible report,
