@@ -14,7 +14,8 @@ type codexMessage struct {
 }
 
 type codexParams struct {
-	Thread struct {
+	ThreadID string `json:"threadId,omitempty"`
+	Thread   struct {
 		ID    string `json:"id"`
 		Model string `json:"model,omitempty"`
 	} `json:"thread"`
@@ -24,16 +25,20 @@ type codexParams struct {
 		Error  json.RawMessage `json:"error,omitempty"`
 		Usage  json.RawMessage `json:"usage,omitempty"`
 	} `json:"turn"`
-	Item   json.RawMessage `json:"item,omitempty"`
-	ItemID string          `json:"itemId,omitempty"`
-	Delta  string          `json:"delta,omitempty"`
-	Error  json.RawMessage `json:"error,omitempty"`
+	Item       json.RawMessage `json:"item,omitempty"`
+	ItemID     string          `json:"itemId,omitempty"`
+	Delta      string          `json:"delta,omitempty"`
+	Error      json.RawMessage `json:"error,omitempty"`
+	Plan       json.RawMessage `json:"plan,omitempty"`
+	Usage      json.RawMessage `json:"usage,omitempty"`
+	TokenUsage json.RawMessage `json:"tokenUsage,omitempty"`
 }
 
 type codexItem struct {
 	ID               string          `json:"id"`
 	Type             string          `json:"type"`
 	Text             string          `json:"text,omitempty"`
+	Review           string          `json:"review,omitempty"`
 	Status           string          `json:"status,omitempty"`
 	Command          string          `json:"command,omitempty"`
 	AggregatedOutput string          `json:"aggregatedOutput,omitempty"`
@@ -86,12 +91,20 @@ func normalizeCodex(line []byte) []eventSpec {
 		return []eventSpec{{sourceID: "codex:turn:" + params.Turn.ID + ":completed", eventType: kind, payload: map[string]any{"id": params.Turn.ID, "status": status, "error": params.Turn.Error, "usage": params.Turn.Usage}}}
 	case "item/agentMessage/delta":
 		return []eventSpec{{eventType: "assistant_delta", payload: map[string]any{"message_id": params.ItemID, "text": params.Delta}}}
-	case "item/reasoning/delta", "item/reasoning/summaryTextDelta":
+	case "item/reasoning/delta", "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
 		return []eventSpec{{eventType: "reasoning_delta", payload: map[string]any{"message_id": params.ItemID, "text": params.Delta}}}
 	case "item/commandExecution/outputDelta":
 		return []eventSpec{{eventType: "tool_delta", payload: map[string]any{"id": params.ItemID, "text": params.Delta}}}
 	case "item/plan/delta":
 		return []eventSpec{{eventType: "plan_delta", payload: map[string]any{"id": params.ItemID, "text": params.Delta}}}
+	case "turn/plan/updated":
+		return []eventSpec{{eventType: "plan_updated", payload: map[string]any{"plan": params.Plan}}}
+	case "thread/tokenUsage/updated":
+		usage := params.Usage
+		if len(params.TokenUsage) > 0 {
+			usage = params.TokenUsage
+		}
+		return []eventSpec{{eventType: "usage_updated", payload: map[string]any{"usage": usage}}}
 	case "error":
 		return []eventSpec{{eventType: "turn_error", payload: map[string]any{"error": params.Error}}}
 	case "serverRequest/resolved":
@@ -154,20 +167,49 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		if completed {
 			kind = "tool_completed"
 		}
-		out := []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"id": item.ID, "name": "collab:" + item.Tool, "input": item, "status": item.Status}}}
+		name, input := codexCollabPresentation(item)
+		output := any(item.Result)
+		isError := false
+		if len(item.Error) > 0 && string(item.Error) != "null" {
+			output, isError = item.Error, true
+		}
+		out := []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{
+			"id": item.ID, "name": name, "input": input, "output": output,
+			"status": item.Status, "is_error": isError,
+		}}}
 		subID := item.NewThreadID
 		if subID == "" {
 			subID = item.ReceiverThreadID
 		}
 		if subID != "" {
 			subKind := "subagent_started"
-			status := codexAgentStatus(item.AgentStatus)
-			if completed && status != "running" {
+			status := codexAgentStatus(item.AgentStatus, subID)
+			if status == "" {
+				status = "running"
+			}
+			if completed && isCodexAgentDone(status) {
 				subKind = "subagent_completed"
+			}
+			if completed && item.Tool == "spawn_agent" && status == "running" {
+				out[0].payload.(map[string]any)["output"] = "Async agent launched successfully. The agent is working in the background."
 			}
 			out = append(out, eventSpec{sourceID: source + ":" + subKind, eventType: subKind, payload: map[string]any{"id": subID, "parent_id": item.SenderThreadID, "parent_item_id": item.ID, "agent_type": "codex", "description": item.Prompt, "status": status}})
 		}
 		return out
+	case "sleep":
+		kind := "tool_started"
+		if completed {
+			kind = "tool_completed"
+		}
+		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{
+			"id": item.ID, "name": "Wait", "input": map[string]any{"duration_ms": item.DurationMS, "_raw": item}, "status": item.Status,
+		}}}
+	case "enteredReviewMode":
+		return []eventSpec{{sourceID: source + ":review-started", eventType: "notice", payload: map[string]any{"text": "Review started"}}}
+	case "exitedReviewMode":
+		return []eventSpec{{sourceID: source + ":review-completed", eventType: "assistant_message", payload: map[string]any{"message_id": item.ID, "text": item.Review}}}
+	case "contextCompaction", "compacted":
+		return []eventSpec{{sourceID: source + ":compacted", eventType: "notice", payload: map[string]any{"text": "Conversation context compacted"}}}
 	default:
 		kind := "tool_started"
 		if completed {
@@ -178,7 +220,30 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 	return nil
 }
 
-func codexAgentStatus(raw json.RawMessage) string {
+func codexCollabPresentation(item codexItem) (string, map[string]any) {
+	name := "Agent"
+	switch item.Tool {
+	case "wait":
+		name = "Wait"
+	case "send_input", "send_message":
+		name = "SendMessage"
+	case "resume_agent":
+		name = "ResumeAgent"
+	case "close_agent":
+		name = "CloseAgent"
+	}
+	input := map[string]any{"_raw": item}
+	if item.Prompt != "" {
+		input["prompt"] = item.Prompt
+		input["description"] = item.Prompt
+	}
+	if item.ReceiverThreadID != "" {
+		input["agent_id"] = item.ReceiverThreadID
+	}
+	return name, input
+}
+
+func codexAgentStatus(raw json.RawMessage, agentID string) string {
 	var status string
 	if json.Unmarshal(raw, &status) == nil {
 		return status
@@ -191,7 +256,25 @@ func codexAgentStatus(raw json.RawMessage) string {
 	if value.Status != "" {
 		return value.Status
 	}
-	return value.Type
+	if value.Type != "" {
+		return value.Type
+	}
+	var statuses map[string]json.RawMessage
+	if json.Unmarshal(raw, &statuses) == nil {
+		if status, ok := statuses[agentID]; ok {
+			return codexAgentStatus(status, "")
+		}
+	}
+	return ""
+}
+
+func isCodexAgentDone(status string) bool {
+	switch strings.ToLower(status) {
+	case "completed", "complete", "finished", "failed", "errored", "cancelled", "canceled", "closed", "shutdown":
+		return true
+	default:
+		return false
+	}
 }
 
 func codexToolPayload(item codexItem) map[string]any {
@@ -204,13 +287,18 @@ func codexToolPayload(item codexItem) map[string]any {
 		}
 	}
 	name := item.Type
+	input := any(item)
+	if item.Type == "commandExecution" || item.Type == "command_execution" {
+		name = "Bash"
+		input = map[string]any{"command": item.Command, "cwd": item.CWD, "_raw": item}
+	}
 	if item.Type == "mcpToolCall" {
 		name = item.Server + ":" + item.Tool
 	}
 	return map[string]any{
 		"id": item.ID, "name": name, "command": item.Command, "cwd": item.CWD,
 		"output": output, "status": item.Status, "exit_code": item.ExitCode,
-		"duration_ms": item.DurationMS, "changes": item.Changes, "arguments": item.Arguments,
+		"duration_ms": item.DurationMS, "changes": item.Changes, "arguments": item.Arguments, "input": input,
 		"query": item.Query, "path": item.Path, "item": item,
 	}
 }

@@ -347,26 +347,24 @@ func (m *ChatQueueManager) List(projectRoot, id string) []QueuedMessage {
 // OnTurnEnd is the registry's turn-end (`result` event) hook: the current turn
 // finished, so dump the queued messages to the CLI.
 //
-// A turn ended by a user interrupt fires no Stop hook (unlike a normal turn
-// end), so nothing in-sandbox updates status.json and the head would sit in
-// "running" forever - spinner on, the client queueing instead of sending, and
-// OnAttach refusing to drain. Consume the pending-interrupt mark and write the
-// "waiting" status here, exactly as the hook would have; the JSON poller picks
-// it up within a tick and broadcasts it. Written BEFORE the drain, so a drained
+// The provider result is the daemon's authoritative turn-end signal. Write the
+// resting status here rather than relying solely on Claude's in-sandbox Stop
+// hook: that hook may be delayed or absent, which otherwise leaves chat mode
+// stuck "running" indefinitely. Written BEFORE the drain, so a drained
 // message's own UserPromptSubmit hook (status running, newer timestamp)
-// supersedes it cleanly.
+// supersedes it cleanly. Interrupt tracking is still consumed here so its
+// timeout cannot relabel a later turn.
 func (m *ChatQueueManager) OnTurnEnd(id string) {
 	root, ok := m.resolveRoot(id)
 	if !ok {
 		return
 	}
-	if m.takeInterrupted(id) {
-		if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
-			Status:    api.Waiting,
-			Timestamp: time.Now().Format(time.RFC3339Nano),
-		}); err != nil {
-			log.Printf("warn: write post-interrupt status for %s: %v", id, err)
-		}
+	m.takeInterrupted(id)
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+		Status:    api.Waiting,
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	}); err != nil {
+		log.Printf("warn: write post-turn status for %s: %v", id, err)
 	}
 	m.drainAll(root, id)
 }

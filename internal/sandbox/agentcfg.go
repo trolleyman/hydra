@@ -569,7 +569,7 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 			// app-server is Codex's persistent bidirectional rich-client
 			// protocol. Approval/sandbox policy is supplied on thread/start by the
 			// controller; Hydra's outer sandbox remains the enforcement boundary.
-			return []string{"codex", "--dangerously-bypass-hook-trust", "app-server", "--listen", "stdio://"}, nil
+			return []string{"codex", "--dangerously-bypass-hook-trust", "--enable", "default_mode_request_user_input", "app-server", "--listen", "stdio://"}, nil
 		}
 		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}
 		if !resume && model != "" {

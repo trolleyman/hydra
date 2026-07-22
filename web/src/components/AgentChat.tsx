@@ -35,7 +35,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
-import { splitBashChains } from '../lib/bashFormat'
+import { formatBashForDisplay } from '../lib/bashFormat'
 import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -81,7 +81,6 @@ interface ChatProps {
 
 interface NormalizedChatEvent {
   seq: number
-  id: string
   type: string
   timestamp: string
   payload?: Record<string, unknown>
@@ -146,7 +145,7 @@ type ChatItem =
   | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean; uuid?: string }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string }
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -462,7 +461,7 @@ function normalizedAsClaude(ev: NormalizedChatEvent): ClaudeEvent[] {
     parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
   }
   const text = typeof p.text === 'string' ? p.text : contentText(p.content)
-  const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : ev.id
+  const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
   switch (ev.type) {
     case 'conversation_started':
       return [{ type: 'system', subtype: 'init', model: typeof p.model === 'string' ? p.model : undefined, slash_commands: Array.isArray(p.slash_commands) ? p.slash_commands.filter((v): v is string => typeof v === 'string') : undefined, apiKeySource: typeof p.api_key_source === 'string' ? p.api_key_source : undefined }]
@@ -1338,10 +1337,18 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
   const imageDims = useImageDims(item.resultImages)
   const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
-  const input = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
+	const visibleResult = item.result ?? item.runningOutput
+  const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
+	const input = useMemo(() => {
+		if (!rawInput || !('_raw' in rawInput)) return rawInput
+		const visible = { ...rawInput }
+		delete visible._raw
+		return visible
+	}, [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
+	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
   const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
 
@@ -1397,10 +1404,11 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
 
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
-    const raw: Record<string, unknown> = { input: item.input }
-    if (item.result !== undefined) raw.result = item.result
+		const protocolInput = rawInput?._raw
+		const raw: Record<string, unknown> = { input: protocolInput ?? item.input }
+		if (visibleResult !== undefined) raw.result = visibleResult
     return JSON.stringify(raw, null, 2)
-  }, [showRaw, item.input, item.result])
+	}, [showRaw, rawInput, item.input, visibleResult])
 
   return (
     <div
@@ -1454,7 +1462,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
           ) : (
             <>
               {isBash ? (
-                <CodePanel code={trimWorktreePaths(splitBashChains(command), worktree)} lang="bash" />
+                <CodePanel code={trimWorktreePaths(formatBashForDisplay(command, commandCwd), worktree)} lang="bash" />
               ) : isWrite ? (
                 <NumberedCodePanel code={trimWorktreePaths(input!.content as string, worktree)} lang={fileLang} />
               ) : isEdit ? (
@@ -1469,7 +1477,7 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
-              {(item.result !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
+				{(visibleResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
@@ -1503,14 +1511,14 @@ const ToolCard = memo(function ToolCard({ item, worktree }: { item: Extract<Chat
                       })}
                     </div>
                   )}
-                  {item.result !== undefined && !(item.result === '' && item.resultImages?.length) && (
+					{visibleResult !== undefined && !(visibleResult === '' && item.resultImages?.length) && (
                     mem && !item.isError
-                      ? <MemoryPanel text={item.result} />
+						? <MemoryPanel text={visibleResult} />
                       : isTaskTool && !item.isError
-                        ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={item.result} /></div>
+							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={visibleResult} /></div>
                         : isRead && !item.isError
-                          ? <ReadOutputPanel text={item.result} lang={outputLang} />
-                          : <OutputPanel text={item.result} lang={outputLang} isError={item.isError} />
+								? <ReadOutputPanel text={visibleResult} lang={outputLang} />
+								: <OutputPanel text={visibleResult} lang={outputLang} isError={item.isError} />
                   )}
                 </div>
               )}
@@ -4081,6 +4089,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )
     }
 
+		const appendToolOutput = (toolUseId: string, delta: string) => {
+			if (!delta) return
+			const inPending = pending.find((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
+			if (inPending?.kind === 'tool') {
+				inPending.runningOutput = (inPending.runningOutput ?? '') + delta
+				return
+			}
+			setItems((prev) => prev.map((it) =>
+				it.kind === 'tool' && it.toolUseId === toolUseId
+					? { ...it, runningOutput: (it.runningOutput ?? '') + delta }
+					: it,
+			))
+		}
+
     // clearSending drops the "Sending..." indicator from optimistic user
     // messages the moment the agent starts responding (item 44) - the response
     // proves the message was received, so waiting for the CLI's echo (which can
@@ -4802,7 +4824,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             scheduleSubFlush()
             return
           }
-          const streamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : normalized.id
+          const streamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : String(normalized.seq)
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
             const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
             if (!normalizedStreams.has(streamID)) {
@@ -4821,6 +4843,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
             if (entries.length) plan.adoptServer(entries)
           }
+					if (normalized.type === 'tool_delta') {
+						const toolID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+						const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+						appendToolOutput(toolID, delta)
+						return
+					}
           recordNormalizedCommit(normalized)
           for (const converted of normalizedAsClaude(normalized)) handleClaudeEvent(converted)
           return

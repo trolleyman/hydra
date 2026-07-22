@@ -70,3 +70,61 @@ func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
 		t.Fatalf("events = %+v", got)
 	}
 }
+
+func TestNormalizeCodexCommandAsBash(t *testing.T) {
+	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"c1","type":"commandExecution","command":"/usr/bin/bash -lc \\\"pwd\\\"","cwd":"src"}}}`))
+	if len(got) != 1 || got[0].eventType != "tool_started" {
+		t.Fatalf("events = %+v", got)
+	}
+	raw, _ := json.Marshal(got[0].payload)
+	var payload struct {
+		Name  string `json:"name"`
+		Input struct {
+			Command string `json:"command"`
+			CWD     string `json:"cwd"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name != "Bash" || payload.Input.CWD != "src" || payload.Input.Command == "" {
+		t.Fatalf("payload = %s (%v)", raw, err)
+	}
+}
+
+func TestCodexChildThreadDecoration(t *testing.T) {
+	line := []byte(`{"method":"item/completed","params":{"threadId":"child","item":{"id":"m1","type":"agentMessage","text":"report"}}}`)
+	threadID, started := codexLineThreads(line)
+	if threadID != "child" || started != "" {
+		t.Fatalf("threads = %q, %q", threadID, started)
+	}
+	specs := normalizeCodex(line)
+	if len(specs) != 1 {
+		t.Fatalf("events = %+v", specs)
+	}
+	raw, _ := json.Marshal(withCodexSidechain(specs[0].payload, threadID))
+	var payload struct {
+		Sidechain bool   `json:"sidechain"`
+		AgentID   string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" {
+		t.Fatalf("payload = %s (%v)", raw, err)
+	}
+}
+
+func TestNormalizeCodexAdditionalRichEvents(t *testing.T) {
+	tests := []struct {
+		line string
+		kind string
+	}{
+		{`{"method":"turn/plan/updated","params":{"plan":[{"step":"test","status":"inProgress"}]}}`, "plan_updated"},
+		{`{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"totalTokens":42}}}}`, "usage_updated"},
+		{`{"method":"item/reasoning/textDelta","params":{"itemId":"r1","delta":"detail"}}`, "reasoning_delta"},
+		{`{"method":"item/started","params":{"item":{"id":"s1","type":"sleep","durationMs":1000}}}`, "tool_started"},
+		{`{"method":"item/completed","params":{"item":{"id":"r1","type":"exitedReviewMode","review":"Looks good"}}}`, "assistant_message"},
+		{`{"method":"item/completed","params":{"item":{"id":"c1","type":"contextCompaction"}}}`, "notice"},
+	}
+	for _, tc := range tests {
+		got := normalizeCodex([]byte(tc.line))
+		if len(got) != 1 || got[0].eventType != tc.kind {
+			t.Errorf("%s => %+v, want %s", tc.line, got, tc.kind)
+		}
+	}
+}

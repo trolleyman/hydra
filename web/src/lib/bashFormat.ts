@@ -46,3 +46,32 @@ export function splitBashChains(cmd: string): string {
   }
   return out
 }
+
+// Codex reports shell commands as the argv-style launcher it executed, commonly
+// `/usr/bin/bash -lc '<script>'`. The wrapper is implementation detail, so show
+// the script itself while retaining the untouched item behind the tool card's
+// Raw toggle. This is display-only and deliberately recognises only one complete,
+// well-formed quoted argument; ambiguous input is returned unchanged.
+export function unwrapBashLoginCommand(command: string): string {
+  const match = command.match(/^(?:\/usr\/bin\/|\/bin\/)?(?:ba)?sh\s+-lc\s+([\s\S]+)$/)
+  if (!match) return command
+  const arg = match[1].trim()
+  if (arg.length < 2) return command
+  if (arg[0] === "'" && arg.at(-1) === "'") {
+    return arg.slice(1, -1).replace(/'"'"'/g, "'")
+  }
+  if (arg[0] === '"' && arg.at(-1) === '"') {
+    return arg.slice(1, -1).replace(/\\([\\"$`])/g, '$1').replace(/\\\n/g, '')
+  }
+  return command
+}
+
+function quoteShellPath(path: string): string {
+  return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
+}
+
+export function formatBashForDisplay(command: string, cwd?: string): string {
+  const script = splitBashChains(unwrapBashLoginCommand(command))
+  if (!cwd || cwd === '.') return script
+  return `cd ${quoteShellPath(cwd)} &&\n${script}`
+}

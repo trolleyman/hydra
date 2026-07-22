@@ -21,12 +21,11 @@ import (
 
 const ProjectionVersion = 1
 
-// Event is one durable item in a head's normalized chat timeline. Seq is a
-// monotonically increasing per-head cursor and ID is its stable wire identity.
-// Payload is type-specific but provider-neutral JSON.
+// Event is one durable item in a head's normalized chat timeline. Seq is its
+// monotonically increasing per-head cursor and stable wire identity. Payload is
+// type-specific but provider-neutral JSON.
 type Event struct {
 	Seq       uint64          `json:"seq"`
-	ID        string          `json:"id"`
 	SourceID  string          `json:"source_id,omitempty"`
 	Type      string          `json:"type"`
 	Timestamp time.Time       `json:"timestamp"`
@@ -189,7 +188,7 @@ func (s *Store) AppendSource(sourceID, eventType string, payload any) (ev Event,
 	if n := len(s.events); n > 0 && s.events[n-1].Seq >= seq {
 		seq = s.events[n-1].Seq + 1
 	}
-	ev = Event{Seq: seq, ID: strconv.FormatUint(seq, 10), SourceID: sourceID, Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
+	ev = Event{Seq: seq, SourceID: sourceID, Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
 	line, err := json.Marshal(ev)
 	if err != nil {
 		return Event{}, false, errtrace.Wrap(err)

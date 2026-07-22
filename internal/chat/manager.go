@@ -41,10 +41,11 @@ type observedLine struct {
 }
 
 type worker struct {
-	store    *Store
-	in       chan observedLine
-	ctx      HeadContext
-	imported bool
+	store       *Store
+	in          chan observedLine
+	ctx         HeadContext
+	imported    bool
+	codexThread string
 }
 
 func NewManager(resolve ContextResolver) *Manager {
@@ -134,6 +135,15 @@ func (w *worker) run(id string) {
 			specs = normalizeClaudeHistory(item.line)
 		case "codex":
 			specs = normalizeCodex(item.line)
+			threadID, startedThread := codexLineThreads(item.line)
+			if w.codexThread == "" && startedThread != "" {
+				w.codexThread = startedThread
+			}
+			if threadID != "" && w.codexThread != "" && threadID != w.codexThread {
+				for i := range specs {
+					specs[i].payload = withCodexSidechain(specs[i].payload, threadID)
+				}
+			}
 		default:
 			continue
 		}
@@ -146,6 +156,35 @@ func (w *worker) run(id string) {
 			}
 		}
 	}
+}
+
+func codexLineThreads(line []byte) (threadID, startedThread string) {
+	var msg codexMessage
+	if json.Unmarshal(line, &msg) != nil {
+		return "", ""
+	}
+	var params codexParams
+	if json.Unmarshal(msg.Params, &params) != nil {
+		return "", ""
+	}
+	if msg.Method == "thread/started" {
+		startedThread = params.Thread.ID
+	}
+	return params.ThreadID, startedThread
+}
+
+func withCodexSidechain(payload any, threadID string) any {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return payload
+	}
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return payload
+	}
+	value["sidechain"] = true
+	value["agent_id"] = threadID
+	return value
 }
 
 func causalItemID(payload any) string {

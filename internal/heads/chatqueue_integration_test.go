@@ -374,20 +374,19 @@ func TestChatQueuedSubmitWhileRestingDrains(t *testing.T) {
 	}
 }
 
-// A normal (un-interrupted) turn end must not touch the status file - that is
-// the Stop hook's job - and a stale interrupt mark (one whose turn never
-// answered, superseded by a later user send) must not relabel a later turn.
-func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
+// Every provider turn end is authoritative even when Claude's Stop hook is
+// delayed or missing. Stale interrupt marks must not prevent that transition.
+func TestChatTurnEndAlwaysSettlesStatus(t *testing.T) {
 	mgr, pty, root := managerFixture(t)
 
 	if err := WriteAgentStatus(root, "agent-x", &api.AgentStatusInfo{Status: api.Running, Timestamp: "2025-01-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Plain turn end: no mark, no status write.
+	// Plain turn end: no interrupt mark, but the daemon still settles it.
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("un-interrupted turn end rewrote the status: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+		t.Fatalf("un-interrupted turn end did not settle status: %+v", s)
 	}
 
 	// A mark followed by a new user send is stale: the send starts a fresh turn
@@ -398,8 +397,8 @@ func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
 		t.Fatalf("direct send not written to stdin: %q", pty.written())
 	}
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("stale interrupt mark relabeled a later turn end: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+		t.Fatalf("later turn end did not settle status: %+v", s)
 	}
 
 	// An expired mark (interrupt that never produced a turn end) is discarded.
@@ -408,7 +407,7 @@ func TestChatTurnEndWithoutInterruptLeavesStatus(t *testing.T) {
 	mgr.interrupted["agent-x"] = time.Now().Add(-2 * interruptMarkTTL)
 	mgr.mu.Unlock()
 	mgr.OnTurnEnd("agent-x")
-	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Running {
-		t.Fatalf("expired interrupt mark relabeled a later turn end: %+v", s)
+	if s := ReadAgentStatus(root, "agent-x"); s == nil || s.Status != api.Waiting {
+		t.Fatalf("turn end with expired mark did not settle status: %+v", s)
 	}
 }

@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,17 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	}
 	if !done || len(page) != 3 || page[0].Seq != 1 || page[2].Seq != 3 {
 		t.Fatalf("older page = %+v, done=%v", page, done)
+	}
+}
+
+func TestEventUsesSequenceAsSoleWireIdentity(t *testing.T) {
+	event := Event{Seq: 7, Type: "notice", Timestamp: time.Unix(123, 0), Payload: json.RawMessage(`{"text":"hi"}`)}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"id":`) || !strings.Contains(string(raw), `"seq":7`) {
+		t.Fatalf("event identity = %s", raw)
 	}
 }
 

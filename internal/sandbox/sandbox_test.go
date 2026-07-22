@@ -119,7 +119,7 @@ func TestAgentArgvCodexChat(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"codex", "--dangerously-bypass-hook-trust", "app-server", "--listen", "stdio://"}
+		want := []string{"codex", "--dangerously-bypass-hook-trust", "--enable", "default_mode_request_user_input", "app-server", "--listen", "stdio://"}
 		if !slices.Equal(got, want) {
 			t.Fatalf("resume=%v: got %q, want %q", resume, got, want)
 		}
