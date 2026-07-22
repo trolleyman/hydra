@@ -131,6 +131,13 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 	if sent[3]["method"] != "thread/resume" {
 		t.Fatalf("sent = %+v", sent)
 	}
+	// A resumed thread must carry the same approval/sandbox policy as a fresh
+	// one; otherwise Codex reverts to prompting for command approval and the
+	// head blocks on a prompt no Hydra UI can answer.
+	resumeParams := sent[3]["params"].(map[string]any)
+	if resumeParams["threadId"] != "thr-old" || resumeParams["approvalPolicy"] != "never" || resumeParams["sandbox"] != "danger-full-access" {
+		t.Fatalf("resume params = %+v", resumeParams)
+	}
 	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
 	c.OnLine([]byte(`{"id":4,"result":{"thread":{"turns":[]}}}`))
 	if err := c.SendText("resumed"); err != nil {
@@ -153,6 +160,30 @@ func TestControllerResumeAndInterrupt(t *testing.T) {
 	c.OnLine([]byte(`{"method":"turn/completed","params":{"turn":{"id":"turn-1"}}}`))
 	if ended != "turn-1" {
 		t.Fatalf("ended = %q", ended)
+	}
+}
+
+func TestControllerAutoAcceptsApprovalRequests(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	c.OnLine([]byte(`{"id":"req-1","method":"item/commandExecution/requestApproval","params":{"command":"ls"}}`))
+	last := sent[len(sent)-1]
+	if last["id"] != "req-1" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	if result, ok := last["result"].(map[string]any); !ok || result["decision"] != "accept" {
+		t.Fatalf("approval response = %+v", last)
+	}
+	// Requests Hydra can actually surface stay parked for the user to answer.
+	before := len(sent)
+	c.OnLine([]byte(`{"id":"req-2","method":"item/tool/requestUserInput","params":{"questions":[]}}`))
+	if len(sent) != before {
+		t.Fatalf("requestUserInput answered automatically: %+v", sent[before:])
 	}
 }
 
