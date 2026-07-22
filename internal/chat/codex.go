@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 )
 
 type codexMessage struct {
@@ -27,12 +28,17 @@ type codexParams struct {
 }
 
 type codexItem struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Text    string          `json:"text,omitempty"`
-	Status  string          `json:"status,omitempty"`
-	Command string          `json:"command,omitempty"`
-	Plan    json.RawMessage `json:"plan,omitempty"`
+	ID               string          `json:"id"`
+	Type             string          `json:"type"`
+	Text             string          `json:"text,omitempty"`
+	Status           string          `json:"status,omitempty"`
+	Command          string          `json:"command,omitempty"`
+	AggregatedOutput string          `json:"aggregatedOutput,omitempty"`
+	Plan             json.RawMessage `json:"plan,omitempty"`
+	Items            []struct {
+		Text      string `json:"text"`
+		Completed bool   `json:"completed"`
+	} `json:"items,omitempty"`
 }
 
 func normalizeCodex(line []byte) []eventSpec {
@@ -94,7 +100,19 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"message_id": item.ID, "text": item.Text}}}
 	case "plan", "todo_list", "todoList":
 		if completed {
-			return []eventSpec{{sourceID: source + ":completed", eventType: "plan_updated", payload: map[string]any{"plan": item.Plan}}}
+			plan := any(item.Plan)
+			if len(item.Items) > 0 {
+				entries := make([]map[string]any, 0, len(item.Items))
+				for i, todo := range item.Items {
+					status := "pending"
+					if todo.Completed {
+						status = "completed"
+					}
+					entries = append(entries, map[string]any{"key": fmt.Sprintf("codex-%d", i), "content": todo.Text, "status": status, "order": i})
+				}
+				plan = entries
+			}
+			return []eventSpec{{sourceID: source + ":completed", eventType: "plan_updated", payload: map[string]any{"plan": plan}}}
 		}
 	case "user_message", "userMessage":
 		return nil // recorded at Hydra's input/queue boundary with its client id
@@ -103,7 +121,7 @@ func normalizeCodexItem(item codexItem, completed bool) []eventSpec {
 		if completed {
 			kind = "tool_completed"
 		}
-		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"id": item.ID, "name": typ, "command": item.Command, "status": item.Status, "item": item}}}
+		return []eventSpec{{sourceID: source + ":" + kind, eventType: kind, payload: map[string]any{"id": item.ID, "name": typ, "command": item.Command, "output": item.AggregatedOutput, "status": item.Status, "item": item}}}
 	}
 	return nil
 }
