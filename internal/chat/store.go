@@ -76,10 +76,15 @@ type Projection struct {
 	Turn        *TurnState               `json:"turn,omitempty"`
 	Interaction json.RawMessage          `json:"interaction,omitempty"`
 	Model       string                   `json:"model,omitempty"`
-	Usage       json.RawMessage          `json:"usage,omitempty"`
-	Queue       map[string]QueuedState   `json:"queue,omitempty"`
-	Head        string                   `json:"head,omitempty"`
-	Imports     map[string]int64         `json:"imports,omitempty"`
+	// SlashCommands the CLI advertised on its system:init. Persisted so the
+	// composer's "/" autocomplete survives resume/re-attach - the list is only
+	// emitted on the live init line, never in the transcript, so an old head
+	// whose init has scrolled past the replay window would otherwise show none.
+	SlashCommands []string               `json:"slash_commands,omitempty"`
+	Usage         json.RawMessage        `json:"usage,omitempty"`
+	Queue         map[string]QueuedState `json:"queue,omitempty"`
+	Head          string                 `json:"head,omitempty"`
+	Imports       map[string]int64       `json:"imports,omitempty"`
 	// Read-only: filled on the copies Watch/Snapshot hand out, never applied or
 	// persisted (see StreamState).
 	Stream *StreamState `json:"stream,omitempty"`
@@ -436,20 +441,21 @@ func (s *Store) pendingStream() *StreamState {
 }
 
 type statePayload struct {
-	ID           string          `json:"id,omitempty"`
-	Status       string          `json:"status,omitempty"`
-	ParentID     string          `json:"parent_id,omitempty"`
-	ParentItemID string          `json:"parent_item_id,omitempty"`
-	AgentType    string          `json:"agent_type,omitempty"`
-	Description  string          `json:"description,omitempty"`
-	Prompt       string          `json:"prompt,omitempty"`
-	Activity     string          `json:"activity,omitempty"`
-	Model        string          `json:"model,omitempty"`
-	Head         string          `json:"head,omitempty"`
-	Plan         json.RawMessage `json:"plan,omitempty"`
-	Interaction  json.RawMessage `json:"interaction,omitempty"`
-	Usage        json.RawMessage `json:"usage,omitempty"`
-	Content      json.RawMessage `json:"content,omitempty"`
+	ID            string          `json:"id,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	ParentID      string          `json:"parent_id,omitempty"`
+	ParentItemID  string          `json:"parent_item_id,omitempty"`
+	AgentType     string          `json:"agent_type,omitempty"`
+	Description   string          `json:"description,omitempty"`
+	Prompt        string          `json:"prompt,omitempty"`
+	Activity      string          `json:"activity,omitempty"`
+	Model         string          `json:"model,omitempty"`
+	Head          string          `json:"head,omitempty"`
+	Plan          json.RawMessage `json:"plan,omitempty"`
+	Interaction   json.RawMessage `json:"interaction,omitempty"`
+	Usage         json.RawMessage `json:"usage,omitempty"`
+	Content       json.RawMessage `json:"content,omitempty"`
+	SlashCommands []string        `json:"slash_commands,omitempty"`
 }
 
 func apply(p *Projection, ev Event) {
@@ -503,6 +509,9 @@ func apply(p *Projection, ev Event) {
 	case "conversation_started":
 		if v.Model != "" {
 			p.Model = v.Model
+		}
+		if len(v.SlashCommands) > 0 {
+			p.SlashCommands = append([]string(nil), v.SlashCommands...)
 		}
 	case "usage_updated":
 		p.Usage = cloneRaw(v.Usage)
