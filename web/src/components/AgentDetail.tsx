@@ -18,6 +18,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
+import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -909,9 +910,8 @@ export function AgentDetail({
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
           useToastStore.getState().show({
-            message: `Agent "${agent.title || agent.id}" killed`,
             type: 'info',
-            agentTransition: { agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' },
+            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' }),
           })
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next
@@ -963,9 +963,8 @@ export function AgentDetail({
           setRestartSignal((n) => n + 1)
           const name = agent.title || agent.id
           useToastStore.getState().show({
-            message: `Agent "${name}" restarting...`,
             type: 'info',
-            agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'restarting', before: '' },
+            ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'restarting', before: '' }),
           })
         } catch (err) {
           useDialogStore.getState().show({
@@ -992,19 +991,17 @@ export function AgentDetail({
     // name + status pill), matching the status-update notifications.
     const name = agent.title || agent.id
     const toastId = useToastStore.getState().show({
-      message: `Merging agent "${name}" into ${agent.base_branch}...`,
       type: 'info',
       duration: 0,
-      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`...` },
+      ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`...` }),
     })
     try {
       await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined, !keepOpen)
       useToastStore.getState().dismiss(toastId)
       if (keepOpen) {
         useToastStore.getState().show({
-          message: `Agent "${name}" merged into ${agent.base_branch} - still running`,
           type: 'success',
-          agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` - agent kept running` },
+          ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` - agent kept running` }),
         })
         // Stay on the page: the base branch just absorbed the head's commits, so
         // the diff (base...head) and any artifact comparison need a refetch.
@@ -1014,9 +1011,8 @@ export function AgentDetail({
         return
       }
       useToastStore.getState().show({
-        message: `Agent "${name}" merged into ${agent.base_branch}`,
         type: 'success',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` },
+        ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` }),
       })
       useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
       onKilled(agent.id)
@@ -1106,9 +1102,8 @@ export function AgentDetail({
       const name = agent.title || agent.id
       const toBranch = agent.base_branch || 'base'
       useToastStore.getState().show({
-        message: `Will merge "${name}" into ${toBranch} when it finishes and its tests pass`,
         type: 'info',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
+        ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` }),
       })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
