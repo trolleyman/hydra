@@ -224,6 +224,50 @@ same classes Hydra already auto-allows, and surface genuinely interactive
 elicitation as a normalized request card. Never leave app-server blocked waiting
 for a response merely because no browser is attached.
 
+### Git commits as causally ordered events
+
+Commit chips must be durable normalized events, not a second frontend data set
+merged into chat by timestamps. The current client fetches the commits endpoint
+after a `head_moved` hint and interleaves the result using Git author time. That
+cannot guarantee that a commit appears after the command/tool card which created
+it: provider output, filesystem polling, HTTP fetches, and author timestamps are
+independent clocks.
+
+The chat driver should maintain an observed Git HEAD for the worktree. At a
+completed command or other potentially mutating tool boundary:
+
+1. append/finalize the provider's `tool_completed` event,
+2. resolve HEAD synchronously,
+3. if it changed, enumerate commits reachable from the new HEAD but not the
+   previously observed HEAD, oldest first,
+4. append one `commit_created` event per newly observed commit,
+5. advance the observed HEAD and emit the ordinary diff-refresh notification.
+
+Because `tool_completed` and `commit_created` use the same per-head event
+sequence, the UI always renders the commit after the Bash/tool output without a
+timestamp heuristic. The event should carry at least SHA, short SHA, subject,
+parents, author/committer time, and the causal tool item id when known. Deduplicate
+by SHA so reconciliation cannot create a second chip.
+
+Do not rely only on Bash. Commits can be made by an MCP tool, a hook, a background
+process, a user shell, or another supported provider item. Check after every
+provider item that can mutate the worktree and again at turn boundaries. Keep the
+existing lightweight HEAD watcher as a fallback for changes outside those
+boundaries, but make it call the same reconciliation function. An externally
+detected commit has no causal tool id and is sequenced wherever it is observed.
+
+Handle non-fast-forward movement explicitly. A fast-forward yields
+`commit_created` events. A reset/rebase/checkout yields a `head_changed` event
+with old/new HEAD and makes the projection reconcile its visible commit set;
+pretending every changed SHA was newly committed would leave stale or duplicate
+chips. The commits endpoint remains useful for the diff selector and full branch
+inventory, but it stops being the source of chat chronology.
+
+For old conversations without stored commit events, exact causal placement
+cannot be recovered reliably. Backfill their commit chips as legacy state (or
+approximately by committer time) and guarantee exact ordering only from the
+first backend-sequenced event onward.
+
 ## Implementation sequence
 
 ### 1. Protocol spike and fixtures
@@ -271,6 +315,9 @@ and process exit mid-turn.
   during the frontend migration.
 - Make history paging display-only: older pages must not update current plan or
   sub-agent state in the frontend.
+- Reconcile Git HEAD after mutating item completions and turn boundaries, emit
+  sequenced `commit_created`/`head_changed` events, and use the existing HEAD
+  watcher only as an out-of-band fallback.
 
 ### 4. UI and API enablement
 
