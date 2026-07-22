@@ -24,7 +24,7 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop } from './lib/collapseScroll'
+import { pinCardToTop, scrollCardToTop } from './lib/diffScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
@@ -981,6 +981,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   return (
     <div
       ref={(el) => { cardRef.current = el; fileRef?.(el) }}
+      data-file-card={file.path}
       style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 8px)` }}
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
@@ -2405,7 +2406,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [handleShowFile])
 
   const scrollToFile = useCallback((path: string) => {
-    fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = fileRefs.current.get(path)
+    if (el) scrollCardToTop(el)
   }, [])
 
   const handleFileClick = useCallback((path: string) => {
@@ -2414,7 +2416,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (idx >= 0) setSingleFileIdx(idx)
     } else {
       if (collapsedFiles.has(path)) toggleFileCollapse(path)
-      setTimeout(() => scrollToFile(path), 50)
+      // No wait for the expand to render: scrollCardToTop re-measures every
+      // frame, so it rides out the 200ms collapse glide (and the lazy bodies
+      // mounting along the way) rather than trusting one stale measurement.
+      scrollToFile(path)
     }
   }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
