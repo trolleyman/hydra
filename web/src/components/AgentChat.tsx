@@ -3539,12 +3539,18 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
   // user turn) and only ONE chip should show (mirrors the live reducer's
   // seenNotif).
   const seenNotifs = new Set<string>()
+  // task-ids whose completion already rendered as the canonical "Sub-agent
+  // finished" chip (from a subagent_completed event). The user turn that
+  // resumed the parent re-states the same notification; suppress that second
+  // chip (mirrors the live reducer's renderedSubCompletions).
+  const subCompletions = new Set<string>()
   const pushNotification = (text: string) => {
     const taskId = /<task-id>([\s\S]*?)<\/task-id>/.exec(text)?.[1]?.trim()
     const toolUseId = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(text)?.[1]?.trim()
     const taskStatus = /<status>([\s\S]*?)<\/status>/.exec(text)?.[1]?.trim()
     const summary = /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim()
     const outputFile = /<output-file>([\s\S]*?)<\/output-file>/.exec(text)?.[1]?.trim()
+    if (taskId && subCompletions.has(taskId)) return
     const dedupKey = `${taskId ?? ''}\0${toolUseId ?? ''}\0${taskStatus ?? ''}\0${summary ?? ''}`
     if (seenNotifs.has(dedupKey)) return
     seenNotifs.add(dedupKey)
@@ -3635,6 +3641,7 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
     }
     if (ev.type === 'hydra_subagent_completed' && ev.subagentNotice) {
       const notice = ev.subagentNotice
+      if (notice.key) subCompletions.add(notice.key)
       push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: true })
       continue
     }
@@ -4551,6 +4558,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // created or linked later still settles (mirrors backgroundToolUses, which
     // exists for the same "signal arrives before the sub" reason).
     const completedNotifs = new Set<string>()
+    // task-ids that already rendered a sub-agent completion chip via the
+    // canonical subagent_completed event (the richer "Sub-agent finished" pill
+    // with a View link). Claude records the same completion a second time as the
+    // user turn that resumed the parent; that copy must still SETTLE the sub but
+    // must not push a second chip (`Agent "X" finished`) for the same task. Old
+    // stored logs hold both records - newer ones collapse them server-side.
+    const renderedSubCompletions = new Set<string>()
     // Older normalized logs may contain a subagent_completed event for a
     // background command because Claude uses the same task-notification
     // envelope for both. Remember output-file task ids so those historical
@@ -4601,6 +4615,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // (notification_backfill): apply the completion, render nothing - the
       // chip belongs to a part of the conversation that isn't loaded.
       if (quiet) return
+      // The canonical subagent_completed event already rendered this task's
+      // completion chip (and the settle above ran); the resume echo of the same
+      // notification must not push a second one.
+      if (taskId && renderedSubCompletions.has(taskId)) return
       // A genuine turn-starting continuation anchors the "working" clock (item 48).
       if (ts != null) turnStartClockRef.current = ts
       if (!stillRunning && taskId) {
@@ -5156,6 +5174,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         case 'hydra_subagent_completed': {
           if (ev.subagentNotice) {
             const notice = ev.subagentNotice
+            if (notice.key) renderedSubCompletions.add(notice.key)
             push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: replaying || undefined })
           }
           return
