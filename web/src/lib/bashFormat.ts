@@ -120,12 +120,100 @@ export function unwrapBashLoginCommand(command: string): string {
   return current
 }
 
+// stripLineContinuations drops the trailing `\` from a `\`-newline pair so a
+// multi-line script reads as plain lines instead of carrying the escape noise.
+// The line break itself is kept (bash would join the lines, but the author wrote
+// them apart deliberately), and leading/trailing blank lines - e.g. the lone `\`
+// some agents emit before the first real line - are removed.
+//
+// Quote-aware: inside single quotes a backslash is literal, so `\`-newline there
+// is left alone. Unlike splitBashChains this DOES remove characters, so it is for
+// the chat transcript only, never the approval card.
+export function stripLineContinuations(cmd: string): string {
+  if (!cmd.includes('\n')) return cmd
+  let out = ''
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]
+    if (escaped) {
+      out += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && !inSingle) {
+      if (cmd[i + 1] === '\n') {
+        // Also drop the space that separated the backslash from the command, so
+        // the line does not end in trailing whitespace.
+        out = out.replace(/[ \t]+$/, '')
+        continue
+      }
+      escaped = true
+      out += ch
+      continue
+    }
+    if (ch === "'" && !inDouble) inSingle = !inSingle
+    else if (ch === '"' && !inSingle) inDouble = !inDouble
+    out += ch
+  }
+  return out.replace(/^\s*\n/, '').trimEnd()
+}
+
+// dropRedundantSemicolons removes a `;` that sits immediately before a newline
+// (allowing trailing spaces) or at the very end of the script - once a chain has
+// been split onto separate lines, `cmd;` + newline is exactly `cmd` + newline in
+// bash, so the `;` is pure noise. Quote-aware, and it never touches a `;;` case
+// terminator. Display-only (chat, not the approval card) since it removes
+// characters.
+export function dropRedundantSemicolons(cmd: string): string {
+  let out = ''
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]
+    if (escaped) {
+      out += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && !inSingle) {
+      escaped = true
+      out += ch
+      continue
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle
+      out += ch
+      continue
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble
+      out += ch
+      continue
+    }
+    // Skip a lone `;` (not part of `;;`) when only whitespace remains before the
+    // next newline or the end of the script; drop that trailing whitespace too.
+    if (ch === ';' && !inSingle && !inDouble && cmd[i - 1] !== ';' && cmd[i + 1] !== ';') {
+      let j = i + 1
+      while (cmd[j] === ' ' || cmd[j] === '\t') j++
+      if (j >= cmd.length || cmd[j] === '\n') {
+        i = j - 1
+        continue
+      }
+    }
+    out += ch
+  }
+  return out
+}
+
 function quoteShellPath(path: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
 
 export function formatBashForDisplay(command: string, cwd?: string): string {
-  const script = splitBashChains(unwrapBashLoginCommand(command))
+  const script = dropRedundantSemicolons(splitBashChains(stripLineContinuations(unwrapBashLoginCommand(command))))
   if (!cwd || cwd === '.' || /^\s*cd(?:\s|$)/.test(script)) return script
   return `cd ${quoteShellPath(cwd)}\n${script}`
 }
