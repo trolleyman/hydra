@@ -61,7 +61,9 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 }
 
 // RemoveAgentStatusFiles removes a head's per-type state files: the status JSON,
-// status log, build log, review file, sub-agents dir, and any unsent chat queue.
+// status log, build log, review file, sub-agents dir, approvals dir (parked
+// requests + session host grants, which must not leak to a future head reusing
+// the ID), and any unsent chat queue.
 func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState := func(what, path string) {
 		if _, err := os.Stat(path); err != nil {
@@ -76,6 +78,7 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState("build log", paths.GetBuildLogFromProjectRoot(projectRoot, id))
 	removeState("review json", paths.GetReviewJsonFromProjectRoot(projectRoot, id))
 	removeState("subagents dir", paths.GetSubagentsDirFromProjectRoot(projectRoot, id))
+	removeState("approvals dir", paths.GetApprovalsDirFromProjectRoot(projectRoot, id))
 	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
 	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
 	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))

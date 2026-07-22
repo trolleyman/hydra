@@ -24,11 +24,15 @@ const (
 	// <reqid>.result.json; the blocked `hydra host-run` CLI polls for it and relays
 	// output + exit code to the agent.
 	resultSuffix = ".result.json"
-	// grantedHostsFile holds hosts the user "always allow"ed for WebFetch during the
-	// current session. The persistent grant lands in the project config (effective
-	// next launch), but the running head's seeded policy.json is read-only, so this
-	// writable file in the approval dir is how a mid-session grant reaches the
-	// in-sandbox gate without a relaunch.
+	// grantedHostsFile holds hosts the user allowed during the current session, via
+	// either a WebFetch gate card or an egress card (both "allow" and "always
+	// allow" - a persistent grant additionally lands in the project config,
+	// effective next launch). It is the one session grant store BOTH network
+	// layers consult: the in-sandbox gate hook unions it into the read-only seeded
+	// policy.json, and the egress approver checks it before parking a connection -
+	// so a single allow covers the tool-level and connection-level prompts. It
+	// lives in the per-head approvals dir and is removed with it when the head is
+	// killed (RemoveAgentStatusFiles).
 	grantedHostsFile = "granted-hosts.json"
 )
 
@@ -46,7 +50,7 @@ func LoadGrantedHosts(dir string) []string {
 	return hosts
 }
 
-// AddGrantedHost appends host to the session's live WebFetch grant list (creating
+// AddGrantedHost appends host to the session's live host grant list (creating
 // the file if needed), deduplicating case-insensitively.
 func AddGrantedHost(dir, host string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {

@@ -320,12 +320,16 @@ export function useAgentNotifications(
           // registering it in Hydra's known-tools list, not a per-call grant) are
           // one-shot only.
           const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
+          // A webfetch/egress allow is a session-wide host grant - it covers every
+          // later request to that host until the head is killed - so its button
+          // says "Allow", not "Allow once". Other kinds are genuinely one-shot.
+          const sessionHostGrant = a.kind === 'webfetch' || a.kind === 'egress'
           // host_command echoes the displayed command back on allow (the TOCTOU
           // guard); every other kind sends no command.
           const echoCommand = a.kind === 'host_command' ? a.target : undefined
           const actions = [
             {
-              label: 'Allow once',
+              label: sessionHostGrant ? 'Allow' : 'Allow once',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
                 void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false, echoCommand)
