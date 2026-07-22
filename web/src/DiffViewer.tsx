@@ -2760,7 +2760,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           transition: isResizing ? undefined : 'width 240ms ease, margin-right 240ms ease',
         }}
       >
-        <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
         {/* Width drag handle: invisible strip, shared pill on hover (the
             unified resize affordance). Hidden while the column is collapsed. */}
         {!filesListHidden && (
@@ -2818,7 +2818,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             />
           </>
         ) : (
-          diff.files.map((f) => {
+          // Render the stacked cards in the SAME order the sidebar lists them
+          // (orderedFiles = tree depth-first / grouped / flat), not diff.files'
+          // raw order - otherwise the tree/grouped sidebar and the diff column
+          // disagree and clicking a file scrolls to a card in a different spot.
+          orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
             <FileDiff key={f.path} file={f} sideBySide={sideBySide}
