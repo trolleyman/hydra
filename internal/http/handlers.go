@@ -1385,11 +1385,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	chatMode := request.Body.ChatMode != nil && *request.Body.ChatMode
-	if chatMode && agentType != sandbox.AgentTypeClaude {
+	if chatMode && agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "chat_mode is only supported for claude agents",
+			Details: "chat_mode is only supported for claude and codex agents",
 		}, nil
 	}
 
@@ -1570,11 +1570,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 
 	if request.Body.ChatMode != nil {
 		chatMode := *request.Body.ChatMode
-		if head.AgentType != sandbox.AgentTypeClaude {
+		if head.AgentType != sandbox.AgentTypeClaude && head.AgentType != sandbox.AgentTypeCodex {
 			return api.UpdateAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "chat_mode is only supported for claude agents",
+				Details: "chat_mode is only supported for claude and codex agents",
 			}, nil
 		}
 		if chatMode != head.ChatMode {

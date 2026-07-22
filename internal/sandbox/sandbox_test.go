@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,19 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 
 	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, ""); err == nil {
 		t.Error("chat mode for gemini: expected error, got nil")
+	}
+}
+
+func TestAgentArgvCodexChat(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"codex", "--dangerously-bypass-hook-trust", "app-server", "--listen", "stdio://"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("resume=%v: got %q, want %q", resume, got, want)
+		}
 	}
 }
 

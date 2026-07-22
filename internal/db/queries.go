@@ -311,6 +311,11 @@ func (s *Store) UpdateAgentModel(id, model string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+func (s *Store) UpdateAgentConversationID(id, conversationID string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("conversation_id", conversationID)
+	return errtrace.Wrap(result.Error)
+}
+
 // UpdateAgentBaseBranch updates the base branch an agent is considered based on.
 // Metadata only: it does not touch the agent's branch, worktree or commits.
 func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
@@ -318,7 +323,7 @@ func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateAgentChatMode flips the head's chat-mode flag (Claude only).
+// UpdateAgentChatMode flips the head's structured chat-mode flag.
 // Metadata only; the live session is restarted separately so
 // the new mode takes effect.
 func (s *Store) UpdateAgentChatMode(id string, chatMode bool) error {

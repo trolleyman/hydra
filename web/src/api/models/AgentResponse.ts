@@ -39,7 +39,7 @@ export type AgentResponse = {
      */
     ephemeral?: boolean;
     /**
-     * True when the head runs in chat mode (stream-json + chat view; Claude only).
+     * True when the head runs in structured chat mode (Claude or Codex).
      */
     chat_mode?: boolean;
     /**

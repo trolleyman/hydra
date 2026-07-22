@@ -207,7 +207,7 @@ export const SpawnForm = memo(function SpawnForm({
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
-  // Chat mode (Claude only): drive the head via stream-json and
+  // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model.
   const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
   const [loading, setLoading] = useState(false)
@@ -677,9 +677,9 @@ export const SpawnForm = memo(function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
-        // chat_mode is Claude-only; the toggle is hidden for other agent types,
-        // and a remembered value must not leak into their spawns.
-        ...(agentType === 'claude' && chatMode ? { chat_mode: true } : {}),
+        // Structured chat is available for Claude and Codex; a remembered value
+        // must not leak into another agent type's spawn.
+        ...((agentType === 'claude' || agentType === 'codex') && chatMode ? { chat_mode: true } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
@@ -718,11 +718,11 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
-  // The chat-mode toggle pill, next to the agent/model picker. Claude-only
-  // (other CLIs have no stream-json interface); lights up when on. The spawned
+  // The chat-mode toggle pill, next to agent/model pickers with structured
+  // transports. The spawned
   // head then opens as a chat view instead of a terminal.
   function renderChatToggle(compactSel: boolean) {
-    if (agentType !== 'claude') return null
+    if (agentType !== 'claude' && agentType !== 'codex') return null
     return (
       <Tooltip content={chatMode ? 'Spawns with a chat view. Click for a terminal.' : 'Spawns with a terminal. Click for a chat view.'} side="top">
         <button

@@ -146,7 +146,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if err != nil || agent == nil {
 			return chat.HeadContext{}, false
 		}
-		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)}
+		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt}
 		return ctx, true
 	})
 	chatQueues.SetEventSink(func(id, eventType string, payload any) {
@@ -154,8 +154,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			log.Printf("warn: persist normalized queue event for %s: %v", id, err)
 		}
 	})
-	reg.SetOnChatLine(func(id string, line []byte) {
-		chatEvents.ObserveProviderLine(id, "claude", line)
+	reg.SetOnChatLine(func(id, provider string, line []byte) {
+		chatEvents.ObserveProviderLine(id, provider, line)
 	})
 	reg.SetOnChatResult(chatQueues.OnTurnEnd)
 	reg.SetOnChatStep(chatQueues.OnTurnStep)

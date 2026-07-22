@@ -12,6 +12,7 @@ import (
 type HeadContext struct {
 	ProjectRoot string
 	Worktree    string
+	Prompt      string
 }
 
 // ContextResolver maps the globally-unique head id carried by session
@@ -58,6 +59,9 @@ func (m *Manager) store(id string) (*Store, error) {
 	}
 	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx}
 	m.workers[id] = w
+	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
+		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
+	}
 	if s.Snapshot().Head == "" && ctx.Worktree != "" {
 		if head, err := git.ResolveRef(ctx.Worktree, "HEAD"); err == nil {
 			_, _ = s.Append("head_observed", map[string]any{"head": head})
@@ -99,6 +103,8 @@ func (w *worker) run(id string) {
 		switch item.provider {
 		case "claude":
 			specs = normalizeClaude(item.line)
+		case "codex":
+			specs = normalizeCodex(item.line)
 		default:
 			continue
 		}

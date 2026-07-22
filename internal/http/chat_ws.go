@@ -212,12 +212,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			s.ChatQueues.Submit(projectRoot, sessionID, heads.QueuedMessage{ID: msg.ID, Content: msg.Content}, msg.Queued)
 			return
 		}
-		line, err := claudestream.UserMessageLine(msg.Content)
-		if err != nil {
-			log.Printf("chat ws: bad user_message content for %q: %v", sessionID, err)
-			return
-		}
-		if err := s.Sessions.Write(sessionID, line); err != nil {
+		if err := s.Sessions.SendChatUser(sessionID, msg.Content); err != nil {
 			log.Printf("chat ws: write user message to %q: %v", sessionID, err)
 		}
 	case "dequeue":
@@ -226,8 +221,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			s.ChatQueues.Dequeue(projectRoot, sessionID, msg.ID)
 		}
 	case "interrupt":
-		id := fmt.Sprintf("hydra-interrupt-%d", chatInterruptSeq.Add(1))
-		if err := s.Sessions.Write(sessionID, claudestream.InterruptLine(id)); err != nil {
+		if err := s.Sessions.InterruptChat(sessionID); err != nil {
 			log.Printf("chat ws: write interrupt to %q: %v", sessionID, err)
 		} else if s.ChatQueues != nil {
 			// The CLI answers an interrupt by ending the turn with a `result`

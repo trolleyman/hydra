@@ -601,14 +601,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
       <span className="shrink-0 inline-flex items-center">
         <MRStateChip agent={agent} />
       </span>
-      {/* Terminal/chat mode toggle (Claude only) - the segmented pill, with a
-          confirm dialog so an accidental tap can't restart the Claude process
-          (switching restarts it in the new mode; the conversation is preserved
-          via --continue). */}
-      {agent.agent_type === 'claude' && !agent.archived && (
+      {/* Terminal/chat mode toggle for agents with structured chat transports.
+          A confirmation prevents an accidental process restart. */}
+      {(agent.agent_type === 'claude' || agent.agent_type === 'codex') && !agent.archived && (
         <span
           className="shrink-0 inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
-          title="How this head is driven: a terminal or a chat view. Switching restarts the Claude process; the conversation is preserved."
+          title="How this head is driven: a terminal or a chat view. Switching restarts the agent process; the conversation is preserved."
         >
           {savingChatMode ? (
             <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
@@ -1727,6 +1725,7 @@ export function AgentDetail({
                 )}
                 <AgentTerminal
                   agentId={agent.id}
+                  agentType={agent.agent_type}
                   projectId={projectId}
                   isEphemeral={agent.ephemeral}
                   chatMode={agent.chat_mode === true}
@@ -1821,6 +1820,7 @@ export function AgentDetail({
               )}
               <AgentTerminal
                 agentId={agent.id}
+                agentType={agent.agent_type}
                 projectId={projectId}
                 isEphemeral={agent.ephemeral}
                 chatMode={agent.chat_mode === true}

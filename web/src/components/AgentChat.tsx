@@ -68,6 +68,7 @@ import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 
 interface ChatProps {
   agentId: string
+  agentType?: string
   projectId: string | null
   active: boolean
   reconnectAttempt: number
@@ -76,6 +77,19 @@ interface ChatProps {
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
+}
+
+interface NormalizedChatEvent {
+  seq: number
+  id: string
+  type: string
+  timestamp: string
+  payload?: Record<string, unknown>
+}
+
+interface ChatProjectionSnapshot {
+  plan?: unknown
+  turn?: { id?: string; status?: string }
 }
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
@@ -432,6 +446,38 @@ function contentText(content: unknown): string {
       .join('\n')
   }
   return ''
+}
+
+// Bridge the provider-neutral backend timeline into the mature presentation
+// reducer while Claude's legacy wire format is being retired. Provider details
+// stop at this boundary; paging and live delivery use the same conversion.
+function normalizedAsClaude(ev: NormalizedChatEvent): ClaudeEvent[] {
+  const p = ev.payload ?? {}
+  const base = { timestamp: ev.timestamp, uuid: `normalized:${ev.seq}` }
+  const text = typeof p.text === 'string' ? p.text : contentText(p.content)
+  const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : ev.id
+  switch (ev.type) {
+    case 'user_message':
+      return text.trim() ? [{ ...base, type: 'user', message: { content: text } }] : []
+    case 'assistant_message':
+      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }] } }] : []
+    case 'reasoning_completed':
+      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
+    case 'tool_started': {
+      const name = typeof p.name === 'string' ? p.name : 'tool'
+      const input = p.item ?? (typeof p.command === 'string' ? { command: p.command } : p)
+      return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input }] } }]
+    }
+    case 'tool_completed': {
+      const result = typeof p.output === 'string' ? p.output : typeof p.status === 'string' ? p.status : ''
+      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.status === 'failed' }] } }]
+    }
+    case 'turn_completed':
+    case 'turn_failed':
+      return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: contentText(p.error) }]
+    default:
+      return []
+  }
 }
 
 // closeOpenFence appends a virtual closing fence when a streaming text ends
@@ -3143,7 +3189,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -3173,6 +3219,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   })
   const fetchCommitsRef = useRef<() => void>(() => {})
   const fetchCommits = useCallback(() => {
+    if (agentType === 'codex') return
     const st = chipStateRef.current
     if (st.inflight) {
       st.again = true
@@ -3215,7 +3262,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           fetchCommitsRef.current()
         }
       })
-  }, [agentId, projectId])
+  }, [agentId, agentType, projectId])
   fetchCommitsRef.current = fetchCommits
   useEffect(() => {
     fetchCommits()
@@ -3360,6 +3407,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // whether the transcript start has been reached, and the scrollHeight snapshot
   // used to keep the viewport anchored across a prepend.
   const oldestUuidRef = useRef<string | null>(null)
+  const oldestEventCursorRef = useRef<string | null>(null)
   const historyIdRef = useRef(-1_000_000)
   const loadingOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -3509,6 +3557,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
     optimisticModelIdRef.current = null
     // Reset load-older paging for the fresh backfill.
     oldestUuidRef.current = null
+    oldestEventCursorRef.current = null
     historyIdRef.current = -1_000_000
     loadingOlderRef.current = false
     setLoadingOlder(false)
@@ -4605,6 +4654,24 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       }
     }
 
+    const recordNormalizedCommit = (normalized: NormalizedChatEvent) => {
+      if (normalized.type !== 'commit_created') return
+      const payload = normalized.payload ?? {}
+      const sha = typeof payload.sha === 'string' ? payload.sha : ''
+      if (!sha) return
+      const st = chipStateRef.current
+      if (st.cache.has(sha)) return
+      const chip: CommitChipItem = {
+        kind: 'commit', id: st.nextId++, sha,
+        shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
+        subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
+        ts: Date.parse(normalized.timestamp) || Date.now(),
+      }
+      st.cache.set(sha, chip)
+      setCommitChips((prev) => [...prev, chip])
+    }
+    const normalizedStreams = new Set<string>()
+
     const ws = new WebSocket(getWsUrl(agentId, projectId))
     wsRef.current = ws
     let retryTimer: number | null = null
@@ -4632,6 +4699,9 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
         content?: string
         error?: string
         plan?: string
+        state?: ChatProjectionSnapshot
+        next_cursor?: string
+        normalizedEvents?: NormalizedChatEvent[]
       }
       try {
         msg = JSON.parse(e.data)
@@ -4646,11 +4716,66 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
           onDiffRefreshRef.current?.(msg.head_moved ?? false)
           // HEAD moved = a commit landed (or the branch was rewritten): refresh
           // the commit chips so the new one appears within the poll interval.
-          if (msg.head_moved) fetchCommitsRef.current()
+          if (msg.head_moved && agentType !== 'codex') fetchCommitsRef.current()
           return
         case 'claude_event':
           if (msg.event) handleClaudeEvent(msg.event)
           return
+        case 'state_snapshot': {
+          if (agentType !== 'codex') return
+          const rawPlan = msg.state?.plan
+          const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+          if (entries.length) plan.adoptServer(entries)
+          return
+        }
+        case 'chat_event': {
+          if (agentType !== 'codex') return
+          const normalized = msg.event as unknown as NormalizedChatEvent | undefined
+          if (!normalized) return
+          const streamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : normalized.id
+          if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
+            const kind = normalized.type === 'assistant_delta' ? 'text' : 'thinking'
+            if (!normalizedStreams.has(streamID)) {
+              normalizedStreams.add(streamID)
+              handleClaudeEvent({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } } })
+            }
+            const delta = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
+            handleClaudeEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: kind === 'text' ? { type: 'text_delta', text: delta } : { type: 'thinking_delta', thinking: delta } } })
+            return
+          }
+          if ((normalized.type === 'assistant_message' || normalized.type === 'reasoning_completed') && normalizedStreams.delete(streamID)) {
+            handleClaudeEvent({ type: 'stream_event', event: { type: 'message_stop' } })
+          }
+          if (normalized.type === 'plan_updated') {
+            const rawPlan = normalized.payload?.plan
+            const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+            if (entries.length) plan.adoptServer(entries)
+          }
+          recordNormalizedCommit(normalized)
+          for (const converted of normalizedAsClaude(normalized)) handleClaudeEvent(converted)
+          return
+        }
+        case 'chat_history': {
+          if (agentType !== 'codex') return
+          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+          oldestEventCursorRef.current = msg.next_cursor ?? null
+          for (const event of normalized) recordNormalizedCommit(event)
+          if (loadingOlderRef.current) {
+            const converted = normalized.flatMap(normalizedAsClaude)
+            handleHistoryBefore(converted, msg.done === true)
+          } else {
+            for (const event of normalized) {
+              if (event.type === 'plan_updated') {
+                const rawPlan = event.payload?.plan
+                const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
+                if (entries.length) plan.adoptServer(entries)
+              }
+              for (const converted of normalizedAsClaude(event)) handleClaudeEvent(converted)
+            }
+            if (msg.done === true) setAllHistoryLoaded(true)
+          }
+          return
+        }
         case 'notification_backfill': {
           // A <task-notification> record from BEFORE the backfill window,
           // relayed so a long-finished background task/agent still settles on
@@ -4797,7 +4922,7 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, projectId, reconnectAttempt, autoRetry])
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -5035,12 +5160,15 @@ export function ChatPane({ agentId, projectId, active, reconnectAttempt, onStatu
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
-    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !oldestUuidRef.current) return
+    const anchor = agentType === 'codex' ? oldestEventCursorRef.current : oldestUuidRef.current
+    if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !anchor) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     loadingOlderRef.current = true
     setLoadingOlder(true)
-    ws.send(JSON.stringify({ type: 'load_before', before: oldestUuidRef.current }))
+    ws.send(agentType === 'codex'
+      ? JSON.stringify({ type: 'load_events_before', cursor: anchor, limit: 100 })
+      : JSON.stringify({ type: 'load_before', before: anchor }))
   }
 
   // Auto-fill: when the loaded window is shorter than the pane (a byte-dense

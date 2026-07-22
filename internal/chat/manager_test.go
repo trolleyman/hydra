@@ -41,6 +41,27 @@ func TestManagerPreservesProviderOrderAndWatches(t *testing.T) {
 	}
 }
 
+func TestManagerSeedsInitialPromptOnce(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: root, Prompt: "build the thing"}, id == "head"
+	})
+	events, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "user_message" {
+		t.Fatalf("events = %+v", events)
+	}
+	if _, err := m.Snapshot("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ = m.Before("head", "", 10)
+	if len(events) != 1 {
+		t.Fatalf("initial prompt duplicated: %+v", events)
+	}
+}
+
 func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	repo := t.TempDir()
 	run := func(args ...string) {

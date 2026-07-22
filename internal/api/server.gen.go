@@ -247,7 +247,7 @@ type AgentResponse struct {
 	BaseBranch string  `json:"base_branch"`
 	BranchName *string `json:"branch_name"`
 
-	// ChatMode True when the head runs in chat mode (stream-json + chat view; Claude only).
+	// ChatMode True when the head runs in structured chat mode (Claude or Codex).
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
@@ -1234,7 +1234,7 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
-	// ChatMode Drive the head via the Claude CLI's stream-json interface and render a chat view instead of a terminal (Claude only; rejected for other agent types). The prompt is delivered as the first chat turn.
+	// ChatMode Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
 	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
@@ -1476,7 +1476,7 @@ type UpdateAgentRequest struct {
 	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
 	BaseBranch *string `json:"base_branch,omitempty"`
 
-	// ChatMode Switch the head between terminal and chat mode (Claude only; rejected for other agent types). When the value actually changes and a session is live, the Claude process is stopped and relaunched in the new mode with --continue - the conversation is preserved (terminal and chat mode share one transcript).
+	// ChatMode Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
 	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.

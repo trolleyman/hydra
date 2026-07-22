@@ -292,17 +292,12 @@ func (m *ChatQueueManager) takeInterrupted(id string) bool {
 
 // writeToStdin hands one message's content to the CLI as a user turn.
 func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool {
-	line, err := claudestream.UserMessageLine(content)
-	if err != nil {
-		log.Printf("warn: chat queue: bad content for %s: %v", id, err)
-		return false
-	}
 	// A new user turn is starting: a still-pending interrupt mark belongs to a
 	// turn that never answered (a race with its own end), not to this one.
 	m.mu.Lock()
 	delete(m.interrupted, id)
 	m.mu.Unlock()
-	if err := m.reg.Write(id, line); err != nil {
+	if err := m.reg.SendChatUser(id, content); err != nil {
 		log.Printf("warn: chat queue: write to %s: %v", id, err)
 		return false
 	}

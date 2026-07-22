@@ -28,7 +28,7 @@ export type SpawnAgentRequest = {
      */
     base_branch?: string;
     /**
-     * Drive the head via the Claude CLI's stream-json interface and render a chat view instead of a terminal (Claude only; rejected for other agent types). The prompt is delivered as the first chat turn.
+     * Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.
      */
     chat_mode?: boolean;
     /**

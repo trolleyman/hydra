@@ -159,8 +159,12 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     lastSentSize.current = { cols, rows }
   }
 
-  // Poll until the container width repeats across two frames (or we've waited
-  // long enough), then send the one settled size. Used both on socket open and
+  // Poll until the container geometry repeats across three frames (or we've
+  // waited long enough), then send the one settled size. Width-only settling
+  // raced a chat -> terminal switch: the split's width was already stable while
+  // its flex height was still changing, leaving Codex's TUI blank/corrupted
+  // until the user moved the divider and triggered another ResizeObserver tick.
+  // Used both on socket open and
   // when a previously-hidden pane is re-shown: in either case the flex layout
   // can still be moving, and measuring mid-transition yields too few columns.
   // While this runs, settlingRef suppresses the ResizeObserver's own sends so
@@ -171,7 +175,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
     settlingRef.current = true
-    let lastWidth = -1
+    let lastGeometry = ''
+    let stableFrames = 0
     let frames = 0
     const tick = () => {
       const node = containerRef.current
@@ -179,13 +184,14 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         settlingRef.current = false
         return
       }
-      const w = node.clientWidth
-      if ((w > 0 && w === lastWidth) || frames > 30) {
+      const geometry = `${node.clientWidth}x${node.clientHeight}`
+      stableFrames = geometry === lastGeometry ? stableFrames + 1 : 0
+      if ((node.clientWidth > 0 && node.clientHeight > 0 && stableFrames >= 2) || frames > 30) {
         settlingRef.current = false
         fitAndSend.current(true)
         return
       }
-      lastWidth = w
+      lastGeometry = geometry
       frames++
       stabilizeRafRef.current = requestAnimationFrame(tick)
     }
@@ -660,6 +666,7 @@ function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
 
 interface Props {
   agentId: string
+  agentType?: string
   projectId: string | null
   isEphemeral?: boolean
   // chatMode renders the agent tab as a chat view (stream-json framing)
@@ -683,7 +690,7 @@ interface Props {
 // so those ticks skip the whole tab strip + xterm/chat subtree.
 export const AgentTerminal = memo(AgentTerminalImpl)
 
-function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
+function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, onRefresh, onStatusUpdate, onDiffRefresh, onSelectCommit }: Props) {
   // Restore this agent's bash tabs (and which was active) from localStorage, so
   // switching away and back brings the same shells with you rather than dropping
   // them or leaking another agent's tabs in.
@@ -1029,6 +1036,7 @@ function AgentTerminalImpl({ agentId, projectId, chatMode, fill, onRefresh, onSt
           {tab.id === 'terminal' && chatMode ? (
             <ChatPane
               agentId={agentId}
+              agentType={agentType}
               projectId={projectId}
               active={activeTabId === tab.id}
               reconnectAttempt={reconnectKeys[tab.id] ?? 0}

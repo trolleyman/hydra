@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"sync"
 	"syscall"
@@ -78,6 +79,7 @@ type Session struct {
 	// and would wrap the ring several times faster. Guarded by mu, like the
 	// ring it feeds.
 	ringFilter *claudestream.RingFilter
+	chatDriver ChatDriver
 
 	mu        sync.Mutex
 	attachers map[*attacher]struct{}
@@ -99,6 +101,14 @@ type Session struct {
 	// kill, an agent pkill-ing itself), which is what auto-restart acts on.
 	// Guarded by mu.
 	stopRequested bool
+}
+
+// ChatDriver translates provider-neutral user controls into a chat provider's
+// stdin protocol. Claude uses Registry's built-in stream-json fallback; Codex
+// installs its app-server controller here after launch.
+type ChatDriver interface {
+	SendUser(content json.RawMessage) error
+	Interrupt() error
 }
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before

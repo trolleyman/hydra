@@ -608,7 +608,7 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 		if ok && ev.Type == "system" && ev.Subtype == "init" && ev.Model != "" && f.OnModel != nil {
 			f.OnModel(ev.Model)
 		}
-		if ok && f.OnLine != nil {
+		if f.OnLine != nil && len(bytes.TrimSpace(line)) > 0 {
 			f.OnLine(line)
 		}
 		out = append(out, line...)

@@ -45,7 +45,7 @@ type Registry struct {
 	onChatPlanSeed    func(id string) string
 	onChatPlanChange  func(id, planJSON string)
 	onChatModel       func(id, model string)
-	onChatLine        func(id string, line []byte)
+	onChatLine        func(id, provider string, line []byte)
 }
 
 // NewRegistry returns an empty registry.
@@ -79,6 +79,17 @@ func (r *Registry) SetOnChatResult(fn func(id string)) {
 	r.mu.Lock()
 	r.onChatResult = fn
 	r.mu.Unlock()
+}
+
+// ChatTurnEnded reports a provider-native turn completion to the same queue
+// lifecycle used by Claude's stream reducer.
+func (r *Registry) ChatTurnEnded(id string) {
+	r.mu.RLock()
+	fn := r.onChatResult
+	r.mu.RUnlock()
+	if fn != nil {
+		go fn(id)
+	}
 }
 
 // SetOnChatStep registers a callback invoked (off the read goroutine) each time
@@ -149,7 +160,7 @@ func (r *Registry) SetOnChatModel(fn func(id, model string)) {
 
 // SetOnChatLine registers the ordered provider-line observer used by the
 // normalized chat event adapter. The callback must remain cheap.
-func (r *Registry) SetOnChatLine(fn func(id string, line []byte)) {
+func (r *Registry) SetOnChatLine(fn func(id, provider string, line []byte)) {
 	r.mu.Lock()
 	r.onChatLine = fn
 	r.mu.Unlock()
@@ -166,6 +177,56 @@ func (r *Registry) ChatPlanJSON(id string) string {
 		return ""
 	}
 	return s.PlanJSON()
+}
+
+func (r *Registry) SetChatDriver(id string, driver ChatDriver) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	s.chatDriver = driver
+	s.mu.Unlock()
+	return nil
+}
+
+func (r *Registry) SendChatUser(id string, content json.RawMessage) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.SendUser(content))
+	}
+	line, err := claudestream.UserMessageLine(content)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(r.Write(id, line))
+}
+
+func (r *Registry) InterruptChat(id string) error {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return errtrace.Wrap(ErrNotFound)
+	}
+	s.mu.Lock()
+	driver := s.chatDriver
+	s.mu.Unlock()
+	if driver != nil {
+		return errtrace.Wrap(driver.Interrupt())
+	}
+	interruptID := fmt.Sprintf("hydra-interrupt-%d", time.Now().UnixNano())
+	return errtrace.Wrap(r.Write(id, claudestream.InterruptLine(interruptID)))
 }
 
 // Start builds the sandbox command, launches it under a PTY, and registers the
@@ -318,7 +379,7 @@ func (r *Registry) register(id string, agentType sandbox.AgentType, worktree str
 			fn := r.onChatLine
 			r.mu.RUnlock()
 			if fn != nil {
-				fn(id, line)
+				fn(id, string(agentType), line)
 			}
 		}
 		// A completed thinking block: persist its measured duration to the head's

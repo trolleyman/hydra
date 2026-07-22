@@ -463,7 +463,7 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 // each model has its own prompt cache, trigger a full cache-missing re-read of
 // the conversation. Empty model inherits the CLI's own default.
 //
-// chatMode (Claude only) drives the CLI's structured stream-json
+// chatMode drives Claude or Codex through its structured protocol
 // interface instead of the interactive TUI: the process stays alive reading
 // user turns from stdin, and the task prompt is sent as the first stdin
 // message (see SpawnHead) rather than as argv.
@@ -476,8 +476,8 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 // pass the newest non-sidechain transcript's id
 // (claudestream.LatestSessionID); empty falls back to --continue.
 func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID string) ([]string, error) {
-	if chatMode && agentType != AgentTypeClaude {
-		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude agents, not %q", agentType))
+	if chatMode && agentType != AgentTypeClaude && agentType != AgentTypeCodex {
+		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude and codex agents, not %q", agentType))
 	}
 	switch agentType {
 	case AgentTypeClaude:
@@ -565,6 +565,12 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		// --dangerously-skip-permissions). Codex has no --append-system-prompt
 		// flag, so the pre-prompt is seeded as ~/.codex/AGENTS.md (see seedHead)
 		// and systemPrompt is ignored here.
+		if chatMode {
+			// app-server is Codex's persistent bidirectional rich-client
+			// protocol. Approval/sandbox policy is supplied on thread/start by the
+			// controller; Hydra's outer sandbox remains the enforcement boundary.
+			return []string{"codex", "--dangerously-bypass-hook-trust", "app-server", "--listen", "stdio://"}, nil
+		}
 		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
