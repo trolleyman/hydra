@@ -284,8 +284,11 @@ function RootLayout() {
   // (NON_LOCAL_INTEGRATION.md 3.8).
   const reviewConfig = useProjectStore((s) => (currentProjectId ? s.reviewConfigs[currentProjectId] : undefined))
   useEffect(() => {
-    if (currentProjectId && !reviewConfig) void ensureReviewConfig(currentProjectId)
-  }, [currentProjectId, reviewConfig])
+    // Unconditional: the store may hold a persisted snapshot (rendered
+    // immediately), and ensureReviewConfig itself decides whether a refresh
+    // is still needed this session.
+    if (currentProjectId) void ensureReviewConfig(currentProjectId)
+  }, [currentProjectId])
   // Whether the user actually has this page in front of them (foreground tab +
   // focused window). Gates the unread auto-clear so a backgrounded page doesn't
   // silently dismiss agents the user hasn't actually looked at.

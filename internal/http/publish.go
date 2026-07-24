@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -422,12 +423,59 @@ func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot st
 	if provider != "" && review.GetAuth() == config.ReviewAuthCLI {
 		authCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), 8*time.Second)
 		defer cancel()
-		if ok, detail, _ := forge.AuthStatus(authCtx, provider); detail != "" || ok {
+		if ok, detail := cachedAuthStatus(authCtx, provider); detail != "" || ok {
 			resp.Authenticated = &ok
 			resp.AuthStatus = ptr(detail)
 		}
 	}
 	return resp
+}
+
+// authStatusCache memoizes forge.AuthStatus per provider. The check shells out
+// to `gh`/`glab auth status` (a network round-trip when logged in), which made
+// GetReviewConfig take ~600ms+ on every page load - visible as the sidebar
+// forge icon popping in late. Logged-in results are cached for a few minutes
+// (auth rarely revokes); logged-out results only briefly, so "run `gh auth
+// login`" -> reopen the dialog shows the fix without a long stale warning.
+var authStatusCache = struct {
+	sync.Mutex
+	entries map[string]authStatusEntry
+}{entries: map[string]authStatusEntry{}}
+
+type authStatusEntry struct {
+	ok     bool
+	detail string
+	at     time.Time
+}
+
+const (
+	authStatusOKTTL   = 5 * time.Minute
+	authStatusFailTTL = 15 * time.Second
+)
+
+func cachedAuthStatus(ctx context.Context, provider string) (bool, string) {
+	authStatusCache.Lock()
+	e, hit := authStatusCache.entries[provider]
+	authStatusCache.Unlock()
+	if hit {
+		ttl := authStatusFailTTL
+		if e.ok {
+			ttl = authStatusOKTTL
+		}
+		if time.Since(e.at) < ttl {
+			return e.ok, e.detail
+		}
+	}
+	ok, detail, err := forge.AuthStatus(ctx, provider)
+	if err != nil && !ok && detail == "" {
+		// A failed/cancelled check (e.g. request context done) yields nothing
+		// worth caching; keep any previous entry for the next attempt.
+		return ok, detail
+	}
+	authStatusCache.Lock()
+	authStatusCache.entries[provider] = authStatusEntry{ok: ok, detail: detail, at: time.Now()}
+	authStatusCache.Unlock()
+	return ok, detail
 }
 
 // ArmPublishWhenGreen arms publish-when-green for a head (3.5).
