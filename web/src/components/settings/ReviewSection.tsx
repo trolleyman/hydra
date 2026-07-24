@@ -1,10 +1,11 @@
 import { useEffect, type ReactNode } from 'react'
-import { CircleCheck, CircleX, RotateCcw } from 'lucide-react'
+import { CircleCheck, CircleX, LoaderCircle, RotateCcw } from 'lucide-react'
 import { ensureReviewConfig, useProjectStore } from '../../stores/projectStore'
 import type { ReviewConfig } from '../../api/models/ReviewConfig'
 import { StorageKeys } from '../../lib/storage'
 import { SettingSection } from './shared'
 import { ProviderIcon } from '../ReviewControls'
+import { Tooltip } from '../Tooltip'
 
 const inputClass =
   'px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm'
@@ -118,7 +119,9 @@ export function ReviewSection({
                   ) : (
                     // Auth fields absent = the background gh/glab check hasn't
                     // finished; the store polls until it lands.
-                    <span className="text-xs text-gray-400 dark:text-gray-500">checking...</span>
+                    <Tooltip content="Checking gh/glab auth status...">
+                      <LoaderCircle className="w-4 h-4 animate-spin text-gray-400 dark:text-gray-500" />
+                    </Tooltip>
                   ))}
               </span>
             </Row>
