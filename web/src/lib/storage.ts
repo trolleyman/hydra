@@ -61,6 +61,8 @@ export const StorageKeys = {
 
   diffSideBySide: 'hydra-diff-side-by-side',
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
+  // Whether to tint the exact changed words within a modified line (default on).
+  diffWordHighlight: 'hydra-diff-word-highlight',
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
