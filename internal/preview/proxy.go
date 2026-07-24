@@ -205,6 +205,14 @@ const loadingPageHTML = `<!doctype html>
         padding: .9rem 1.1rem; overflow: auto; max-height: 55vh;
         font-size: .78rem; line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
   .stderr { color: #e08f8f; }
+  /* ANSI SGR palette (normal + bright), tuned for the dark background. */
+  pre .b { font-weight: 600; }
+  pre .c30 { color: #586071; } pre .c31 { color: #e05f5f; } pre .c32 { color: #6fc177; }
+  pre .c33 { color: #e0af3f; } pre .c34 { color: #6ea1e8; } pre .c35 { color: #c793e6; }
+  pre .c36 { color: #5fc2c9; } pre .c37 { color: #d6dbe4; }
+  pre .c90 { color: #6b7487; } pre .c91 { color: #ef8080; } pre .c92 { color: #8fd69a; }
+  pre .c93 { color: #ecc56a; } pre .c94 { color: #8fb8f0; } pre .c95 { color: #d7adef; }
+  pre .c96 { color: #7fd4da; } pre .c97 { color: #eef1f6; }
   .err-msg { color: #e05f5f; font-size: .85rem; margin: 0 0 1rem; max-width: 60rem; }
   .hint { color: #5c6575; font-size: .75rem; margin-top: 1rem; }
 </style>
@@ -221,16 +229,64 @@ const loadingPageHTML = `<!doctype html>
   var messageEl = document.getElementById('message');
   var dotEl = document.getElementById('dot');
   var hintEl = document.getElementById('hint');
+
+  // Follow the log tail only while the user is at (or near) the bottom;
+  // scrolling up to read pauses the auto-scroll until they return.
+  var stick = true;
+  logEl.addEventListener('scroll', function () {
+    stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
+  });
+
+  function escapeHTML(t) {
+    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  }
+
+  // Renders ANSI SGR color/bold codes as spans (state carries across lines,
+  // mutated in place); every other escape sequence is stripped. One token per
+  // match: an SGR sequence, any other CSI sequence, an OSC sequence, or a
+  // stray ESC+byte.
+  var ANSI_TOKEN = /\x1b\[([0-9;]*)m|\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b./g;
+  function applySGR(params, state) {
+    var codes = params === '' ? [0] : params.split(';').map(Number);
+    for (var i = 0; i < codes.length; i++) {
+      var c = codes[i];
+      if (c === 0) { state.bold = false; state.fg = 0; }
+      else if (c === 1) state.bold = true;
+      else if (c === 22) state.bold = false;
+      else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) state.fg = c;
+      else if (c === 39) state.fg = 0;
+      else if (c === 38 || c === 48) i += codes[i + 1] === 5 ? 2 : codes[i + 1] === 2 ? 4 : 0;
+    }
+  }
+  function ansiToHTML(raw, state) {
+    var out = '', last = 0, m;
+    function flush(text) {
+      if (!text) return;
+      var cls = (state.bold ? 'b ' : '') + (state.fg ? 'c' + state.fg : '');
+      cls = cls.trim();
+      out += cls ? '<span class="' + cls + '">' + escapeHTML(text) + '</span>' : escapeHTML(text);
+    }
+    ANSI_TOKEN.lastIndex = 0;
+    while ((m = ANSI_TOKEN.exec(raw))) {
+      flush(raw.slice(last, m.index));
+      last = ANSI_TOKEN.lastIndex;
+      if (m[1] !== undefined) applySGR(m[1], state);
+    }
+    flush(raw.slice(last));
+    return out;
+  }
+
   function render(st) {
     if (st.state === 'running') { location.reload(); return; }
     progressEl.textContent = st.progress || '';
     if (st.log && st.log.length) {
       logEl.hidden = false;
+      var sgr = { bold: false, fg: 0 };
       logEl.innerHTML = st.log.map(function (l) {
-        var t = l.text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        var t = ansiToHTML(l.text, sgr);
         return l.stream === 'stderr' ? '<span class="stderr">' + t + '</span>' : t;
       }).join('\n');
-      logEl.scrollTop = logEl.scrollHeight;
+      if (stick) logEl.scrollTop = logEl.scrollHeight;
     }
     if (st.state === 'error') {
       dotEl.classList.add('err');
