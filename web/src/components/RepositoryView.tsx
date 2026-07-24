@@ -352,15 +352,16 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
 // the diff viewer's own options so the two feel consistent.
 
-type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
+type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; wordHighlight: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
 
 // DiffSettingsFields renders the branch-compare view's file-list / diff / image
 // options, shared by the desktop popup (DiffSettingsPopup) and the overflow menu.
 function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
-  type BoolKey = 'singleFile' | 'sideBySide' | 'ignoreWhitespace'
+  type BoolKey = 'singleFile' | 'sideBySide' | 'wordHighlight' | 'ignoreWhitespace'
   const options: { key: BoolKey; label: string }[] = [
     { key: 'singleFile', label: 'One file at a time' },
     { key: 'sideBySide', label: 'Side by side' },
+    { key: 'wordHighlight', label: 'Highlight changed words' },
     { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
   ]
   const viewOptions: { value: FileView; label: string }[] = [
@@ -876,6 +877,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       fileView,
       singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
       sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
+      wordHighlight: readLocal(StorageKeys.diffWordHighlight) !== 'false',
       ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
       imageDiffMode,
     }
@@ -883,6 +885,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.repoDiffFileView, diffSettings.fileView) }, [diffSettings.fileView])
   useEffect(() => { writeLocal(StorageKeys.repoDiffSingleFile, String(diffSettings.singleFile)) }, [diffSettings.singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
+  useEffect(() => { writeLocal(StorageKeys.diffWordHighlight, String(diffSettings.wordHighlight)) }, [diffSettings.wordHighlight])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, diffSettings.imageDiffMode) }, [diffSettings.imageDiffMode])
   // In one-file-at-a-time mode, the file whose diff is shown comes from the
@@ -1661,6 +1664,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     key={f.path}
                     file={f}
                     sideBySide={diffSettings.sideBySide}
+                    wordHighlight={diffSettings.wordHighlight}
                     isCollapsed={collapsedDiffFiles.has(f.path)}
                     onToggleCollapse={toggleDiffFileCollapse}
                     onComment={noopComment}

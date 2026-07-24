@@ -1184,6 +1184,16 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	}
 	defer launch.Cleanup()
 
+	// Run under a transient systemd scope so the generation subtree (bash ->
+	// bwrap -> node / headless Chrome) gets its own cgroup with CPU/IO weight
+	// limits and a single kill handle, and can't outlive the daemon. Best-effort:
+	// a no-op where scopes are unavailable. StopScope in a defer reaps the whole
+	// cgroup on every return path (this is the exact runaway-headless-Chrome case
+	// that motivated scoping).
+	scopeUnit := sandbox.ScopeUnit("artifact", spec.Name+"-"+sandbox.ScopeHash(dir))
+	sandbox.WrapScope(scopeUnit, launch)
+	defer sandbox.StopScope(scopeUnit)
+
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env

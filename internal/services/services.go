@@ -484,6 +484,10 @@ func (m *Manager) supervise(ctx context.Context, root string, ps *projectService
 				select {
 				case <-ctx.Done():
 					terminateGroup(pid)
+					// Also stop the systemd scope: when the service is scoped the
+					// tracked pid is systemd-run's, so the process-group signal may
+					// not reach the sandboxed children - StopScope reaps the cgroup.
+					sandbox.StopScope(serviceScopeUnit(root, sv))
 					select {
 					case <-done:
 					case <-time.After(m.stopGrace):
@@ -552,6 +556,14 @@ func (m *Manager) supervise(ctx context.Context, root string, ps *projectService
 	}
 }
 
+// serviceScopeUnit is the transient systemd scope unit name for a service. It is
+// a pure function of (project root, service name) so both the spawn and teardown
+// paths can derive it without extra plumbing; the root hash keeps units unique
+// across projects that share a service name (one daemon serves them all).
+func serviceScopeUnit(root string, sv *supervised) string {
+	return sandbox.ScopeUnit("service", sv.spec.Name+"-"+sandbox.ScopeHash(root))
+}
+
 // buildCmd constructs the exec.Cmd for a service launch plus a cleanup func that
 // releases any sandbox temp resources. The command runs from the project root,
 // directly on the host when spec.Host is set, otherwise inside the OS sandbox.
@@ -608,6 +620,11 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 		egressSess.Close()
 		return nil, func() {}, errtrace.Wrap(err)
 	}
+
+	// Run the service under a transient systemd scope (best-effort) so its
+	// process subtree gets its own cgroup with CPU/IO weight limits and a single
+	// kill handle, and can't outlive the daemon. Reaped in the ctx.Done path below.
+	sandbox.WrapScope(serviceScopeUnit(root, sv), spec)
 
 	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
 	cmd.Dir = spec.Dir

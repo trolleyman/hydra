@@ -1,7 +1,6 @@
 package http
 
 import (
-	"braces.dev/errtrace"
 	"bufio"
 	"bytes"
 	"context"
@@ -12,6 +11,8 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"braces.dev/errtrace"
 
 	"github.com/trolleyman/hydra/internal/api"
 )
@@ -106,6 +107,19 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		r, et := withErrorTracker(r)
 
+		// Include the query string so distinct requests to the same path (e.g.
+		// per-file diff fetches with different ?path=&context=) are tellable apart
+		// in the log instead of all collapsing to an identical-looking line.
+		uri := r.URL.Path
+		if r.URL.RawQuery != "" {
+			uri += "?" + r.URL.RawQuery
+		}
+
+		// Log on receipt (<- ) and again on completion (-> ), so a request
+		// that hangs in its handler is visible in the log before it finishes
+		// (a "<- " line with no matching "-> ").
+		log.Printf("<- %s %s", r.Method, uri)
+
 		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
@@ -123,14 +137,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		// Include the query string so distinct requests to the same path (e.g.
-		// per-file diff fetches with different ?path=&context=) are tellable apart
-		// in the log instead of all collapsing to an identical-looking line.
-		uri := r.URL.Path
-		if r.URL.RawQuery != "" {
-			uri += "?" + r.URL.RawQuery
-		}
-		log.Printf("%s %s %d %s%s", r.Method, uri, rec.statusCode, time.Since(start).Round(time.Millisecond), errorSuffix)
+		log.Printf("-> %s %s %d %s%s", r.Method, uri, rec.statusCode, time.Since(start).Round(time.Millisecond), errorSuffix)
 
 		if rec.statusCode == http.StatusInternalServerError {
 			if et.err != nil {
