@@ -7349,7 +7349,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           {pendingSends.length > 0 && (
             <div className="flex flex-col gap-1">
               {pendingSends.map((p) => (
-                <div key={`pending-${p.id}`} className="group relative flex justify-end animate-chat-item-in">
+                <div key={`pending-${p.id}`} className="group relative animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
