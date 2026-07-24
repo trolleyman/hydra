@@ -1265,11 +1265,15 @@ const PANEL_CLASS =
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
-// Claude model aliases offered by the in-chat model dropdown. Sent verbatim to
-// the CLI's set_model control request, so these must be aliases it accepts.
+// Claude models offered by the in-chat model dropdown. Sent verbatim to the
+// CLI's set_model control request, so these must be aliases (or full model ids)
+// it accepts. The two Opus versions use full ids rather than the bare `opus`
+// alias so they map to distinct labels in modelDisplayLabel's substring match
+// (bare `opus` is a substring of both claude-opus-5 and claude-opus-4-8).
 const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
+  { id: 'claude-opus-5', label: 'Opus 5' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', label: 'Haiku' },
 ]
