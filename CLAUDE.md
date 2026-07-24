@@ -26,6 +26,15 @@ Use `mage` for development tasks.
     package management against `web/package-lock.json`. Build scripts under
     `web/scripts/` and `web/e2e/` run directly with `node` (Node 24+ strips the TS
     types), not a separate TS runner.
+
+    **Expected `aube install` warnings (all benign - do not "fix" them):**
+    - `WARN_AUBE_GVS_INCOMPATIBLE` for `vite`: vite can't use aube's global
+      virtual store, so it installs per-project. Upstream vite limitation; install
+      still succeeds.
+    - `WARN_AUBE_IGNORED_BUILD_SCRIPTS` for `@swc/core` / `esbuild`: aube skips
+      their postinstall build scripts by default. Both ship prebuilt binaries and
+      work fine without them; run `aube approve-builds` only if you deliberately
+      want to enable them.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
 ## Conventions
