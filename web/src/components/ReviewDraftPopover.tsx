@@ -13,12 +13,15 @@ import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
 import type { PendingReviewComment } from '../lib/reviewDrafts'
 import { Tooltip } from './Tooltip'
 
-export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove }: {
+export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove, onJump }: {
   comments: PendingReviewComment[]
   staleIds: Set<string>
   submitting: boolean
   onSubmit: () => void
   onRemove: (id: string) => void
+  // Scroll the diff to a queued comment's line. Provided by the diff viewer;
+  // clicking a comment invokes it and closes the popover.
+  onJump: (comment: PendingReviewComment) => void
 }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -91,9 +94,13 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
             {comments.map((c) => {
               const stale = staleIds.has(c.id)
               return (
-                <div key={c.id} className="group flex items-start gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500 dark:text-gray-400">
+                <div key={c.id} className="group flex items-start gap-2 px-1 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <button
+                    onClick={() => { onJump(c); setOpen(false) }}
+                    title="Jump to this line in the diff"
+                    className="min-w-0 flex-1 text-left px-2 py-2 rounded cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                       <span className="truncate" title={c.path}>{c.path}</span>
                       <span className="shrink-0 text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
                       {stale && (
@@ -107,12 +114,12 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
                     <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-words line-clamp-3">
                       {c.text}
                     </div>
-                  </div>
+                  </button>
                   <Tooltip content="Remove" side="top">
                     <button
                       onClick={() => onRemove(c.id)}
                       aria-label="Remove comment"
-                      className="shrink-0 p-1 rounded text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all cursor-pointer"
+                      className="shrink-0 mt-2 mr-1 p-1 rounded text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

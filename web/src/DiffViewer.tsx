@@ -24,7 +24,7 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop, scrollCardToTop } from './lib/diffScroll'
+import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
@@ -2529,6 +2529,40 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
   }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
+  // Jump from a queued review comment to the line it anchors to: reveal the file
+  // (select it in single-file view; expand/show it otherwise), then centre the
+  // line and flash it. scrollToDiffLine re-acquires the card and re-measures each
+  // frame, so it copes with the file mounting a beat after these state updates.
+  // No-op for a comment whose file has dropped out of the current comparison.
+  const handleJumpToComment = useCallback((c: PendingReviewComment) => {
+    if (!diff || !diff.files.some((f) => f.path === c.path)) return
+    if (singleFile) {
+      const idx = diff.files.findIndex((f) => f.path === c.path)
+      if (idx >= 0) setSingleFileIdx(idx)
+    } else if (collapsedFiles.has(c.path)) {
+      toggleFileCollapse(c.path)
+    }
+    if (hiddenFiles.has(c.path)) handleShowFile(c.path)
+    scrollToDiffLine(
+      () => fileRefs.current.get(c.path) ?? null,
+      c.isNew ? 'new' : 'old',
+      c.lineNum,
+      (row) => {
+        const rowEl = row.closest<HTMLElement>('.group') ?? row.parentElement
+        if (!rowEl) return
+        const prevShadow = rowEl.style.boxShadow
+        const prevBg = rowEl.style.backgroundColor
+        rowEl.style.transition = 'box-shadow 0.2s, background-color 0.2s'
+        rowEl.style.boxShadow = 'inset 3px 0 0 0 #f59e0b'
+        rowEl.style.backgroundColor = 'rgba(245, 158, 11, 0.18)'
+        setTimeout(() => {
+          rowEl.style.boxShadow = prevShadow
+          rowEl.style.backgroundColor = prevBg
+        }, 1600)
+      },
+    )
+  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile])
+
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
   }, [])
@@ -3118,6 +3152,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             submitting={submittingReview}
             onSubmit={submitReview}
             onRemove={removeQueuedComment}
+            onJump={handleJumpToComment}
           />
           {loadingSpinner}
           {refreshBtn}
