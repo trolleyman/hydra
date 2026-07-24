@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -28,7 +30,11 @@ type nsHost struct {
 	proc    *exec.Cmd
 	client  *nshost.Client
 	sockDir string
-	cleanup func()
+	// scopeUnit is the transient systemd scope wrapping the supervisor (and thus
+	// the whole head's process subtree), or "" when scopes are unavailable. Stopped
+	// on teardown so the cgroup is reaped as a unit.
+	scopeUnit string
+	cleanup   func()
 	// done is closed once the supervisor has exited and its resources are
 	// reclaimed (by the watcher). removeNamespaceHost blocks on it for a
 	// synchronous teardown.
@@ -125,6 +131,17 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		return nil, errtrace.Wrap(fmt.Errorf("build supervisor sandbox: %w", err))
 	}
 
+	// Wrap the supervisor in a transient systemd user scope so the whole head -
+	// the agent plus every sibling bash shell that shares this one bwrap - lives
+	// in a single per-head cgroup carrying the project's resolved resource limits,
+	// reapable as a unit and unable to outlive the daemon by reparenting to
+	// systemd. Best-effort: a no-op (scoped=false) where scopes are unavailable,
+	// leaving the supervisor a direct child of the daemon as before. config.Load is
+	// cached, so the re-read is cheap.
+	scopeUnit := sandbox.ScopeUnit("", id)
+	limitsCfg, _ := config.Load(projectRoot)
+	scoped := sandbox.WrapScope(scopeUnit, spec, limitsCfg.ResolveResourceLimits())
+
 	cmd := exec.Command(spec.Path, spec.Args[1:]...)
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
@@ -135,14 +152,33 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	var errTail capWriter
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
-	if err := cmd.Start(); err != nil {
+	// Tie the outermost process to the daemon's lifetime so an ungraceful daemon
+	// death (crash, SIGKILL, botched auto-upgrade) SIGKILLs it and bwrap's
+	// --die-with-parent cascades the kill through the head's PID namespace - the
+	// agent and anything it spawned die immediately instead of orphaning to
+	// systemd (the ~load-106 incident that motivated scoping). When unscoped bwrap
+	// is that direct child; when scoped systemd-run is, so it needs the signal to
+	// pass the kill down. The scope + boot-time sweep are only the backstop. Lock
+	// the OS thread across the fork so the Go runtime can't retire the forking
+	// thread and fire Pdeathsig early (see session.startProcess).
+	setSupervisorPdeathsig(cmd)
+	runtime.LockOSThread()
+	startErr := cmd.Start()
+	runtime.UnlockOSThread()
+	if startErr != nil {
+		if scoped {
+			sandbox.StopScope(scopeUnit)
+		}
 		spec.Cleanup()
-		return nil, errtrace.Wrap(fmt.Errorf("start supervisor: %w", err))
+		return nil, errtrace.Wrap(fmt.Errorf("start supervisor: %w", startErr))
 	}
 
 	if err := nshost.WaitForSocket(sockPath, 10*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		if scoped {
+			sandbox.StopScope(scopeUnit) // reap the cgroup; killing systemd-run alone may not
+		}
 		spec.Cleanup()
 		if tail := strings.TrimSpace(errTail.String()); tail != "" {
 			return nil, errtrace.Wrap(fmt.Errorf("%w; supervisor output: %s", err, tail))
@@ -150,8 +186,12 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		return nil, errtrace.Wrap(err)
 	}
 
+	unit := ""
+	if scoped {
+		unit = scopeUnit
+	}
 	log.Printf("heads: namespace host ready for %s (pid %d)", id, cmd.Process.Pid)
-	return &nsHost{id: id, proc: cmd, client: nshost.Dial(sockPath), sockDir: sockDir, cleanup: spec.Cleanup, done: make(chan struct{})}, nil
+	return &nsHost{id: id, proc: cmd, client: nshost.Dial(sockPath), sockDir: sockDir, scopeUnit: unit, cleanup: spec.Cleanup, done: make(chan struct{})}, nil
 }
 
 // watchNamespaceHost is the sole waiter on the supervisor process. It blocks until
@@ -169,6 +209,11 @@ func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
 	// so drop the remembered egress port: a later relaunch must allocate a fresh one
 	// and bake it into the fresh supervisor, not try to reclaim the dead port.
 	forgetEgressPort(id)
+	// Reap the head's transient scope now that the supervisor has exited: this
+	// clears the (now-empty) unit and SIGKILLs any stray process still in its
+	// cgroup, so nothing lingers even if the --die-with-parent cascade missed one.
+	// Best-effort and a no-op for an unscoped supervisor (scopeUnit == "").
+	sandbox.StopScope(h.scopeUnit)
 	if h.cleanup != nil {
 		h.cleanup()
 	}

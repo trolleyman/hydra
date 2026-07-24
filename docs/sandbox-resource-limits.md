@@ -47,8 +47,16 @@ set configurable per project, with a Settings UI section.
   - `StopScope(unit)`, `SweepOrphanScopes()`.
 - `scope_other.go` - no-op stubs for non-linux.
 - Call sites (each already has the workload's project config in scope):
-  - agent: `internal/session/registry.go` `Registry.Start` (with an unwrap-and-
-    retry fallback if the scoped spawn fails to exec).
+  - agent (the whole head): `internal/heads/nshost.go` `launchNamespaceHost` wraps
+    the per-head *supervisor* bwrap, so the agent AND its sibling sandboxed bash
+    shells (all children of that one bwrap) share one `hydra-<id>.scope`. It sets
+    Pdeathsig on the (systemd-run) cmd + `runtime.LockOSThread()` across the fork so
+    an ungraceful daemon death still SIGKILLs it and bwrap's `--die-with-parent`
+    cascades immediately; `watchNamespaceHost` `StopScope`s the unit on teardown.
+    (`internal/session/registry.go` `Registry.Start` still wraps the *standalone*
+    fallback shell - the path taken only when no supervisor is live - via
+    `StartOptions.Limits`, with an unwrap-and-retry fallback if the scoped spawn
+    fails to exec.)
   - preview: `internal/preview/spawn.go` `run()` (wrap) + `stopChild()` (StopScope).
   - service: `internal/services/services.go` `buildCmd()` (wrap) + the ctx.Done
     goroutine in `supervise()` (StopScope). Helper `serviceScopeUnit`.
@@ -220,3 +228,11 @@ Keep `internal/sandbox` free of any `internal/config` import - config resolves
 - The systemd behaviour (properties actually applied, controller-delegation
   fallback) needs host verification - it can't be exercised from CI or a nested
   sandbox (bwrap needs an unprivileged userns; scopes need a user systemd manager).
+- **Supervisor-scoping orphan check (host).** Because scoping the per-head
+  supervisor interposes `systemd-run` between the daemon and bwrap, verify the
+  kill-on-daemon-death path still fires *immediately*, not just at the next
+  boot-sweep: spawn a head, `systemctl --user show hydra-<id>.scope -p CPUWeight
+  -p MemoryMax` to confirm the limits landed, then `kill -9` the daemon and
+  confirm the agent + its bash shells die at once (the Pdeathsig -> `--die-with-
+  parent` cascade), leaving the scope empty and reaped. A resume/restart of the
+  head must land in a fresh `hydra-<id>.scope` (WrapScope pre-clears a stale unit).
