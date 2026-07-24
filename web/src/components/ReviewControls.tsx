@@ -219,7 +219,10 @@ export function CreateMRDialog({
           <h2 className="text-base font-semibold">Create {providerLabel}</h2>
         </div>
         <div className="px-5 py-4 overflow-auto flex flex-col gap-3">
-          {config && !config.authenticated && config.auth === 'cli' && (
+          {/* Only an explicit false warns: the auth check runs in the background
+              server-side, so a config without the field just means "still
+              checking" and stays quiet. */}
+          {config && config.authenticated === false && config.auth === 'cli' && (
             <div className="text-xs rounded-md px-3 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
               {config.auth_status || 'The forge CLI is not authenticated. Run `gh auth login` / `glab auth login` on the host.'}
             </div>

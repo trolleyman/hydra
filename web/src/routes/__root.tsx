@@ -841,11 +841,12 @@ function RootLayout() {
                 return (
                   <>
                     {/* Row 1: the Repository link (labelled with the project's
-                        path), full width. Row 2 (always rendered, so git state
-                        changes never shift the layout): the forge link and
-                        dirty/ahead/behind chips, with Sync anchored at the
-                        right - next to the state it acts on. */}
-                    <div className="flex items-center gap-1.5">
+                        path) with the forge web link right-aligned after it.
+                        Row 2 appears only when there is git state to act on
+                        (dirty checkout or ahead/behind) - when everything is
+                        clean and in sync it isn't rendered at all, so the
+                        section stays a single tidy row. */}
+                    <div className="flex items-center gap-1">
                       <Link
                         to="/project/$projectId/repository"
                         params={{ projectId: currentProjectId }}
@@ -880,27 +881,32 @@ function RootLayout() {
                           <span className="truncate">Repository</span>
                         )}
                       </Link>
-                    </div>
-                    <div className="flex items-center gap-1.5 px-1 mt-1 pb-1">
-                        {/* Forge web link, derived from the remote URL (read-only, no
-                            auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
-                            no remote or no https browse URL could be derived. */}
-                        {reviewConfig?.browse_url && (
-                          <Tooltip
-                            content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
-                            className="shrink-0"
+                      {/* Forge web link, derived from the remote URL (read-only, no
+                          auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                          no remote or no https browse URL could be derived. */}
+                      {reviewConfig?.browse_url && (
+                        <Tooltip
+                          content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                          className="shrink-0"
+                        >
+                          <a
+                            href={reviewConfig.browse_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Open repository on the forge"
+                            className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
-                            <a
-                              href={reviewConfig.browse_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label="Open repository on the forge"
-                              className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            >
-                              <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
-                            </a>
-                          </Tooltip>
-                        )}
+                            <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
+                          </a>
+                        </Tooltip>
+                      )}
+                    </div>
+                    {/* Row 2, only when actionable ('syncing' keeps it mounted so
+                        the spinner doesn't vanish mid-sync as counters hit 0).
+                        Sync is pinned right next to the counters that describe
+                        exactly what it will do. */}
+                    {((pushStatus?.uncommitted.total ?? 0) > 0 || ahead > 0 || behind > 0 || syncing) && (
+                      <div className="flex items-center gap-1.5 px-1 mt-1 pb-1">
                         {/* Uncommitted-changes warning: the project checkout is dirty
                             (e.g. a Settings save rewrote .hydra/config.toml). Click to
                             review the paths and commit them all. */}
@@ -911,10 +917,6 @@ function RootLayout() {
                             onCommit={handleCommit}
                           />
                         )}
-                        {/* Ahead/behind counters + Sync, pinned right together
-                            (the counters describe exactly what Sync will do).
-                            Sync always renders - it anchors the row so the
-                            section height never shifts as chips come and go. */}
                         <div className="flex-1" />
                         {(behind > 0 || ahead > 0) && (
                           <Tooltip content={statusTooltip} className="shrink-0">
@@ -948,6 +950,7 @@ function RootLayout() {
                           </button>
                         </Tooltip>
                       </div>
+                    )}
                   </>
                 )
               })()
@@ -956,9 +959,6 @@ function RootLayout() {
                 <span className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
-                </span>
-                <span className="inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
-                  <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
               </div>
             )}

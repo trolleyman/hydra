@@ -111,10 +111,14 @@ export function ReviewSection({
                     <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                       <CircleCheck className="w-4 h-4" /> {resolved.auth_status || 'authenticated'}
                     </span>
-                  ) : (
+                  ) : resolved.authenticated === false ? (
                     <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                       <CircleX className="w-4 h-4" /> {resolved.auth_status || 'not authenticated - run gh/glab auth login'}
                     </span>
+                  ) : (
+                    // Auth fields absent = the background gh/glab check hasn't
+                    // finished; the store polls until it lands.
+                    <span className="text-xs text-gray-400 dark:text-gray-500">checking...</span>
                   ))}
               </span>
             </Row>

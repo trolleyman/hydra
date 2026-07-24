@@ -85,6 +85,27 @@ export function ensureReviewConfig(projectId: string): Promise<void> {
   return refreshReviewConfig(projectId)
 }
 
+// The server answers GetReviewConfig without waiting on the gh/glab auth-status
+// shell-out: a response with `authenticated` absent means the check is still
+// running in the background. Poll a few times until it lands so the Create MR
+// dialog warning and the Settings auth row settle; capped so a server that can
+// never resolve auth doesn't get polled forever.
+const authPollAttempts = new Map<string, number>()
+const AUTH_POLL_MAX = 5
+const AUTH_POLL_INTERVAL_MS = 2000
+
+function scheduleAuthPoll(projectId: string, cfg: ReviewConfigResponse): void {
+  const pending = cfg.provider && cfg.auth === 'cli' && cfg.authenticated == null
+  if (!pending) {
+    authPollAttempts.delete(projectId)
+    return
+  }
+  const attempts = authPollAttempts.get(projectId) ?? 0
+  if (attempts >= AUTH_POLL_MAX) return
+  authPollAttempts.set(projectId, attempts + 1)
+  setTimeout(() => void refreshReviewConfig(projectId), AUTH_POLL_INTERVAL_MS)
+}
+
 // refreshReviewConfig re-fetches even when cached (still joining any in-flight
 // fetch), for callers that want fresh values - opening the Create MR dialog,
 // saving settings. Failures are swallowed: a previously-cached config stays put.
@@ -96,6 +117,7 @@ export function refreshReviewConfig(projectId: string): Promise<void> {
     .then((cfg) => {
       freshReviewConfigs.add(projectId)
       useProjectStore.getState().setReviewConfig(projectId, cfg)
+      scheduleAuthPoll(projectId, cfg)
     })
     .catch(() => {})
     .finally(() => reviewConfigFetches.delete(projectId))
