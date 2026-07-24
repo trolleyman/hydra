@@ -1492,14 +1492,17 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     // Only unified-diff mode has a structural prefix to remove. Inferring that
     // from each line corrupts full files whose content begins with space/+/-.
     const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
+    // Plain loop (not flatMap with captured counters): the react-hooks
+    // immutability rule flags reassigning closure-captured `let`s during render.
     let oldLine = kind === 'delete' ? 1 : 0
     let newLine = kind === 'add' ? 1 : 0
-    return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
+    const out: { text: string; added: boolean; removed: boolean; oldNo: string; newNo: string }[] = []
+    for (const line of diff.replace(/\n$/, '').split('\n')) {
       const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
       if (hunk) {
         oldLine = Number(hunk[1])
         newLine = Number(hunk[2])
-        return []
+        continue
       }
       const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
       const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
@@ -1507,8 +1510,9 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
       const removed = kind === 'delete' || hasRemovedMarker
       const oldNo = added ? '' : String(oldLine++)
       const newNo = removed ? '' : String(newLine++)
-      return [{ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo }]
-    })
+      out.push({ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo })
+    }
+    return out
   }, [diff, kind])
   const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
   return (
