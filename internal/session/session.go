@@ -87,6 +87,9 @@ type Session struct {
 	cols      uint16
 	status    Status
 	exitErr   error
+	// scopeUnit is the transient systemd scope wrapping this session's sandbox,
+	// if one was created (empty otherwise). Stopping it reaps the whole cgroup.
+	scopeUnit string
 
 	// ephemeral sessions (web bash shells) self-terminate shortly after their
 	// last attacher leaves; reapTimer is the pending grace-period kill, cancelled
@@ -311,20 +314,41 @@ func (s *Session) resize(rows, cols uint16) error {
 	return errtrace.Wrap(s.proc.Resize(rows, cols))
 }
 
+// setScopeUnit records the transient systemd scope wrapping this session so
+// stop/kill can reap the whole cgroup.
+func (s *Session) setScopeUnit(unit string) {
+	s.mu.Lock()
+	s.scopeUnit = unit
+	s.mu.Unlock()
+}
+
+func (s *Session) getScopeUnit() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scopeUnit
+}
+
 // stop signals the process to terminate; the readLoop handles cleanup. It
 // signals the whole process group (not just the leader) so anything the sandbox
-// spawned is torn down too and nothing lingers past a daemon drain.
+// spawned is torn down too, and stops the systemd scope (if any) so the whole
+// cgroup is reaped - nothing lingers past a daemon drain.
 func (s *Session) stop() {
 	s.markStopRequested()
 	_ = s.proc.Signal(syscall.SIGTERM)
 	signalGroup(s.proc.Pid(), syscall.SIGTERM)
+	if u := s.getScopeUnit(); u != "" {
+		sandbox.StopScope(u)
+	}
 }
 
-// kill forcibly terminates the process (and its whole group).
+// kill forcibly terminates the process (and its whole group / scope).
 func (s *Session) kill() {
 	s.markStopRequested()
 	_ = s.proc.Signal(os.Kill)
 	signalGroup(s.proc.Pid(), syscall.SIGKILL)
+	if u := s.getScopeUnit(); u != "" {
+		sandbox.StopScope(u)
+	}
 }
 
 func (s *Session) markStopRequested() {

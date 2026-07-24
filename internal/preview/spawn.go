@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ type instance struct {
 	state     State
 	childPort int
 	pid       int
+	scopeUnit string // transient systemd scope wrapping this run's sandbox, if any
 	cancel    context.CancelFunc
 	// gen increments on every spawn and on stopChild; a run goroutine settles
 	// its instance state only while its captured gen is current, so a
@@ -193,6 +195,14 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	}
 	defer launch.Cleanup()
 
+	// Run under a transient systemd scope (best-effort): own cgroup with CPU/IO
+	// weight limits + a single kill handle, reaped in stopChild. The child port
+	// makes the unit unique among concurrently-live preview instances (active +
+	// pending of the same script/head), so pre-clearing a stale unit can't kill a
+	// sibling's scope.
+	scopeUnit := sandbox.ScopeUnit("preview", spec.Name+"-"+in.version.HeadID+"-"+strconv.Itoa(childPort))
+	sandbox.WrapScope(scopeUnit, launch)
+
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
@@ -234,10 +244,12 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 		// A concurrent stop already superseded this spawn.
 		in.mu.Unlock()
 		terminateGroup(cmd.Process.Pid)
+		sandbox.StopScope(scopeUnit)
 		_ = cmd.Wait()
 		return
 	}
 	in.pid = cmd.Process.Pid
+	in.scopeUnit = scopeUnit
 	readyDeadline := in.readyTimeout()
 	in.mu.Unlock()
 
@@ -369,6 +381,7 @@ func (in *instance) settleError(gen int, msg string) {
 func (in *instance) stopChild(finalState State, message string) {
 	in.mu.Lock()
 	pid := in.pid
+	scopeUnit := in.scopeUnit
 	cancel := in.cancel
 	in.gen++ // supersede the live run goroutine, if any
 	if in.state == StateStarting && in.readyCh != nil {
@@ -378,6 +391,7 @@ func (in *instance) stopChild(finalState State, message string) {
 	in.state = finalState
 	in.message = message
 	in.pid = 0
+	in.scopeUnit = ""
 	in.childPort = 0
 	in.proxy = nil
 	in.readyCh = nil
@@ -386,6 +400,10 @@ func (in *instance) stopChild(finalState State, message string) {
 
 	if pid > 0 {
 		terminateGroup(pid)
+		// Also reap the systemd scope: when scoped, the tracked pid is
+		// systemd-run's, so the process-group signal may not reach the sandboxed
+		// children - StopScope tears down the whole cgroup.
+		sandbox.StopScope(scopeUnit)
 		grace := in.mgr.stopGrace
 		go func() {
 			time.Sleep(grace)

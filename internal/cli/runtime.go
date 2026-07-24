@@ -313,6 +313,12 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 	}
 
+	// Reap any workload scopes left behind by a prior daemon that died before
+	// draining (crash / SIGKILL). We own no live sessions yet, so every
+	// hydra-*.scope is stale. This is what recovers from an orphaned-sandbox
+	// pile-up on the next boot.
+	sandbox.SweepOrphanScopes()
+
 	// Resume heads that were running before a restart (best-effort), clear out
 	// any ephemeral artifact checkouts left behind by a crash mid-generation, and
 	// migrate any cache still in the old flat key layout to the current
