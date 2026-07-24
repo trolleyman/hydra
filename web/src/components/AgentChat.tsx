@@ -167,7 +167,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         <GitMerge className="w-3 h-3 shrink-0" />
         <span className="truncate">{label}</span>
       </button>
-      {expanded && shown > 0 && (
+      <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
           {item.merged!.map((m) => (
             <div
@@ -190,7 +190,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
             </div>
           )}
         </div>
-      )}
+      </Expandable>
     </div>
   )
 }
@@ -1355,7 +1355,7 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
 // leaving a transient empty gap below the content - the "weird" half-open frame.
 // Measuring clips exactly and reveals linearly. After opening we release
 // max-height to 'none' so later content growth (streamed output) isn't capped.
-function Expandable({ open, children }: { open: boolean; children: ReactNode }) {
+function Expandable({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
   const mounted = useDelayedUnmount(open)
   const ref = useRef<HTMLDivElement>(null)
   const first = useRef(true)
@@ -1397,7 +1397,7 @@ function Expandable({ open, children }: { open: boolean; children: ReactNode }) 
     el.style.maxHeight = '0px'
   }, [open])
   return (
-    <div ref={ref} style={{ overflow: 'hidden' }}>
+    <div ref={ref} className={className} style={{ overflow: 'hidden' }}>
       {mounted ? children : null}
     </div>
   )
