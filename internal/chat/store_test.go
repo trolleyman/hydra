@@ -55,6 +55,47 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	}
 }
 
+func TestSubagentEventsReturnsOnlyThatSubsSteps(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return time.Unix(123, 0) }
+	mustAppend := func(kind string, payload any) {
+		if _, err := s.Append(kind, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A main-flow message, both sub-agents' lifecycle (keyed by id, not agent_id)
+	// and their interleaved sidechain steps, plus a stream-only sidechain delta.
+	mustAppend("user_message", map[string]any{"id": "m1", "text": "go"})
+	mustAppend("subagent_started", map[string]any{"id": "subA", "status": "running"})
+	mustAppend("tool_started", map[string]any{"id": "t1", "name": "Read", "agent_id": "subA", "sidechain": true})
+	mustAppend("subagent_started", map[string]any{"id": "subB", "status": "running"})
+	mustAppend("tool_started", map[string]any{"id": "t2", "name": "Grep", "agent_id": "subB", "sidechain": true})
+	mustAppend("assistant_delta", map[string]any{"text": "part", "agent_id": "subA", "sidechain": true})
+	mustAppend("assistant_message", map[string]any{"text": "done", "agent_id": "subA", "sidechain": true})
+	mustAppend("assistant_message", map[string]any{"text": "main reply"})
+
+	got := s.SubagentEvents("subA")
+	if len(got) != 2 {
+		t.Fatalf("subA events = %+v (want 2: t1 tool_started + assistant_message; no delta, no subB, no main)", got)
+	}
+	if got[0].Type != "tool_started" || got[1].Type != "assistant_message" {
+		t.Fatalf("subA events out of order / wrong types: %+v", got)
+	}
+	if got[0].Seq >= got[1].Seq {
+		t.Fatalf("subA events not oldest-first: %+v", got)
+	}
+	if len(s.SubagentEvents("subB")) != 1 {
+		t.Fatalf("subB events = %+v (want just t2)", s.SubagentEvents("subB"))
+	}
+	if s.SubagentEvents("") != nil || len(s.SubagentEvents("missing")) != 0 {
+		t.Fatalf("empty/unknown sub-agent should yield no events")
+	}
+}
+
 func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
 	root := t.TempDir()
 	s, err := Open(root, "head")

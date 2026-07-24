@@ -4146,6 +4146,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // used to keep the viewport anchored across a prepend.
   const oldestUuidRef = useRef<string | null>(null)
   const oldestEventCursorRef = useRef<string | null>(null)
+  // Sub-agents whose full step history we've already asked the daemon for this
+  // connection (opening their tab). A sub-agent's steps may live outside the
+  // loaded main-conversation window, so its `items` would otherwise stay empty
+  // until the user scrolled the main history back to where it ran.
+  const requestedSubsRef = useRef<Set<string>>(new Set())
   const historyIdRef = useRef(-1_000_000)
   const loadingOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -4307,6 +4312,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Reset load-older paging for the fresh backfill.
     oldestUuidRef.current = null
     oldestEventCursorRef.current = null
+    requestedSubsRef.current = new Set()
     historyIdRef.current = -1_000_000
     loadingOlderRef.current = false
     setLoadingOlder(false)
@@ -5927,6 +5933,34 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           return
         }
+        case 'subagent_events': {
+          // A load_subagent reply: one sub-agent's full step history, fetched
+          // when its tab opened. Every event is a sidechain step (agent_id set),
+          // so route them exactly like the load-older sidechain branch above -
+          // through the live handler into the sub-agent's card. Deduped by seq,
+          // so overlap with the already-loaded window (or a later scroll) is a
+          // no-op.
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
+          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+            .filter(firstNormalizedDelivery)
+            .filter(keepNormalizedUserEvent)
+          for (const rawEvent of normalized) rememberNormalizedToolMetadata(rawEvent)
+          for (const rawEvent of normalized) {
+            if (handleNormalizedSubagent(rawEvent)) continue
+            const event = enrichNormalizedTool(rawEvent)
+            if (event.type === 'tool_started' || event.type === 'tool_completed') {
+              const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+              const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+              if (toolID && toolName && event.payload && 'input' in event.payload) {
+                patchToolMetadata(toolID, toolName, event.payload.input)
+              }
+            }
+            for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
+          }
+          flushSubagents()
+          return
+        }
         case 'notification_backfill': {
           if (normalizedAvailableRef.current) return
           // A <task-notification> record from BEFORE the backfill window,
@@ -6326,6 +6360,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       : JSON.stringify({ type: 'load_before', before: anchor }))
   }
 
+  // requestSubagentEvents fetches a sub-agent's full step history the first time
+  // its tab is opened. A sub-agent's steps are sidechain events interleaved in
+  // the main event log and reach the client only with the loaded main-
+  // conversation window, so a sub-agent that ran before that window would show
+  // an empty tab until the user scrolled the main history back to it. The daemon
+  // reply is deduped by seq (firstNormalizedDelivery), so a later scroll re-
+  // delivering the same events is harmless. Only the normalized path (Claude /
+  // Codex) has this split; the legacy transcript path backfills every sub-agent
+  // sidecar up front.
+  function requestSubagentEvents(subID: string) {
+    if (!usesNormalizedEvents || !subID || requestedSubsRef.current.has(subID)) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    requestedSubsRef.current.add(subID)
+    ws.send(JSON.stringify({ type: 'load_subagent', sub_id: subID }))
+  }
+
+  // Fetch a sub-agent's history the moment its tab opens (or once the socket is
+  // ready, if it was opened before). No deps array, mirroring the auto-fill
+  // effect below: requestSubagentEvents self-guards so re-runs are cheap no-ops.
+  useEffect(() => {
+    if (!replayDone || chatView === 'main') return
+    requestSubagentEvents(chatView)
+  })
+
   // Auto-fill: when the loaded window is shorter than the pane (a byte-dense
   // backfill - a few image reads can eat the whole window in a handful of
   // messages), there is no scrollbar, so scrolling can never trigger the
@@ -6342,7 +6401,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
-    // Load-older pages main history; a sub-agent view has its whole run already.
+    // Load-older pages main history; a sub-agent view fetches its whole run up
+    // front when opened (requestSubagentEvents), so it never pages here.
     if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     // While pinned, content can grow FASTER than the follow effects re-pin (a
