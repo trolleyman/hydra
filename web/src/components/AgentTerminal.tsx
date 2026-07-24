@@ -116,7 +116,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // overestimates cols. `force` re-sends even if the geometry is unchanged
   // (used right after the socket opens, when lastSentSize is reset).
   const fitAndSend = useRef<(force?: boolean) => void>(() => {})
-  fitAndSend.current = (force = false) => {
+  // Defined each render to capture the latest props/state, but published to the ref
+  // in an effect below - a render must never write a ref. The async callers
+  // (ResizeObserver, RAF, socket handlers) only ever read the ref after commit.
+  const runFitAndSend = (force = false) => {
     const fitAddon = fitAddonRef.current
     const term = termRef.current
     const ws = wsRef.current
@@ -158,6 +161,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     lastSentSize.current = { cols, rows }
   }
+  useEffect(() => {
+    fitAndSend.current = runFitAndSend
+  })
 
   // Poll until the container geometry repeats across three frames (or we've
   // waited long enough), then send the one settled size. Width-only settling
@@ -170,7 +176,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // While this runs, settlingRef suppresses the ResizeObserver's own sends so
   // only the final, correct geometry reaches the backend PTY.
   const stabilizeThenSend = useRef<() => void>(() => {})
-  stabilizeThenSend.current = () => {
+  // Same latest-closure-in-a-ref pattern as runFitAndSend above: defined each render,
+  // published to the ref in an effect (never during render), read only by callers.
+  const runStabilizeThenSend = () => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
@@ -197,6 +205,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     }
     stabilizeRafRef.current = requestAnimationFrame(tick)
   }
+  useEffect(() => {
+    stabilizeThenSend.current = runStabilizeThenSend
+  })
 
   // Re-fit when tab becomes visible (after display:none -> display:block). The
   // container only has its real size once it's displayed, so a fit done while

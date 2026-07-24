@@ -2443,13 +2443,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
   // identity across silent refreshes. Depending on diff/commits/sel directly would
   // give it a new identity on each refresh and re-render every FileDiff, defeating
-  // their memo() - the main cost behind the agent-view jank.
+  // their memo() - the main cost behind the agent-view jank. The refs are published
+  // in an effect (a render must never write a ref); handleComment only reads them
+  // asynchronously, well after commit.
   const diffRef = useRef(diff)
-  diffRef.current = diff
   const leftSelRef = useRef(leftSel)
-  leftSelRef.current = leftSel
   const rightSelRef = useRef(rightSel)
-  rightSelRef.current = rightSel
+  useEffect(() => {
+    diffRef.current = diff
+    leftSelRef.current = leftSel
+    rightSelRef.current = rightSel
+  })
 
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
     const leftSel = leftSelRef.current
@@ -2815,7 +2819,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onComment={handleComment}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
+              // getShowCallback/getFileRef return render-stable per-path callbacks that
+              // (deliberately) close over the DOM-node registry and userShownFiles refs -
+              // both touched only in event handlers / at commit, never during render. The
+              // refs rule follows that transitively and flags the call; it is a safe
+              // false positive here. Same at the stacked-list map below.
+              // eslint-disable-next-line react-hooks/refs
               onShow={getShowCallback(diff.files[singleFileIdx].path)}
+              // eslint-disable-next-line react-hooks/refs
               fileRef={getFileRef(diff.files[singleFileIdx].path)}
               currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
               imageDiffMode={imageDiffMode}
@@ -2828,6 +2839,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           // (orderedFiles = tree depth-first / grouped / flat), not diff.files'
           // raw order - otherwise the tree/grouped sidebar and the diff column
           // disagree and clicking a file scrolls to a card in a different spot.
+          // eslint-disable-next-line react-hooks/refs -- see the getShowCallback/getFileRef note above
           orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (

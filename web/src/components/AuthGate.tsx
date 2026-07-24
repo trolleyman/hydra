@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Lock, LoaderCircle } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 
@@ -24,25 +24,26 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const checkStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/auth/status', { credentials: 'include' })
-      if (!res.ok) {
-        // Endpoint should always be reachable; if not, fail open and let the app
-        // surface the real error rather than trapping the user behind a login.
-        setPhase('ready')
-        return
-      }
-      const status: AuthStatus = await res.json()
-      setPhase(status.auth_required && !status.authenticated ? 'login' : 'ready')
-    } catch {
-      setPhase('ready')
-    }
-  }, [])
-
   useEffect(() => {
-    void checkStatus()
-  }, [checkStatus])
+    // The auth check sets phase only after the fetch resolves (an async boundary),
+    // so it's a legitimate effect - synchronising with the auth server. Defined
+    // inline so that async boundary is visible to the setState-in-effect rule.
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth/status', { credentials: 'include' })
+        if (!res.ok) {
+          // Endpoint should always be reachable; if not, fail open and let the app
+          // surface the real error rather than trapping the user behind a login.
+          setPhase('ready')
+          return
+        }
+        const status: AuthStatus = await res.json()
+        setPhase(status.auth_required && !status.authenticated ? 'login' : 'ready')
+      } catch {
+        setPhase('ready')
+      }
+    })()
+  }, [])
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
