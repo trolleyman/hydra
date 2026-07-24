@@ -2680,9 +2680,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>(
     () => loadReviewDraft(projectId, agent.id),
   )
-  useEffect(() => {
+  // Reload the mirrored draft when the agent changes, during render (previous-key
+  // idiom) rather than in an effect - DiffViewerImpl isn't remounted per agent, so
+  // this reacts to the id change without a cascading effect render.
+  const [prevReviewDraftKey, setPrevReviewDraftKey] = useState(`${projectId}\0${agent.id}`)
+  if (prevReviewDraftKey !== `${projectId}\0${agent.id}`) {
+    setPrevReviewDraftKey(`${projectId}\0${agent.id}`)
     setReviewComments(loadReviewDraft(projectId, agent.id))
-  }, [projectId, agent.id])
+  }
   const [submittingReview, setSubmittingReview] = useState(false)
 
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
