@@ -4245,6 +4245,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   useEffect(() => {
     const seeded = seedLocalPlan(projectId, agentId, serverPlan)
     if (seeded.length) {
+      // Legitimate effect: seedLocalPlan writes to localStorage (a side effect that
+      // belongs in an effect), and we adopt its result. Can't move to render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTodos(
         seeded
           .sort((a, b) => a.order - b.order)
@@ -4260,6 +4263,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
   )
   useEffect(() => {
+    // Adopt the daemon-captured model only while the selector is still on its
+    // placeholder (the `m || serverModel` functional update fills an empty value and
+    // no more), so this never fights the authoritative live system:init - a benign,
+    // intentional one-shot rather than a cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (serverModel) setModel((m) => m || serverModel)
   }, [serverModel])
 
@@ -4283,6 +4291,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   })
 
   useEffect(() => {
+    // Reconnect/re-navigation reset: this clears a dozen pieces of live state AND
+    // several refs (normalizedAvailableRef, itemTsRef, thoughtDurationsRef...) in one
+    // atomic pass before the transcript replays. The ref writes must stay in an
+    // effect, so this whole reset stays here rather than moving to render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems([])
     normalizedAvailableRef.current = false
     itemTsRef.current = new Map()
@@ -6121,10 +6134,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   // --- Sub-agent chat views --------------------------------------------------
 
-  // Viewing another agent's chat is per-head ephemeral UI; a different head
-  // starts back on its main conversation.
-  useEffect(() => {
+  // Viewing another agent's chat is per-head ephemeral UI; a different head starts
+  // back on its main conversation. Reset the view during render (previous-key idiom)
+  // so it isn't a cascading effect render; the scroll-memory ref reset must stay in
+  // an effect (a ref must not be written during render).
+  const headKey = `${agentId}\0${projectId}`
+  const [prevHeadKey, setPrevHeadKey] = useState(headKey)
+  if (prevHeadKey !== headKey) {
+    setPrevHeadKey(headKey)
     setChatView('main')
+  }
+  useEffect(() => {
     mainScrollRef.current = null
   }, [agentId, projectId])
 
@@ -6205,6 +6225,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!isTurnRunning) {
       turnStartRef.current = null
       turnStartClockRef.current = null
+      // Timer effect: resets the clock refs + elapsed seconds when a turn ends and
+      // runs an interval while it's live - all genuine effect work, not a render-time
+      // derivation.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsed(0)
       return
     }
@@ -6497,7 +6521,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // advertised command instead of an arbitrary first-8 subset.
     return slashCommands.filter((c) => c.toLowerCase().startsWith(q))
   }, [slashQuery, slashDismissed, slashCommands])
-  useEffect(() => setSlashSel(0), [slashQuery])
+  // Reset the highlighted row to the top when the query changes, during render.
+  const [prevSlashQuery, setPrevSlashQuery] = useState(slashQuery)
+  if (prevSlashQuery !== slashQuery) {
+    setPrevSlashQuery(slashQuery)
+    setSlashSel(0)
+  }
   // Keep the highlighted row visible as the selection moves through a list
   // taller than the popup's max height.
   useEffect(() => {

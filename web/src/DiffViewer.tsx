@@ -814,7 +814,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const [bodyRef, bodyH] = useMeasuredHeight(0)
   const [bodyMounted, setBodyMounted] = useState(!isCollapsed)
   useEffect(() => {
-    if (!isCollapsed) { setBodyMounted(true); return }
+    // Mount on the next frame (not synchronously here) so the body first paints at
+    // height 0 and the 0->height glide can play - deferring via rAF also keeps this
+    // out of the synchronous effect body. Cancel it if we re-collapse before it fires.
+    if (!isCollapsed) {
+      const r = requestAnimationFrame(() => setBodyMounted(true))
+      return () => cancelAnimationFrame(r)
+    }
     const t = setTimeout(() => setBodyMounted(false), FILE_COLLAPSE_MS)
     return () => clearTimeout(t)
   }, [isCollapsed])
@@ -881,10 +887,20 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     [highlightSource, lang, langReady],
   )
   const [asyncHighlight, setAsyncHighlight] = useState(EMPTY_HIGHLIGHT)
+  // When the async-highlighted content (or its language) changes, repaint as plain
+  // text immediately DURING RENDER while the worker re-highlights - this avoids a
+  // flash of stale highlighting and keeps the reset out of the synchronous effect
+  // body. Tracked via prev-as-state compared by reference, so no large-string work
+  // per render.
+  const [prevHlSource, setPrevHlSource] = useState(highlightSource)
+  const [prevHlLang, setPrevHlLang] = useState(lang)
+  if (prevHlSource !== highlightSource || prevHlLang !== lang) {
+    setPrevHlSource(highlightSource)
+    setPrevHlLang(lang)
+    if (highlightSource && highlightSource.length > HL_SYNC_MAX) setAsyncHighlight(EMPTY_HIGHLIGHT)
+  }
   useEffect(() => {
     if (!highlightSource || highlightSource.length <= HL_SYNC_MAX) return
-    // Repaint as plain text while the worker highlights the new content.
-    setAsyncHighlight(EMPTY_HIGHLIGHT)
     let cancelled = false
     const { oldLines, newLines } = extractSides(highlightSource)
     highlightSides(
@@ -2152,6 +2168,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     if (!agent.branch_name) return
     let cancelled = false
+    // Legitimate data-fetch effect: reset to the loading state before the async
+    // fetch. This can't move to render (it sits alongside the fileContextsRef write,
+    // and a ref must not be written during render), and the cascading render is
+    // intended - it clears the stale diff + context expansions on a params change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingDiff(true)
     setDiffError(null)
     // Reset per-file context expansions when diff params change
@@ -2346,16 +2367,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setLeftSel(newLeft)
   }, [])
 
-  useEffect(() => {
+  // Correct invalid selection combos DURING RENDER (the adjust-state-during-render
+  // idiom) rather than in an effect: React re-renders immediately and the guards make
+  // each correction idempotent (it converges in one step), so there's no cascading
+  // effect render.
+  if (leftSel.type === 'latest' && rightSel.type === 'latest') {
     // left='latest' and right='latest' is invalid - switch right to uncommitted
-    if (leftSel.type === 'latest' && rightSel.type === 'latest') {
-      setRightSel({ type: 'uncommitted' }); return
-    }
-    if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
+    setRightSel({ type: 'uncommitted' })
+  } else if (leftSel.type === 'commit' && rightSel.type === 'commit') {
     const li = commitIdx(leftSel.sha, commits)
     const ri = commitIdx(rightSel.sha, commits)
     if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
-  }, [leftSel, rightSel, commits])
+  }
 
   // An externally-driven "show just this commit" selection (a commit chip
   // clicked in the chat transcript): parent -> commit, like picking the
@@ -2380,6 +2403,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       return
     }
     appliedCommitNonceRef.current = sel.nonce
+    // Legitimate effect: applies an external "show this commit" command (a nonce from
+    // the parent), guarded to fire once per nonce, alongside a smooth-scroll side
+    // effect - so it belongs in an effect, not render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
     setRightSel({ type: 'commit', sha: sel.sha })
     // Bring the Changes bar + file list into view in whichever scroll context

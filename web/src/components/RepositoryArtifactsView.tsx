@@ -178,7 +178,13 @@ export function RepositoryArtifactsView({
   // changes and saved only on an explicit edit so the reload can't clobber it.
   const filterAgentKey = `repo:${scriptName}`
   const [filter, setFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, filterAgentKey))
-  useEffect(() => { setFilter(loadTagFilter(projectId, filterAgentKey)) }, [projectId, filterAgentKey])
+  // Reload the persisted filter when the project/script changes, during render (the
+  // previous-key idiom) instead of in an effect - no cascading effect re-render.
+  const [prevFilterKey, setPrevFilterKey] = useState(`${projectId}\0${filterAgentKey}`)
+  if (prevFilterKey !== `${projectId}\0${filterAgentKey}`) {
+    setPrevFilterKey(`${projectId}\0${filterAgentKey}`)
+    setFilter(loadTagFilter(projectId, filterAgentKey))
+  }
   const updateFilter = useCallback((f: ArtifactTagFilter) => {
     setFilter(f)
     saveTagFilter(projectId, filterAgentKey, f)
@@ -186,7 +192,12 @@ export function RepositoryArtifactsView({
   // Ephemeral search (narrows + ranks without persisting), cleared when the script
   // changes since this view is reused across the repository browser's scripts.
   const [search, setSearch] = useState('')
-  useEffect(() => { setSearch('') }, [projectId, scriptName])
+  // Clear the ephemeral search when the project/script changes (during render).
+  const [prevSearchKey, setPrevSearchKey] = useState(`${projectId}\0${scriptName}`)
+  if (prevSearchKey !== `${projectId}\0${scriptName}`) {
+    setPrevSearchKey(`${projectId}\0${scriptName}`)
+    setSearch('')
+  }
   // Each file's aspect ratio + natural width, so the masonry can auto-span by shape
   // and cap the span to avoid upscaling a low-res shot (see MasonryGrid spanOf). The
   // server supplies width/height when it could measure them; useMediaDims only

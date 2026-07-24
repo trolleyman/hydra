@@ -613,6 +613,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // - not an intermediate animation frame). Cleared when the drag ends (setGhostH(null)
   // is a bail-out no-op if it was already null).
   useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM-measurement layout effect: it reads ghostRef.current and the ghost's offsetHeight (only knowable after render), so the synchronous setGhostH reset can't move to render.
     if (!drag) { setGhostH(null); return }
     const el = ghostRef.current
     if (el) setGhostH(el.offsetHeight)
@@ -1279,16 +1280,15 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   const [filterBarRef, filterBarH] = useMeasuredHeight(41)
 
   // Tag filter, shared across every card for this agent. Reload it when the
-  // project/agent changes; persist it only on an explicit user change (a save
-  // effect would race the reload and clobber the new key with the old value).
+  // project/agent changes (see the during-render reset below); persist it only on
+  // an explicit user change (a save effect would race the reload and clobber the
+  // new key with the old value).
   const [tagFilter, setTagFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, agentId))
-  useEffect(() => { setTagFilter(loadTagFilter(projectId, agentId)) }, [projectId, agentId])
 
   // Free-text search over filenames + tags (split-word fuzzy match + rank). Kept
   // ephemeral - it narrows/ranks the view without persisting - and cleared when the
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
-  useEffect(() => { setSearch('') }, [projectId, agentId])
 
   // Lightweight "chrome" (script names + available tags) read from localStorage -
   // a previous render of this agent (or, as a fallback, any agent in this project)
@@ -1297,7 +1297,19 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   // project/agent changes (the panel is reused across agents). Saved back below
   // once a live comparison settles.
   const [chrome, setChrome] = useState<ArtifactChrome | null>(() => loadArtifactChrome(projectId, agentId))
-  useEffect(() => { setChrome(loadArtifactChrome(projectId, agentId)) }, [projectId, agentId])
+
+  // Reset all three per-agent view states when the project/agent changes, DURING
+  // render (not in an effect) so the reload lands in the same commit as the key
+  // change - no stale flash. The useState initializers already seed the first
+  // mount, so this fires only on an actual key change.
+  const artifactViewKey = `${projectId}\0${agentId}`
+  const [prevArtifactViewKey, setPrevArtifactViewKey] = useState(artifactViewKey)
+  if (prevArtifactViewKey !== artifactViewKey) {
+    setPrevArtifactViewKey(artifactViewKey)
+    setTagFilter(loadTagFilter(projectId, agentId))
+    setSearch('')
+    setChrome(loadArtifactChrome(projectId, agentId))
+  }
   // Persist the chrome once every script has settled, so the next open of this
   // agent (or a sibling) renders it instantly. Skipped while anything is still
   // generating so a partial tag set isn't cached as complete.
@@ -1407,6 +1419,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   // Falls back to polling (below) if the socket fails to open or later drops.
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate WS-connection effect: the synchronous setMode('connecting') loading reset sits alongside the wsRef.current write and WebSocket construction, so it can't move to render.
     setMode('connecting')
     let ws: WebSocket
     try {

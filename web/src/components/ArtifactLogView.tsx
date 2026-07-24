@@ -297,22 +297,27 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // Reset to the loading state for each new url-pair DURING RENDER (the previous-key
+  // idiom) rather than synchronously inside the fetch effect: that avoids a cascading
+  // effect-triggered re-render and, because prevLogKey is state that resets to null on
+  // a fresh mount, it still re-fires on React StrictMode's mount->cleanup->remount (or
+  // a card whose log is open from the start) so the panes never strand on "Loading...".
+  const logKey = open && (leftUrl || rightUrl) ? `${leftUrl ?? ''}\0${rightUrl ?? ''}` : null
+  const [prevLogKey, setPrevLogKey] = useState<string | null>(null)
+  if (prevLogKey !== logKey) {
+    setPrevLogKey(logKey)
+    if (logKey !== null) { setLoading(true); setErr(null); setLogs(null) }
+  }
+
   // Lazily fetch each side's log whenever the view is open - driven by an effect
   // (not the click handler) so a restored-open state also loads the log. The deps
   // ([open, leftUrl, rightUrl]) already make this run once per url-pair and refetch
   // when a regenerate swaps the urls; unrelated re-renders don't change them so they
   // don't re-fire it. Each run owns its own `cancelled` flag and always clears
-  // `loading` in its finally, so a run superseded mid-flight - React StrictMode's
-  // mount→cleanup→remount, which fires for a card whose log is open from the start
-  // (a failed build) - never strands the panes on "Loading...": the latest run
-  // resolves the state. (An earlier url-keyed ref guard bailed the remount out
-  // before re-fetching, leaving the cancelled first run's `loading` stuck true.)
+  // `loading` in its finally, so a run superseded mid-flight never strands the panes.
   useEffect(() => {
     if (!open || (!leftUrl && !rightUrl)) return
     let cancelled = false
-    setLoading(true)
-    setErr(null)
-    setLogs(null)
     ;(async () => {
       try {
         // A side with no URL (absent on that version) stays null → "No log" pane.

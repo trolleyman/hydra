@@ -875,8 +875,21 @@ export function AgentDetail({
     }
   }, [projectId])
 
-  useEffect(() => {
+  // Clear the cached branch list when the project changes, during render (the
+  // previous-key idiom) rather than synchronously in the effect below - so switching
+  // project doesn't briefly show the old project's branches, without a cascading
+  // effect render. The effect then only kicks off the (async) refetch.
+  const [branchesProject, setBranchesProject] = useState(projectId)
+  if (branchesProject !== projectId) {
+    setBranchesProject(projectId)
     setBranches(null)
+  }
+  useEffect(() => {
+    // Legitimate load-on-mount/project-change: refreshBranches only sets state after
+    // its await, so this isn't a synchronous cascading render. It's a shared
+    // useCallback (also the manual "refresh branches" action), so it can't be inlined
+    // to make that async boundary visible to the rule.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshBranches()
   }, [refreshBranches])
 

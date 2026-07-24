@@ -1007,22 +1007,42 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // branch ref isn't briefly mis-parsed and fetched at the wrong ref).
   const ready = !splat || branches !== null
 
-  // Load branches once per project.
+  // Load branches once per project. The list is cleared during render (not in the
+  // effect) when the project changes, so the fetch effect below just does the
+  // async load. Init to the current id so no redundant clear fires on mount
+  // (branches already starts null).
+  const [prevBranchProject, setPrevBranchProject] = useState(projectId)
+  if (prevBranchProject !== projectId) {
+    setPrevBranchProject(projectId)
+    setBranches(null)
+  }
   useEffect(() => {
     let cancelled = false
-    setBranches(null)
     api.default.getRepositoryBranches(projectId)
       .then((r) => { if (!cancelled) { setBranches(r.branches); setCurrentBranch(r.current) } })
       .catch(() => { if (!cancelled) { setBranches([]); setCurrentBranch('') } })
     return () => { cancelled = true }
   }, [projectId])
 
+  // The tree + artifact-script fetch effects below share the same trigger
+  // ([projectId, queryRef, ready]) and each clears its state to a loading value
+  // synchronously before fetching. That reset runs during render here instead of
+  // in the effect bodies. The null sentinel keeps the reset gated on `ready` (so
+  // it also fires on the first ready render, showing the tree spinner on initial
+  // load), matching the effects' `if (!ready) return` guards.
+  const refFetchKey = ready ? `${projectId}\0${queryRef ?? ''}` : null
+  const [prevRefFetchKey, setPrevRefFetchKey] = useState<string | null>(null)
+  if (refFetchKey !== null && prevRefFetchKey !== refFetchKey) {
+    setPrevRefFetchKey(refFetchKey)
+    setTreeLoading(true)
+    setTreeError(null)
+    setArtifactScripts(null)
+  }
+
   // Load the tree for the resolved ref.
   useEffect(() => {
     if (!ready) return
     let cancelled = false
-    setTreeLoading(true)
-    setTreeError(null)
     api.default.getRepositoryTree(projectId, queryRef)
       .then((resp) => {
         if (cancelled) return
@@ -1046,7 +1066,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => {
     if (!ready) return
     let cancelled = false
-    setArtifactScripts(null)
     api.default.getRepositoryArtifacts(projectId, queryRef)
       .then((r) => { if (!cancelled) setArtifactScripts(r.scripts.map((s) => s.name)) })
       .catch(() => { if (!cancelled) setArtifactScripts([]) })
@@ -1055,15 +1074,28 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Load the file content for the displayed path. Synthetic artifact paths are not
   // real files - they render the artifacts viewer instead - so skip the fetch.
-  useEffect(() => {
-    if (!ready || !viewPath || artifactScriptOf(viewPath)) { setFile(null); return }
-    let cancelled = false
-    // Clear the previously-shown file so the pane shows a loading icon instead
-    // of the stale file while the new one is fetched.
+  //
+  // Clear the previously-shown file during render (not in the effect) so the pane
+  // shows a loading icon instead of the stale file while the new one is fetched.
+  // The key is null when there's nothing to fetch (not ready / no path / an
+  // artifact path), so both the inactive case (just clear the file) and the active
+  // case (clear + raise loading) are covered by the key going null <-> a value.
+  // The null init makes the loading reset fire on the first active render too.
+  const fileFetchActive = ready && !!viewPath && !artifactScriptOf(viewPath)
+  const fileFetchKey = fileFetchActive ? `${projectId}\0${queryRef ?? ''}\0${viewPath}` : null
+  const [prevFileFetchKey, setPrevFileFetchKey] = useState<string | null>(null)
+  if (prevFileFetchKey !== fileFetchKey) {
+    setPrevFileFetchKey(fileFetchKey)
     setFile(null)
-    setFileLoading(true)
-    setError(null)
-    setNotFound(false)
+    if (fileFetchKey !== null) {
+      setFileLoading(true)
+      setError(null)
+      setNotFound(false)
+    }
+  }
+  useEffect(() => {
+    if (!ready || !viewPath || artifactScriptOf(viewPath)) return
+    let cancelled = false
     api.default.getRepositoryFile(projectId, viewPath, queryRef)
       .then((resp) => { if (!cancelled) setFile(resp) })
       .catch((err) => {
@@ -1189,6 +1221,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
   // full_context so context can be revealed client-side without round-trips.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate data-fetch effect: the synchronous reset-to-loading on compare-key change is intentional and can't move to render because it sits alongside the fileContextsRef.current reset (a ref write, which would trip react-hooks/refs during render). The cascading render is desired - it immediately clears stale diff content.
     if (!diffActive) { setDiff(null); setDiffError(null); return }
     let cancelled = false
     setDiffLoading(true)
@@ -1205,15 +1238,32 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Leaving diff mode or retargeting the comparison drops the mobile drill-down
   // back to the changed-files list (so it never opens onto a stale selection).
-  useEffect(() => { setMobileDiffOpen(false) }, [diffActive, compareRef])
+  // Done as a during-render reset keyed on (diffActive, compareRef); init to the
+  // current key so no reset fires on mount (it starts closed anyway).
+  const mobileDiffResetKey = `${diffActive}\0${compareRef}`
+  const [prevMobileDiffResetKey, setPrevMobileDiffResetKey] = useState(mobileDiffResetKey)
+  if (prevMobileDiffResetKey !== mobileDiffResetKey) {
+    setPrevMobileDiffResetKey(mobileDiffResetKey)
+    setMobileDiffOpen(false)
+  }
 
   // Fetch the selected file's blob so the single-file header's copy/raw buttons
   // (reused FileActions) act on its actual content. Binary files still get a
   // working "Raw" link; the copy button hides itself when there's no content.
-  useEffect(() => {
-    if (!selectedDiffFile) { setDiffFileMeta(null); return }
-    let cancelled = false
+  // Clear the stale blob metadata during render (both the inactive case and the
+  // active reset are just setDiffFileMeta(null), so the null-sentinel key covers
+  // both); init to the current key so no redundant clear fires on mount.
+  const diffFileMetaKey = selectedDiffFile
+    ? `${projectId}\0${selectedDiffFile.path}\0${selectedDiffFileRef}`
+    : null
+  const [prevDiffFileMetaKey, setPrevDiffFileMetaKey] = useState(diffFileMetaKey)
+  if (prevDiffFileMetaKey !== diffFileMetaKey) {
+    setPrevDiffFileMetaKey(diffFileMetaKey)
     setDiffFileMeta(null)
+  }
+  useEffect(() => {
+    if (!selectedDiffFile) return
+    let cancelled = false
     api.default.getRepositoryFile(projectId, selectedDiffFile.path, selectedDiffFileRef)
       .then((r) => { if (!cancelled) setDiffFileMeta(r) })
       .catch(() => { if (!cancelled) setDiffFileMeta(null) })
