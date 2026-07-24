@@ -62,6 +62,11 @@ type chatClientMsg struct {
 	// File is the <output-file> path of a task_output request: the background
 	// task's output file as the SANDBOXED agent saw it (its private /tmp).
 	File string `json:"file,omitempty"`
+	// SubID is the sub-agent whose full step history the client wants (it opened
+	// that sub-agent's tab). Unlike the main window this isn't paginated: a
+	// sub-agent's steps may sit entirely outside the loaded main-conversation
+	// window, so the client fetches them directly rather than scrolling to them.
+	SubID string `json:"sub_id,omitempty"`
 }
 
 // chatTaskOutputFrame answers a task_output request: the (tail of the)
@@ -193,6 +198,12 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		// client's current oldest line (msg.Before is that line's uuid).
 		sendChatHistoryBefore(conn, worktree, sessionID, msg.Before)
 		return
+	case "load_subagent":
+		// The client opened a sub-agent's tab: send that sub-agent's full step
+		// history so it renders even when the sub-agent ran before the loaded
+		// main-conversation window.
+		s.sendSubagentEvents(conn, sessionID, msg.SubID)
+		return
 	case "task_output":
 		// The expandable background-task chip asking for the task's output file
 		// (the <output-file> path its <task-notification> carried). sessionID is
@@ -267,6 +278,34 @@ func (s *Server) sendNormalizedHistory(conn *safeConn, agentID, cursor string, l
 	data, err := json.Marshal(normalizedChatHistoryFrame{
 		terminalEvent: terminalEvent{Type: "chat_history"},
 		Events:        events, NextCursor: next, Done: done,
+	})
+	if err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+// subagentEventsFrame answers a load_subagent: one sub-agent's full step
+// history (its sidechain events), so the client can render the sub-agent's tab
+// regardless of how far the main conversation has been paged back.
+type subagentEventsFrame struct {
+	terminalEvent
+	AgentID string       `json:"agentId"`
+	Events  []chat.Event `json:"events"`
+}
+
+func (s *Server) sendSubagentEvents(conn *safeConn, agentID, subID string) {
+	if s.ChatEvents == nil || subID == "" {
+		return
+	}
+	events, err := s.ChatEvents.SubagentEvents(agentID, subID)
+	if err != nil {
+		log.Printf("chat ws: subagent events for %q/%q: %v", agentID, subID, err)
+		return
+	}
+	data, err := json.Marshal(subagentEventsFrame{
+		terminalEvent: terminalEvent{Type: "subagent_events"},
+		AgentID:       subID,
+		Events:        events,
 	})
 	if err == nil {
 		_ = conn.WriteMessage(websocket.TextMessage, data)
