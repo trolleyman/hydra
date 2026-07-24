@@ -311,16 +311,20 @@ func (s *Session) resize(rows, cols uint16) error {
 	return errtrace.Wrap(s.proc.Resize(rows, cols))
 }
 
-// stop signals the process to terminate; the readLoop handles cleanup.
+// stop signals the process to terminate; the readLoop handles cleanup. It
+// signals the whole process group (not just the leader) so anything the sandbox
+// spawned is torn down too and nothing lingers past a daemon drain.
 func (s *Session) stop() {
 	s.markStopRequested()
 	_ = s.proc.Signal(syscall.SIGTERM)
+	signalGroup(s.proc.Pid(), syscall.SIGTERM)
 }
 
-// kill forcibly terminates the process.
+// kill forcibly terminates the process (and its whole group).
 func (s *Session) kill() {
 	s.markStopRequested()
 	_ = s.proc.Signal(os.Kill)
+	signalGroup(s.proc.Pid(), syscall.SIGKILL)
 }
 
 func (s *Session) markStopRequested() {
