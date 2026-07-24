@@ -1,8 +1,20 @@
 import { create } from 'zustand'
 import type { ProjectInfo, ReviewConfigResponse, StatusResponse } from '../api'
 import { api } from './apiClient'
-import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, readJSON, readLocal, writeJSON, writeLocal } from '../lib/storage'
 import { deepEqual, reconcileList, reuseIfEqual } from '../lib/deepEqual'
+
+// readStoredReviewConfigs hydrates the persisted per-project review-config
+// snapshots (see StorageKeys.reviewConfigs). The endpoint that refreshes them
+// is slow (it shells out to gh/glab), so booting from the snapshot lets the
+// sidebar forge icon and MR prefill render instantly instead of popping in.
+function readStoredReviewConfigs(): Record<string, ReviewConfigResponse> {
+  return (
+    readJSON<Record<string, ReviewConfigResponse>>(StorageKeys.reviewConfigs, (v) =>
+      v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, ReviewConfigResponse>) : null,
+    ) ?? {}
+  )
+}
 
 interface ProjectState {
   projects: ProjectInfo[]
@@ -22,11 +34,22 @@ export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   selectedProjectId: readLocal(StorageKeys.projectId),
   systemStatus: null,
-  reviewConfigs: {},
+  reviewConfigs: readStoredReviewConfigs(),
   // The setters below reuse the previous objects when a refetch returns
   // structurally-identical data, so the polls/event-driven refreshes that
   // re-deliver the same state don't re-render every subscriber.
-  setProjects: (projects) => set((s) => ({ projects: reconcileList(s.projects, projects, (p) => p.id) })),
+  setProjects: (projects) => set((s) => {
+    // Piggyback on the project list to prune persisted review configs of
+    // removed projects, so the localStorage snapshot can't grow unbounded.
+    const stale = Object.keys(s.reviewConfigs).filter((id) => !projects.some((p) => p.id === id))
+    let reviewConfigs = s.reviewConfigs
+    if (stale.length > 0) {
+      reviewConfigs = { ...s.reviewConfigs }
+      for (const id of stale) delete reviewConfigs[id]
+      writeJSON(StorageKeys.reviewConfigs, reviewConfigs)
+    }
+    return { projects: reconcileList(s.projects, projects, (p) => p.id), reviewConfigs }
+  }),
   setSelectedProjectId: (id) => {
     writeLocal(StorageKeys.projectId, id)
     set({ selectedProjectId: id })
@@ -34,7 +57,9 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setSystemStatus: (systemStatus) => set((s) => ({ systemStatus: reuseIfEqual(s.systemStatus, systemStatus) })),
   setReviewConfig: (projectId, cfg) => set((s) => {
     if (deepEqual(s.reviewConfigs[projectId], cfg)) return {}
-    return { reviewConfigs: { ...s.reviewConfigs, [projectId]: cfg } }
+    const reviewConfigs = { ...s.reviewConfigs, [projectId]: cfg }
+    writeJSON(StorageKeys.reviewConfigs, reviewConfigs)
+    return { reviewConfigs }
   }),
 }))
 
@@ -45,11 +70,40 @@ export const useProjectStore = create<ProjectState>((set) => ({
 // for auth status), so stray duplicates are very visible in the request log.
 const reviewConfigFetches = new Map<string, Promise<void>>()
 
+// Projects whose review config was fetched from the server this session. A
+// localStorage-hydrated entry renders immediately but still counts as stale -
+// ensureReviewConfig kicks one background refresh per project per session so
+// the snapshot tracks config/auth changes.
+const freshReviewConfigs = new Set<string>()
+
 // ensureReviewConfig loads a project's resolved review config into the store
-// cache; a no-op when it is already cached or a fetch is in flight.
+// cache; a no-op when it was already fetched this session or a fetch is in
+// flight. With a persisted snapshot present the store already has data, so
+// consumers render instantly while this refresh runs.
 export function ensureReviewConfig(projectId: string): Promise<void> {
-  if (useProjectStore.getState().reviewConfigs[projectId]) return Promise.resolve()
+  if (freshReviewConfigs.has(projectId)) return Promise.resolve()
   return refreshReviewConfig(projectId)
+}
+
+// The server answers GetReviewConfig without waiting on the gh/glab auth-status
+// shell-out: a response with `authenticated` absent means the check is still
+// running in the background. Poll a few times until it lands so the Create MR
+// dialog warning and the Settings auth row settle; capped so a server that can
+// never resolve auth doesn't get polled forever.
+const authPollAttempts = new Map<string, number>()
+const AUTH_POLL_MAX = 5
+const AUTH_POLL_INTERVAL_MS = 2000
+
+function scheduleAuthPoll(projectId: string, cfg: ReviewConfigResponse): void {
+  const pending = cfg.provider && cfg.auth === 'cli' && cfg.authenticated == null
+  if (!pending) {
+    authPollAttempts.delete(projectId)
+    return
+  }
+  const attempts = authPollAttempts.get(projectId) ?? 0
+  if (attempts >= AUTH_POLL_MAX) return
+  authPollAttempts.set(projectId, attempts + 1)
+  setTimeout(() => void refreshReviewConfig(projectId), AUTH_POLL_INTERVAL_MS)
 }
 
 // refreshReviewConfig re-fetches even when cached (still joining any in-flight
@@ -60,7 +114,11 @@ export function refreshReviewConfig(projectId: string): Promise<void> {
   if (running) return running
   const request = api.default
     .getReviewConfig(projectId)
-    .then((cfg) => useProjectStore.getState().setReviewConfig(projectId, cfg))
+    .then((cfg) => {
+      freshReviewConfigs.add(projectId)
+      useProjectStore.getState().setReviewConfig(projectId, cfg)
+      scheduleAuthPoll(projectId, cfg)
+    })
     .catch(() => {})
     .finally(() => reviewConfigFetches.delete(projectId))
   reviewConfigFetches.set(projectId, request)

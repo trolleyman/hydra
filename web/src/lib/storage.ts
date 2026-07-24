@@ -28,6 +28,13 @@ export const StorageKeys = {
   // recent first). Drives the Ctrl+` alt-tab switcher's order. See
   // lib/projectRecency.ts.
   projectRecency: 'hydra-project-recency',
+  // Snapshot of each project's resolved [review] config (JSON map projectId ->
+  // ReviewConfigResponse). Hydrated into the project store on boot so the
+  // sidebar forge icon and Create MR prefill render instantly, then refreshed
+  // from the (slow, shells out to gh/glab) endpoint in the background. Entries
+  // for removed projects are pruned when the project list loads. See
+  // stores/projectStore.ts.
+  reviewConfigs: 'hydra-review-configs',
   // Remembered model per agent type (JSON map, e.g. {"claude":"opus"}). Keyed by
   // agent type because each CLI has its own model aliases; picking a model in the
   // spawn form seeds the next spawn of that same agent type. '' / absent = the

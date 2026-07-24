@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -386,13 +387,13 @@ func (s *Server) GetReviewConfig(ctx context.Context, request api.GetReviewConfi
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	return api.GetReviewConfig200JSONResponse(s.resolveReviewConfigResponse(ctx, projectRoot)), nil
+	return api.GetReviewConfig200JSONResponse(s.resolveReviewConfigResponse(projectRoot)), nil
 }
 
 // resolveReviewConfigResponse builds the resolved [review] config response
-// (defaults applied, provider auto-detected, live forge auth checked) for a
-// project root. Shared by GetReviewConfig and SaveReviewConfig.
-func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot string) api.ReviewConfigResponse {
+// (defaults applied, provider auto-detected, cached forge auth attached) for a
+// project root.
+func (s *Server) resolveReviewConfigResponse(projectRoot string) api.ReviewConfigResponse {
 	cfg, _ := config.Load(projectRoot)
 	review := cfg.Review
 	if review == nil {
@@ -419,15 +420,84 @@ func (s *Server) resolveReviewConfigResponse(ctx context.Context, projectRoot st
 		PublishWhenGreen:   ptr(review.IsPublishWhenGreen()),
 		ProtectedBranches:  &review.ProtectedBranches,
 	}
+	// The provider itself is detected from the remote URL above - no forge CLI
+	// involved. The gh/glab auth-status check (a shell-out, and a network
+	// round-trip when logged in) only feeds the "not authenticated" warning, so
+	// it never blocks this response: answer from the cache when possible and
+	// warm it in the background otherwise. A response with the auth fields
+	// omitted means "still checking" - the client re-polls until they appear.
 	if provider != "" && review.GetAuth() == config.ReviewAuthCLI {
-		authCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), 8*time.Second)
-		defer cancel()
-		if ok, detail, _ := forge.AuthStatus(authCtx, provider); detail != "" || ok {
-			resp.Authenticated = &ok
-			resp.AuthStatus = ptr(detail)
+		if e, ok := peekAuthStatus(provider); ok {
+			resp.Authenticated = &e.ok
+			resp.AuthStatus = ptr(e.detail)
 		}
+		warmAuthStatus(provider)
 	}
 	return resp
+}
+
+// authStatusCache memoizes forge.AuthStatus per provider, refreshed by a
+// background goroutine (warmAuthStatus) so GetReviewConfig never waits on the
+// gh/glab shell-out. Logged-in results are trusted for a few minutes (auth
+// rarely revokes); logged-out results only briefly, so "run `gh auth login`"
+// -> reopen the Create MR dialog shows the fix promptly. Expired entries are
+// still served (stale-while-revalidate) while the refresh runs.
+var authStatusCache = struct {
+	sync.Mutex
+	entries  map[string]authStatusEntry
+	inFlight map[string]bool
+}{entries: map[string]authStatusEntry{}, inFlight: map[string]bool{}}
+
+type authStatusEntry struct {
+	ok     bool
+	detail string
+	at     time.Time
+}
+
+const (
+	authStatusOKTTL   = 5 * time.Minute
+	authStatusFailTTL = 15 * time.Second
+)
+
+func (e authStatusEntry) fresh() bool {
+	ttl := authStatusFailTTL
+	if e.ok {
+		ttl = authStatusOKTTL
+	}
+	return time.Since(e.at) < ttl
+}
+
+// peekAuthStatus returns the cached auth status (fresh or stale) without ever
+// running a check.
+func peekAuthStatus(provider string) (authStatusEntry, bool) {
+	authStatusCache.Lock()
+	defer authStatusCache.Unlock()
+	e, ok := authStatusCache.entries[provider]
+	return e, ok
+}
+
+// warmAuthStatus refreshes the cached auth status in the background when it is
+// missing or expired. At most one check per provider runs at a time. The result
+// is always stored - including failures - so `authenticated` is eventually an
+// explicit true/false rather than forever "unknown".
+func warmAuthStatus(provider string) {
+	authStatusCache.Lock()
+	e, cached := authStatusCache.entries[provider]
+	if (cached && e.fresh()) || authStatusCache.inFlight[provider] {
+		authStatusCache.Unlock()
+		return
+	}
+	authStatusCache.inFlight[provider] = true
+	authStatusCache.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		ok, detail, _ := forge.AuthStatus(ctx, provider)
+		authStatusCache.Lock()
+		authStatusCache.entries[provider] = authStatusEntry{ok: ok, detail: detail, at: time.Now()}
+		authStatusCache.inFlight[provider] = false
+		authStatusCache.Unlock()
+	}()
 }
 
 // ArmPublishWhenGreen arms publish-when-green for a head (3.5).
