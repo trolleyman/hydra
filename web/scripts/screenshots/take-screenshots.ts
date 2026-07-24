@@ -1106,12 +1106,12 @@ try {
       // viewportOnly: the menu is a fixed overlay anchored to the trigger at the
       // top-left, so the default viewport already frames both the box and menu.
       { name: 'spawn-agent-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label^="Agent and model:"]' },
-      // The same picker with a model already selected (seeded Claude → Opus): the
+      // The same picker with a model already selected (seeded Claude → Opus 5): the
       // compact trigger shows the model label beside the brand mark, and the open
-      // menu shows the nested per-agent model rows with Opus checked. Documents
+      // menu shows the nested per-agent model rows with Opus 5 checked. Documents
       // the model selector's selected state (the picked model is remembered per
       // agent type in StorageKeys.defaultModel and pins the CLI's --model at spawn).
-      { name: 'spawn-model-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, seedModel: { claude: 'opus' }, click: 'button[aria-label^="Agent and model:"]' },
+      { name: 'spawn-model-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, seedModel: { claude: 'claude-opus-5' }, click: 'button[aria-label^="Agent and model:"]' },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens

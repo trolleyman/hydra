@@ -22,5 +22,13 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // TanStack Router route files are `export const Route = createFileRoute(...)(...)`
+      // (or createRootRoute(...)) alongside a local page component. eslint-plugin-react-refresh
+      // v0.5 stopped recognizing those route-factory calls as component exports, so register
+      // them as HOCs - that keeps `Route` counted as the file's component export and Fast
+      // Refresh happy, without splitting every route into two files.
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true, extraHOCs: ['createFileRoute', 'createRootRoute'] }],
+    },
   },
 ])
