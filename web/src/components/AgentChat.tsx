@@ -6870,6 +6870,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       rest = rest.slice(m.index + m[0].length)
     }
     if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    // eslint-disable-next-line no-useless-assignment -- final key++ is a dead store, but keep it consistent with the pushes above
     if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }

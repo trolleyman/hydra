@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Github, GitlabIcon } from 'lucide-react'
+import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink } from 'lucide-react'
+// lucide-react dropped brand glyphs in v1, so the forge icons come from
+// simple-icons instead (@icons-pack/react-simple-icons).
+import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
 import type { AgentResponse } from '../api/models/AgentResponse'
 import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { Badge } from './Badge'
@@ -15,8 +18,8 @@ function FieldLabel({ children }: { children: ReactNode }) {
 
 // providerIcon returns the small forge glyph for a provider name.
 export function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
-  if (provider === 'github') return <Github className={className} />
-  if (provider === 'gitlab') return <GitlabIcon className={className} />
+  if (provider === 'github') return <SiGithub className={className} />
+  if (provider === 'gitlab') return <SiGitlab className={className} />
   return <GitPullRequest className={className} />
 }
 
