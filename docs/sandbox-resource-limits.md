@@ -1,10 +1,10 @@
 # Sandbox resource limits (configurable cgroup limits + Settings UI)
 
-Status: **proposed, unbuilt**. This is the design + build order for making the
-per-workload systemd-scope cgroup limits configurable per project and editable
-from the web Settings UI. The scope-wrapping machinery it builds on is already
-shipped (see "What exists today"); this doc is only about making its limits
-configurable.
+Status: **built**. This was the design + build order for making the per-workload
+systemd-scope cgroup limits configurable per project and editable from the web
+Settings UI; it is now implemented (see the build order below for the map of what
+landed where). The scope-wrapping machinery it builds on was already shipped (see
+"What exists today"). The two "Also worth doing" items remain optional and unbuilt.
 
 ## Motivation
 

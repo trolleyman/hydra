@@ -91,7 +91,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Improving the diff review workflow** (per-file "viewed" state, "reviewed up
   to" marker) -> [docs/diff-review-state.md](docs/diff-review-state.md) (proposed,
   unbuilt design + build order)
-- **Making sandbox scope cgroup limits configurable** (CPU/IO weight, CPU quota,
-  memory max, tasks max via `[resources]` config + a Settings UI section) ->
-  [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (proposed,
-  unbuilt design + build order; the scope-wrapping it builds on is already shipped)
+- **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
+  max via the `[resources]` config table + the Settings "Resource limits" section)
+  -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
+  `sandbox.ScopeLimits` + `WrapScope(unit, spec, limits)`, per-controller
+  delegation probe, `config.ResolveResourceLimits`)
