@@ -281,7 +281,6 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 			Timeout:   2 * time.Second,
 			Transport: &http.Transport{DisableKeepAlives: true},
 		}
-		hinted := false
 		for {
 			select {
 			case <-probeCtx.Done():
@@ -294,17 +293,13 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 					markReady()
 					return
 				}
-				// Under hard mode a raw dial that succeeds while HTTP keeps
-				// failing means the port is held (by pasta) but the server bound
-				// loopback INSIDE the netns, where pasta's inbound forward can't
-				// reach it. Surface a one-time hint so the log points at the fix.
-				if hardMode && !hinted {
-					if c, derr := net.DialTimeout("tcp", addr, time.Second); derr == nil {
-						_ = c.Close()
-						hinted = true
-						in.appendLog("hydra: port is open but the server isn't answering HTTP - under network mode hard the server must bind 0.0.0.0 (use HYDRA_PREVIEW_ADDR), not 127.0.0.1", "stderr")
-					}
-				}
+				// No bind-address hint here: under hard mode pasta holds the
+				// host port and completes TCP handshakes even while nothing
+				// inside the netns listens, so during a long build "dial ok,
+				// HTTP dead" is the NORMAL starting state and a mid-probe
+				// warning fires spuriously on every spawn. The hint is
+				// attached to the ready-deadline failure below instead, the
+				// point where it is actually diagnostic.
 			}
 		}
 	}()
@@ -318,6 +313,14 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 		in.mu.Unlock()
 		if expired {
 			in.appendLog(fmt.Sprintf("hydra: server not ready after %s, giving up", readyDeadline), "stderr")
+			if hardMode {
+				// The likeliest config mistake behind never-ready under hard
+				// mode: the server bound loopback INSIDE the netns, where
+				// pasta's inbound forward can't reach it. (A raw dial can't
+				// distinguish this - pasta ACKs regardless - hence a hint at
+				// give-up time rather than a check during startup.)
+				in.appendLog("hydra: if the server was listening, check its bind address - under network mode hard it must bind 0.0.0.0 (use HYDRA_PREVIEW_ADDR), not 127.0.0.1", "stderr")
+			}
 			terminateGroup(cmd.Process.Pid)
 		}
 	}()
