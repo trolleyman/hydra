@@ -2658,6 +2658,12 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			Provider:           ptr("gitlab"),
 			PushBranchTemplate: ptr("feat/{ticket}-{id}"),
 		}
+		// Resource limits: a lowered CPU weight plus a hard memory cap in the
+		// shared project config, so the Resource limits section renders populated.
+		resp.Resources = &api.ResourceLimits{
+			CpuWeight: ptr(30),
+			MemoryMax: ptr(4096),
+		}
 	case *params.Scope == api.GetConfigParamsScopeLocal:
 		resp.Review = &api.ReviewConfig{DefaultAction: ptr("create_mr")}
 	}

@@ -7,6 +7,7 @@ import { AgentTypeIcon, type AgentTypeIconName } from '../AgentTypeIcon'
 import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
 import { SettingSection, type SettingsSection } from './shared'
 import { ReviewSection } from './ReviewSection'
+import { ResourceLimitsSection } from './ResourceLimitsSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
 import { TestsEditor } from './TestsEditor'
@@ -158,6 +159,14 @@ export function SettingsContent({
           scope={scope}
         />
       )}
+      {/* Resource limits apply to every scoped workload of a project and layer
+          like other config, so they are offered at all scopes (a user-scope
+          value is the default for every project). */}
+      <ResourceLimitsSection
+        resources={config.resources}
+        onChange={(resources) => setConfig({ ...config, resources: resources ?? undefined })}
+        scope={scope}
+      />
       <SettingSection
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."
