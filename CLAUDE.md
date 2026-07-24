@@ -50,10 +50,10 @@ and ellipses.
 
 ### No UPPERCASE headings in the UI
 
-Do **not** use all-caps text for headings, section labels, or titles in the web
-UI. Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
-CONTROLS"). If a heading needs to read as uppercase visually, do it with CSS
-(`text-transform: uppercase`), not by capitalising the string literal.
+Do **not** render headings, section labels, or titles in the web UI as all-caps.
+Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
+CONTROLS"). This covers both capitalised string literals *and* CSS - do not reach
+for `text-transform: uppercase` to get the uppercase look either.
 
 ### No raw control bytes in source
 
