@@ -182,6 +182,14 @@ func runSimulationServer() error {
 	// the real server's non-OpenAPI route), so that toggle can be screenshotted.
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 
+	// Auth status (mirrors the real server's non-OpenAPI route): the sim is
+	// always local/authenticated. Without it every page load logs a 404 in the
+	// console - noise when the sim is used as a live preview.
+	mux.HandleFunc("GET /api/auth/status", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth_required":false,"authenticated":true}`))
+	})
+
 	registerFrontend(mux)
 
 	addr := defaultWebAddr

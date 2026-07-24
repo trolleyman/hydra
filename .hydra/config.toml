@@ -27,7 +27,7 @@ pre_prompt = '''
   - Useful pages: /project/sim-project/agent/agent-1 (8-file diff, largest, incl. a >1000-changed-lines hidden "Load diff" file), agent-2 (small diff incl. a plaintext .txt file, tests panel data), agent-md (markdown / running-tests states).
   - Playwright scripts MUST live under web/ (node resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers from web/ with `cd web && npx playwright install chromium` (playwright is a devDependency, so this runs the pinned local version).
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
-  - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available, /api/auth/status.
+  - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available.
 '''
 
 ## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.
@@ -250,7 +250,11 @@ timeout_sec = 900
 # after that transparently respawns it. The frontend build dominates spawn
 # time, hence the generous ready timeout.
 type = "server"
-command = "cd web && npm install && npm run build && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
+# --mode development builds the frontend unminified with sourcemaps (see the
+# isDev switch in web/vite.config.ts), so an error in the previewed app gives a
+# readable stack trace instead of minified chunk soup. The preview exists to
+# inspect and debug UI changes; readable beats small here.
+command = "cd web && npm install && npm run build -- --mode development && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
 ## [services.<name>]: per-project long-running commands the daemon supervises while

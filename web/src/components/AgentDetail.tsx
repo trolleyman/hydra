@@ -1474,8 +1474,10 @@ export function AgentDetail({
   // with prefilled values - the fetch no longer gates the popup. Deduped in the
   // store, so this and the root layout's fetch produce a single request.
   useEffect(() => {
-    if (projectId && !reviewConfig) void ensureReviewConfig(projectId)
-  }, [projectId, reviewConfig])
+    // Unconditional: a persisted snapshot may already be in the store, but
+    // ensureReviewConfig still owes one background refresh per session.
+    if (projectId) void ensureReviewConfig(projectId)
+  }, [projectId])
 
   // openCreateMR opens the Create MR dialog immediately, refreshing the config
   // in the background rather than blocking the popup on a network round-trip.

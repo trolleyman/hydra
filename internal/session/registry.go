@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -304,13 +305,33 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("build sandbox spec: %w", err))
 	}
 
+	// Run the sandbox inside a transient systemd user scope (best-effort) so its
+	// process subtree gets its own cgroup, weight limits and a single kill
+	// handle, and can't outlive the daemon by reparenting to systemd. If the
+	// wrapped spawn fails to exec (e.g. a systemd hiccup), fall back to launching
+	// the sandbox directly so a scope problem can never block an agent.
+	origPath, origArgs := spec.Path, spec.Args
+	unit := sandbox.ScopeUnit("", opts.ID)
+	scoped := sandbox.WrapScope(unit, spec)
+
 	proc, err := startProcess(spec, opts.Rows, opts.Cols)
+	if err != nil && scoped {
+		log.Printf("session %s: scoped spawn failed (%v); retrying unscoped", opts.ID, err)
+		sandbox.StopScope(unit)
+		spec.Path, spec.Args = origPath, origArgs
+		scoped = false
+		proc, err = startProcess(spec, opts.Rows, opts.Cols)
+	}
 	if err != nil {
 		spec.Cleanup()
 		return nil, errtrace.Wrap(fmt.Errorf("start sandboxed process: %w", err))
 	}
 
-	return r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, KindTerminal, proc, spec.Cleanup), nil
+	sess := r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, KindTerminal, proc, spec.Cleanup)
+	if scoped {
+		sess.setScopeUnit(unit)
+	}
+	return sess, nil
 }
 
 // StartWithProc registers a session backed by an already-running process (e.g.

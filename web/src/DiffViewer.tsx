@@ -22,6 +22,7 @@ import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
+import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
@@ -307,10 +308,32 @@ const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-p
 // arithmetically identical to brightness(1-a), so the light-mode tint is unchanged.
 const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:after:absolute hover:after:inset-0 hover:after:bg-black/[0.05] dark:hover:after:bg-white/[0.04]"
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+// Intra-line "word diff" tints. A changed line already carries a faint whole-row
+// tint (bg-*-50); these darker spans mark the exact characters that differ so the
+// eye lands on the actual edit rather than re-reading the whole line. Deletions
+// read red, additions green - the same red/green language as the row.
+const WORD_DEL_CLASS = 'rounded-[2px] bg-red-300/45 dark:bg-red-400/25'
+const WORD_ADD_CLASS = 'rounded-[2px] bg-green-300/45 dark:bg-green-400/25'
+
+// Empty maps shared by every line without word-diff data, so the memo'd hunks
+// keep a stable prop identity when word highlighting is off or a file has none.
+const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
+
+// codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
+// overlay when this line has changed ranges, else the plain syntax-highlighted
+// HTML. Returns null to signal "render the raw content as a text node" (no
+// highlight, no word ranges) - the safe path that needs no dangerouslySetInnerHTML.
+function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string): string | null {
+  if (ranges && ranges.length) return renderWordDiffHtml(highlighted, content, ranges, wordClass)
+  return highlighted ?? null
+}
+
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  wordRangesOld: Map<number, WordRange[]>
+  wordRangesNew: Map<number, WordRange[]>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
@@ -329,6 +352,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const highlighted = isAdd
           ? (line.new_line_num != null ? highlightedNew.get(line.new_line_num) : undefined)
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
+        const wordRanges = isAdd
+          ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
+          : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
+        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const selOld = selectionHas(selection, 'old', line.old_line_num)
         const selNew = selectionHas(selection, 'new', line.new_line_num)
@@ -349,8 +376,8 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
               </span>
               {isNoNewline ? (
                 <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
-              ) : highlighted ? (
-                <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
+              ) : codeHtml != null ? (
+                <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: codeHtml }} />
               ) : (
                 <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
               )}
@@ -382,10 +409,12 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  wordRangesOld: Map<number, WordRange[]>
+  wordRangesNew: Map<number, WordRange[]>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
@@ -400,6 +429,12 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
+        // Word-diff overlay only for a real changed line (deletion/addition), not
+        // a context line shown on both sides.
+        const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
+        const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
+        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS) : null
+        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
@@ -417,8 +452,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
                 </span>
-                {line.oldContent != null && oldHighlighted
-                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
+                {line.oldContent != null && oldCodeHtml != null
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldCodeHtml }} />
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
@@ -432,8 +467,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
                 </span>
-                {line.newContent != null && newHighlighted
-                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
+                {line.newContent != null && newCodeHtml != null
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newCodeHtml }} />
                   : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
                 }
               </div>
@@ -788,9 +823,12 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
   file: DiffFile
   sideBySide: boolean
+  // Highlight the exact changed words within a modified line (on top of the
+  // whole-row tint). Defaults on; the diff toolbar's settings cog toggles it.
+  wordHighlight?: boolean
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
   // Optional "Add to review" (queue for batch submit). Omitted in the read-only
@@ -947,6 +985,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   }, [highlightSource, lang])
   const { highlightedOld, highlightedNew } = syncHighlight ?? asyncHighlight
 
+  // Word-diff ranges: for each changed line, the character sub-ranges that
+  // actually differ from its paired line (so the viewer can tint just those
+  // words). Computed from the same line list as the highlighting and keyed the
+  // same way (old_line_num / new_line_num), memoised off hunksSig so a no-op
+  // background refresh doesn't recompute it. Empty maps when the toggle is off.
+  const { wordRangesOld, wordRangesNew } = useMemo(() => {
+    if (!wordHighlight || !highlightSource) return { wordRangesOld: EMPTY_WORD_RANGES, wordRangesNew: EMPTY_WORD_RANGES }
+    const maps = buildWordRangeMaps(highlightSource)
+    return { wordRangesOld: maps.old, wordRangesNew: maps.new }
+  }, [highlightSource, wordHighlight])
+
   // Placeholder height while the body is lazy-unmounted. Also used directly as
   // the tween wrapper's height during that phase: bodyH is 0 until the
   // ResizeObserver's first measurement, and if every card rendered at ~0 body
@@ -1016,8 +1065,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
@@ -1198,8 +1249,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
                         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
                         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
@@ -2052,6 +2105,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
+  const [wordHighlight, setWordHighlight] = useState(() => readLocal(StorageKeys.diffWordHighlight) !== 'false')
   const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
   const [fileView, setFileView] = useState<FileView>(() => {
     const stored = readLocal(StorageKeys.diffFileView)
@@ -2111,6 +2165,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(sideBySide)) }, [sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(ignoreWhitespace)) }, [ignoreWhitespace])
+  useEffect(() => { writeLocal(StorageKeys.diffWordHighlight, String(wordHighlight)) }, [wordHighlight])
   useEffect(() => { writeLocal(StorageKeys.diffSingleFile, String(singleFile)) }, [singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
@@ -2862,6 +2917,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
       <div className="flex flex-col gap-0.5">
         <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />
+        <SettingsOptionRow type="checkbox" checked={wordHighlight} onChange={setWordHighlight} label="Highlight changed words" />
         <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
         <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
       </div>
@@ -3005,6 +3061,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               key={diff.files[singleFileIdx]?.path}
               file={diff.files[singleFileIdx]!}
               sideBySide={sideBySide}
+              wordHighlight={wordHighlight}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
@@ -3027,7 +3084,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
-            <FileDiff key={f.path} file={f} sideBySide={sideBySide}
+            <FileDiff key={f.path} file={f} sideBySide={sideBySide} wordHighlight={wordHighlight}
               isCollapsed={collapsedFiles.has(f.path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
