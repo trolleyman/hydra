@@ -48,6 +48,7 @@ import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
+import { pruneReviewDrafts } from '../lib/reviewDrafts'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
@@ -562,6 +563,7 @@ function RootLayout() {
   useEffect(() => {
     pruneArtifactPrefs()
     pruneAgentViewPrefs()
+    pruneReviewDrafts()
     try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
   }, [])
 
