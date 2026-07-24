@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"syscall"
 
 	"braces.dev/errtrace"
 	"github.com/creack/pty"
@@ -26,15 +25,16 @@ func startProcess(spec *sandbox.Spec, rows, cols uint16) (*ptyProcess, error) {
 	cmd.Dir = spec.Dir
 	cmd.ExtraFiles = spec.ExtraFiles
 
-	// Tie the sandbox to the daemon's lifetime. If the daemon dies for any
-	// reason the graceful drain can't handle - a crash, an outright SIGKILL, a
-	// botched auto-upgrade - the kernel SIGKILLs the outermost sandbox process
-	// (pasta in hard-egress mode, otherwise bwrap). bwrap's own
-	// --die-with-parent then cascades the kill down through the unshared PID
-	// namespace, so the agent (and anything it spawned, e.g. a headless Chrome)
-	// dies too instead of being reparented to systemd and left running.
-	// creack/pty preserves this SysProcAttr and layers Setsid+Setctty on top.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	// Tie the sandbox to the daemon's lifetime (Linux only; Pdeathsig is not a
+	// darwin/bsd SysProcAttr field). If the daemon dies for any reason the
+	// graceful drain can't handle - a crash, an outright SIGKILL, a botched
+	// auto-upgrade - the kernel SIGKILLs the outermost sandbox process (pasta in
+	// hard-egress mode, otherwise bwrap). bwrap's own --die-with-parent then
+	// cascades the kill down through the unshared PID namespace, so the agent
+	// (and anything it spawned, e.g. a headless Chrome) dies too instead of being
+	// reparented to systemd and left running. creack/pty preserves this
+	// SysProcAttr and layers Setsid+Setctty on top.
+	setPdeathsig(cmd)
 
 	if rows == 0 {
 		rows = 24
