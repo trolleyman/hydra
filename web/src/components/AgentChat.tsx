@@ -155,12 +155,12 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const label = mergeChipLabel(item.subject, count)
   const shown = item.merged?.length ?? 0
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex max-w-full flex-col items-center gap-1">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-[90%]`}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full`}
         title={expanded ? 'Hide merged commits' : 'Show merged commits'}
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
@@ -168,7 +168,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         <span className="truncate">{label}</span>
       </button>
       {expanded && shown > 0 && (
-        <div className="flex w-full max-w-[90%] flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
+        <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
           {item.merged!.map((m) => (
             <div
               key={m.sha}
