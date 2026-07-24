@@ -178,6 +178,17 @@ export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
 export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
+// Pending review comments the user has queued (via "Add to review" in the diff
+// viewer) but not yet submitted to the agent - one draft per project + agent, so
+// each agent accumulates its own batch and the "Submit review" button in the
+// Changes bar can flush them all at once. Kept in a dedicated store (not
+// agentViewPrefs) because this is user-authored content with its own
+// clear-on-submit lifecycle, not view state. See lib/reviewDrafts.ts. projectId
+// may be null → '_' keeps the key shape stable.
+export const REVIEW_DRAFT_PREFIX = 'hydra-review-draft-'
+export const reviewDraftKey = (projectId: string | null, agentId: string): string =>
+  `${REVIEW_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
 // collapsed (the default - archived history is rarely wanted, so it stays out of
 // the way); '0' = the user explicitly expanded it. (Legacy '1' values from when
