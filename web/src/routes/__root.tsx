@@ -815,13 +815,34 @@ function RootLayout() {
             {currentProjectId ? (
               (() => {
                 const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
+                const ahead = pushStatus?.ahead ?? 0
+                const behind = pushStatus?.behind ?? 0
+                const canSync = (ahead > 0 || behind > 0) && !!pushStatus?.has_remote && !!pushStatus?.branch && !syncing
+                const remote = pushStatus?.remote ?? 'remote'
+                const statusTooltip = [
+                  behind > 0 ? `${behind} behind` : null,
+                  ahead > 0 ? `${ahead} ahead` : null,
+                ].filter(Boolean).join(', ') + ` ${remote}`
+                const syncTooltip = syncing
+                  ? 'Syncing...'
+                  : !pushStatus
+                    ? 'Sync with remote'
+                    : !pushStatus.has_remote
+                      ? 'No remote to sync with'
+                      : !pushStatus.branch
+                        ? 'Detached HEAD - cannot sync'
+                        : behind > 0 && ahead > 0
+                          ? `Sync: pull ${behind}, push ${ahead}`
+                          : behind > 0
+                            ? `Pull ${behind} commit${behind === 1 ? '' : 's'} from ${remote}`
+                            : ahead > 0
+                              ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
+                              : `Up to date with ${remote}`
+                const inSync = !!pushStatus && ahead === 0 && behind === 0
                 return (
                   <>
-                    {/* A single row: the Repository link (labelled with the
-                        project's path) with the forge web link right-aligned
-                        after it. Git state (branch/dirty/ahead/behind/Sync)
-                        lives in the status line pinned above the sidebar
-                        footer, so this section never changes shape. */}
+                    {/* Row 1: the Repository link (labelled with the project's
+                        path) with the forge web link right-aligned after it. */}
                     <div className="flex items-center gap-1">
                       <Link
                         to="/project/$projectId/repository"
@@ -877,6 +898,63 @@ function RootLayout() {
                         </Tooltip>
                       )}
                     </div>
+                    {/* Row 2: the git status line - ALWAYS rendered (a row that
+                        came and went with every merge made the layout jump
+                        constantly). Branch fills the left; dirty/ahead-behind
+                        chips and Sync sit right. When clean and in sync it
+                        reads "up to date" instead of emptying. */}
+                    <div className="px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                      <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
+                        {pushStatus ? (pushStatus.branch || 'detached') : '...'}
+                      </span>
+                      <div className="flex-1" />
+                      {/* Uncommitted-changes warning: the project checkout is dirty
+                          (e.g. a Settings save rewrote .hydra/config.toml). Click to
+                          review the paths and commit them all. */}
+                      {pushStatus && pushStatus.uncommitted.total > 0 && (
+                        <UncommittedChip
+                          uncommitted={pushStatus.uncommitted}
+                          committing={committing}
+                          onCommit={handleCommit}
+                        />
+                      )}
+                      {behind > 0 || ahead > 0 ? (
+                        <Tooltip content={statusTooltip} className="shrink-0">
+                          <span className="flex items-center gap-1 font-medium tabular-nums select-none">
+                            {behind > 0 && (
+                              <span className="flex items-center text-amber-600 dark:text-amber-400">
+                                <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                              </span>
+                            )}
+                            {ahead > 0 && (
+                              <span className="flex items-center">
+                                <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                              </span>
+                            )}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <span className="select-none text-gray-400 dark:text-gray-500">
+                          {!pushStatus ? '' : !pushStatus.has_remote ? 'no remote' : inSync ? 'up to date' : ''}
+                        </span>
+                      )}
+                      <Tooltip content={syncTooltip} className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSync}
+                          disabled={!canSync}
+                          aria-label={syncTooltip}
+                          className={
+                            canSync
+                              ? 'inline-flex items-center p-1 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                              : 'inline-flex items-center p-1 rounded-md text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          }
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                        </button>
+                      </Tooltip>
+                    </div>
                   </>
                 )
               })()
@@ -900,92 +978,6 @@ function RootLayout() {
             onDeselect={handleAgentDeselect}
             archivedSentinelRef={archivedSentinelRef}
           />
-
-          {/* Git status line - pinned above the footer, ALWAYS rendered for the
-              selected project (a row that came and went with every merge made
-              the layout jump constantly). Branch fills the left; dirty/
-              ahead-behind chips and Sync sit right where they're easy to find.
-              When clean and in sync it reads "up to date" instead of emptying. */}
-          {currentProjectId && (() => {
-            const ahead = pushStatus?.ahead ?? 0
-            const behind = pushStatus?.behind ?? 0
-            const canSync = (ahead > 0 || behind > 0) && !!pushStatus?.has_remote && !!pushStatus?.branch && !syncing
-            const remote = pushStatus?.remote ?? 'remote'
-            const statusTooltip = [
-              behind > 0 ? `${behind} behind` : null,
-              ahead > 0 ? `${ahead} ahead` : null,
-            ].filter(Boolean).join(', ') + ` ${remote}`
-            const syncTooltip = syncing
-              ? 'Syncing...'
-              : !pushStatus
-                ? 'Sync with remote'
-                : !pushStatus.has_remote
-                  ? 'No remote to sync with'
-                  : !pushStatus.branch
-                    ? 'Detached HEAD - cannot sync'
-                    : behind > 0 && ahead > 0
-                      ? `Sync: pull ${behind}, push ${ahead}`
-                      : behind > 0
-                        ? `Pull ${behind} commit${behind === 1 ? '' : 's'} from ${remote}`
-                        : ahead > 0
-                          ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
-                          : `Up to date with ${remote}`
-            const inSync = !!pushStatus && ahead === 0 && behind === 0
-            return (
-              <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-1.5 shrink-0 text-xs text-gray-500 dark:text-gray-400">
-                <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
-                  {pushStatus ? (pushStatus.branch || 'detached') : '...'}
-                </span>
-                <div className="flex-1" />
-                {/* Uncommitted-changes warning: the project checkout is dirty
-                    (e.g. a Settings save rewrote .hydra/config.toml). Click to
-                    review the paths and commit them all. */}
-                {pushStatus && pushStatus.uncommitted.total > 0 && (
-                  <UncommittedChip
-                    uncommitted={pushStatus.uncommitted}
-                    committing={committing}
-                    onCommit={handleCommit}
-                  />
-                )}
-                {behind > 0 || ahead > 0 ? (
-                  <Tooltip content={statusTooltip} className="shrink-0">
-                    <span className="flex items-center gap-1 font-medium tabular-nums select-none">
-                      {behind > 0 && (
-                        <span className="flex items-center text-amber-600 dark:text-amber-400">
-                          <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
-                        </span>
-                      )}
-                      {ahead > 0 && (
-                        <span className="flex items-center">
-                          <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
-                        </span>
-                      )}
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <span className="select-none text-gray-400 dark:text-gray-500">
-                    {!pushStatus ? '' : !pushStatus.has_remote ? 'no remote' : inSync ? 'up to date' : ''}
-                  </span>
-                )}
-                <Tooltip content={syncTooltip} className="shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleSync}
-                    disabled={!canSync}
-                    aria-label={syncTooltip}
-                    className={
-                      canSync
-                        ? 'inline-flex items-center p-1 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                        : 'inline-flex items-center p-1 rounded-md text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                    }
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                  </button>
-                </Tooltip>
-              </div>
-            )
-          })()}
 
           {/* Sidebar footer - a single row: restart (icon) + uptime on the left,
               Claude usage + Settings (icon) on the right. The theme switcher now
