@@ -85,7 +85,7 @@ describe('composerHistory', () => {
     let h = initHistory(snap(''))
     h = commitHistory(h, snap('a'), true, (t += 10))
     h = commitHistory(h, snap('ab'), true, (t += 10))
-    h = commitHistory(h, snap('abc'), true, (t += 10))
+    h = commitHistory(h, snap('abc'), true, t + 10)
     // One step back to the empty baseline, not three.
     expect(h.past.length).toBe(1)
     h = undoHistory(h)

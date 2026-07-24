@@ -9,7 +9,7 @@ const source = await fs.readFile('src/routeTree.gen.ts', 'utf-8')
 // Extract full paths from FileRoutesByFullPath interface keys.
 // These are the canonical full URL paths (not relative child paths).
 const fullPathBlock = source.match(/export interface FileRoutesByFullPath \{([^}]+)\}/s)
-let validPaths: string[] = []
+let validPaths: string[]
 if (fullPathBlock) {
   const keyMatches = [...fullPathBlock[1].matchAll(/'([^']+)':/g)]
   validPaths = [...new Set(keyMatches.map((m) => m[1]))]
