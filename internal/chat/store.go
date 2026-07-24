@@ -398,6 +398,38 @@ func (s *Store) Before(cursor string, limit int) ([]Event, string, bool, error) 
 	return out, next, start == 0, nil
 }
 
+// SubagentEvents returns every display event belonging to sub-agent subID (its
+// sidechain steps, which carry agent_id == subID in the payload), oldest-first.
+// Stream-only deltas are excluded, mirroring Before. Unlike the main history
+// window this is deliberately NOT paginated: a single sub-agent's transcript is
+// bounded, and the client needs all of it to render the sub-agent's tab on
+// demand - a sub-agent's steps may sit entirely outside the loaded main
+// conversation window (an early sub-agent in a long chat), so paging the main
+// history to reach them is neither reliable nor cheap. The lifecycle
+// (subagent_started/completed) events are keyed by id, not agent_id, and reach
+// the client via the projection snapshot, so they are intentionally omitted.
+func (s *Store) SubagentEvents(subID string) []Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if subID == "" {
+		return nil
+	}
+	var out []Event
+	for _, ev := range s.events {
+		if streamOnly(ev.Type) {
+			continue
+		}
+		var v struct {
+			AgentID string `json:"agent_id"`
+		}
+		if json.Unmarshal(ev.Payload, &v) != nil || v.AgentID != subID {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
 // pendingStream reconstructs the block currently being produced from the tail
 // of the log: the run of deltas after the last event that would have settled or
 // abandoned it. Callers must hold s.mu.
