@@ -72,6 +72,80 @@ let cancelActive: (() => void) | null = null
 // would drag every card in between into the mount margin, which is both slow
 // and pointless when none of it is meant to be read. Any real user scroll input
 // aborts - we never fight the user for the scrollbar.
+// scrollToDiffLine centres a specific diff line (identified by its gutter
+// `data-diff-ln="<side>:<num>"` cell, scoped to one file's card so the same line
+// number in other files can't be matched) in the scroll container, and keeps
+// correcting until the layout settles - same rationale as scrollCardToTop.
+//
+// The card is re-acquired every frame via getCard() because the target file may
+// not be mounted yet at call time (single-file view swaps the card; a collapsed
+// or hidden file mounts its body only once it nears the viewport). Until the row
+// exists we glide the card toward the top to force its lazy body to mount; once
+// the row appears we glide it to the vertical centre. onArrive fires once, when
+// the row first lands, for a transient highlight.
+export function scrollToDiffLine(
+  getCard: () => HTMLElement | null,
+  side: 'old' | 'new',
+  lineNum: number,
+  onArrive?: (row: HTMLElement) => void,
+) {
+  cancelActive?.()
+  const sel = `[data-diff-ln="${side}:${lineNum}"]`
+  const start = performance.now()
+  let raf = 0
+  let arrivedAt = 0
+  let scroller: HTMLElement | null = null
+  const stop = () => {
+    cancelAnimationFrame(raf)
+    if (scroller) for (const ev of USER_SCROLL_EVENTS) scroller.removeEventListener(ev, stop)
+    if (cancelActive === stop) cancelActive = null
+  }
+  const glide = (delta: number) => {
+    const jump = Math.abs(delta) > 2 * scroller!.clientHeight || performance.now() - start >= GLIDE_MAX_MS
+    scroller!.scrollTop += jump
+      ? delta
+      : Math.sign(delta) * Math.min(Math.abs(delta), Math.max(GLIDE_MIN_STEP, Math.abs(delta) * GLIDE_FRACTION))
+  }
+  const step = () => {
+    const now = performance.now()
+    const card = getCard()
+    // Bind the scroller (and its user-scroll aborts) as soon as a card exists.
+    if (card && !scroller) {
+      scroller = scrollerFor(card)
+      if (scroller) for (const ev of USER_SCROLL_EVENTS) scroller.addEventListener(ev, stop, { passive: true })
+    }
+    if (!card || !scroller) {
+      if (now - start >= DEADLINE_MS) return stop()
+      raf = requestAnimationFrame(step)
+      return
+    }
+    const row = card.querySelector<HTMLElement>(sel)
+    if (!row) {
+      // Phase A: no row yet - dock the card near the top so its lazy body mounts.
+      if (now - start >= DEADLINE_MS) return stop()
+      const margin = parseFloat(getComputedStyle(card).scrollMarginTop) || 0
+      glide(card.getBoundingClientRect().top - (scroller.getBoundingClientRect().top + margin))
+      raf = requestAnimationFrame(step)
+      return
+    }
+    // Phase B: centre the row and settle.
+    const sc = scroller.getBoundingClientRect()
+    const rr = row.getBoundingClientRect()
+    const delta = (rr.top + rr.height / 2) - (sc.top + scroller.clientHeight / 2)
+    if (Math.abs(delta) <= 1) {
+      if (!arrivedAt) { arrivedAt = now; onArrive?.(row) }
+      if (now - arrivedAt >= SETTLE_MS) return stop()
+    } else if (now - start >= DEADLINE_MS) {
+      return stop()
+    } else {
+      arrivedAt = 0
+      glide(delta)
+    }
+    raf = requestAnimationFrame(step)
+  }
+  raf = requestAnimationFrame(step)
+}
+
 export function scrollCardToTop(el: HTMLElement) {
   cancelActive?.()
   const scroller = scrollerFor(el)

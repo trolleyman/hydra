@@ -73,13 +73,18 @@ export function useServerData<T = unknown, A = void>(
   const [loading, setLoading] = useState(false)
 
   // Latest closures via refs so the effect (re-run only on key/deps) always calls
-  // the freshest fetcher/onData without listing them as effect deps.
+  // the freshest fetcher/onData without listing them as effect deps. The refs are
+  // updated in an effect (not during render - a render must never mutate a ref);
+  // declared BEFORE the data effect below so they are already fresh whenever it runs
+  // in the same commit (effects fire in declaration order).
   const fetcherRef = useRef(fetcher)
-  fetcherRef.current = fetcher
   const onDataRef = useRef(options.onData)
-  onDataRef.current = options.onData
   const initialRef = useRef(initial)
-  initialRef.current = initial
+  useEffect(() => {
+    fetcherRef.current = fetcher
+    onDataRef.current = options.onData
+    initialRef.current = initial
+  })
 
   // refetch routes through this ref, so its own identity stays stable even as the
   // live fetch fn is swapped out on each key change (or cleared on disable).

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
@@ -48,8 +48,12 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
 
   // Read through a ref so a sync that finishes after the user switches projects
   // only paints its result if they're still looking at the project it ran for.
+  // Written in an effect (a render must never mutate a ref); handleSync only reads
+  // it asynchronously, after this effect has committed.
   const currentProjectIdRef = useRef(currentProjectId)
-  currentProjectIdRef.current = currentProjectId
+  useEffect(() => {
+    currentProjectIdRef.current = currentProjectId
+  })
 
   const handleSync = useCallback(async () => {
     if (!currentProjectId || syncingProjects.has(currentProjectId)) return

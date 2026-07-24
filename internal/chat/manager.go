@@ -562,6 +562,17 @@ func (m *Manager) Before(id, cursor string, limit int) ([]Event, string, bool, e
 	return errtrace.Wrap4(s.Before(cursor, limit))
 }
 
+// SubagentEvents returns sub-agent subID's full (unpaginated) event history for
+// the head id, so a client can render that sub-agent's tab on demand without
+// waiting for the main conversation to page back to where the sub-agent ran.
+func (m *Manager) SubagentEvents(id, subID string) ([]Event, error) {
+	s, err := m.store(id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return s.SubagentEvents(subID), nil
+}
+
 func (m *Manager) Watch(id string) (Projection, <-chan Event, func(), error) {
 	s, err := m.store(id)
 	if err != nil {

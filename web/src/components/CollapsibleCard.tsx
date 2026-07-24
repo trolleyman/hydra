@@ -112,8 +112,8 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
     }
     // Arm the glide and move the height target together, in this one post-toggle
     // commit, so the body eases toward the new height instead of jumping to it before
-    // the transition exists.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // the transition exists. (Not flagged by set-state-in-effect: the firstToggle
+    // guard above means this never runs on the effect's initial/mount fire.)
     setHeightAnimated(true)
     setExpanded(!collapsed)
     const t = setTimeout(() => setHeightAnimated(false), COLLAPSE_MS)
@@ -121,13 +121,12 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
   }, [collapsed, glideKey])
   useEffect(() => {
     if (!collapsed) {
-      // Mount deliberately in an effect (after a paint at height 0), NOT during
-      // render, so a user expand's 0->height glide can play. On the first render the
+      // Mount on the next frame (not synchronously here) so the body first paints at
+      // height 0 and a user expand's 0->height glide can play. On the first render the
       // body is already mounted (useState above) with animate still false, so a
-      // restore snaps open instead of gliding. This post-paint setState is intended.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMounted(true)
-      return
+      // restore snaps open instead of gliding. Cancel if we re-collapse before it fires.
+      const r = requestAnimationFrame(() => setMounted(true))
+      return () => cancelAnimationFrame(r)
     }
     const t = setTimeout(() => setMounted(false), COLLAPSE_MS)
     return () => clearTimeout(t)

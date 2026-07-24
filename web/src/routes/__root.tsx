@@ -17,7 +17,7 @@ import { useProjectFavicon } from '../lib/useProjectFavicon'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderGit2, GitBranch, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
 import { ProviderIcon } from '../components/ReviewControls'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_DESKTOP_QUERY } from '../lib/sidebar'
@@ -48,6 +48,7 @@ import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
+import { pruneReviewDrafts } from '../lib/reviewDrafts'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
@@ -284,8 +285,11 @@ function RootLayout() {
   // (NON_LOCAL_INTEGRATION.md 3.8).
   const reviewConfig = useProjectStore((s) => (currentProjectId ? s.reviewConfigs[currentProjectId] : undefined))
   useEffect(() => {
-    if (currentProjectId && !reviewConfig) void ensureReviewConfig(currentProjectId)
-  }, [currentProjectId, reviewConfig])
+    // Unconditional: the store may hold a persisted snapshot (rendered
+    // immediately), and ensureReviewConfig itself decides whether a refresh
+    // is still needed this session.
+    if (currentProjectId) void ensureReviewConfig(currentProjectId)
+  }, [currentProjectId])
   // Whether the user actually has this page in front of them (foreground tab +
   // focused window). Gates the unread auto-clear so a backgrounded page doesn't
   // silently dismiss agents the user hasn't actually looked at.
@@ -562,6 +566,7 @@ function RootLayout() {
   useEffect(() => {
     pruneArtifactPrefs()
     pruneAgentViewPrefs()
+    pruneReviewDrafts()
     try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
   }, [])
 
@@ -835,14 +840,12 @@ function RootLayout() {
                             : ahead > 0
                               ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
                               : `Up to date with ${remote}`
+                const inSync = !!pushStatus && ahead === 0 && behind === 0
                 return (
                   <>
                     {/* Row 1: the Repository link (labelled with the project's
-                        path), full width. Row 2 (always rendered, so git state
-                        changes never shift the layout): the forge link and
-                        dirty/ahead/behind chips, with Sync anchored at the
-                        right - next to the state it acts on. */}
-                    <div className="flex items-center gap-1.5">
+                        path) with the forge web link right-aligned after it. */}
+                    <div className="flex items-center gap-1">
                       <Link
                         to="/project/$projectId/repository"
                         params={{ projectId: currentProjectId }}
@@ -877,74 +880,83 @@ function RootLayout() {
                           <span className="truncate">Repository</span>
                         )}
                       </Link>
-                    </div>
-                    <div className="flex items-center gap-1.5 px-1 mt-1 pb-1">
-                        {/* Forge web link, derived from the remote URL (read-only, no
-                            auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
-                            no remote or no https browse URL could be derived. */}
-                        {reviewConfig?.browse_url && (
-                          <Tooltip
-                            content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
-                            className="shrink-0"
+                      {/* Forge web link, derived from the remote URL (read-only, no
+                          auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                          no remote or no https browse URL could be derived. */}
+                      {reviewConfig?.browse_url && (
+                        <Tooltip
+                          content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                          className="shrink-0"
+                        >
+                          <a
+                            href={reviewConfig.browse_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Open repository on the forge"
+                            className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
-                            <a
-                              href={reviewConfig.browse_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label="Open repository on the forge"
-                              className="inline-flex items-center p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            >
-                              <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
-                            </a>
-                          </Tooltip>
-                        )}
-                        {/* Uncommitted-changes warning: the project checkout is dirty
-                            (e.g. a Settings save rewrote .hydra/config.toml). Click to
-                            review the paths and commit them all. */}
-                        {pushStatus && pushStatus.uncommitted.total > 0 && (
-                          <UncommittedChip
-                            uncommitted={pushStatus.uncommitted}
-                            committing={committing}
-                            onCommit={handleCommit}
-                          />
-                        )}
-                        {/* Ahead/behind counters + Sync, pinned right together
-                            (the counters describe exactly what Sync will do).
-                            Sync always renders - it anchors the row so the
-                            section height never shifts as chips come and go. */}
-                        <div className="flex-1" />
-                        {(behind > 0 || ahead > 0) && (
-                          <Tooltip content={statusTooltip} className="shrink-0">
-                            <span className="flex items-center gap-1 px-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
-                              {behind > 0 && (
-                                <span className="flex items-center text-amber-600 dark:text-amber-400">
-                                  <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
-                                </span>
-                              )}
-                              {ahead > 0 && (
-                                <span className="flex items-center">
-                                  <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
-                                </span>
-                              )}
-                            </span>
-                          </Tooltip>
-                        )}
-                        <Tooltip content={syncTooltip} className="shrink-0">
-                          <button
-                            type="button"
-                            onClick={handleSync}
-                            disabled={!canSync}
-                            aria-label={syncTooltip}
-                            className={
-                              canSync
-                                ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                                : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
-                            }
-                          >
-                            <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                          </button>
+                            <ProviderIcon provider={reviewConfig.provider} className="w-4 h-4 shrink-0" />
+                          </a>
                         </Tooltip>
-                      </div>
+                      )}
+                    </div>
+                    {/* Row 2: the git status line - ALWAYS rendered (a row that
+                        came and went with every merge made the layout jump
+                        constantly). Branch fills the left; dirty/ahead-behind
+                        chips and Sync sit right. When clean and in sync it
+                        reads "up to date" instead of emptying. */}
+                    <div className="px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                      <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
+                        {pushStatus ? (pushStatus.branch || 'detached') : '...'}
+                      </span>
+                      <div className="flex-1" />
+                      {/* Uncommitted-changes warning: the project checkout is dirty
+                          (e.g. a Settings save rewrote .hydra/config.toml). Click to
+                          review the paths and commit them all. */}
+                      {pushStatus && pushStatus.uncommitted.total > 0 && (
+                        <UncommittedChip
+                          uncommitted={pushStatus.uncommitted}
+                          committing={committing}
+                          onCommit={handleCommit}
+                        />
+                      )}
+                      {behind > 0 || ahead > 0 ? (
+                        <Tooltip content={statusTooltip} className="shrink-0">
+                          <span className="flex items-center gap-1 font-medium tabular-nums select-none">
+                            {behind > 0 && (
+                              <span className="flex items-center text-amber-600 dark:text-amber-400">
+                                <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                              </span>
+                            )}
+                            {ahead > 0 && (
+                              <span className="flex items-center">
+                                <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                              </span>
+                            )}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <span className="select-none text-gray-400 dark:text-gray-500">
+                          {!pushStatus ? '' : !pushStatus.has_remote ? 'no remote' : inSync ? 'up to date' : ''}
+                        </span>
+                      )}
+                      <Tooltip content={syncTooltip} className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSync}
+                          disabled={!canSync}
+                          aria-label={syncTooltip}
+                          className={
+                            canSync
+                              ? 'inline-flex items-center p-1 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                              : 'inline-flex items-center p-1 rounded-md text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                          }
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                        </button>
+                      </Tooltip>
+                    </div>
                   </>
                 )
               })()
@@ -953,9 +965,6 @@ function RootLayout() {
                 <span className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
-                </span>
-                <span className="inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
-                  <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
               </div>
             )}

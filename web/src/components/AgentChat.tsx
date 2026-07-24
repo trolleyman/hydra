@@ -155,20 +155,20 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const label = mergeChipLabel(item.subject, count)
   const shown = item.merged?.length ?? 0
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex max-w-full flex-col items-center gap-1">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-[90%]`}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full`}
         title={expanded ? 'Hide merged commits' : 'Show merged commits'}
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
         <span className="truncate">{label}</span>
       </button>
-      {expanded && shown > 0 && (
-        <div className="flex w-full max-w-[90%] flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
+      <Expandable open={expanded && shown > 0} className="w-full">
+        <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
           {item.merged!.map((m) => (
             <div
               key={m.sha}
@@ -190,7 +190,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
             </div>
           )}
         </div>
-      )}
+      </Expandable>
     </div>
   )
 }
@@ -1265,11 +1265,15 @@ const PANEL_CLASS =
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
-// Claude model aliases offered by the in-chat model dropdown. Sent verbatim to
-// the CLI's set_model control request, so these must be aliases it accepts.
+// Claude models offered by the in-chat model dropdown. Sent verbatim to the
+// CLI's set_model control request, so these must be aliases (or full model ids)
+// it accepts. The two Opus versions use full ids rather than the bare `opus`
+// alias so they map to distinct labels in modelDisplayLabel's substring match
+// (bare `opus` is a substring of both claude-opus-5 and claude-opus-4-8).
 const CLAUDE_MODELS = [
   { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
+  { id: 'claude-opus-5', label: 'Opus 5' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'sonnet', label: 'Sonnet' },
   { id: 'haiku', label: 'Haiku' },
 ]
@@ -1351,7 +1355,7 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
 // leaving a transient empty gap below the content - the "weird" half-open frame.
 // Measuring clips exactly and reveals linearly. After opening we release
 // max-height to 'none' so later content growth (streamed output) isn't capped.
-function Expandable({ open, children }: { open: boolean; children: ReactNode }) {
+function Expandable({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
   const mounted = useDelayedUnmount(open)
   const ref = useRef<HTMLDivElement>(null)
   const first = useRef(true)
@@ -1393,7 +1397,7 @@ function Expandable({ open, children }: { open: boolean; children: ReactNode }) 
     el.style.maxHeight = '0px'
   }, [open])
   return (
-    <div ref={ref} style={{ overflow: 'hidden' }}>
+    <div ref={ref} className={className} style={{ overflow: 'hidden' }}>
       {mounted ? children : null}
     </div>
   )
@@ -1492,14 +1496,17 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     // Only unified-diff mode has a structural prefix to remove. Inferring that
     // from each line corrupts full files whose content begins with space/+/-.
     const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
+    // Plain loop (not flatMap with captured counters): the react-hooks
+    // immutability rule flags reassigning closure-captured `let`s during render.
     let oldLine = kind === 'delete' ? 1 : 0
     let newLine = kind === 'add' ? 1 : 0
-    return diff.replace(/\n$/, '').split('\n').flatMap((line) => {
+    const out: { text: string; added: boolean; removed: boolean; oldNo: string; newNo: string }[] = []
+    for (const line of diff.replace(/\n$/, '').split('\n')) {
       const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
       if (hunk) {
         oldLine = Number(hunk[1])
         newLine = Number(hunk[2])
-        return []
+        continue
       }
       const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
       const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
@@ -1507,8 +1514,9 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
       const removed = kind === 'delete' || hasRemovedMarker
       const oldNo = added ? '' : String(oldLine++)
       const newNo = removed ? '' : String(newLine++)
-      return [{ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo }]
-    })
+      out.push({ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo })
+    }
+    return out
   }, [diff, kind])
   const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
   return (
@@ -1854,7 +1862,7 @@ function LowlitPath({ path }: { path: string }) {
   const slash = path.lastIndexOf('/')
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
   const name = slash >= 0 ? path.slice(slash + 1) : path
-  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-500 dark:text-stone-400">{name}</span></>
+  return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-400 dark:text-stone-500">{name}</span></>
 }
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
@@ -4138,6 +4146,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // used to keep the viewport anchored across a prepend.
   const oldestUuidRef = useRef<string | null>(null)
   const oldestEventCursorRef = useRef<string | null>(null)
+  // Sub-agents whose full step history we've already asked the daemon for this
+  // connection (opening their tab). A sub-agent's steps may live outside the
+  // loaded main-conversation window, so its `items` would otherwise stay empty
+  // until the user scrolled the main history back to where it ran.
+  const requestedSubsRef = useRef<Set<string>>(new Set())
   const historyIdRef = useRef(-1_000_000)
   const loadingOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -4237,6 +4250,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   useEffect(() => {
     const seeded = seedLocalPlan(projectId, agentId, serverPlan)
     if (seeded.length) {
+      // Legitimate effect: seedLocalPlan writes to localStorage (a side effect that
+      // belongs in an effect), and we adopt its result. Can't move to render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTodos(
         seeded
           .sort((a, b) => a.order - b.order)
@@ -4252,6 +4268,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
   )
   useEffect(() => {
+    // Adopt the daemon-captured model only while the selector is still on its
+    // placeholder (the `m || serverModel` functional update fills an empty value and
+    // no more), so this never fights the authoritative live system:init - a benign,
+    // intentional one-shot rather than a cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (serverModel) setModel((m) => m || serverModel)
   }, [serverModel])
 
@@ -4275,6 +4296,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   })
 
   useEffect(() => {
+    // Reconnect/re-navigation reset: this clears a dozen pieces of live state AND
+    // several refs (normalizedAvailableRef, itemTsRef, thoughtDurationsRef...) in one
+    // atomic pass before the transcript replays. The ref writes must stay in an
+    // effect, so this whole reset stays here rather than moving to render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems([])
     normalizedAvailableRef.current = false
     itemTsRef.current = new Map()
@@ -4299,6 +4325,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Reset load-older paging for the fresh backfill.
     oldestUuidRef.current = null
     oldestEventCursorRef.current = null
+    requestedSubsRef.current = new Set()
     historyIdRef.current = -1_000_000
     loadingOlderRef.current = false
     setLoadingOlder(false)
@@ -5919,6 +5946,34 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           return
         }
+        case 'subagent_events': {
+          // A load_subagent reply: one sub-agent's full step history, fetched
+          // when its tab opened. Every event is a sidechain step (agent_id set),
+          // so route them exactly like the load-older sidechain branch above -
+          // through the live handler into the sub-agent's card. Deduped by seq,
+          // so overlap with the already-loaded window (or a later scroll) is a
+          // no-op.
+          if (!usesNormalizedEvents) return
+          normalizedAvailableRef.current = true
+          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+            .filter(firstNormalizedDelivery)
+            .filter(keepNormalizedUserEvent)
+          for (const rawEvent of normalized) rememberNormalizedToolMetadata(rawEvent)
+          for (const rawEvent of normalized) {
+            if (handleNormalizedSubagent(rawEvent)) continue
+            const event = enrichNormalizedTool(rawEvent)
+            if (event.type === 'tool_started' || event.type === 'tool_completed') {
+              const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+              const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
+              if (toolID && toolName && event.payload && 'input' in event.payload) {
+                patchToolMetadata(toolID, toolName, event.payload.input)
+              }
+            }
+            for (const converted of normalizedPresentationEvents(event)) handleProviderEvent(converted)
+          }
+          flushSubagents()
+          return
+        }
         case 'notification_backfill': {
           if (normalizedAvailableRef.current) return
           // A <task-notification> record from BEFORE the backfill window,
@@ -6113,10 +6168,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   // --- Sub-agent chat views --------------------------------------------------
 
-  // Viewing another agent's chat is per-head ephemeral UI; a different head
-  // starts back on its main conversation.
-  useEffect(() => {
+  // Viewing another agent's chat is per-head ephemeral UI; a different head starts
+  // back on its main conversation. Reset the view during render (previous-key idiom)
+  // so it isn't a cascading effect render; the scroll-memory ref reset must stay in
+  // an effect (a ref must not be written during render).
+  const headKey = `${agentId}\0${projectId}`
+  const [prevHeadKey, setPrevHeadKey] = useState(headKey)
+  if (prevHeadKey !== headKey) {
+    setPrevHeadKey(headKey)
     setChatView('main')
+  }
+  useEffect(() => {
     mainScrollRef.current = null
   }, [agentId, projectId])
 
@@ -6197,6 +6259,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!isTurnRunning) {
       turnStartRef.current = null
       turnStartClockRef.current = null
+      // Timer effect: resets the clock refs + elapsed seconds when a turn ends and
+      // runs an interval while it's live - all genuine effect work, not a render-time
+      // derivation.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsed(0)
       return
     }
@@ -6318,6 +6384,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       : JSON.stringify({ type: 'load_before', before: anchor }))
   }
 
+  // requestSubagentEvents fetches a sub-agent's full step history the first time
+  // its tab is opened. A sub-agent's steps are sidechain events interleaved in
+  // the main event log and reach the client only with the loaded main-
+  // conversation window, so a sub-agent that ran before that window would show
+  // an empty tab until the user scrolled the main history back to it. The daemon
+  // reply is deduped by seq (firstNormalizedDelivery), so a later scroll re-
+  // delivering the same events is harmless. Only the normalized path (Claude /
+  // Codex) has this split; the legacy transcript path backfills every sub-agent
+  // sidecar up front.
+  function requestSubagentEvents(subID: string) {
+    if (!usesNormalizedEvents || !subID || requestedSubsRef.current.has(subID)) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    requestedSubsRef.current.add(subID)
+    ws.send(JSON.stringify({ type: 'load_subagent', sub_id: subID }))
+  }
+
+  // Fetch a sub-agent's history the moment its tab opens (or once the socket is
+  // ready, if it was opened before). No deps array, mirroring the auto-fill
+  // effect below: requestSubagentEvents self-guards so re-runs are cheap no-ops.
+  useEffect(() => {
+    if (!replayDone || chatView === 'main') return
+    requestSubagentEvents(chatView)
+  })
+
   // Auto-fill: when the loaded window is shorter than the pane (a byte-dense
   // backfill - a few image reads can eat the whole window in a handful of
   // messages), there is no scrollbar, so scrolling can never trigger the
@@ -6334,7 +6425,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
-    // Load-older pages main history; a sub-agent view has its whole run already.
+    // Load-older pages main history; a sub-agent view fetches its whole run up
+    // front when opened (requestSubagentEvents), so it never pages here.
     if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
     // While pinned, content can grow FASTER than the follow effects re-pin (a
@@ -6489,7 +6581,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // advertised command instead of an arbitrary first-8 subset.
     return slashCommands.filter((c) => c.toLowerCase().startsWith(q))
   }, [slashQuery, slashDismissed, slashCommands])
-  useEffect(() => setSlashSel(0), [slashQuery])
+  // Reset the highlighted row to the top when the query changes, during render.
+  const [prevSlashQuery, setPrevSlashQuery] = useState(slashQuery)
+  if (prevSlashQuery !== slashQuery) {
+    setPrevSlashQuery(slashQuery)
+    setSlashSel(0)
+  }
   // Keep the highlighted row visible as the selection moves through a list
   // taller than the popup's max height.
   useEffect(() => {
@@ -6862,6 +6959,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       rest = rest.slice(m.index + m[0].length)
     }
     if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    // eslint-disable-next-line no-useless-assignment -- final key++ is a dead store, but keep it consistent with the pushes above
     if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }
@@ -7340,7 +7438,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           {pendingSends.length > 0 && (
             <div className="flex flex-col gap-1">
               {pendingSends.map((p) => (
-                <div key={`pending-${p.id}`} className="group relative flex justify-end animate-chat-item-in">
+                <div key={`pending-${p.id}`} className="group relative animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw

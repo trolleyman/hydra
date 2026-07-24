@@ -22,11 +22,13 @@ import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
+import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop, scrollCardToTop } from './lib/diffScroll'
+import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
 import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { ReviewDraftPopover } from './components/ReviewDraftPopover'
 import { TestsPanel } from './components/TestsPanel'
 import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
@@ -37,6 +39,7 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
+import { addReviewComment, removeReviewComment, clearReviewDraft, loadReviewDraft, type PendingReviewComment } from './lib/reviewDrafts'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -112,7 +115,16 @@ function CopyButton({ text }: { text: string }) {
 }
 
 
-function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promise<void>; onCancel: () => void }) {
+// A per-line comment editor. "Send" fires the comment at the agent immediately;
+// "Add to review" (when onAddToReview is wired - i.e. not the read-only repo
+// view) instead queues it into the per-agent review batch for a later single
+// submit. onAddToReview is synchronous (a localStorage write), so it just closes
+// the row via the parent's onCancel after queuing.
+function CommentRow({ onSubmit, onAddToReview, onCancel }: {
+  onSubmit: (text: string) => Promise<void>
+  onAddToReview?: (text: string) => void
+  onCancel: () => void
+}) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -125,9 +137,18 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
     setSending(false)
   }
 
+  const handleAdd = () => {
+    if (!text.trim() || sending || !onAddToReview) return
+    onAddToReview(text)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); handleSubmit() }
-    else if (e.key === 'Escape') onCancel()
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      // Ctrl+Enter queues into the review batch when that's available (the common
+      // reviewing flow), else sends immediately.
+      if (onAddToReview) handleAdd(); else handleSubmit()
+    } else if (e.key === 'Escape') onCancel()
   }
 
   return (
@@ -138,7 +159,7 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         className="w-full h-20 p-2 text-xs font-sans bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
-        placeholder="Write a comment... (Ctrl+Enter to submit)"
+        placeholder={onAddToReview ? 'Write a comment... (Ctrl+Enter to add to review)' : 'Write a comment... (Ctrl+Enter to submit)'}
       />
       <div className="flex justify-end gap-2 mt-2">
         <button
@@ -147,6 +168,15 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
         >
           Cancel
         </button>
+        {onAddToReview && (
+          <button
+            disabled={!text.trim() || sending}
+            onClick={handleAdd}
+            className="px-2 py-1 text-[10px] font-medium text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50 rounded transition-colors cursor-pointer"
+          >
+            Add to review
+          </button>
+        )}
         <button
           disabled={!text.trim() || sending}
           onClick={handleSubmit}
@@ -278,11 +308,34 @@ const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-p
 // arithmetically identical to brightness(1-a), so the light-mode tint is unchanged.
 const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:after:absolute hover:after:inset-0 hover:after:bg-black/[0.05] dark:hover:after:bg-white/[0.04]"
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
+// Intra-line "word diff" tints. A changed line already carries a faint whole-row
+// tint (bg-*-50); these darker spans mark the exact characters that differ so the
+// eye lands on the actual edit rather than re-reading the whole line. Deletions
+// read red, additions green - the same red/green language as the row.
+const WORD_DEL_CLASS = 'rounded-[2px] bg-red-300/45 dark:bg-red-400/25'
+const WORD_ADD_CLASS = 'rounded-[2px] bg-green-300/45 dark:bg-green-400/25'
+
+// Empty maps shared by every line without word-diff data, so the memo'd hunks
+// keep a stable prop identity when word highlighting is off or a file has none.
+const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
+
+// codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
+// overlay when this line has changed ranges, else the plain syntax-highlighted
+// HTML. Returns null to signal "render the raw content as a text node" (no
+// highlight, no word ranges) - the safe path that needs no dangerouslySetInnerHTML.
+function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string): string | null {
+  if (ranges && ranges.length) return renderWordDiffHtml(highlighted, content, ranges, wordClass)
+  return highlighted ?? null
+}
+
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  wordRangesOld: Map<number, WordRange[]>
+  wordRangesNew: Map<number, WordRange[]>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
   selection?: DiffLineSelection | null
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
@@ -299,6 +352,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const highlighted = isAdd
           ? (line.new_line_num != null ? highlightedNew.get(line.new_line_num) : undefined)
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
+        const wordRanges = isAdd
+          ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
+          : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
+        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const selOld = selectionHas(selection, 'old', line.old_line_num)
         const selNew = selectionHas(selection, 'new', line.new_line_num)
@@ -319,8 +376,8 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
               </span>
               {isNoNewline ? (
                 <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
-              ) : highlighted ? (
-                <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
+              ) : codeHtml != null ? (
+                <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: codeHtml }} />
               ) : (
                 <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
               )}
@@ -334,6 +391,11 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
                   await onComment(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
                   setOpenCommentIdx(null)
                 }}
+                onAddToReview={onAddToReview ? (text) => {
+                  const isNew = isAdd || line.type === 'context'
+                  onAddToReview(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
+                  setOpenCommentIdx(null)
+                } : undefined}
                 onCancel={() => setOpenCommentIdx(null)}
               />
             )}
@@ -347,11 +409,14 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  wordRangesOld: Map<number, WordRange[]>
+  wordRangesNew: Map<number, WordRange[]>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
   selection?: DiffLineSelection | null
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
@@ -364,6 +429,12 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
+        // Word-diff overlay only for a real changed line (deletion/addition), not
+        // a context line shown on both sides.
+        const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
+        const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
+        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS) : null
+        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
@@ -381,8 +452,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
                 </span>
-                {line.oldContent != null && oldHighlighted
-                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
+                {line.oldContent != null && oldCodeHtml != null
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldCodeHtml }} />
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
@@ -396,8 +467,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
                 </span>
-                {line.newContent != null && newHighlighted
-                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
+                {line.newContent != null && newCodeHtml != null
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newCodeHtml }} />
                   : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
                 }
               </div>
@@ -410,6 +481,12 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                   await onComment(lineNum, isNew, text)
                   setOpenCommentIdx(null)
                 }}
+                onAddToReview={onAddToReview ? (text) => {
+                  const lineNum = line.newLineNum ?? line.oldLineNum!
+                  const isNew = line.newLineNum != null
+                  onAddToReview(lineNum, isNew, text)
+                  setOpenCommentIdx(null)
+                } : undefined}
                 onCancel={() => setOpenCommentIdx(null)}
               />
             )}
@@ -746,11 +823,17 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
   file: DiffFile
   sideBySide: boolean
+  // Highlight the exact changed words within a modified line (on top of the
+  // whole-row tint). Defaults on; the diff toolbar's settings cog toggles it.
+  wordHighlight?: boolean
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
+  // Optional "Add to review" (queue for batch submit). Omitted in the read-only
+  // repo view, where the line-level comment affordances are hidden entirely.
+  onAddToReview?: (path: string, lineNum: number, isNew: boolean, text: string) => void
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
@@ -814,7 +897,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   const [bodyRef, bodyH] = useMeasuredHeight(0)
   const [bodyMounted, setBodyMounted] = useState(!isCollapsed)
   useEffect(() => {
-    if (!isCollapsed) { setBodyMounted(true); return }
+    // Mount on the next frame (not synchronously here) so the body first paints at
+    // height 0 and the 0->height glide can play - deferring via rAF also keeps this
+    // out of the synchronous effect body. Cancel it if we re-collapse before it fires.
+    if (!isCollapsed) {
+      const r = requestAnimationFrame(() => setBodyMounted(true))
+      return () => cancelAnimationFrame(r)
+    }
     const t = setTimeout(() => setBodyMounted(false), FILE_COLLAPSE_MS)
     return () => clearTimeout(t)
   }, [isCollapsed])
@@ -881,10 +970,20 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     [highlightSource, lang, langReady],
   )
   const [asyncHighlight, setAsyncHighlight] = useState(EMPTY_HIGHLIGHT)
+  // When the async-highlighted content (or its language) changes, repaint as plain
+  // text immediately DURING RENDER while the worker re-highlights - this avoids a
+  // flash of stale highlighting and keeps the reset out of the synchronous effect
+  // body. Tracked via prev-as-state compared by reference, so no large-string work
+  // per render.
+  const [prevHlSource, setPrevHlSource] = useState(highlightSource)
+  const [prevHlLang, setPrevHlLang] = useState(lang)
+  if (prevHlSource !== highlightSource || prevHlLang !== lang) {
+    setPrevHlSource(highlightSource)
+    setPrevHlLang(lang)
+    if (highlightSource && highlightSource.length > HL_SYNC_MAX) setAsyncHighlight(EMPTY_HIGHLIGHT)
+  }
   useEffect(() => {
     if (!highlightSource || highlightSource.length <= HL_SYNC_MAX) return
-    // Repaint as plain text while the worker highlights the new content.
-    setAsyncHighlight(EMPTY_HIGHLIGHT)
     let cancelled = false
     const { oldLines, newLines } = extractSides(highlightSource)
     highlightSides(
@@ -901,6 +1000,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     return () => { cancelled = true }
   }, [highlightSource, lang])
   const { highlightedOld, highlightedNew } = syncHighlight ?? asyncHighlight
+
+  // Word-diff ranges: for each changed line, the character sub-ranges that
+  // actually differ from its paired line (so the viewer can tint just those
+  // words). Computed from the same line list as the highlighting and keyed the
+  // same way (old_line_num / new_line_num), memoised off hunksSig so a no-op
+  // background refresh doesn't recompute it. Empty maps when the toggle is off.
+  const { wordRangesOld, wordRangesNew } = useMemo(() => {
+    if (!wordHighlight || !highlightSource) return { wordRangesOld: EMPTY_WORD_RANGES, wordRangesNew: EMPTY_WORD_RANGES }
+    const maps = buildWordRangeMaps(highlightSource)
+    return { wordRangesOld: maps.old, wordRangesNew: maps.new }
+  }, [highlightSource, wordHighlight])
 
   // Placeholder height while the body is lazy-unmounted. Also used directly as
   // the tween wrapper's height during that phase: bodyH is 0 until the
@@ -960,13 +1070,22 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     (ln: number, isNew: boolean, txt: string) => onComment(file.path, ln, isNew, txt),
     [onComment, file.path],
   )
+  const onAddToReviewForFile = useCallback(
+    (ln: number, isNew: boolean, txt: string) => onAddToReview?.(file.path, ln, isNew, txt),
+    [onAddToReview, file.path],
+  )
+  // Only wire the queue callback into hunks when the parent provided one, so the
+  // read-only repo view keeps no "Add to review" button at all.
+  const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave
@@ -1146,9 +1265,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={onCommentForFile} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
@@ -1193,6 +1314,61 @@ function buildDiffParams(leftSel: LeftSel, rightSel: RightSel, ignoreWhitespace:
   if (rightSel.type === 'uncommitted') params.includeUncommitted = true
   else if (rightSel.type === 'commit') params.headRef = rightSel.sha
   return params
+}
+
+// ── Diff-comment context (shared by "Send" and "Add to review") ───────────────
+
+// Human labels for the two sides of the current comparison, embedded in a comment
+// so the agent knows which diff it was written against. Commit selectors resolve
+// to a concrete short sha here (not just "latest"), so a queued comment still
+// names the right commit even after new work lands.
+function resolveDiffLabels(
+  leftSel: LeftSel,
+  rightSel: RightSel,
+  commits: CommitInfo[],
+  baseBranch: string,
+): { fromLabel: string; toLabel: string } {
+  const fromLabel = leftSel.type === 'base'
+    ? baseBranch
+    : leftSel.type === 'latest'
+      ? (commits[0]?.short_sha ? `HEAD (${commits[0].short_sha})` : 'HEAD')
+      : (commits.find((c) => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
+  const toLabel = rightSel.type === 'latest' ? 'latest commit'
+    : rightSel.type === 'uncommitted' ? 'uncommitted changes'
+      : (commits.find((c) => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+  return { fromLabel, toLabel }
+}
+
+// Find the hunk in a file that contains the given line (on the new or old side).
+function findHunkForLine(file: DiffFile | undefined, lineNum: number, isNew: boolean): DiffHunk | undefined {
+  return file?.hunks?.find((h) =>
+    h.lines.some((l) => (isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)),
+  )
+}
+
+// Build the fenced ```diff context block for a commented line: three lines either
+// side. Each row is `<sign> | <old line> | <new line> | <code>` (line numbers
+// padded to align within the window), and the commented line is followed by a
+// `# ^ Comment by user` caret so the agent can see exactly which line is meant.
+// Returns '' when the hunk/line can't be located.
+function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: number, isNew: boolean): string {
+  if (!hunk) return ''
+  const targetIdx = hunk.lines.findIndex((l) => (isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum))
+  if (targetIdx < 0) return ''
+  const start = Math.max(0, targetIdx - 3)
+  const end = Math.min(hunk.lines.length, targetIdx + 4)
+  const ctxLines = hunk.lines.slice(start, end)
+  const oldStr = (l: DiffLine) => (l.old_line_num != null ? String(l.old_line_num) : '')
+  const newStr = (l: DiffLine) => (l.new_line_num != null ? String(l.new_line_num) : '')
+  const wOld = Math.max(1, ...ctxLines.map((l) => oldStr(l).length))
+  const wNew = Math.max(1, ...ctxLines.map((l) => newStr(l).length))
+  const rows: string[] = []
+  ctxLines.forEach((l, i) => {
+    const sign = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+    rows.push(`${sign} | ${oldStr(l).padStart(wOld)} | ${newStr(l).padStart(wNew)} | ${l.content}`)
+    if (start + i === targetIdx) rows.push('# ^ Comment by user')
+  })
+  return `\`\`\`diff\n# ${path}\n${hunk.header}\n${rows.join('\n')}\n\`\`\`\n`
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -1578,7 +1754,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts by merging the local ${baseBranch} branch into this one (do not git fetch first), resolving the conflicts that arise.` }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
@@ -1768,7 +1944,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       onSecondary: async () => {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-            text: `Update this branch from its base by merging ${baseBranch} in, resolving any conflicts that arise.`,
+            text: `Update this branch from its base by merging the local ${baseBranch} branch in (do not git fetch first), resolving any conflicts that arise.`,
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -1945,6 +2121,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
+  const [wordHighlight, setWordHighlight] = useState(() => readLocal(StorageKeys.diffWordHighlight) !== 'false')
   const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
   const [fileView, setFileView] = useState<FileView>(() => {
     const stored = readLocal(StorageKeys.diffFileView)
@@ -2004,6 +2181,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(sideBySide)) }, [sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(ignoreWhitespace)) }, [ignoreWhitespace])
+  useEffect(() => { writeLocal(StorageKeys.diffWordHighlight, String(wordHighlight)) }, [wordHighlight])
   useEffect(() => { writeLocal(StorageKeys.diffSingleFile, String(singleFile)) }, [singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
@@ -2152,6 +2330,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     if (!agent.branch_name) return
     let cancelled = false
+    // Legitimate data-fetch effect: reset to the loading state before the async
+    // fetch. This can't move to render (it sits alongside the fileContextsRef write,
+    // and a ref must not be written during render), and the cascading render is
+    // intended - it clears the stale diff + context expansions on a params change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingDiff(true)
     setDiffError(null)
     // Reset per-file context expansions when diff params change
@@ -2346,16 +2529,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setLeftSel(newLeft)
   }, [])
 
-  useEffect(() => {
+  // Correct invalid selection combos DURING RENDER (the adjust-state-during-render
+  // idiom) rather than in an effect: React re-renders immediately and the guards make
+  // each correction idempotent (it converges in one step), so there's no cascading
+  // effect render.
+  if (leftSel.type === 'latest' && rightSel.type === 'latest') {
     // left='latest' and right='latest' is invalid - switch right to uncommitted
-    if (leftSel.type === 'latest' && rightSel.type === 'latest') {
-      setRightSel({ type: 'uncommitted' }); return
-    }
-    if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
+    setRightSel({ type: 'uncommitted' })
+  } else if (leftSel.type === 'commit' && rightSel.type === 'commit') {
     const li = commitIdx(leftSel.sha, commits)
     const ri = commitIdx(rightSel.sha, commits)
     if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
-  }, [leftSel, rightSel, commits])
+  }
 
   // An externally-driven "show just this commit" selection (a commit chip
   // clicked in the chat transcript): parent -> commit, like picking the
@@ -2380,6 +2565,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       return
     }
     appliedCommitNonceRef.current = sel.nonce
+    // Legitimate effect: applies an external "show this commit" command (a nonce from
+    // the parent), guarded to fire once per nonce, alongside a smooth-scroll side
+    // effect - so it belongs in an effect, not render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
     setRightSel({ type: 'commit', sha: sel.sha })
     // Bring the Changes bar + file list into view in whichever scroll context
@@ -2429,6 +2618,44 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
   }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
+  // Jump from a queued review comment to the line it anchors to: reveal the file
+  // (select it in single-file view; expand/show it otherwise), then centre the
+  // line and flash it. scrollToDiffLine re-acquires the card and re-measures each
+  // frame, so it copes with the file mounting a beat after these state updates.
+  // No-op for a comment whose file has dropped out of the current comparison.
+  const handleJumpToComment = useCallback((c: PendingReviewComment) => {
+    if (!diff) return
+    const idx = diff.files.findIndex((f) => f.path === c.path)
+    if (idx < 0) return
+    // In one-file-at-a-time view, switch to the commented file first (only its
+    // card is mounted). scrollToDiffLine re-acquires the card each frame, so it
+    // waits for the swapped-in card to mount.
+    if (singleFile) setSingleFileIdx(idx)
+    // Reveal the file's body in EITHER view: expand it if collapsed, un-hide it
+    // if it's a big "Load diff" file - otherwise its rows never mount and there's
+    // no line to scroll to.
+    if (collapsedFiles.has(c.path)) toggleFileCollapse(c.path)
+    if (hiddenFiles.has(c.path)) handleShowFile(c.path)
+    scrollToDiffLine(
+      () => fileRefs.current.get(c.path) ?? null,
+      c.isNew ? 'new' : 'old',
+      c.lineNum,
+      (row) => {
+        const rowEl = row.closest<HTMLElement>('.group') ?? row.parentElement
+        if (!rowEl) return
+        const prevShadow = rowEl.style.boxShadow
+        const prevBg = rowEl.style.backgroundColor
+        rowEl.style.transition = 'box-shadow 0.2s, background-color 0.2s'
+        rowEl.style.boxShadow = 'inset 3px 0 0 0 #f59e0b'
+        rowEl.style.backgroundColor = 'rgba(245, 158, 11, 0.18)'
+        setTimeout(() => {
+          rowEl.style.boxShadow = prevShadow
+          rowEl.style.backgroundColor = prevBg
+        }, 1600)
+      },
+    )
+  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile])
+
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
   }, [])
@@ -2438,67 +2665,126 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setRightSel({ type: 'uncommitted' })
   }, [])
 
-  const [commentSent, setCommentSent] = useState(false)
+  // Confirmation toast text (a single "Comment sent" or a batch "Review sent"),
+  // or null when hidden. One state so both paths share the same toast UI.
+  const [sentToast, setSentToast] = useState<string | null>(null)
+  const showSentToast = useCallback((text: string) => {
+    setSentToast(text)
+    setTimeout(() => setSentToast(null), 3000)
+  }, [])
+
+  // Queued "Add to review" comments for THIS agent, mirrored from localStorage so
+  // the count/badge and the review popover update as the user adds or removes
+  // them. Reloaded when the agent changes (DiffViewerImpl is not remounted per
+  // agent - see the memo comparator - so switching agents re-runs this effect).
+  const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>(
+    () => loadReviewDraft(projectId, agent.id),
+  )
+  // Reload the mirrored draft when the agent changes, during render (previous-key
+  // idiom) rather than in an effect - DiffViewerImpl isn't remounted per agent, so
+  // this reacts to the id change without a cascading effect render.
+  const [prevReviewDraftKey, setPrevReviewDraftKey] = useState(`${projectId}\0${agent.id}`)
+  if (prevReviewDraftKey !== `${projectId}\0${agent.id}`) {
+    setPrevReviewDraftKey(`${projectId}\0${agent.id}`)
+    setReviewComments(loadReviewDraft(projectId, agent.id))
+  }
+  const [submittingReview, setSubmittingReview] = useState(false)
 
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
   // identity across silent refreshes. Depending on diff/commits/sel directly would
   // give it a new identity on each refresh and re-render every FileDiff, defeating
-  // their memo() - the main cost behind the agent-view jank.
+  // their memo() - the main cost behind the agent-view jank. The refs are published
+  // in an effect (a render must never write a ref); handleComment only reads them
+  // asynchronously, well after commit.
   const diffRef = useRef(diff)
-  diffRef.current = diff
   const leftSelRef = useRef(leftSel)
-  leftSelRef.current = leftSel
   const rightSelRef = useRef(rightSel)
-  rightSelRef.current = rightSel
+  useEffect(() => {
+    diffRef.current = diff
+    leftSelRef.current = leftSel
+    rightSelRef.current = rightSel
+  })
 
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
-    const leftSel = leftSelRef.current
-    const rightSel = rightSelRef.current
-    const commits = commitsRef.current
-    const diff = diffRef.current
-    const fromLabel = leftSel.type === 'base'
-      ? agent.base_branch
-      : leftSel.type === 'latest'
-        ? (commits[0]?.short_sha ? `HEAD (${commits[0].short_sha})` : 'HEAD')
-        : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
-    const toLabel = rightSel.type === 'latest' ? 'latest commit'
-      : rightSel.type === 'uncommitted' ? 'uncommitted changes'
-        : (commits.find(c => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const file = diffRef.current?.files.find(f => f.path === path)
+    const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
-    // Find hunk containing this line and build surrounding context
-    const file = diff?.files.find(f => f.path === path)
-    const hunk = file?.hunks?.find(h =>
-      h.lines.some(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
-    )
-
-    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`>\`) (diff: ${fromLabel} -> ${toLabel})\n`
-    if (hunk) {
-      const targetIdx = hunk.lines.findIndex(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
-      if (targetIdx >= 0) {
-        const start = Math.max(0, targetIdx - 3)
-        const end = Math.min(hunk.lines.length, targetIdx + 4)
-        const ctxLines = hunk.lines.slice(start, end)
-        msg += `\n\`\`\`diff\n# ${path}\n${hunk.header}\n`
-        msg += ctxLines.map((l, i) => {
-          const typeChar = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
-          // The commented line keeps its +/-/space marker but uses '>' instead of
-          // '|' so the agent can see both the line's kind and which line we mean.
-          if (start + i === targetIdx) return typeChar + '>' + l.content
-          return typeChar + '|' + l.content
-        }).join('\n')
-        msg += `\n\`\`\`\n`
-      }
-    }
+    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`# ^\` in the block below) (diff: ${fromLabel} -> ${toLabel})\n`
+    if (block) msg += `\n${block}`
     msg += `\nComment:\n${text}`
 
     try {
       await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
-      setCommentSent(true)
-      setTimeout(() => setCommentSent(false), 3000)
+      showSentToast('Comment sent to agent')
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
+  }, [agent.id, agent.base_branch, projectId, showSentToast])
+
+  // "Add to review": cache the comment (with a frozen context block + the current
+  // hunk's hash for staleness detection) instead of sending it now. The batch is
+  // flushed later by submitReview. Kept stable (refs + functional setState) so it
+  // doesn't bust FileDiff's memo, just like handleComment.
+  const handleAddToReview = useCallback((path: string, lineNum: number, isNew: boolean, text: string) => {
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const file = diffRef.current?.files.find(f => f.path === path)
+    const hunk = findHunkForLine(file, lineNum, isNew)
+    const next = addReviewComment(projectId, agent.id, {
+      path, lineNum, isNew, text, fromLabel, toLabel,
+      contextBlock: diffContextBlock(path, hunk, lineNum, isNew),
+      hunkHash: hunk ? hashHunks([hunk]) : '',
+    })
+    setReviewComments(next)
   }, [agent.id, agent.base_branch, projectId])
+
+  const removeQueuedComment = useCallback((id: string) => {
+    setReviewComments(removeReviewComment(projectId, agent.id, id))
+  }, [projectId, agent.id])
+
+  // Flush the whole queued batch to the agent as one message, then clear the
+  // draft. Each comment carries its own frozen context, so the message is built
+  // entirely from the stored data - independent of what the live diff shows now.
+  const submitReview = useCallback(async () => {
+    const comments = loadReviewDraft(projectId, agent.id)
+    if (comments.length === 0 || submittingReview) return
+    setSubmittingReview(true)
+    const header = comments.length === 1
+      ? `Please address the following review comment:`
+      : `Please address the following ${comments.length} review comments:`
+    const body = comments.map((c, i) => {
+      let s = `## ${i + 1}. \`${c.path}\` line ${c.lineNum} (diff: ${c.fromLabel} -> ${c.toLabel})\n`
+      if (c.contextBlock) s += `\n${c.contextBlock}`
+      s += `\nComment:\n${c.text}`
+      return s
+    }).join('\n\n')
+    try {
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `${header}\n\n${body}` })
+      clearReviewDraft(projectId, agent.id)
+      setReviewComments([])
+      showSentToast(comments.length === 1 ? 'Review sent to agent' : `Review of ${comments.length} comments sent to agent`)
+    } catch (e) {
+      console.error('Failed to submit review:', e)
+    } finally {
+      setSubmittingReview(false)
+    }
+  }, [agent.id, projectId, submittingReview, showSentToast])
+
+  // Which queued comments have gone stale: the diff under them changed since they
+  // were added (the anchoring hunk's content hash no longer matches, or the line
+  // is gone from the current comparison entirely). Recomputed against the LIVE
+  // diff so it updates on refresh and when the comparison selectors change. A
+  // comment stored with no hunk (hash '') can't be judged, so it's never stale.
+  const staleReviewIds = useMemo(() => {
+    const stale = new Set<string>()
+    for (const c of reviewComments) {
+      if (!c.hunkHash) continue
+      const file = diff?.files.find(f => f.path === c.path)
+      const hunk = findHunkForLine(file, c.lineNum, c.isNew)
+      if ((hunk ? hashHunks([hunk]) : '') !== c.hunkHash) stale.add(c.id)
+    }
+    return stale
+  }, [diff, reviewComments])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -2667,6 +2953,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
       <div className="flex flex-col gap-0.5">
         <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />
+        <SettingsOptionRow type="checkbox" checked={wordHighlight} onChange={setWordHighlight} label="Highlight changed words" />
         <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
         <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
       </div>
@@ -2810,12 +3097,21 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               key={diff.files[singleFileIdx]?.path}
               file={diff.files[singleFileIdx]!}
               sideBySide={sideBySide}
+              wordHighlight={wordHighlight}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
+              onAddToReview={handleAddToReview}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
+              // getShowCallback/getFileRef return render-stable per-path callbacks that
+              // (deliberately) close over the DOM-node registry and userShownFiles refs -
+              // both touched only in event handlers / at commit, never during render. The
+              // refs rule follows that transitively and flags the call; it is a safe
+              // false positive here. Same at the stacked-list map below.
+              // eslint-disable-next-line react-hooks/refs
               onShow={getShowCallback(diff.files[singleFileIdx].path)}
+              // eslint-disable-next-line react-hooks/refs
               fileRef={getFileRef(diff.files[singleFileIdx].path)}
               currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
               imageDiffMode={imageDiffMode}
@@ -2828,13 +3124,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           // (orderedFiles = tree depth-first / grouped / flat), not diff.files'
           // raw order - otherwise the tree/grouped sidebar and the diff column
           // disagree and clicking a file scrolls to a card in a different spot.
+          // eslint-disable-next-line react-hooks/refs -- see the getShowCallback/getFileRef note above
           orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
-            <FileDiff key={f.path} file={f} sideBySide={sideBySide}
+            <FileDiff key={f.path} file={f} sideBySide={sideBySide} wordHighlight={wordHighlight}
               isCollapsed={collapsedFiles.has(f.path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
+              onAddToReview={handleAddToReview}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(f.path)}
               onShow={getShowCallback(f.path)}
@@ -2894,10 +3192,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   )
 
   const dragOverlay = isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />
-  const commentToast = commentSent && (
+  const commentToast = sentToast && (
     <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
       <Check className="w-3.5 h-3.5" />
-      Comment sent to agent
+      {sentToast}
     </div>
   )
 
@@ -2958,6 +3256,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         {/* Actions pinned to the top-right corner regardless of how many lines the
             content above wraps to (parent is items-start, this group is shrink-0). */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* "Submit review" - shown only once the user has queued at least one
+              "Add to review" comment for this agent. */}
+          <ReviewDraftPopover
+            comments={reviewComments}
+            staleIds={staleReviewIds}
+            submitting={submittingReview}
+            onSubmit={submitReview}
+            onRemove={removeQueuedComment}
+            onJump={handleJumpToComment}
+          />
           {loadingSpinner}
           {refreshBtn}
         </div>

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Github, GitlabIcon } from 'lucide-react'
+import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink } from 'lucide-react'
+// lucide-react dropped brand glyphs in v1, so the forge icons come from
+// simple-icons instead (@icons-pack/react-simple-icons).
+import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
 import type { AgentResponse } from '../api/models/AgentResponse'
 import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { Badge } from './Badge'
@@ -15,8 +18,8 @@ function FieldLabel({ children }: { children: ReactNode }) {
 
 // providerIcon returns the small forge glyph for a provider name.
 export function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
-  if (provider === 'github') return <Github className={className} />
-  if (provider === 'gitlab') return <GitlabIcon className={className} />
+  if (provider === 'github') return <SiGithub className={className} />
+  if (provider === 'gitlab') return <SiGitlab className={className} />
   return <GitPullRequest className={className} />
 }
 
@@ -216,7 +219,10 @@ export function CreateMRDialog({
           <h2 className="text-base font-semibold">Create {providerLabel}</h2>
         </div>
         <div className="px-5 py-4 overflow-auto flex flex-col gap-3">
-          {config && !config.authenticated && config.auth === 'cli' && (
+          {/* Only an explicit false warns: the auth check runs in the background
+              server-side, so a config without the field just means "still
+              checking" and stays quiet. */}
+          {config && config.authenticated === false && config.auth === 'cli' && (
             <div className="text-xs rounded-md px-3 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
               {config.auth_status || 'The forge CLI is not authenticated. Run `gh auth login` / `glab auth login` on the host.'}
             </div>

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ type instance struct {
 	state     State
 	childPort int
 	pid       int
+	scopeUnit string // transient systemd scope wrapping this run's sandbox, if any
 	cancel    context.CancelFunc
 	// gen increments on every spawn and on stopChild; a run goroutine settles
 	// its instance state only while its captured gen is current, so a
@@ -193,6 +195,14 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	}
 	defer launch.Cleanup()
 
+	// Run under a transient systemd scope (best-effort): own cgroup with CPU/IO
+	// weight limits + a single kill handle, reaped in stopChild. The child port
+	// makes the unit unique among concurrently-live preview instances (active +
+	// pending of the same script/head), so pre-clearing a stale unit can't kill a
+	// sibling's scope.
+	scopeUnit := sandbox.ScopeUnit("preview", spec.Name+"-"+in.version.HeadID+"-"+strconv.Itoa(childPort))
+	sandbox.WrapScope(scopeUnit, launch)
+
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
@@ -234,10 +244,12 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 		// A concurrent stop already superseded this spawn.
 		in.mu.Unlock()
 		terminateGroup(cmd.Process.Pid)
+		sandbox.StopScope(scopeUnit)
 		_ = cmd.Wait()
 		return
 	}
 	in.pid = cmd.Process.Pid
+	in.scopeUnit = scopeUnit
 	readyDeadline := in.readyTimeout()
 	in.mu.Unlock()
 
@@ -281,7 +293,6 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 			Timeout:   2 * time.Second,
 			Transport: &http.Transport{DisableKeepAlives: true},
 		}
-		hinted := false
 		for {
 			select {
 			case <-probeCtx.Done():
@@ -294,17 +305,13 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 					markReady()
 					return
 				}
-				// Under hard mode a raw dial that succeeds while HTTP keeps
-				// failing means the port is held (by pasta) but the server bound
-				// loopback INSIDE the netns, where pasta's inbound forward can't
-				// reach it. Surface a one-time hint so the log points at the fix.
-				if hardMode && !hinted {
-					if c, derr := net.DialTimeout("tcp", addr, time.Second); derr == nil {
-						_ = c.Close()
-						hinted = true
-						in.appendLog("hydra: port is open but the server isn't answering HTTP - under network mode hard the server must bind 0.0.0.0 (use HYDRA_PREVIEW_ADDR), not 127.0.0.1", "stderr")
-					}
-				}
+				// No bind-address hint here: under hard mode pasta holds the
+				// host port and completes TCP handshakes even while nothing
+				// inside the netns listens, so during a long build "dial ok,
+				// HTTP dead" is the NORMAL starting state and a mid-probe
+				// warning fires spuriously on every spawn. The hint is
+				// attached to the ready-deadline failure below instead, the
+				// point where it is actually diagnostic.
 			}
 		}
 	}()
@@ -318,6 +325,14 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 		in.mu.Unlock()
 		if expired {
 			in.appendLog(fmt.Sprintf("hydra: server not ready after %s, giving up", readyDeadline), "stderr")
+			if hardMode {
+				// The likeliest config mistake behind never-ready under hard
+				// mode: the server bound loopback INSIDE the netns, where
+				// pasta's inbound forward can't reach it. (A raw dial can't
+				// distinguish this - pasta ACKs regardless - hence a hint at
+				// give-up time rather than a check during startup.)
+				in.appendLog("hydra: if the server was listening, check its bind address - under network mode hard it must bind 0.0.0.0 (use HYDRA_PREVIEW_ADDR), not 127.0.0.1", "stderr")
+			}
 			terminateGroup(cmd.Process.Pid)
 		}
 	}()
@@ -369,6 +384,7 @@ func (in *instance) settleError(gen int, msg string) {
 func (in *instance) stopChild(finalState State, message string) {
 	in.mu.Lock()
 	pid := in.pid
+	scopeUnit := in.scopeUnit
 	cancel := in.cancel
 	in.gen++ // supersede the live run goroutine, if any
 	if in.state == StateStarting && in.readyCh != nil {
@@ -378,6 +394,7 @@ func (in *instance) stopChild(finalState State, message string) {
 	in.state = finalState
 	in.message = message
 	in.pid = 0
+	in.scopeUnit = ""
 	in.childPort = 0
 	in.proxy = nil
 	in.readyCh = nil
@@ -386,6 +403,10 @@ func (in *instance) stopChild(finalState State, message string) {
 
 	if pid > 0 {
 		terminateGroup(pid)
+		// Also reap the systemd scope: when scoped, the tracked pid is
+		// systemd-run's, so the process-group signal may not reach the sandboxed
+		// children - StopScope tears down the whole cgroup.
+		sandbox.StopScope(scopeUnit)
 		grace := in.mgr.stopGrace
 		go func() {
 			time.Sleep(grace)

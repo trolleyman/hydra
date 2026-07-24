@@ -28,6 +28,13 @@ export const StorageKeys = {
   // recent first). Drives the Ctrl+` alt-tab switcher's order. See
   // lib/projectRecency.ts.
   projectRecency: 'hydra-project-recency',
+  // Snapshot of each project's resolved [review] config (JSON map projectId ->
+  // ReviewConfigResponse). Hydrated into the project store on boot so the
+  // sidebar forge icon and Create MR prefill render instantly, then refreshed
+  // from the (slow, shells out to gh/glab) endpoint in the background. Entries
+  // for removed projects are pruned when the project list loads. See
+  // stores/projectStore.ts.
+  reviewConfigs: 'hydra-review-configs',
   // Remembered model per agent type (JSON map, e.g. {"claude":"opus"}). Keyed by
   // agent type because each CLI has its own model aliases; picking a model in the
   // spawn form seeds the next spawn of that same agent type. '' / absent = the
@@ -61,6 +68,8 @@ export const StorageKeys = {
 
   diffSideBySide: 'hydra-diff-side-by-side',
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
+  // Whether to tint the exact changed words within a modified line (default on).
+  diffWordHighlight: 'hydra-diff-word-highlight',
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
@@ -168,6 +177,17 @@ export const testFilterKey = (projectId: string | null, agentId: string): string
 export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
 export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
+
+// Pending review comments the user has queued (via "Add to review" in the diff
+// viewer) but not yet submitted to the agent - one draft per project + agent, so
+// each agent accumulates its own batch and the "Submit review" button in the
+// Changes bar can flush them all at once. Kept in a dedicated store (not
+// agentViewPrefs) because this is user-authored content with its own
+// clear-on-submit lifecycle, not view state. See lib/reviewDrafts.ts. projectId
+// may be null → '_' keeps the key shape stable.
+export const REVIEW_DRAFT_PREFIX = 'hydra-review-draft-'
+export const reviewDraftKey = (projectId: string | null, agentId: string): string =>
+  `${REVIEW_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
 
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
 // collapsed (the default - archived history is rarely wanted, so it stays out of
