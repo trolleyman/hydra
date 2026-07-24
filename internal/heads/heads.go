@@ -920,7 +920,10 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		}
 	}
 
-	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb, Ephemeral: true}); err != nil {
+	// Apply the project's resolved cgroup limits to the shell's transient scope
+	// (config.Load is cached, so this re-read is cheap).
+	limitsCfg, _ := config.Load(projectRoot)
+	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb, Ephemeral: true, Limits: limitsCfg.ResolveResourceLimits()}); err != nil {
 		return "", errtrace.Wrap(err)
 	}
 	return shellID, nil
