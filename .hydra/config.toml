@@ -249,11 +249,11 @@ timeout_sec = 900
 # the build log while it starts, and tears it down when idle; the first visit
 # after that transparently respawns it. The frontend build dominates spawn
 # time, hence the generous ready timeout.
-type = "server"
 # --mode development builds the frontend unminified with sourcemaps (see the
 # isDev switch in web/vite.config.ts), so an error in the previewed app gives a
 # readable stack trace instead of minified chunk soup. The preview exists to
 # inspect and debug UI changes; readable beats small here.
+type = "server"
 command = "cd web && npm install && npm run build -- --mode development && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
