@@ -48,6 +48,13 @@ user-facing text (JSX / string literals) *and* code comments. Decorative status
 glyphs already in use (`✓ ⚠ ✗ ▸ │`) are fine; this rule is specifically about dashes
 and ellipses.
 
+### No UPPERCASE headings in the UI
+
+Do **not** render headings, section labels, or titles in the web UI as all-caps.
+Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
+CONTROLS"). This covers both capitalised string literals *and* CSS - do not reach
+for `text-transform: uppercase` to get the uppercase look either.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL
