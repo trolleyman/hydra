@@ -1278,8 +1278,10 @@ function findHunkForLine(file: DiffFile | undefined, lineNum: number, isNew: boo
 }
 
 // Build the fenced ```diff context block for a commented line: three lines either
-// side, with the target line marked by `>` (instead of `|`) so the agent can see
-// exactly which line is meant. Returns '' when the hunk/line can't be located.
+// side. Each row is `<sign> | <old line> | <new line> | <code>` (line numbers
+// padded to align within the window), and the commented line is followed by a
+// `# ^ Comment by user` caret so the agent can see exactly which line is meant.
+// Returns '' when the hunk/line can't be located.
 function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: number, isNew: boolean): string {
   if (!hunk) return ''
   const targetIdx = hunk.lines.findIndex((l) => (isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum))
@@ -1287,12 +1289,17 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   const start = Math.max(0, targetIdx - 3)
   const end = Math.min(hunk.lines.length, targetIdx + 4)
   const ctxLines = hunk.lines.slice(start, end)
-  const body = ctxLines.map((l, i) => {
-    const typeChar = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
-    if (start + i === targetIdx) return typeChar + '>' + l.content
-    return typeChar + '|' + l.content
-  }).join('\n')
-  return `\`\`\`diff\n# ${path}\n${hunk.header}\n${body}\n\`\`\`\n`
+  const oldStr = (l: DiffLine) => (l.old_line_num != null ? String(l.old_line_num) : '')
+  const newStr = (l: DiffLine) => (l.new_line_num != null ? String(l.new_line_num) : '')
+  const wOld = Math.max(1, ...ctxLines.map((l) => oldStr(l).length))
+  const wNew = Math.max(1, ...ctxLines.map((l) => newStr(l).length))
+  const rows: string[] = []
+  ctxLines.forEach((l, i) => {
+    const sign = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+    rows.push(`${sign} | ${oldStr(l).padStart(wOld)} | ${newStr(l).padStart(wNew)} | ${l.content}`)
+    if (start + i === targetIdx) rows.push('# ^ Comment by user')
+  })
+  return `\`\`\`diff\n# ${path}\n${hunk.header}\n${rows.join('\n')}\n\`\`\`\n`
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -2535,13 +2542,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // frame, so it copes with the file mounting a beat after these state updates.
   // No-op for a comment whose file has dropped out of the current comparison.
   const handleJumpToComment = useCallback((c: PendingReviewComment) => {
-    if (!diff || !diff.files.some((f) => f.path === c.path)) return
-    if (singleFile) {
-      const idx = diff.files.findIndex((f) => f.path === c.path)
-      if (idx >= 0) setSingleFileIdx(idx)
-    } else if (collapsedFiles.has(c.path)) {
-      toggleFileCollapse(c.path)
-    }
+    if (!diff) return
+    const idx = diff.files.findIndex((f) => f.path === c.path)
+    if (idx < 0) return
+    // In one-file-at-a-time view, switch to the commented file first (only its
+    // card is mounted). scrollToDiffLine re-acquires the card each frame, so it
+    // waits for the swapped-in card to mount.
+    if (singleFile) setSingleFileIdx(idx)
+    // Reveal the file's body in EITHER view: expand it if collapsed, un-hide it
+    // if it's a big "Load diff" file - otherwise its rows never mount and there's
+    // no line to scroll to.
+    if (collapsedFiles.has(c.path)) toggleFileCollapse(c.path)
     if (hiddenFiles.has(c.path)) handleShowFile(c.path)
     scrollToDiffLine(
       () => fileRefs.current.get(c.path) ?? null,
@@ -2608,7 +2619,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const file = diffRef.current?.files.find(f => f.path === path)
     const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
-    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`>\`) (diff: ${fromLabel} -> ${toLabel})\n`
+    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`# ^\` in the block below) (diff: ${fromLabel} -> ${toLabel})\n`
     if (block) msg += `\n${block}`
     msg += `\nComment:\n${text}`
 

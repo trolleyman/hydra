@@ -241,6 +241,14 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 .dark .hljs-emphasis { color: inherit; font-style: italic; }
 .dark .hljs-strong { color: inherit; font-weight: bold; }
 .dark .hljs-link { text-decoration: underline; }
+/* github.css (light) paints diff additions/deletions with pale near-white
+   backgrounds (#f0fff4 / #ffeef0); the dark overrides above only change the token
+   COLOUR, so those light backgrounds otherwise survive into dark mode and wash
+   out ```diff code blocks in rendered markdown (e.g. the diff-context blocks the
+   review comments embed). Repaint them with the same translucent green/red the
+   diff viewer's own rows use (bg-green-500/15 / bg-red-500/15). */
+.dark .hljs-addition { background-color: rgba(34, 197, 94, 0.15); }
+.dark .hljs-deletion { background-color: rgba(239, 68, 68, 0.15); }
 
 /* On Linux the OS-native scrollbar carries increment/decrement arrow buttons,
    and `color-scheme` paints it dark. Inside short boxes (e.g. the build-log
