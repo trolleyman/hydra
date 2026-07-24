@@ -40,7 +40,8 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
 const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
   claude: [
     { id: 'fable', label: 'Fable' },
-    { id: 'opus', label: 'Opus' },
+    { id: 'claude-opus-5', label: 'Opus 5' },
+    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
     { id: 'sonnet', label: 'Sonnet' },
     { id: 'haiku', label: 'Haiku' },
   ],

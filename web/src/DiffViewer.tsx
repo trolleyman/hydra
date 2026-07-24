@@ -1578,7 +1578,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts by merging the local ${baseBranch} branch into this one (do not git fetch first), resolving the conflicts that arise.` }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
@@ -1768,7 +1768,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       onSecondary: async () => {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-            text: `Update this branch from its base by merging ${baseBranch} in, resolving any conflicts that arise.`,
+            text: `Update this branch from its base by merging the local ${baseBranch} branch in (do not git fetch first), resolving any conflicts that arise.`,
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
