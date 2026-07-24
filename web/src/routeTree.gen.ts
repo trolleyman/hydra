@@ -9,23 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectId'
 import { Route as ProjectProjectIdIndexRouteImport } from './routes/project.$projectId/index'
-import { Route as ProjectProjectIdSettingsRouteImport } from './routes/project.$projectId/settings'
 import { Route as ProjectProjectIdRepositoryRouteImport } from './routes/project.$projectId/repository'
-import { Route as ProjectProjectIdRepositorySplatRouteImport } from './routes/project.$projectId/repository.$'
+import { Route as ProjectProjectIdSettingsRouteImport } from './routes/project.$projectId/settings'
 import { Route as ProjectProjectIdAgentAgentIdRouteImport } from './routes/project.$projectId/agent.$agentId'
+import { Route as ProjectProjectIdRepositorySplatRouteImport } from './routes/project.$projectId/repository.$'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectProjectIdRoute = ProjectProjectIdRouteImport.update({
@@ -38,16 +38,22 @@ const ProjectProjectIdIndexRoute = ProjectProjectIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProjectProjectIdRoute,
 } as any)
+const ProjectProjectIdRepositoryRoute =
+  ProjectProjectIdRepositoryRouteImport.update({
+    id: '/repository',
+    path: '/repository',
+    getParentRoute: () => ProjectProjectIdRoute,
+  } as any)
 const ProjectProjectIdSettingsRoute =
   ProjectProjectIdSettingsRouteImport.update({
     id: '/settings',
     path: '/settings',
     getParentRoute: () => ProjectProjectIdRoute,
   } as any)
-const ProjectProjectIdRepositoryRoute =
-  ProjectProjectIdRepositoryRouteImport.update({
-    id: '/repository',
-    path: '/repository',
+const ProjectProjectIdAgentAgentIdRoute =
+  ProjectProjectIdAgentAgentIdRouteImport.update({
+    id: '/agent/$agentId',
+    path: '/agent/$agentId',
     getParentRoute: () => ProjectProjectIdRoute,
   } as any)
 const ProjectProjectIdRepositorySplatRoute =
@@ -55,12 +61,6 @@ const ProjectProjectIdRepositorySplatRoute =
     id: '/$',
     path: '/$',
     getParentRoute: () => ProjectProjectIdRepositoryRoute,
-  } as any)
-const ProjectProjectIdAgentAgentIdRoute =
-  ProjectProjectIdAgentAgentIdRouteImport.update({
-    id: '/agent/$agentId',
-    path: '/agent/$agentId',
-    getParentRoute: () => ProjectProjectIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -133,18 +133,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/project/$projectId': {
@@ -161,6 +161,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectProjectIdIndexRouteImport
       parentRoute: typeof ProjectProjectIdRoute
     }
+    '/project/$projectId/repository': {
+      id: '/project/$projectId/repository'
+      path: '/repository'
+      fullPath: '/project/$projectId/repository'
+      preLoaderRoute: typeof ProjectProjectIdRepositoryRouteImport
+      parentRoute: typeof ProjectProjectIdRoute
+    }
     '/project/$projectId/settings': {
       id: '/project/$projectId/settings'
       path: '/settings'
@@ -168,11 +175,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectProjectIdSettingsRouteImport
       parentRoute: typeof ProjectProjectIdRoute
     }
-    '/project/$projectId/repository': {
-      id: '/project/$projectId/repository'
-      path: '/repository'
-      fullPath: '/project/$projectId/repository'
-      preLoaderRoute: typeof ProjectProjectIdRepositoryRouteImport
+    '/project/$projectId/agent/$agentId': {
+      id: '/project/$projectId/agent/$agentId'
+      path: '/agent/$agentId'
+      fullPath: '/project/$projectId/agent/$agentId'
+      preLoaderRoute: typeof ProjectProjectIdAgentAgentIdRouteImport
       parentRoute: typeof ProjectProjectIdRoute
     }
     '/project/$projectId/repository/$': {
@@ -181,13 +188,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/project/$projectId/repository/$'
       preLoaderRoute: typeof ProjectProjectIdRepositorySplatRouteImport
       parentRoute: typeof ProjectProjectIdRepositoryRoute
-    }
-    '/project/$projectId/agent/$agentId': {
-      id: '/project/$projectId/agent/$agentId'
-      path: '/agent/$agentId'
-      fullPath: '/project/$projectId/agent/$agentId'
-      preLoaderRoute: typeof ProjectProjectIdAgentAgentIdRouteImport
-      parentRoute: typeof ProjectProjectIdRoute
     }
   }
 }
