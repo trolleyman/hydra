@@ -601,6 +601,9 @@ type ConfigResponse struct {
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
 
+	// Resources The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
+	Resources *ResourceLimits `json:"resources,omitempty"`
+
 	// Review The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
 	Review *ReviewConfig `json:"review,omitempty"`
 
@@ -1055,6 +1058,24 @@ type RepositoryUncommittedFile struct {
 
 	// Status One of modified|added|deleted|renamed|copied|conflicted|untracked
 	Status string `json:"status"`
+}
+
+// ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
+type ResourceLimits struct {
+	// CpuQuota Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null/0 = no cap.
+	CpuQuota *int `json:"cpu_quota"`
+
+	// CpuWeight Relative CPU share under contention (systemd CPUWeight, 1-10000). null uses the default (50).
+	CpuWeight *int `json:"cpu_weight"`
+
+	// IoWeight Relative block-IO share under contention (systemd IOWeight, 1-10000). null uses the default (50).
+	IoWeight *int `json:"io_weight"`
+
+	// MemoryMax Hard memory ceiling in MB (systemd MemoryMax); the cgroup is OOM-killed past it. null/0 = no cap.
+	MemoryMax *int `json:"memory_max"`
+
+	// TasksMax Hard cap on processes/threads (systemd TasksMax); guards against fork bombs / PID exhaustion. null/0 = no cap.
+	TasksMax *int `json:"tasks_max"`
 }
 
 // ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.

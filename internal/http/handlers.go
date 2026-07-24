@@ -877,6 +877,10 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	// the field empty and inherits the layer below).
 	resp.Review = toAPIReviewConfig(cfg.Review)
 
+	// The raw [resources] table for this layer (nil = unset → the editor shows the
+	// fields empty and inherits the layer below / the built-in defaults).
+	resp.Resources = toAPIResourceLimits(cfg.Resources)
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -1062,6 +1066,58 @@ func fromAPIReviewConfig(r *api.ReviewConfig) *config.ReviewConfig {
 	return &out
 }
 
+// toAPIResourceLimits converts the raw internal [resources] table to its API
+// shape (both are all-optional pointer fields). nil in → nil out (the layer sets
+// none). Pointers are copied so the response never aliases cfg's pointers.
+func toAPIResourceLimits(r *config.ResourceLimits) *api.ResourceLimits {
+	if r == nil {
+		return nil
+	}
+	return &api.ResourceLimits{
+		CpuWeight: copyIntPtr(r.CPUWeight),
+		IoWeight:  copyIntPtr(r.IOWeight),
+		CpuQuota:  copyIntPtr(r.CPUQuota),
+		MemoryMax: copyIntPtr(r.MemoryMax),
+		TasksMax:  copyIntPtr(r.TasksMax),
+	}
+}
+
+// fromAPIResourceLimits is the inverse of toAPIResourceLimits, for a SaveConfig
+// body. Hard caps below zero are clamped to 0 (unset/no cap); weights below zero
+// are clamped to 0 too (which resolves back to the default).
+func fromAPIResourceLimits(r *api.ResourceLimits) *config.ResourceLimits {
+	if r == nil {
+		return nil
+	}
+	clamp := func(v *int) *int {
+		if v == nil {
+			return nil
+		}
+		n := *v
+		if n < 0 {
+			n = 0
+		}
+		return &n
+	}
+	return &config.ResourceLimits{
+		CPUWeight: clamp(r.CpuWeight),
+		IOWeight:  clamp(r.IoWeight),
+		CPUQuota:  clamp(r.CpuQuota),
+		MemoryMax: clamp(r.MemoryMax),
+		TasksMax:  clamp(r.TasksMax),
+	}
+}
+
+// copyIntPtr returns a fresh copy of an int pointer (nil-safe), so an API
+// response never aliases the internal config's pointers.
+func copyIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	n := *v
+	return &n
+}
+
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	out := api.AgentConfig{
@@ -1218,6 +1274,7 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	// The raw [review] table for this layer. renderConfig regenerates [review]
 	// from it (or preserves the existing block when nil).
 	newCfg.Review = fromAPIReviewConfig(request.Body.Review)
+	newCfg.Resources = fromAPIResourceLimits(request.Body.Resources)
 	// Artifact concurrency: a set value (0 = unlimited, N>0 = at most N) is
 	// applied authoritatively; nil/absent clears it so it resets to the built-in
 	// default. Negatives are coerced to 0 (unlimited), matching the API minimum.
