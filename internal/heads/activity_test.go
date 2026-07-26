@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -57,17 +58,36 @@ func TestReadStatusLogTailNoActivityAfterStop(t *testing.T) {
 	}
 }
 
-func TestEnrichAgentStatusRunning(t *testing.T) {
-	root := t.TempDir()
-	id := "abc"
-	writeStatusLog(t, root, id,
-		`{"hook":{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/repo/main.go"}}}`,
-	)
+// applyPersistedActivity copies the persisted live-activity columns onto the
+// status: activity only while running, last_message in every state, and the
+// suggested flag round-tripped from the column. (The columns themselves are filled
+// by the poller from readStatusLogTail - see TestReadStatusLogTail* above.)
+func TestApplyPersistedActivity(t *testing.T) {
+	running := &api.AgentStatusInfo{Status: api.Running}
+	applyPersistedActivity(running, &db.Agent{Activity: "Editing main.go", LastMessage: "All done."})
+	if running.Activity == nil || *running.Activity != "Editing main.go" {
+		t.Fatalf("activity = %v, want %q", running.Activity, "Editing main.go")
+	}
+	if running.LastMessage == nil || *running.LastMessage != "All done." {
+		t.Fatalf("lastMessage = %v, want %q", running.LastMessage, "All done.")
+	}
 
-	info := &api.AgentStatusInfo{Status: api.Running}
-	enrichAgentStatus(root, id, info)
-	if info.Activity == nil || *info.Activity != "Editing main.go" {
-		t.Fatalf("activity = %v, want %q", info.Activity, "Editing main.go")
+	// At rest the activity column is not surfaced (the UI hides it and it's stale),
+	// but the last message still is.
+	rest := &api.AgentStatusInfo{Status: api.Finished}
+	applyPersistedActivity(rest, &db.Agent{Activity: "Editing main.go", LastMessage: "All done."})
+	if rest.Activity != nil {
+		t.Fatalf("activity = %v, want nil at rest", rest.Activity)
+	}
+	if rest.LastMessage == nil || *rest.LastMessage != "All done." {
+		t.Fatalf("lastMessage = %v, want %q at rest", rest.LastMessage, "All done.")
+	}
+
+	// The suggested-next-message flag round-trips from the column.
+	sug := &api.AgentStatusInfo{Status: api.Finished}
+	applyPersistedActivity(sug, &db.Agent{LastMessage: "run it", LastMessageIsSuggested: true})
+	if sug.LastMessageIsSuggestedNextMessage == nil || !*sug.LastMessageIsSuggestedNextMessage {
+		t.Fatalf("suggested = %v, want true", sug.LastMessageIsSuggestedNextMessage)
 	}
 }
 
@@ -109,21 +129,22 @@ func TestReadStatusLogTailQuestion(t *testing.T) {
 		`{"hook":{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which DB?"}]}}}`,
 	)
 
-	info := &api.AgentStatusInfo{Status: api.Waiting}
-	enrichAgentStatus(root, id, info)
-	if info.LastMessage == nil || *info.LastMessage != "Which DB?" {
-		t.Fatalf("lastMessage = %v, want %q", info.LastMessage, "Which DB?")
+	_, lastMessage, isQuestion := readStatusLogTail(root, id)
+	if lastMessage != "Which DB?" {
+		t.Fatalf("lastMessage = %q, want %q", lastMessage, "Which DB?")
 	}
 	// The message is a question the agent is asking the user, not a suggestion you
-	// could send back - so it must not be flagged as a suggested next message even
-	// though its shape (short, single line, no mid-message break) looks terse.
-	if info.LastMessageIsSuggestedNextMessage != nil {
-		t.Fatalf("lastMessageIsSuggestedNextMessage = %v, want nil for a question", *info.LastMessageIsSuggestedNextMessage)
+	// could send back: the poller uses isQuestion to keep it off the suggested-next
+	// flag even though its shape (short, single line) looks terse.
+	if !isQuestion {
+		t.Fatalf("isQuestion = false, want true for an AskUserQuestion")
 	}
-	// A question tool isn't "activity" - the agent is blocked, not working.
-	if info.Activity != nil {
-		t.Fatalf("activity = %v, want nil while waiting", info.Activity)
+	if !isQuestion && IsSuggestedNextMessage(lastMessage) {
+		t.Fatalf("a question must not be treated as a suggested next message")
 	}
+	// (readStatusLogTail reports the raw tool activity here; the agent-is-blocked
+	// suppression is applied downstream, gated on the running status - see the
+	// poller and applyPersistedActivity.)
 }
 
 func TestIsSuggestedNextMessage(t *testing.T) {

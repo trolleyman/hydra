@@ -251,6 +251,7 @@ function RootLayout() {
   const addAgent = useAgentStore((s) => s.addAgent)
   const markRead = useAgentStore((s) => s.markRead)
   const patchAgentTests = useAgentStore((s) => s.patchAgentTests)
+  const patchAgentStatus = useAgentStore((s) => s.patchAgentStatus)
   const showDialog = useDialogStore((s) => s.show)
   const navigate = useNavigate()
   const location = useLocation()
@@ -502,6 +503,10 @@ function RootLayout() {
     // A streamed test run ticking: the event carries the new summary, so patch
     // the one agent's chip in place - no agent-list refetch.
     onAgentTestsChanged: (agentId, tests) => patchAgentTests(agentId, tests),
+    // A head's live status/activity/last-message changed: the event carries the
+    // bundle, so patch the one row in place - no agent-list refetch. (A real status
+    // flip also fires agents_changed above for the unread / push-status paths.)
+    onAgentStatusChanged: (agentId, patch) => patchAgentStatus(agentId, patch),
   })
 
   // When the app lands on the bare root path ("/") but a project is already

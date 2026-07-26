@@ -32,6 +32,12 @@ const (
 	// as Payload keyed by the agent id - the client patches the agent's chip in
 	// place instead of refetching the whole agent list.
 	AgentTestsChanged Type = "agent_tests_changed"
+	// AgentStatusChanged: one head's live status bundle changed (status string,
+	// activity line, or last message). Project-scoped, carries the bundle as Payload
+	// keyed by the agent id so the client patches that one row in place. Unlike
+	// AgentsChanged this fires on every per-tool-call activity change, which is far
+	// too frequent for a full-list refetch.
+	AgentStatusChanged Type = "agent_status_changed"
 )
 
 // Event is one change signal. ProjectRoot scopes a project-specific event to
@@ -98,6 +104,13 @@ func (h *Hub) PushStatusChanged(projectRoot string) {
 // per agent id (latest payload wins for a slow reader).
 func (h *Hub) AgentTestsChanged(projectRoot, agentID string, payload any) {
 	h.Publish(Event{Type: AgentTestsChanged, ProjectRoot: projectRoot, Key: agentID, Payload: payload})
+}
+
+// AgentStatusChanged publishes one head's changed live status bundle (status +
+// activity + last message), coalesced per agent id so a slow reader only sees the
+// latest value for that head.
+func (h *Hub) AgentStatusChanged(projectRoot, agentID string, payload any) {
+	h.Publish(Event{Type: AgentStatusChanged, ProjectRoot: projectRoot, Key: agentID, Payload: payload})
 }
 
 // Subscribe registers a subscriber scoped to projectRoot. It receives project

@@ -296,6 +296,21 @@ func (s *Store) UpdateAgentTitle(id, title string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateAgentActivity stores the head's live activity + last message, written by
+// the JSON status poller when they change. A map (not a struct) so an empty
+// activity string is written through - clearing the activity when the agent goes
+// idle - rather than skipped as a zero value. Does NOT touch agent_status_time:
+// the running-to-finished transition detection (statusTimeAfter) and the unread
+// debounce belong solely to UpdateAgentStatus (see poller.go / chatqueue.go).
+func (s *Store) UpdateAgentActivity(id, activity, lastMessage string, lastMessageIsSuggested bool) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"activity":                  activity,
+		"last_message":              lastMessage,
+		"last_message_is_suggested": lastMessageIsSuggested,
+	})
+	return errtrace.Wrap(result.Error)
+}
+
 // UpdateAgentPlan stores the chat plan/to-do JSON for an agent (opaque;
 // written by the chat client's debounced PUT and by the daemon's transcript
 // reconstruction on chat attach). Empty clears it.
