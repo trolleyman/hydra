@@ -274,6 +274,111 @@ func (p *githubProvider) Discussions(ctx context.Context, repoDir, _ string, id 
 	return res, nil
 }
 
+// ghPRRef is the subset of `gh pr {list,view} --json ...` fields needed to adopt
+// a PR (browse it, check out its head, work out where to push back). It is a
+// wider projection than ghPR (which is status-only), so it lives separately.
+type ghPRRef struct {
+	Number              int    `json:"number"`
+	URL                 string `json:"url"`
+	Title               string `json:"title"`
+	State               string `json:"state"`
+	IsDraft             bool   `json:"isDraft"`
+	HeadRefName         string `json:"headRefName"`
+	BaseRefName         string `json:"baseRefName"`
+	IsCrossRepository   bool   `json:"isCrossRepository"`
+	MaintainerCanModify bool   `json:"maintainerCanModify"`
+	Author              struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	HeadRepository struct {
+		Name string `json:"name"`
+	} `json:"headRepository"`
+	HeadRepositoryOwner struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+}
+
+// ghAdoptFields are the --json fields fetched for adoption. Both `gh pr list` and
+// `gh pr view` accept this set (the fields are defined on the PR type). If a gh
+// version rejects one ("Unknown JSON field"), `gh pr list --json bogus` prints
+// the valid set for that version.
+const ghAdoptFields = "number,url,title,state,isDraft,headRefName,baseRefName,isCrossRepository,maintainerCanModify,author,headRepository,headRepositoryOwner"
+
+func (r ghPRRef) toMRRef(basePRURL string) MRRef {
+	ref := MRRef{
+		ID:           strconv.Itoa(r.Number),
+		URL:          r.URL,
+		Title:        r.Title,
+		Author:       r.Author.Login,
+		State:        ghState(r.State, r.IsDraft),
+		Draft:        r.IsDraft,
+		HeadRef:      r.HeadRefName,
+		TargetBranch: r.BaseRefName,
+		CrossRepo:    r.IsCrossRepository,
+		// Same-repo PRs are always pushable; a fork PR only when the author opted
+		// in. We never assume pushable when unsure.
+		CanPush: !r.IsCrossRepository || r.MaintainerCanModify,
+	}
+	if r.IsCrossRepository && r.HeadRepositoryOwner.Login != "" && r.HeadRepository.Name != "" {
+		// gh's JSON has no clone URL, so build one from the fork's owner/name on the
+		// same host as the PR (handles github.com and GHES). Best-effort: an
+		// unparseable host leaves HeadRepoURL empty and the push falls back to the
+		// configured remote (which will simply fail for a real fork - surfaced then).
+		if host := urlSchemeHost(firstNonEmptyStr(r.URL, basePRURL)); host != "" {
+			ref.HeadRepoURL = host + "/" + r.HeadRepositoryOwner.Login + "/" + r.HeadRepository.Name + ".git"
+		}
+	}
+	return ref
+}
+
+func (p *githubProvider) ListMRs(ctx context.Context, repoDir, _ string, o ListMROptions) ([]MRRef, error) {
+	args := []string{"pr", "list", "--json", ghAdoptFields}
+	switch strings.ToLower(o.State) {
+	case "", "open":
+		args = append(args, "--state", "open")
+	case "all":
+		args = append(args, "--state", "all")
+	case "merged":
+		args = append(args, "--state", "merged")
+	case "closed":
+		args = append(args, "--state", "closed")
+	}
+	if o.Author != "" {
+		args = append(args, "--author", o.Author)
+	}
+	if o.Search != "" {
+		args = append(args, "--search", o.Search)
+	}
+	if o.Limit > 0 {
+		args = append(args, "--limit", strconv.Itoa(o.Limit))
+	}
+	out, err := p.run(ctx, repoDir, "gh", args...)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	var list []ghPRRef
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	res := make([]MRRef, 0, len(list))
+	for _, r := range list {
+		res = append(res, r.toMRRef(""))
+	}
+	return res, nil
+}
+
+func (p *githubProvider) GetMR(ctx context.Context, repoDir, _ string, id string) (MRRef, error) {
+	out, err := p.run(ctx, repoDir, "gh", "pr", "view", id, "--json", ghAdoptFields)
+	if err != nil {
+		return MRRef{}, errtrace.Wrap(err)
+	}
+	var r ghPRRef
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		return MRRef{}, errtrace.Wrap(err)
+	}
+	return r.toMRRef(""), nil
+}
+
 // ghAuthStatus reports gh login state via `gh auth status`.
 func ghAuthStatus(ctx context.Context) (bool, string, error) {
 	if !cliAvailable("gh") {
