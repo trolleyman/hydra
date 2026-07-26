@@ -3413,6 +3413,26 @@ func handleSimChatWS(conn *safeConn) {
 			return
 		}
 		switch msg.Type {
+		case "shell_command":
+			// A composer "!command": mimic the daemon by running it (here, a canned
+			// result) and delivering the output as a normalized user_message whose
+			// payload carries the `shell` object the client renders as a card. A
+			// short delay lets the optimistic "running" card show before it settles.
+			cmd := msg.Command
+			go func() {
+				time.Sleep(900 * time.Millisecond)
+				output := "PASS\nok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s\nok  \tgithub.com/trolleyman/hydra/internal/http\t0.19s"
+				exit := 0
+				if strings.Contains(cmd, "fail") {
+					output = "--- FAIL: TestThing (0.00s)\n    thing_test.go:12: boom\nFAIL\nexit status 1"
+					exit = 1
+				}
+				sendSimNormalizedChatEvent(conn, time.Now().UnixMilli(), "user_message", map[string]any{
+					"id":      msg.ID,
+					"content": []map[string]any{{"type": "text", "text": "I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"}},
+					"shell":   map[string]any{"command": cmd, "output": output, "exit_code": exit, "truncated": false},
+				})
+			}()
 		case "set_model":
 			// The real CLI confirms a set_model control_request with a
 			// local-command echo (wrapped in a caveat, which the chat hides) -
@@ -3467,6 +3487,7 @@ type simChatClientMsg struct {
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
 	File     string          `json:"file"`
+	Command  string          `json:"command"`
 }
 
 // simOlderHistory is a canned run of older conversation (oldest-first, uuids
