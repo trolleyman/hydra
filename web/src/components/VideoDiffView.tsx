@@ -22,6 +22,7 @@ import {
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
+import { Tooltip } from './Tooltip'
 import { ABControlsContext } from './artifactDiffContext'
 
 // Minimum tile width (CSS px) a video needs so VideoTransport's fixed-size controls
@@ -369,21 +370,26 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
             onChange={setLocalView}
             options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
           />
-          <label
-            title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
-            className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-              canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-            }`}
+          {/* ml-auto moves to the wrapper - it is the row's flex child now. */}
+          <Tooltip
+            content={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
+            className="ml-auto"
           >
-            <input
-              type="checkbox"
-              checked={localHighlight && canDiff}
-              disabled={!canDiff}
-              onChange={(e) => setLocalHighlight(e.target.checked)}
-              className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
-            />
-            Highlight
-          </label>
+            <label
+              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={localHighlight && canDiff}
+                disabled={!canDiff}
+                onChange={(e) => setLocalHighlight(e.target.checked)}
+                className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+              />
+              Highlight
+            </label>
+          </Tooltip>
         </div>
       )}
       <div
@@ -529,15 +535,21 @@ function VideoTransport({ controller }: { controller: Controller }) {
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors'
   return (
     <div data-no-tile-drag className="flex items-center gap-2 mt-1.5 max-w-full">
-      <button onClick={() => frameStep(-1)} className={iconBtn} title="Previous frame">
-        <StepBack className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={togglePlay} className={iconBtn} title={playing ? 'Pause' : 'Play'}>
-        {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-      </button>
-      <button onClick={() => frameStep(1)} className={iconBtn} title="Next frame">
-        <StepForward className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="Previous frame">
+        <button onClick={() => frameStep(-1)} className={iconBtn} aria-label="Previous frame">
+          <StepBack className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
+      <Tooltip content={playing ? 'Pause' : 'Play'}>
+        <button onClick={togglePlay} className={iconBtn} aria-label={playing ? 'Pause' : 'Play'}>
+          {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+        </button>
+      </Tooltip>
+      <Tooltip content="Next frame">
+        <button onClick={() => frameStep(1)} className={iconBtn} aria-label="Next frame">
+          <StepForward className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
       <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 w-9 text-right">{formatTime(currentTime)}</span>
       <input
         type="range"
@@ -551,17 +563,21 @@ function VideoTransport({ controller }: { controller: Controller }) {
         className="flex-1 min-w-[80px] accent-blue-500 cursor-pointer"
       />
       <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-9">{formatTime(duration)}</span>
-      <button onClick={() => setLoop((l) => !l)} className={`${iconBtn} ${loop ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800' : ''}`} title="Loop">
-        <Repeat className="w-3.5 h-3.5" />
-      </button>
-      <select
-        value={rate}
-        onChange={(e) => setRate(Number(e.target.value))}
-        className="h-7 text-[11px] rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer px-1"
-        title="Playback speed"
-      >
-        {RATES.map((r) => <option key={r} value={r}>{r}×</option>)}
-      </select>
+      <Tooltip content="Loop">
+        <button onClick={() => setLoop((l) => !l)} className={`${iconBtn} ${loop ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800' : ''}`} aria-label="Loop">
+          <Repeat className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
+      <Tooltip content="Playback speed">
+        <select
+          value={rate}
+          onChange={(e) => setRate(Number(e.target.value))}
+          aria-label="Playback speed"
+          className="h-7 text-[11px] rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer px-1"
+        >
+          {RATES.map((r) => <option key={r} value={r}>{r}×</option>)}
+        </select>
+      </Tooltip>
     </div>
   )
 }

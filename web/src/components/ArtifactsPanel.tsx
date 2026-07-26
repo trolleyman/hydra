@@ -7,6 +7,7 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
@@ -133,7 +134,7 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
         {file.unverified && (
           <span
             className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20"
-            title="Compared by byte hash only - install ffmpeg for frame-accurate video diffs. This “modified” result may be spurious (e.g. only container metadata changed)."
+            title={'Compared by byte hash only - install ffmpeg for frame-accurate video diffs. This "modified" result may be spurious (e.g. only container metadata changed).'}
           >
             <TriangleAlert className="w-3 h-3" />
             byte-compared
@@ -179,16 +180,16 @@ function DownloadTile({ file }: { file: ArtifactFile }) {
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           {sides.map((side) => (
-            <a
-              key={side.label}
-              href={side.url}
-              download
-              title={`Download the ${side.label} version`}
-              className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
-            >
-              <Download className="w-3 h-3" />
-              {side.label}
-            </a>
+            <Tooltip key={side.label} content={`Download the ${side.label} version`}>
+              <a
+                href={side.url}
+                download
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <Download className="w-3 h-3" />
+                {side.label}
+              </a>
+            </Tooltip>
           ))}
         </div>
       </div>
@@ -704,14 +705,21 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
               // blue rule appears on hover so the resize affordance stays subtle at
               // rest. The tile's media is also draggable (startBodyResize); this handle
               // gives a visible cue and a double-click target to auto-size.
-              <div
-                onPointerDown={startEdgeResize(it.key, p.span)}
-                onDoubleClick={() => onSpanChange?.(spanKey(it.key), null)}
-                title="Drag to resize · double-click to auto-size"
-                className="absolute inset-y-0 right-0 z-10 w-3 -mr-1.5 cursor-col-resize flex justify-center items-stretch touch-none opacity-0 group-hover/tile:opacity-100 transition-opacity"
+              // The tile-relative placement (absolute inset/right/z/width) moves to
+              // the tooltip wrapper, which is what sits in the tile now; the handle
+              // stretches to fill it as the wrapper's flex child.
+              <Tooltip
+                content="Drag to resize · double-click to auto-size"
+                className="absolute inset-y-0 right-0 z-10 w-3 -mr-1.5"
               >
-                <div className="w-px self-stretch bg-blue-400/60" />
-              </div>
+                <div
+                  onPointerDown={startEdgeResize(it.key, p.span)}
+                  onDoubleClick={() => onSpanChange?.(spanKey(it.key), null)}
+                  className="w-full cursor-col-resize flex justify-center items-stretch touch-none opacity-0 group-hover/tile:opacity-100 transition-opacity"
+                >
+                  <div className="w-px self-stretch bg-blue-400/60" />
+                </div>
+              </Tooltip>
             )}
           </div>
         )
@@ -1025,41 +1033,44 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
               melts away (see MELT_BTN). Hidden when a side failed: the log is
               force-shown there, so there's nothing to toggle. */}
           {hasBuildLog && !anyFailed && (
-            <button
-              onClick={toggleBuildLog}
-              title={buildLogOpen ? 'Hide build log' : 'Show build log'}
-              aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
-              className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-                buildLogOpen
-                  ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300'
-                  : MELT_BTN
-              }`}
-            >
-              <ScrollText className="w-3.5 h-3.5" />
-            </button>
+            <Tooltip content={buildLogOpen ? 'Hide build log' : 'Show build log'}>
+              <button
+                onClick={toggleBuildLog}
+                aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+                className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                  buildLogOpen
+                    ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300'
+                    : MELT_BTN
+                }`}
+              >
+                <ScrollText className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
           )}
           {/* Split regenerate button: a main click busts the per-commit cache and
               regenerates both sides (chiefly to retry a failure, whose error is
               otherwise cached until the ref changes); the chevron opens a menu to
               regenerate just one side. */}
           <div ref={regenBtnRef} className="relative inline-flex">
-            <button
-              onClick={() => onRefresh(set.name)}
-              title="Regenerate this artifact"
-              aria-label="Regenerate this artifact"
-              className={`h-7 pl-2 pr-1.5 inline-flex items-center rounded-l-md ${MELT_BTN}`}
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setRegenMenuOpen((o) => !o)}
-              title="Regenerate one side"
-              aria-label="Regenerate options"
-              aria-expanded={regenMenuOpen}
-              className={`h-7 px-1 inline-flex items-center rounded-r-md ${MELT_BTN}`}
-            >
-              <ChevronDown className="w-3 h-3" />
-            </button>
+            <Tooltip content="Regenerate this artifact">
+              <button
+                onClick={() => onRefresh(set.name)}
+                aria-label="Regenerate this artifact"
+                className={`h-7 pl-2 pr-1.5 inline-flex items-center rounded-l-md ${MELT_BTN}`}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+            <Tooltip content="Regenerate one side">
+              <button
+                onClick={() => setRegenMenuOpen((o) => !o)}
+                aria-label="Regenerate options"
+                aria-expanded={regenMenuOpen}
+                className={`h-7 px-1 inline-flex items-center rounded-r-md ${MELT_BTN}`}
+              >
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </Tooltip>
             {/* Portal'd so the card's overflow-hidden can't clip it (see regenCoords). */}
             {regenMenuOpen && regenCoords && createPortal(
               <>
@@ -1584,47 +1595,52 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
       >
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
+        {/* The info trigger sits directly after the fixed-width title, BEFORE the
+            status chip: the chip comes and goes (and its text rewidths as a run
+            progresses), which used to shove the `i` ~90px sideways out from under
+            a stationary cursor. */}
+        {/* Scope: what this panel is and what its controls do - the things you
+            need while looking at it. The authoring reference (env vars, marker
+            syntax, sidecar schema, per-format comparison rules) lives in
+            docs/artifacts.md; it ran to ~900 words here, which rendered a
+            1248px-tall card that ran clean off a phone screen. */}
+        <InfoTooltip title="Artifacts" width={480}>
+          <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
+          <p>Each one is produced by a project-defined <strong>artifact script</strong>, configured in <code className="text-blue-300">.hydra/config.toml</code> under <code className="text-blue-300">[[artifacts]]</code>. Hydra runs it against both the base ref and the head ref (or your uncommitted working tree) and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
+          <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The <strong>build log</strong> button (the scroll icon in the card header) shows both sides' output; <strong>refresh</strong> beside it re-runs that script, handy to retry a failure or re-render when nothing visibly changed.</p>
+          <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
+          <p className="text-gray-500 dark:text-gray-400">Writing an artifact script - environment variables, streaming markers, tag sidecars, how each format is compared - is covered in <code className="text-blue-300">docs/artifacts.md</code>.</p>
+        </InfoTooltip>
         {generatingCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>
         )}
-        <InfoTooltip title="Artifacts" width={560}>
-          <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
-          <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
-          <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) - for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
-          <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types - <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> - are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg ... -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
-          <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script - handy to retry a failure or re-render even when nothing visibly changed.</p>
-          <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) - Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Streaming tiles.</strong> Print <code className="text-blue-300">::hydra:artifact:: home-dark.png</code> right after writing a file (and its <code className="text-blue-300">.meta</code> sidecar) and Hydra scans and diffs just that tile immediately, rendering it while the rest of the run continues - so images trickle in as they render instead of all appearing at the end. The path is relative to <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>; emit the marker only once the file is fully written. It is optional - a script that emits none still has every output collected by the final scan when it exits.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. The sidecar can also carry an optional <code className="text-blue-300">dpi</code> (the device-scale factor the shot was captured at, e.g. <code className="text-blue-300">{'{'}"dpi": 2{'}'}</code>) - the grid then sizes a tile by its <em>logical</em> width (pixels / dpi), so a 2× shot lays out like a 1× one, just sharper. For a video, an optional <code className="text-blue-300">fps</code> (e.g. <code className="text-blue-300">{'{'}"fps": 60{'}'}</code>) sets the frame rate the frame-step buttons use, since HTML5 video exposes none of its own. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label - only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right - how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) - the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
-        </InfoTooltip>
         {/* Right cluster: the global A/B before/after + highlight controls (only
             meaningful in A/B mode, where each tile shows one side at a time), then
             the shared filter bar. ml-auto floats the whole cluster to the right. */}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {imageDiffMode === 'ab' && (
             <div className="flex items-center gap-1.5">
-              <span title="Show every tile's before / after - X flips · B = Before · A = After">
+              <Tooltip content="Show every tile's before / after - X flips · B = Before · A = After">
                 <SegmentedToggle
                   value={artifactView}
                   onChange={onArtifactViewChange}
                   options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
                 />
-              </span>
-              <label
-                title="Highlight changed pixels in magenta on every tile - shortcut: H"
-                className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none"
-              >
-                <input
-                  type="checkbox"
-                  checked={artifactHighlight}
-                  onChange={(e) => onArtifactHighlightChange(e.target.checked)}
-                  className="accent-blue-500 cursor-pointer"
-                />
-                Highlight
-              </label>
+              </Tooltip>
+              <Tooltip content="Highlight changed pixels in magenta on every tile - shortcut: H">
+                <label className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={artifactHighlight}
+                    onChange={(e) => onArtifactHighlightChange(e.target.checked)}
+                    className="accent-blue-500 cursor-pointer"
+                  />
+                  Highlight
+                </label>
+              </Tooltip>
             </div>
           )}
           {/* The shared filter bar: a search box and one dropdown per tag scope (the
@@ -1653,12 +1669,16 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
                 tile up or down from there (drag a tile's edge to override one). */}
             <div className="mt-3 flex items-center gap-2">
               <SettingsGroupLabel className="shrink-0">Size</SettingsGroupLabel>
-              <input
-                type="range" min={0.5} max={2} step={0.25} value={artifactScale}
-                onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
-                className="flex-1 accent-blue-500 cursor-pointer"
-                title="Scale every artifact tile up or down"
-              />
+              {/* flex-1 on both: the wrapper takes the row's spare width, and the
+                  slider fills the wrapper. */}
+              <Tooltip content="Scale every artifact tile up or down" className="flex-1">
+                <input
+                  type="range" min={0.5} max={2} step={0.25} value={artifactScale}
+                  onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
+                  aria-label="Scale every artifact tile up or down"
+                  className="flex-1 accent-blue-500 cursor-pointer"
+                />
+              </Tooltip>
               <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
             </div>
             <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>

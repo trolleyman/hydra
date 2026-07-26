@@ -7,6 +7,7 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
+import { Tooltip } from './Tooltip'
 import { PanelError } from './PanelError'
 
 // How eagerly the panel re-polls GET /previews, by the most active instance
@@ -166,18 +167,20 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
       >
         <MonitorPlay className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Previews</h3>
-        {startingCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
-            <LoaderCircle className="w-3 h-3 animate-spin" />
-            Starting
-          </span>
-        )}
+        {/* Info trigger before the status chip, so a preview starting up does not
+            shift the `i` sideways out from under a stationary cursor. */}
         <InfoTooltip title="Previews" width={520}>
           <p>Live demo servers built from the selected version - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip.</p>
           <p>Each row is a project-defined <code className="text-blue-300">[artifacts.&lt;name&gt;]</code> script with <code className="text-blue-300">type = "server"</code> in <code className="text-blue-300">.hydra/config.toml</code>. <strong>Open</strong> spins the server up on its own port (the tab shows the build log live until it is ready) and proxies to it; with no open connections past its idle timeout it shuts down again, and revisiting the link transparently respawns it.</p>
           <p>There is one server per script, following your <strong>after</strong> selection: pointing at a different version rebuilds it in place - the URL and port never change. On <strong>Latest commit</strong> it tracks the branch tip, building the new commit in the background and hot-swapping it in when ready. On <strong>Latest changes</strong> it runs in its own checkout that mirrors your uncommitted edits; a build-then-serve preview then shows <span className="text-amber-400">code changed - restart</span> so you can rebuild.</p>
           <p>The card body shows the captured build log; a running preview keeps its port, so bookmarks within one session stay valid.</p>
         </InfoTooltip>
+        {startingCount > 0 && (
+          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+            <LoaderCircle className="w-3 h-3 animate-spin" />
+            Starting
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-2">
         {previews.map((p) => (
@@ -234,62 +237,69 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
             <span className="text-[11px] text-red-500 dark:text-red-400 truncate max-w-64" title={p.message}>{p.message}</span>
           )}
           {p.state === 'running' && p.stale && (
-            <span className="text-[11px] text-amber-600 dark:text-amber-500" title="The code changed since this server was built. Restart to rebuild.">code changed - restart</span>
+            <Tooltip content="The code changed since this server was built. Restart to rebuild.">
+              <span className="text-[11px] text-amber-600 dark:text-amber-500">code changed - restart</span>
+            </Tooltip>
           )}
         </span>
       }
       actions={
         <span className="flex items-center gap-2">
           {live && p.stale && (
-            <button
-              onClick={onRestart}
-              title="Restart to rebuild from the current code"
-              aria-label={`Restart preview ${p.name}`}
-              className={MELT_BTN}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
+            <Tooltip content="Restart to rebuild from the current code">
+              <button
+                onClick={onRestart}
+                aria-label={`Restart preview ${p.name}`}
+                className={MELT_BTN}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
           )}
           {live && (
-            <button
-              onClick={onStop}
-              title="Stop the preview server"
-              aria-label={`Stop preview ${p.name}`}
-              className={MELT_BTN}
-            >
-              <Square className="w-3.5 h-3.5" />
-            </button>
+            <Tooltip content="Stop the preview server">
+              <button
+                onClick={onStop}
+                aria-label={`Stop preview ${p.name}`}
+                className={MELT_BTN}
+              >
+                <Square className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
           )}
           {!live && onStart && (
-            <button
-              onClick={onStart}
-              title="Start the server"
-              aria-label={`Start preview ${p.name}`}
-              className={MELT_BTN}
-            >
-              <Play className="w-3.5 h-3.5" />
-            </button>
+            <Tooltip content="Start the server">
+              <button
+                onClick={onStart}
+                aria-label={`Start preview ${p.name}`}
+                className={MELT_BTN}
+              >
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
           )}
           {p.url && live ? (
-            <a
-              href={p.url}
-              target="_blank"
-              rel="noreferrer"
-              title="Open the preview in a new tab"
-              className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
-            >
-              <ExternalLink className="w-3 h-3" />
-              Open
-            </a>
+            <Tooltip content="Open the preview in a new tab">
+              <a
+                href={p.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Open
+              </a>
+            </Tooltip>
           ) : (
-            <button
-              onClick={onOpen}
-              title="Start the preview and open it in a new tab"
-              className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
-            >
-              <ExternalLink className="w-3 h-3" />
-              Open
-            </button>
+            <Tooltip content="Start the preview and open it in a new tab">
+              <button
+                onClick={onOpen}
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Open
+              </button>
+            </Tooltip>
           )}
         </span>
       }

@@ -10,6 +10,7 @@ import {
   DEFAULT_HIDDEN_CHANGE_TYPES,
   type ArtifactTagFilter,
 } from '../lib/artifactPrefs'
+import { Tooltip } from './Tooltip'
 
 // The artifact filter bar - a search box plus one dropdown per tag scope - shared by
 // the diff viewer's ArtifactsPanel and the repository browser's
@@ -361,28 +362,33 @@ function ArtifactFilterBarImpl({
           className={`h-7 w-full pl-7 pr-6 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none transition-opacity duration-150 ${searchExpanded ? 'opacity-100' : 'opacity-0'}`}
         />
         {search && (
-          <button
-            onClick={() => onSearchChange('')}
-            title="Clear search"
-            aria-label="Clear search"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
-          >
-            <X className="w-3 h-3" />
-          </button>
+          // The absolute placement moves to the tooltip wrapper: it is the element
+          // that now sits in the search box's flow, and the button inside it is
+          // positioned by it.
+          <Tooltip content="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2">
+            <button
+              onClick={() => onSearchChange('')}
+              aria-label="Clear search"
+              className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </Tooltip>
         )}
       </div>
       {/* Reset to defaults - shown only when the filter has moved off its default
           (any tag/value hidden, or the changes filter no longer hides only
           'unchanged'). Restores every scope to "show all" + the change default. */}
       {!isDefaultTagFilter(filter) && (
-        <button
-          onClick={() => onFilterChange(defaultTagFilter())}
-          title="Reset filters"
-          className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
-        >
-          <FunnelX className="w-3 h-3" />
-          <span className="lowercase">reset</span>
-        </button>
+        <Tooltip content="Reset filters">
+          <button
+            onClick={() => onFilterChange(defaultTagFilter())}
+            className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+          >
+            <FunnelX className="w-3 h-3" />
+            <span className="lowercase">reset</span>
+          </button>
+        </Tooltip>
       )}
       {collectedTags.scoped.map(({ cat, values }) => (
         <TagScopeFilter

@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { ToastDismissContext } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { Badge } from './Badge'
+import { Tooltip } from './Tooltip'
 import { agentStatusBadge } from '../lib/agentDisplay'
 import { withBranchPills } from '../lib/branchPills'
 import type { AgentTransitionSpec } from '../lib/agentToast'
@@ -23,15 +24,21 @@ export function AgentTransitionRow({ agentName, agentId, projectId, status, befo
   }
   return (
     <>
-      <Link
-        to="/project/$projectId/agent/$agentId"
-        params={{ projectId, agentId }}
-        onClick={openAgent}
-        title="Open this agent"
-        className="block max-w-full truncate text-left text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
-      >
-        {agentName}
-      </Link>
+      {/* The flex row keeps the tooltip's inline-flex wrapper off a line box (an
+          inline child of the block toast body would pick up the parent's taller
+          strut and grow the row); min-w-0 keeps the name truncating. */}
+      <div className="flex min-w-0">
+        <Tooltip content="Open this agent" className="min-w-0">
+          <Link
+            to="/project/$projectId/agent/$agentId"
+            params={{ projectId, agentId }}
+            onClick={openAgent}
+            className="block max-w-full truncate text-left text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
+          >
+            {agentName}
+          </Link>
+        </Tooltip>
+      </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
         {lead && <span>{withBranchPills(lead)}</span>}
         {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}

@@ -14,7 +14,7 @@ function wrapper(container: HTMLElement) {
   return container.querySelector('span') as HTMLElement
 }
 
-describe('Tooltip - dark variant (default)', () => {
+describe('Tooltip - hint variant (default)', () => {
   it('shows only after the hover delay and hides immediately on leave', () => {
     vi.useFakeTimers()
     try {
@@ -106,9 +106,71 @@ describe('Tooltip - card variant', () => {
       act(() => void vi.advanceTimersByTime(200))
       expect(screen.getByText('OS Sandbox')).toBeInTheDocument()
 
-      // Leaving the card itself dismisses it.
+      // Leaving the card for somewhere outside the trigger dismisses it. React
+      // fires leave on both (the portal is a React child of the wrapper), so the
+      // test models both.
       fireEvent.mouseLeave(card)
+      fireEvent.mouseLeave(span)
+      act(() => void vi.advanceTimersByTime(100))
       expect(screen.queryByText('OS Sandbox')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Regression: the card's arrow used to overhang onto the trigger, so nudging
+  // the pointer within a 14px icon crossed card -> trigger. React's enter/leave
+  // follow the REACT tree and the portal is a child of the wrapper, so that move
+  // fires leave-on-card with NO enter-on-wrapper to answer it. Dismissing
+  // straight from the card's leave therefore closed the card while the pointer
+  // was still on the trigger, with nothing left to reopen it.
+  it('stays open when the pointer moves from the card back onto the trigger', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip variant="card" content={<p>body</p>}>
+          <span>icon</span>
+        </Tooltip>,
+      )
+      const span = wrapper(container)
+      fireEvent.mouseEnter(span)
+      act(() => void vi.advanceTimersByTime(0))
+      const card = screen.getByText('body').closest('div.fixed') as HTMLElement
+      fireEvent.mouseEnter(card)
+
+      // Pointer travels card -> trigger. React fires leave on the card and
+      // propagates it to the wrapper too; relatedTarget is what says the pointer
+      // actually landed back on the trigger.
+      const icon = screen.getByText('icon')
+      fireEvent.mouseLeave(card, { relatedTarget: icon })
+      fireEvent.mouseLeave(span, { relatedTarget: icon })
+      act(() => void vi.advanceTimersByTime(500))
+      expect(screen.getByText('body')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pins on click so it survives the pointer leaving, and Escape unpins', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip variant="card" content={<p>body</p>}>
+          <button>icon</button>
+        </Tooltip>,
+      )
+      const span = wrapper(container)
+      fireEvent.click(span)
+      act(() => void vi.advanceTimersByTime(0))
+      expect(screen.getByText('body')).toBeInTheDocument()
+
+      // Pinned: the usual dismiss path is inert.
+      fireEvent.mouseLeave(span)
+      act(() => void vi.advanceTimersByTime(500))
+      expect(screen.getByText('body')).toBeInTheDocument()
+
+      act(() => void fireEvent.keyDown(document, { key: 'Escape' }))
+      expect(screen.queryByText('body')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -145,7 +207,10 @@ describe('InfoTooltip', () => {
           <p>outbound network details</p>
         </InfoTooltip>,
       )
-      // The trigger is the lucide Info svg, hidden until hovered.
+      // The trigger is a real button (keyboard-reachable, 20px hit target)
+      // wrapping the lucide Info svg; the card is hidden until hovered.
+      const trigger = screen.getByRole('button', { name: 'Network Access help' })
+      expect(trigger.querySelector('svg')).toBeTruthy()
       expect(container.querySelector('svg')).toBeTruthy()
       expect(screen.queryByText('Network Access')).toBeNull()
 

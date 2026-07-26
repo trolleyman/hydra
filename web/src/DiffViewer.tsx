@@ -3024,11 +3024,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
-      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      {/* Info trigger before the file count: the count rewidths as you switch
+          refs (8 -> 34 -> 123), which would otherwise shift the `i` sideways out
+          from under a stationary cursor. */}
       <InfoTooltip title="Files" width={460}>
         <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>
+      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
       <div className="ml-auto flex items-center gap-1.5">
         {/* Show/hide the file-list column (hidden on mobile anyway, where the
             diffs take the full width - so the toggle only bites at md+). */}

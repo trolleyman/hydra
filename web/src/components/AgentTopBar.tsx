@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import { MoreHorizontal, ChevronDown } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
+import { Tooltip } from './Tooltip'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -116,17 +117,19 @@ const moreBtnClass =
 // Render a single action button.
 function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
   return (
-    <button
-      type="button"
-      disabled={a.disabled}
-      onClick={a.onClick}
-      aria-label={a.label}
-      title={actionTitle(a, showShortcut)}
-      className={actionBtnClass(mode, a)}
-    >
-      {a.icon}
-      {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
-    </button>
+    // shrink-0 rides the wrapper too: it is now the toolbar row's flex child.
+    <Tooltip content={actionTitle(a, showShortcut)} side="bottom" className="shrink-0">
+      <button
+        type="button"
+        disabled={a.disabled}
+        onClick={a.onClick}
+        aria-label={a.label}
+        className={actionBtnClass(mode, a)}
+      >
+        {a.icon}
+        {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -179,17 +182,18 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
   const mainCls = actionBtnClass(mode, a).replace('rounded-lg', 'rounded-l-lg rounded-r-none')
   return (
     <div ref={wrapRef} className="relative inline-flex shrink-0">
-      <button
-        type="button"
-        disabled={a.disabled}
-        onClick={a.onClick}
-        aria-label={a.label}
-        title={actionTitle(a, showShortcut)}
-        className={mainCls}
-      >
-        {a.icon}
-        {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
-      </button>
+      <Tooltip content={actionTitle(a, showShortcut)} side="bottom" className="shrink-0">
+        <button
+          type="button"
+          disabled={a.disabled}
+          onClick={a.onClick}
+          aria-label={a.label}
+          className={mainCls}
+        >
+          {a.icon}
+          {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+        </button>
+      </Tooltip>
       <button
         type="button"
         disabled={a.disabled}
@@ -544,37 +548,40 @@ export function AgentTopBarContent({
           // keeps its full width, clicking places the caret where you click, and
           // the text never shifts between the display and edit states. The bottom
           // border is always reserved (transparent → blue) to avoid any reflow.
-          <input
-            ref={inputRef}
-            type="text"
-            aria-label="Agent title"
-            value={editing ? rename.draft : title}
-            readOnly={!editing}
-            disabled={rename.saving}
-            onChange={(e) => rename.onChange(e.target.value)}
-            onFocus={() => {
-              if (!editing) rename.onStart()
-            }}
-            onBlur={() => {
-              if (editing && !rename.saving) rename.onSave()
-            }}
-            onKeyDown={(e) => {
-              if (!editing) return
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                rename.onSave()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                rename.onCancel()
-              }
-            }}
-            title={editing ? undefined : 'Rename'}
-            className={`min-w-0 flex-1 text-sm font-semibold bg-transparent border-b px-1 py-1 rounded focus:outline-none text-gray-800 dark:text-gray-100 transition-colors disabled:opacity-50 ${
-              editing
-                ? 'border-blue-400'
-                : 'border-transparent cursor-text hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-          />
+          // The wrapper takes over the row's flex sizing (min-w-0 flex-1); the
+          // input keeps them so it fills the wrapper in turn.
+          <Tooltip content={editing ? undefined : 'Rename'} side="bottom" className="min-w-0 flex-1">
+            <input
+              ref={inputRef}
+              type="text"
+              aria-label="Agent title"
+              value={editing ? rename.draft : title}
+              readOnly={!editing}
+              disabled={rename.saving}
+              onChange={(e) => rename.onChange(e.target.value)}
+              onFocus={() => {
+                if (!editing) rename.onStart()
+              }}
+              onBlur={() => {
+                if (editing && !rename.saving) rename.onSave()
+              }}
+              onKeyDown={(e) => {
+                if (!editing) return
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  rename.onSave()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  rename.onCancel()
+                }
+              }}
+              className={`min-w-0 flex-1 text-sm font-semibold bg-transparent border-b px-1 py-1 rounded focus:outline-none text-gray-800 dark:text-gray-100 transition-colors disabled:opacity-50 ${
+                editing
+                  ? 'border-blue-400'
+                  : 'border-transparent cursor-text hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            />
+          </Tooltip>
         ) : (
           <span
             title={title}

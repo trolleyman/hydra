@@ -148,26 +148,29 @@ const AgentModelPicker = memo(function AgentModelPicker({
   }
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        title={`Agent: ${active.label}${label ? ` · ${label}` : ''}`}
-        aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
-        // Measure the trigger before opening so the fixed-position menu lands in
-        // the right spot on its first paint; scroll/resize keep it pinned after.
-        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
-          open
-            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-            : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
-      >
-        <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
-          <AgentTypeIcon name={active.id} className={iconCls} />
-        </span>
-        {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
-      </button>
+    // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
+    // add baseline/descender space under the trigger.
+    <div ref={ref} className="relative flex shrink-0">
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
+          // Measure the trigger before opening so the fixed-position menu lands in
+          // the right spot on its first paint; scroll/resize keep it pinned after.
+          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
+            open
+              ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+              : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
+            <AgentTypeIcon name={active.id} className={iconCls} />
+          </span>
+          {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
+        </button>
+      </Tooltip>
       {open && coords && (
         <div
           style={{ position: 'fixed', left: coords.left, top: coords.top }}

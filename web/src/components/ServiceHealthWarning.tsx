@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 import { api } from '../stores/apiClient'
 import { useServerData } from '../lib/useServerData'
 import { useEventStream } from '../lib/useEventStream'
@@ -23,12 +24,15 @@ export function ServiceHealthWarning({ projectId }: { projectId: string | null }
 
   if (failed.length === 0) return null
   return (
-    <span
-      className="shrink-0 inline-flex"
-      aria-label="service failure"
-      title={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
+    // shrink-0 rides the Tooltip wrapper: it is the flex child of the project
+    // name row now, so the icon still can't be squeezed away.
+    <Tooltip
+      className="shrink-0"
+      content={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
     >
-      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-    </span>
+      <span className="inline-flex" aria-label="service failure">
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+      </span>
+    </Tooltip>
   )
 }
