@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
-	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -136,11 +135,11 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	// in a single per-head cgroup carrying the project's resolved resource limits,
 	// reapable as a unit and unable to outlive the daemon by reparenting to
 	// systemd. Best-effort: a no-op (scoped=false) where scopes are unavailable,
-	// leaving the supervisor a direct child of the daemon as before. config.Load is
-	// cached, so the re-read is cheap.
+	// leaving the supervisor a direct child of the daemon as before. scope.Apply
+	// returns whether the scope took, which the error paths below use to skip a
+	// StopScope that would otherwise be a no-op.
 	scopeUnit := sandbox.ScopeUnit("", id)
-	limitsCfg, _ := config.Load(projectRoot)
-	scoped := sandbox.WrapScope(scopeUnit, spec, limitsCfg.ResolveResourceLimits())
+	scoped := scope.Apply(projectRoot, scopeUnit, spec)
 
 	cmd := exec.Command(spec.Path, spec.Args[1:]...)
 	cmd.Env = spec.Env

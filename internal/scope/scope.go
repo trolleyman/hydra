@@ -22,10 +22,12 @@ import (
 // It is best-effort: a no-op where systemd scopes are unavailable, and it never
 // fails a spawn (a config load error falls back to the default limits). The
 // caller owns the unit name and must sandbox.StopScope(unit) on teardown to reap
-// the cgroup.
-func Apply(projectRoot, unit string, spec *sandbox.Spec) {
+// the cgroup. Returns whether the scope actually took effect (false where scopes
+// are unavailable), which a caller can use to skip a StopScope it would otherwise
+// run on an error path; runners that always defer StopScope can ignore it.
+func Apply(projectRoot, unit string, spec *sandbox.Spec) bool {
 	limits, _ := config.Load(projectRoot)
-	sandbox.WrapScope(unit, spec, limits.ResolveResourceLimits())
+	return sandbox.WrapScope(unit, spec, limits.ResolveResourceLimits())
 }
 
 // Command builds the exec.Cmd for a launch spec - the Path/Args/Dir/Env/ExtraFiles
@@ -40,18 +42,24 @@ func Command(ctx context.Context, spec *sandbox.Spec) *exec.Cmd {
 	return cmd
 }
 
-// Start launches cmd tied to the daemon's lifetime. It sets the parent-death
-// signal so the kernel SIGKILLs cmd when the daemon (its parent) dies; combined
-// with the scope's systemd-run and bwrap's --die-with-parent, that brings the
-// whole sandbox subtree down immediately on an ungraceful daemon death (crash,
-// SIGKILL, botched auto-upgrade) instead of orphaning it to systemd until the
-// next boot-time sweep. It pins the OS thread across the fork so the Go runtime
-// can't retire the forking thread and fire the parent-death signal early. The
-// parent-death signal is Linux-only (a no-op elsewhere); the OS-thread pin is
-// cheap and harmless everywhere.
-func Start(cmd *exec.Cmd) error {
+// StartFunc launches cmd tied to the daemon's lifetime, running the supplied
+// start to do the actual fork (cmd.Start for a plain child, pty.StartWithSize for
+// a PTY session). It sets the parent-death signal so the kernel SIGKILLs cmd when
+// the daemon (its parent) dies; combined with the scope's systemd-run and bwrap's
+// --die-with-parent, that brings the whole sandbox subtree down immediately on an
+// ungraceful daemon death (crash, SIGKILL, botched auto-upgrade) instead of
+// orphaning it to systemd until the next boot-time sweep. It pins the OS thread
+// across the fork so the Go runtime can't retire the forking thread and fire the
+// parent-death signal early. The parent-death signal is Linux-only (a no-op
+// elsewhere); the OS-thread pin is cheap and harmless everywhere.
+func StartFunc(cmd *exec.Cmd, start func() error) error {
 	setPdeathsig(cmd)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	return errtrace.Wrap(cmd.Start())
+	return errtrace.Wrap(start())
+}
+
+// Start is StartFunc for the common case of a plain cmd.Start.
+func Start(cmd *exec.Cmd) error {
+	return errtrace.Wrap(StartFunc(cmd, cmd.Start))
 }
