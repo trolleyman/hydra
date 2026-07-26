@@ -10,14 +10,38 @@ import type { DiffLine } from '../api'
 // A [start, end) half-open character range into a line's raw content.
 export type WordRange = [number, number]
 
-// Token granularity: runs of identifiers/numbers, runs of whitespace, and each
-// other single character (punctuation/operators) on its own. Every character of
-// the input lands in exactly one token, so token lengths sum to the string
-// length and char offsets stay exact.
-const TOKEN_RE = /[0-9A-Za-z_]+|\s+|[^0-9A-Za-z_\s]/g
+// Token granularity: runs of identifiers/numbers, and every other character on
+// its own. Whitespace deliberately does *not* clump into runs - a re-indent from
+// four spaces to eight is then a four-space insertion, so only the added spaces
+// at the end of the indent light up instead of the whole indent being repainted
+// as a substitution. Every character of the input lands in exactly one token, so
+// token lengths sum to the string length and char offsets stay exact.
+const TOKEN_RE = /[0-9A-Za-z_]+|[^0-9A-Za-z_]/g
+// Coarse fallback used only when the fine tokenization would make the LCS grid
+// too big: whitespace clumps back into runs, cutting the token count on lines
+// that are mostly padding.
+const TOKEN_RE_COARSE = /[0-9A-Za-z_]+|\s+|[^0-9A-Za-z_\s]/g
 
-function tokenize(s: string): string[] {
-  return s.match(TOKEN_RE) ?? []
+function tokenize(s: string, coarse = false): string[] {
+  return s.match(coarse ? TOKEN_RE_COARSE : TOKEN_RE) ?? []
+}
+
+// Shared prefix/suffix token counts. Those tokens are unchanged by definition
+// and shrinking them out of the LCS grid often leaves nothing to solve at all
+// (a one-token edit, or a pure indent insertion).
+type Trim = { lo: number; aHi: number; bHi: number }
+
+function trimCommon(a: string[], b: string[]): Trim {
+  let lo = 0
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++
+  let aHi = a.length
+  let bHi = b.length
+  while (aHi > lo && bHi > lo && a[aHi - 1] === b[bHi - 1]) { aHi--; bHi-- }
+  return { lo, aHi, bHi }
+}
+
+function gridCells(t: Trim): number {
+  return (t.aHi - t.lo) * (t.bHi - t.lo)
 }
 
 // Lines longer than this, or an LCS grid larger than MAX_CELLS after trimming
@@ -59,24 +83,24 @@ export function computeWordDiff(oldStr: string, newStr: string): { old: WordRang
   if (oldStr === newStr) return { old: [], new: [] }
   if (oldStr.length > MAX_LINE_LEN || newStr.length > MAX_LINE_LEN) return { old: [], new: [] }
 
-  const a = tokenize(oldStr)
-  const b = tokenize(newStr)
+  let a = tokenize(oldStr)
+  let b = tokenize(newStr)
+  let t = trimCommon(a, b)
+  if (gridCells(t) > MAX_CELLS) {
+    // Too big at character granularity - retry with whitespace clumped, and give
+    // up if even that is pathological (the row tint still conveys the change).
+    a = tokenize(oldStr, true)
+    b = tokenize(newStr, true)
+    t = trimCommon(a, b)
+    if (gridCells(t) > MAX_CELLS) return { old: [], new: [] }
+  }
+
   const oldChanged = new Array<boolean>(a.length).fill(false)
   const newChanged = new Array<boolean>(b.length).fill(false)
-
-  // Trim the shared prefix and suffix of tokens - they are unchanged and shrink
-  // the LCS grid (often to nothing for a one-token edit).
-  let lo = 0
-  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++
-  let aHi = a.length
-  let bHi = b.length
-  while (aHi > lo && bHi > lo && a[aHi - 1] === b[bHi - 1]) { aHi--; bHi-- }
-
+  const { lo, aHi, bHi } = t
   const an = aHi - lo
   const bn = bHi - lo
   if (an === 0 && bn === 0) return { old: [], new: [] }
-
-  if (an * bn > MAX_CELLS) return { old: [], new: [] }
 
   if (an === 0) {
     // Pure insertion in the middle: every remaining new token changed.

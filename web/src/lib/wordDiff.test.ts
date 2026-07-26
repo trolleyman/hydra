@@ -50,6 +50,49 @@ describe('computeWordDiff', () => {
     expect(slices(newS, r.new)).toEqual(['y', '2'])
   })
 
+  it('highlights only the added spaces when a line is indented deeper', () => {
+    const oldS = '    return ok'
+    const newS = '        return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    // The four added spaces sit at the end of the indent, right before the code;
+    // the four that were already there stay unhighlighted.
+    expect(r.new).toEqual([[4, 8]])
+  })
+
+  it('highlights only the removed spaces when a line is dedented', () => {
+    const oldS = '        return ok'
+    const newS = '    return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([[4, 8]])
+    expect(r.new).toEqual([])
+  })
+
+  it('highlights the whole indent when the indent character changes', () => {
+    const oldS = '\treturn ok'
+    const newS = '    return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['\t'])
+    expect(slices(newS, r.new)).toEqual(['    '])
+  })
+
+  it('highlights only the changed part of a mixed indent', () => {
+    const oldS = '\t\tx = 1'
+    const newS = '\t    x = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['\t'])
+    expect(slices(newS, r.new)).toEqual(['    '])
+  })
+
+  it('highlights only the added spaces of a realignment', () => {
+    const oldS = 'a  = 1'
+    const newS = 'a    = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    // Two spaces added; only they light up, not the whole padding run.
+    expect(r.new).toEqual([[3, 5]])
+  })
+
   it('handles a change at the end of line', () => {
     const oldS = 'return ok'
     const newS = 'return okay'

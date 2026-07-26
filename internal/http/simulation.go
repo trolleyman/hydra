@@ -1217,6 +1217,29 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Context, Content: "\t}", OldLineNum: ptr(67), NewLineNum: ptr(71)},
 							},
 						},
+						{
+							// Pure re-indent: the body moved one tab deeper when it was
+							// wrapped in a loop. Exercises the word diff's whitespace
+							// handling - only the added tab should light up, not the
+							// whole indent.
+							Header:   "@@ -92,6 +96,7 @@ func (s *SimulationServer) simDiff(...) {",
+							OldStart: 92,
+							NewStart: 96,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "\tfiles := make([]api.DiffFile, 0, 8)", OldLineNum: ptr(92), NewLineNum: ptr(96)},
+								{Type: api.Addition, Content: "\tfor _, hunk := range hunks {", NewLineNum: ptr(97)},
+								{Type: api.Deletion, Content: "\tstat := statFor(hunk)", OldLineNum: ptr(93)},
+								{Type: api.Deletion, Content: "\tif stat.Additions > 0 {", OldLineNum: ptr(94)},
+								{Type: api.Deletion, Content: "\t\tfiles = append(files, fileFor(hunk, stat))", OldLineNum: ptr(95)},
+								{Type: api.Deletion, Content: "\t}", OldLineNum: ptr(96)},
+								{Type: api.Addition, Content: "\t\tstat := statFor(hunk)", NewLineNum: ptr(98)},
+								{Type: api.Addition, Content: "\t\tif stat.Additions > 0 {", NewLineNum: ptr(99)},
+								{Type: api.Addition, Content: "\t\t\tfiles = append(files, fileFor(hunk, stat))", NewLineNum: ptr(100)},
+								{Type: api.Addition, Content: "\t\t}", NewLineNum: ptr(101)},
+								{Type: api.Addition, Content: "\t}", NewLineNum: ptr(102)},
+								{Type: api.Context, Content: "\treturn files", OldLineNum: ptr(97), NewLineNum: ptr(103)},
+							},
+						},
 					},
 				},
 				{
