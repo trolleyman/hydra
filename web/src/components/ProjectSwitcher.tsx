@@ -38,7 +38,7 @@ export function ProjectSwitcher({
         aria-modal="true"
         aria-label="Switch project"
       >
-        <div className="px-5 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        <div className="px-5 pt-4 pb-2 text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">
           Switch project
         </div>
         <div className="px-2 pb-2 max-h-[60vh] overflow-y-auto">
