@@ -391,11 +391,11 @@ export function Tooltip({
               }}
             >
               {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1 shrink-0">{title}</p>}
-              {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
-                  for a dark tooltip); re-tint to a darker blue in light mode here so it
-                  stays readable on the white surface (descendant selector wins on
-                  specificity, no caller changes needed). Scrolls when computePos has
-                  capped the card's height against the viewport. */}
+              {/* Body text + code spans. Call sites tag <code> with text-blue-300,
+                  which only reads on the dark surface; re-tint to a darker blue for
+                  light mode here so it stays legible on white (descendant selector
+                  wins on specificity, no caller changes needed). Scrolls when
+                  computePos has capped the card's height against the viewport. */}
               <div className="text-gray-600 dark:text-gray-300 space-y-2 overflow-y-auto min-h-0 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
                 {content}
               </div>
