@@ -19,3 +19,21 @@ export function useMeasuredHeight(initial: number): [(el: HTMLElement | null) =>
   }, [])
   return [ref, height]
 }
+
+// useMeasuredWidth is the same for the live clientWidth - the *content* width,
+// excluding borders and any scrollbar, which is the width text inside the
+// element actually wraps at. The diff viewer feeds it to diffMetrics so an
+// unmounted file body can be measured at the width its rows will really have.
+export function useMeasuredWidth(initial: number): [(el: HTMLElement | null) => void, number] {
+  const [width, setWidth] = useState(initial)
+  const roRef = useRef<ResizeObserver | null>(null)
+  const ref = useCallback((el: HTMLElement | null) => {
+    roRef.current?.disconnect()
+    if (!el) return
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el)
+    roRef.current = ro
+    setWidth(el.clientWidth)
+  }, [])
+  return [ref, width]
+}
