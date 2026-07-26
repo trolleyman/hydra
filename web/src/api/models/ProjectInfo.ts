@@ -20,7 +20,7 @@ export type ProjectInfo = {
      */
     name: string;
     /**
-     * True for a project Hydra created and owns rather than one the user registered - currently only the scratch project (id `_scratch`). Built-ins are pinned in the project list, render without their path, and hide the spawn form's base-branch picker. They must be excluded when testing whether the user has any projects yet.
+     * True for a project Hydra created and owns rather than one the user registered - currently only the chat project (id `_chat`). Built-ins are pinned in the project list, render without their path, and hide the spawn form's base-branch picker. They must be excluded when testing whether the user has any projects yet.
      */
     builtin?: boolean;
     /**

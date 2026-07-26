@@ -96,8 +96,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
   `sandbox.ScopeLimits` + `WrapScope(unit, spec, limits)`, per-controller
   delegation probe, `config.ResolveResourceLimits`)
-- **The built-in scratch project** (the always-present "just chatting" project,
-  `_scratch`, project selection on boot, `ProjectInfo.Builtin`) ->
-  [docs/scratch-project.md](docs/scratch-project.md) (BUILT;
-  `projects.EnsureScratchProject` + `HasUserProjects`, the reserved-ID rule, why
-  a worktree-less head does not work)
+- **The built-in chat project** (the always-present "just chatting" project,
+  `_chat`, project selection on boot, `ProjectInfo.Builtin`) ->
+  [docs/chat-project.md](docs/chat-project.md) (BUILT;
+  `projects.EnsureChatProject` + `HasUserProjects`, the reserved-ID rule, why a
+  worktree-less head does not work, the project-icon traps)

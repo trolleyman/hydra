@@ -51,7 +51,7 @@ type ProjectInfo struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
 	// Builtin marks a project Hydra created and owns rather than one the user
-	// registered - currently only the scratch project (see docs/scratch-project.md).
+	// registered - currently only the chat project (see docs/chat-project.md).
 	// It is never added via the add-project flow and never prompts for trust.
 	// Callers asking "does the user have any projects yet?" must exclude these,
 	// otherwise first-run states never render again.

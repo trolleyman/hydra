@@ -54,9 +54,10 @@ function ProjectRow({
               project wants you" reads before the tally. */}
           <ProjectAttentionDot project={p} />
         </div>
-        {p.builtin ? (
-          <div className="text-xs text-gray-400 dark:text-gray-500 truncate">Just chatting - no repo</div>
-        ) : (
+        {/* Built-ins have no meaningful path to show, and an explanatory
+            subtitle would be noise in a list you scan often - so the second
+            line is simply omitted rather than replaced. */}
+        {!p.builtin && (
           <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
         )}
       </div>

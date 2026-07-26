@@ -122,14 +122,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
 	simDisplayPath := "~/code/simulated/project"
 	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
-	// The built-in scratch project (docs/scratch-project.md). Deliberately listed
+	// The built-in chat project (docs/chat-project.md). Deliberately listed
 	// *last* so the dropdown's pin-to-top sort is actually exercised rather than
 	// accidentally satisfied by server order.
-	scratchBuiltin := true
-	scratchIcon := "MessageSquare"
-	scratchDisplayPath := "~/.local/share/hydra/scratch"
-	scratchTotal, scratchRunning, scratchWaiting, scratchFinished := 2, 0, 1, 1
-	scratchUnread, scratchNeedsInput := 0, 0
+	chatBuiltin := true
+	chatIcon := "MessageSquare"
+	chatDisplayPath := "~/.local/share/hydra/chat"
+	chatTotal, chatRunning, chatWaiting, chatFinished := 2, 0, 1, 1
+	chatUnread, chatNeedsInput := 0, 0
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
@@ -158,18 +158,18 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			FinishedCount:   &otherFinished,
 		},
 		{
-			Id:              projects.ScratchProjectID,
-			Path:            "/home/sim/.local/share/hydra/scratch",
-			DisplayPath:     &scratchDisplayPath,
-			Name:            projects.ScratchProjectName,
-			Builtin:         &scratchBuiltin,
-			Icon:            &scratchIcon,
-			UnreadCount:     &scratchUnread,
-			NeedsInputCount: &scratchNeedsInput,
-			AgentCount:      &scratchTotal,
-			RunningCount:    &scratchRunning,
-			WaitingCount:    &scratchWaiting,
-			FinishedCount:   &scratchFinished,
+			Id:              projects.ChatProjectID,
+			Path:            "/home/sim/.local/share/hydra/chat",
+			DisplayPath:     &chatDisplayPath,
+			Name:            projects.ChatProjectName,
+			Builtin:         &chatBuiltin,
+			Icon:            &chatIcon,
+			UnreadCount:     &chatUnread,
+			NeedsInputCount: &chatNeedsInput,
+			AgentCount:      &chatTotal,
+			RunningCount:    &chatRunning,
+			WaitingCount:    &chatWaiting,
+			FinishedCount:   &chatFinished,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)

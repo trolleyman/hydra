@@ -111,16 +111,16 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		return nil, errtrace.Wrap(err)
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
-	// The built-in scratch project has to exist before we start serving: every
+	// The built-in chat project has to exist before we start serving: every
 	// route and endpoint resolves a project through GetByID, so creating it
 	// lazily would 404 on the first navigation to its own URL. Registered *after*
 	// the real project so it never lands at index 0, where several "pick a
 	// project" fallbacks would otherwise reach for it. Best-effort - if the repo
 	// can't be created (no git, unwritable HOME) the daemon should still boot.
-	if scratch, err := pm.EnsureScratchProject(); err != nil {
-		log.Printf("warn: ensure scratch project: %v", err)
+	if chatProject, err := pm.EnsureChatProject(); err != nil {
+		log.Printf("warn: ensure chat project: %v", err)
 	} else {
-		log.Printf("Scratch project: %s (%s)", scratch.Name, scratch.Path)
+		log.Printf("Chat project: %s (%s)", chatProject.Name, chatProject.Path)
 	}
 
 	// One artifacts Manager per registered project, created lazily on first use.
