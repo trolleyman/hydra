@@ -7469,14 +7469,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         {/* Jump to bottom (item 14): floats above the composer while the user
             is scrolled up, claude.ai style. */}
         {!pinned && replayDone && (
-          <button
-            onClick={() => scrollToBottom(true)}
-            title="Jump to bottom (Ctrl+End)"
-            aria-label="Jump to bottom"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 rounded-full border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] p-1.5 text-stone-500 dark:text-stone-300 shadow-md hover:text-stone-700 dark:hover:text-stone-100 hover:shadow-lg transition-all cursor-pointer animate-chat-item-in"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
+          // The float (absolute + centring translate) moves to the wrapper, which
+          // is now what sits in the transcript pane.
+          <Tooltip content="Jump to bottom (Ctrl+End)" side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+            <button
+              onClick={() => scrollToBottom(true)}
+              aria-label="Jump to bottom"
+              className="rounded-full border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] p-1.5 text-stone-500 dark:text-stone-300 shadow-md hover:text-stone-700 dark:hover:text-stone-100 hover:shadow-lg transition-all cursor-pointer animate-chat-item-in"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -7605,19 +7608,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   </Tooltip>
                 )}
                 <div className="relative">
-                  <button
-                    onClick={() => setModelMenuOpen((o) => !o)}
-                    disabled={!connected}
-                    className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
-                      modelMenuOpen
-                        ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
-                        : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
-                    }`}
-                    title="Model"
-                  >
-                    {modelLabel}
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
+                  <Tooltip content="Model" side="top">
+                    <button
+                      onClick={() => setModelMenuOpen((o) => !o)}
+                      disabled={!connected}
+                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
+                        modelMenuOpen
+                          ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
+                          : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
+                      }`}
+                    >
+                      {modelLabel}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                  </Tooltip>
                   {modelMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setModelMenuOpen(false)} />

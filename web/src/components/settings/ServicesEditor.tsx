@@ -4,6 +4,7 @@ import { X, Plus, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, PauseC
 import { api } from '../../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../../api'
 import { InfoTooltip } from '../InfoTooltip'
+import { Tooltip } from '../Tooltip'
 import { ShellEditor } from '../ShellEditor'
 import { EnabledToggle } from './shared'
 
@@ -107,15 +108,16 @@ export function ServicesEditor({
           <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> from the project root, with <code className="text-blue-300">HYDRA_PROJECT_ROOT</code> and <code className="text-blue-300">HYDRA_SERVICE_NAME</code> set.</p>
         </InfoTooltip>
         <div className="flex-1" />
-        <button
-          onClick={restartAll}
-          disabled={!projectId || restarting}
-          title="Stop and restart this project's services (picks up saved config)"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-        >
-          <RotateCw className={`w-3.5 h-3.5 ${restarting ? 'animate-spin' : ''}`} />
-          {restarting ? 'Restarting...' : 'Restart Services'}
-        </button>
+        <Tooltip content="Stop and restart this project's services (picks up saved config)">
+          <button
+            onClick={restartAll}
+            disabled={!projectId || restarting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${restarting ? 'animate-spin' : ''}`} />
+            {restarting ? 'Restarting...' : 'Restart Services'}
+          </button>
+        </Tooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
         Supervised long-running commands, stored as <span className="font-mono">[services.&lt;name&gt;]</span> tables in config.toml. Saving applies changes immediately.
@@ -238,13 +240,17 @@ export function ServicesEditor({
                   )}
                   </div>
                 </div>
-                <button
-                  onClick={() => remove(index)}
-                  className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer shrink-0"
-                  title="Remove service"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {/* shrink-0 rides on the Tooltip wrapper: it is what the row's
+                    flex layout now sees in place of the button. */}
+                <Tooltip content="Remove service" className="shrink-0">
+                  <button
+                    onClick={() => remove(index)}
+                    className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                    aria-label="Remove service"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )

@@ -12,6 +12,7 @@ import {
   SettingsContent,
 } from '../components/SettingsComponents'
 import { PageTopBar } from '../components/PageTopBar'
+import { Tooltip } from '../components/Tooltip'
 import { BrowserSections } from '../components/settings/BrowserSections'
 import { ScopeTabs } from '../components/settings/shared'
 
@@ -134,14 +135,15 @@ function SettingsPage() {
         onBack={canGoBack ? () => router.history.back() : undefined}
         right={
           tab !== 'browser' ? (
-            <button
-              onClick={handleSave}
-              aria-label="Save settings"
-              title="Save settings"
-              className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            </button>
+            <Tooltip content="Save settings">
+              <button
+                onClick={handleSave}
+                aria-label="Save settings"
+                className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              </button>
+            </Tooltip>
           ) : undefined
         }
       />

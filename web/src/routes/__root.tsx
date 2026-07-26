@@ -885,7 +885,21 @@ function RootLayout() {
                           no remote or no https browse URL could be derived. */}
                       {reviewConfig?.browse_url && (
                         <Tooltip
-                          content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                          content={
+                            <>
+                              <div>
+                                Open on{' '}
+                                {reviewConfig.provider === 'github'
+                                  ? 'GitHub'
+                                  : reviewConfig.provider === 'gitlab'
+                                    ? 'GitLab'
+                                    : 'the forge'}
+                              </div>
+                              {/* The URL is the useful part - which remote this
+                                  actually points at. The hint wraps at 320px. */}
+                              <div className="text-gray-500 dark:text-gray-400">{reviewConfig.browse_url}</div>
+                            </>
+                          }
                           className="shrink-0"
                         >
                           <a

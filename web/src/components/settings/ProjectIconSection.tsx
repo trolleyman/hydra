@@ -5,6 +5,7 @@ import { formatError } from '../../api/format_error'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToastStore } from '../../stores/toastStore'
 import { ProjectIcon } from '../../lib/projectIcon'
+import { Tooltip } from '../Tooltip'
 import { SettingSection } from './shared'
 
 // A few one-click presets to make the field discoverable. Mix of emoji and
@@ -68,15 +69,16 @@ export function ProjectIconSection({ project }: { project: ProjectInfo }) {
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {PRESETS.map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            onClick={() => setDraft(preset)}
-            title={preset}
-            className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-200 hover:border-blue-400 dark:hover:border-blue-500 transition-colors cursor-pointer"
-          >
-            <ProjectIcon icon={preset} projectId={project.id} size={18} />
-          </button>
+          <Tooltip key={preset} content={preset}>
+            <button
+              type="button"
+              onClick={() => setDraft(preset)}
+              aria-label={preset}
+              className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-200 hover:border-blue-400 dark:hover:border-blue-500 transition-colors cursor-pointer"
+            >
+              <ProjectIcon icon={preset} projectId={project.id} size={18} />
+            </button>
+          </Tooltip>
         ))}
         <button
           type="button"

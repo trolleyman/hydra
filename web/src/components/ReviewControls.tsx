@@ -6,6 +6,7 @@ import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
 import type { AgentResponse } from '../api/models/AgentResponse'
 import type { ReviewConfigResponse } from '../api/models/ReviewConfigResponse'
 import { Badge } from './Badge'
+import { Tooltip } from './Tooltip'
 import { DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ResizeHandle } from '../lib/ResizeHandle'
@@ -67,18 +68,19 @@ export function MRStateChip({ agent }: { agent: AgentResponse }) {
   const label = review.id != null ? `MR ${review.id}` : 'MR'
   return (
     <span className="inline-flex items-center gap-1.5">
-      <a
-        href={review.url}
-        target="_blank"
-        rel="noreferrer"
-        title={`Open ${review.provider} MR #${review.id}${st?.state ? ` (${st.state})` : ''}`}
-        className="no-underline"
-      >
-        <Badge tone={mrStateTone(st?.state)} icon={<ProviderIcon provider={review.provider} className="w-3 h-3" />}>
-          {label}
-          <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-60" />
-        </Badge>
-      </a>
+      <Tooltip content={`Open ${review.provider} MR #${review.id}${st?.state ? ` (${st.state})` : ''}`}>
+        <a
+          href={review.url}
+          target="_blank"
+          rel="noreferrer"
+          className="no-underline"
+        >
+          <Badge tone={mrStateTone(st?.state)} icon={<ProviderIcon provider={review.provider} className="w-3 h-3" />}>
+            {label}
+            <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-60" />
+          </Badge>
+        </a>
+      </Tooltip>
       <CIChip status={st?.ci_status} />
       {st && st.approvals_required != null && st.approvals_required > 0 && (
         <Badge
@@ -147,19 +149,20 @@ export function DownstreamBranchEditor({
   return (
     <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
       <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
-      <button
-        type="button"
-        disabled={linked || saving}
-        onClick={() => {
-          if (linked) return
-          setDraft(value)
-          setEditing(true)
-        }}
-        title={linked ? 'Locked: renaming would orphan the open MR' : 'Edit downstream branch name'}
-        className={`px-1.5 py-0.5 rounded ${linked ? 'cursor-default' : 'hover:bg-gray-100 dark:hover:bg-gray-800 cursor-text'}`}
-      >
-        {value}
-      </button>
+      <Tooltip content={linked ? 'Locked: renaming would orphan the open MR' : 'Edit downstream branch name'}>
+        <button
+          type="button"
+          disabled={linked || saving}
+          onClick={() => {
+            if (linked) return
+            setDraft(value)
+            setEditing(true)
+          }}
+          className={`px-1.5 py-0.5 rounded ${linked ? 'cursor-default' : 'hover:bg-gray-100 dark:hover:bg-gray-800 cursor-text'}`}
+        >
+          {value}
+        </button>
+      </Tooltip>
     </span>
   )
 }

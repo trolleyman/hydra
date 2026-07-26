@@ -92,6 +92,12 @@ export function Tooltip({
   // an overflowing card scrollable with the mouse.
   const [pinned, setPinned] = useState(false)
   const [pos, setPos] = useState<Position | null>(null)
+  // Dark mode is class-scoped (`@custom-variant dark (&:where(.dark, .dark *))`),
+  // so a subtree can force it locally - the image lightbox renders itself dark
+  // inside an otherwise light app. The box portals to document.body and would
+  // escape that, coming out light-on-dark, so mirror the trigger's theme context
+  // onto the portal root. Redundant but harmless when the whole app is dark.
+  const [inDark, setInDark] = useState(false)
   const wrapperRef = useRef<HTMLSpanElement>(null)
   // The rendered tooltip box, so computePos can measure its real height and flip
   // sides when it wouldn't fit, instead of guessing a fixed height.
@@ -172,6 +178,7 @@ export function Tooltip({
   const show = useCallback(() => {
     const p = computePos()
     if (!p) return
+    setInDark(!!wrapperRef.current?.closest('.dark'))
     setPos(p)
     setVisible(true)
   }, [computePos])
@@ -361,7 +368,7 @@ export function Tooltip({
           // visibly drift into place.
           <div
             ref={boxRef}
-            className={`fixed z-[9999] -translate-x-1/2 ${
+            className={`fixed z-[9999] -translate-x-1/2 ${inDark ? 'dark' : ''} ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             style={{ top: pos.top, left: pos.left }}
@@ -406,7 +413,7 @@ export function Tooltip({
           <div
             ref={boxRef}
             role="tooltip"
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${surface} text-gray-700 dark:text-gray-200 text-[11px] text-center rounded shadow-lg break-words ${
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-[11px] text-center rounded shadow-lg break-words ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             // width: max-content sizes the box to its text: a fixed-position box

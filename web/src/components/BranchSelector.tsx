@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType 
 import { createPortal } from 'react-dom'
 import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
+import { Tooltip } from './Tooltip'
 
 // shortSha collapses a full/long commit SHA to a readable prefix, leaving
 // branch names (and anything that isn't a hex SHA) untouched.
@@ -131,35 +132,43 @@ export const BranchSelector = memo(function BranchSelector({
   )
 
   return (
-    <div ref={ref} className={`relative ${flexible ? 'min-w-0 flex-1' : 'shrink-0'}`}>
+    // `flex` so the Tooltip's inline-flex wrapper around the trigger is a flex
+    // item rather than an inline box - an inline box would sit on this line's
+    // baseline and add a few px of descender space under the control.
+    <div ref={ref} className={`relative flex ${flexible ? 'min-w-0 flex-1' : 'shrink-0'}`}>
       {TriggerIcon ? (
-        <button
-          type="button"
-          title={title}
-          onClick={() => setOpen((o) => !o)}
-          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          <TriggerIcon className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={title} className="shrink-0">
+          <button
+            type="button"
+            aria-label={title}
+            onClick={() => setOpen((o) => !o)}
+            className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
+              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+              : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+          >
+            <TriggerIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       ) : (
-        <button
-          type="button"
-          title={title}
-          onClick={() => setOpen((o) => !o)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${flexible ? 'w-full min-w-0' : 'max-w-[14rem]'} ${open
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          {activeIsAgent
-            ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
-            : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
-          <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
-          <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
-        </button>
+        // The width constraints are on the wrapper too: the button's `w-full` /
+        // `max-w-[14rem]` now resolve against the wrapper, not this box.
+        <Tooltip content={title} className={flexible ? 'w-full min-w-0' : 'max-w-[14rem]'}>
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${flexible ? 'w-full min-w-0' : 'max-w-[14rem]'} ${open
+              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+              : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+          >
+            {activeIsAgent
+              ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+              : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+            <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+          </button>
+        </Tooltip>
       )}
 
       {open && coords && createPortal(
