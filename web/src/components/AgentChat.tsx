@@ -2173,7 +2173,7 @@ const ToolCard = memo(function ToolCard({
               first thing you want to know about a SendMessage. */}
           {isSendMessage && messageTo && (
             <span className="shrink-0 flex items-baseline gap-1 text-stone-400 dark:text-stone-500">
-              <span aria-hidden>-&gt;</span>
+              <span aria-hidden>&#8594;</span>
               <span className="max-w-40 truncate text-stone-500 dark:text-stone-400">{recipientName}</span>
             </span>
           )}
