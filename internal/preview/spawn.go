@@ -23,6 +23,7 @@ import (
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 // instance is one backing server for a slot: an on-demand child server process
@@ -201,8 +202,7 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	// pending of the same script/head), so pre-clearing a stale unit can't kill a
 	// sibling's scope.
 	scopeUnit := sandbox.ScopeUnit("preview", spec.Name+"-"+in.version.HeadID+"-"+strconv.Itoa(childPort))
-	limitsCfg, _ := config.Load(in.root)
-	sandbox.WrapScope(scopeUnit, launch, limitsCfg.ResolveResourceLimits())
+	scope.Apply(in.root, scopeUnit, launch)
 
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir

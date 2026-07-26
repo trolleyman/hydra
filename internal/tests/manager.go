@@ -25,6 +25,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 const (
@@ -750,6 +751,16 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		return errored(rep, err.Error())
 	}
 	defer launch.Cleanup()
+
+	// Run the test subtree (bash -> bwrap -> the runner, e.g. go test / a
+	// Playwright e2e that spawns Chromium) under a transient systemd scope, so it
+	// gets the project's CPU/IO weight + resource caps, a single kill handle, and
+	// can't outlive the daemon - parity with the artifact/preview/service runners.
+	// Best-effort: a no-op where scopes are unavailable; StopScope reaps the whole
+	// cgroup on every return path.
+	scopeUnit := sandbox.ScopeUnit("test", spec.Name+"-"+sandbox.ScopeHash(dir))
+	scope.Apply(m.projectRoot, scopeUnit, launch)
+	defer sandbox.StopScope(scopeUnit)
 
 	// A streaming run that never declares ::hydra:test:total:: still gets a
 	// determinate progress bar: seed the denominator from a prior run's total

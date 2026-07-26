@@ -57,10 +57,18 @@ set configurable per project, with a Settings UI section.
     fallback shell - the path taken only when no supervisor is live - via
     `StartOptions.Limits`, with an unwrap-and-retry fallback if the scoped spawn
     fails to exec.)
-  - preview: `internal/preview/spawn.go` `run()` (wrap) + `stopChild()` (StopScope).
-  - service: `internal/services/services.go` `buildCmd()` (wrap) + the ctx.Done
+  - The four non-agent runners below share one seam: `scope.Apply(projectRoot,
+    unit, spec)` (`internal/scope/scope.go`) does the `config.Load` ->
+    `ResolveResourceLimits` -> `sandbox.WrapScope` policy in one place; each caller
+    still builds its own `unit` name and owns `StopScope` teardown (the timing
+    differs: defer vs stored-field vs recompute).
+  - preview: `internal/preview/spawn.go` `run()` (`scope.Apply`) + `stopChild()` (StopScope).
+  - service: `internal/services/services.go` `buildCmd()` (`scope.Apply`) + the ctx.Done
     goroutine in `supervise()` (StopScope). Helper `serviceScopeUnit`.
-  - artifact: `internal/artifacts/artifacts.go` `generate()` (wrap + `defer StopScope`).
+  - artifact: `internal/artifacts/artifacts.go` `generate()` (`scope.Apply` + `defer StopScope`).
+  - test: `internal/tests/manager.go` `generate()` (`scope.Apply` + `defer StopScope`),
+    unit kind `"test"`. Added for parity - a test command (e.g. a Playwright e2e
+    that spawns Chromium) is as capable of a CPU/memory runaway as an artifact.
 - boot sweep: `internal/cli/runtime.go` `setupRuntime` calls `sandbox.SweepOrphanScopes()`.
 
 ## Key tension to resolve first

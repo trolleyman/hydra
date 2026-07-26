@@ -64,6 +64,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 const (
@@ -1191,8 +1192,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	// cgroup on every return path (this is the exact runaway-headless-Chrome case
 	// that motivated scoping).
 	scopeUnit := sandbox.ScopeUnit("artifact", spec.Name+"-"+sandbox.ScopeHash(dir))
-	limitsCfg, _ := config.Load(m.projectRoot)
-	sandbox.WrapScope(scopeUnit, launch, limitsCfg.ResolveResourceLimits())
+	scope.Apply(m.projectRoot, scopeUnit, launch)
 	defer sandbox.StopScope(scopeUnit)
 
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
