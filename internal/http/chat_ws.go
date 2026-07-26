@@ -239,7 +239,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		if strings.TrimSpace(msg.Command) == "" {
 			return
 		}
-		go s.runChatShellCommand(projectRoot, worktree, sessionID, msg.ID, msg.Command)
+		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, msg.ID, msg.Command)
 	case "dequeue":
 		// Recall a still-queued message (Up-arrow edit): drop it from the queue.
 		if s.ChatQueues != nil && msg.ID != "" {
@@ -280,11 +280,31 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	}
 }
 
+// shellOutputFrame streams one chunk of a running "!command"'s combined output
+// to the client so the card fills in live (ephemeral - the durable record is the
+// user_message the command settles into). Keyed by the send frame's id so the
+// client appends it to the right running card.
+type shellOutputFrame struct {
+	terminalEvent
+	ID    string `json:"id"`
+	Chunk string `json:"chunk"`
+}
+
 // runChatShellCommand executes a composer "!command" in the head's sandbox and
-// delivers the result both to the UI (a shell-command card) and to the agent (a
-// user turn carrying the command + output). Runs on its own goroutine.
-func (s *Server) runChatShellCommand(projectRoot, worktree, sessionID, msgID, command string) {
-	res, err := heads.RunShellCommand(context.Background(), projectRoot, worktree, command)
+// delivers the result both to the UI (a shell-command card, streamed live) and
+// to the agent (a user turn carrying the command + output). Runs on its own
+// goroutine. conn streams the live output; a closed socket just drops the live
+// frames (the durable settle still persists).
+func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID, msgID, command string) {
+	onChunk := func(chunk string) {
+		frame, err := json.Marshal(shellOutputFrame{
+			terminalEvent: terminalEvent{Type: "shell_output"}, ID: msgID, Chunk: chunk,
+		})
+		if err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+	}
+	res, err := heads.RunShellCommand(context.Background(), projectRoot, worktree, command, onChunk)
 	if err != nil {
 		// A launch/spec failure (e.g. no worktree): surface it in the card's output
 		// so the user isn't left with a silently-hung "running" card.

@@ -51,6 +51,7 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderMarkdownSource } from '../lib/markdown'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
@@ -1458,11 +1459,34 @@ function OutputPanel({ text, lang }: { text: string; lang: string; isError?: boo
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
 
-// ShellCommandCard renders a chat "!command" the user ran from the composer: the
-// command in a header, a status chip (running / exit code / timed out), and the
-// combined stdout+stderr in an ANSI-aware output panel. The same output is also
-// delivered to the agent as a user turn (see internal/http shellCommandUserContent),
-// so this card is the human-facing view of that turn rather than a plain bubble.
+// SHELL_STREAM_CAP bounds a running card's accumulated live output (chars): a
+// runaway command streams without limit, but the DOM node must not grow forever.
+// tailCap keeps the newest chars, matching the daemon's tail-capped durable copy.
+const SHELL_STREAM_CAP = 200_000
+function tailCap(s: string, max: number): string {
+  return s.length <= max ? s : '[... earlier output truncated ...]\n' + s.slice(s.length - max)
+}
+
+// ShellCommandBash renders the command line with bash highlighting and a leading
+// "$" prompt, so a "!command" card reads unmistakably as a shell the USER ran -
+// not an agent tool call. Falls back to plain mono text when highlighting fails.
+function ShellCommandBash({ command }: { command: string }) {
+  const html = useMemo(() => highlightHtml(command, 'bash'), [command])
+  return (
+    <code className="min-w-0 flex-1 truncate font-mono text-xs text-stone-700 dark:text-stone-200" title={command}>
+      <span className="mr-1 select-none text-[#c96442]">$</span>
+      {html != null ? <span dangerouslySetInnerHTML={{ __html: html }} /> : command}
+    </code>
+  )
+}
+
+// ShellCommandCard renders a chat "!command" the user ran from the composer. It
+// is deliberately styled apart from the agent's tool cards - a terracotta left
+// rail (the user-action accent) and a "$" shell prompt - so it's obvious the
+// command was run by the user, not the agent. The header collapses the output;
+// output streams in live while running (see the shell_output frame handler). The
+// same output is also delivered to the agent as a user turn, so this card is the
+// human-facing view of that turn rather than a plain bubble.
 function ShellCommandCard({ command, output, exitCode, truncated, timedOut, running }: {
   command: string
   output: string
@@ -1471,29 +1495,47 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, runn
   timedOut?: boolean
   running?: boolean
 }) {
+  const [open, setOpen] = useState(true)
   const failed = !running && !timedOut && typeof exitCode === 'number' && exitCode !== 0
+  const hasBody = running || output.trim().length > 0
   return (
-    <div className={`${PANEL_CLASS} overflow-hidden`}>
-      <div className="flex items-center gap-2 border-b border-stone-200 dark:border-white/[0.06] px-2.5 py-1.5">
-        <SquareTerminal className="w-3.5 h-3.5 shrink-0 text-stone-500 dark:text-stone-400" />
-        <code className="min-w-0 flex-1 truncate font-mono text-xs text-stone-700 dark:text-stone-200" title={command}>
-          {command}
-        </code>
+    <div className="overflow-hidden rounded-md border border-stone-200 border-l-2 border-l-[#c96442] bg-[#fbfaf7] dark:border-white/[0.06] dark:border-l-[#c96442] dark:bg-white/[0.02]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+      >
+        {hasBody ? (
+          open ? (
+            <ChevronDown className="w-3.5 h-3.5 shrink-0 text-stone-400" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5 shrink-0 text-stone-400" />
+          )
+        ) : (
+          <SquareTerminal className="w-3.5 h-3.5 shrink-0 text-stone-400" />
+        )}
+        <ShellCommandBash command={command} />
         {running ? (
-          <span className="flex items-center gap-1 text-[11px] text-stone-500 dark:text-stone-400">
+          <span className="flex shrink-0 items-center gap-1 text-[11px] text-stone-500 dark:text-stone-400">
             <LoaderCircle className="w-3 h-3 animate-spin" /> running
           </span>
         ) : timedOut ? (
-          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
+          <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
         ) : (
-          <span className={`text-[11px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-stone-500 dark:text-stone-400'}`}>
+          <span className={`shrink-0 text-[11px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
             exit {exitCode ?? 0}
           </span>
         )}
-      </div>
-      {!running && (
-        <div className="p-1.5">
-          <OutputPanel text={output || ''} lang="" isError={failed} />
+      </button>
+      {open && hasBody && (
+        <div className="px-1.5 pb-1.5">
+          {output.trim().length > 0 ? (
+            <OutputPanel text={output} lang="" isError={failed} />
+          ) : (
+            <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-[11px] italic text-stone-400 dark:text-stone-500`}>
+              Waiting for output...
+            </div>
+          )}
           {truncated && (
             <div className="px-1 pt-1 text-[10px] text-stone-400 dark:text-stone-500">
               Output truncated to the last part of a longer log.
@@ -5855,6 +5897,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         state?: ChatProjectionSnapshot
         next_cursor?: string
         normalizedEvents?: NormalizedChatEvent[]
+        id?: string
+        chunk?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -5876,6 +5920,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // sequenced backend event stream instead.
           if (!normalizedAvailableRef.current && msg.event) handleProviderEvent(msg.event)
           return
+        case 'shell_output': {
+          // A live chunk of a running "!command"'s output: append it to the
+          // matching running card (keyed by the send frame's id). Ephemeral - the
+          // durable copy arrives as the command's settle event. The tail is capped
+          // so a runaway command can't grow the DOM node without bound.
+          const cid = msg.id
+          const chunk = msg.chunk
+          if (!cid || typeof chunk !== 'string') return
+          setItems((prev) =>
+            prev.map((it) =>
+              it.kind === 'shellCmd' && it.clientId === cid && it.running
+                ? { ...it, output: tailCap(it.output + chunk, SHELL_STREAM_CAP) }
+                : it,
+            ),
+          )
+          return
+        }
         case 'state_snapshot': {
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
@@ -6835,6 +6896,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return true
   }
 
+  // renderComposerBackdrop highlights the composer's transparent-text backdrop:
+  // a "!command" gets a terracotta "!" and bash syntax highlighting (so shell
+  // mode is unmistakable as you type), everything else the usual inline markdown.
+  // MUST preserve the value's exact characters so the backdrop stays aligned.
+  const renderComposerBackdrop = useCallback((value: string): ReactNode => {
+    if (value.startsWith('!')) {
+      const command = value.slice(1)
+      const html = highlightHtml(command, 'bash')
+      return (
+        <>
+          <span className="font-semibold text-[#c96442]">!</span>
+          {html != null ? <span dangerouslySetInnerHTML={{ __html: html }} /> : command}
+        </>
+      )
+    }
+    return renderMarkdownSource(value)
+  }, [])
+
   function send() {
     if (uploading) return
     const text = input.trim()
@@ -7716,6 +7795,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
+              renderContent={renderComposerBackdrop}
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}

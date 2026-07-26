@@ -4,6 +4,7 @@ import {
   useImperativeHandle,
   useRef,
   type CSSProperties,
+  type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react'
 import { renderMarkdownSource } from '../lib/markdown'
@@ -25,6 +26,11 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
   // blend into a differently-tinted surface (e.g. the stone-toned chat composer).
   textColorClassName?: string
   caretClassName?: string
+  // Override how the backdrop renders the value. Defaults to inline-markdown
+  // highlighting; the chat composer swaps in a bash highlighter when the text is
+  // a "!command". MUST preserve the value's exact characters/whitespace so the
+  // backdrop stays glyph-aligned with the transparent textarea below it.
+  renderContent?: (value: string) => ReactNode
 }
 
 // HighlightedTextarea is a drop-in textarea that renders live inline-markdown
@@ -41,6 +47,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       wrapperStyle,
       textColorClassName = 'text-gray-800 dark:text-gray-100',
       caretClassName = 'caret-gray-800 dark:caret-gray-100',
+      renderContent = renderMarkdownSource,
       onScroll,
       style,
       ...rest
@@ -84,7 +91,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // font's slnt axis without drifting the textarea caret (see index.css).
           className={`prompt-input-font absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
         >
-          {renderMarkdownSource(value)}
+          {renderContent(value)}
           {/* Trailing newline keeps the backdrop's height matching the textarea
               when the value ends in a newline. */}
           {'\n'}

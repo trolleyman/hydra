@@ -50,7 +50,12 @@ const shellCommandMaxOutput = 64 * 1024
 // deliberately self-contained: no HYDRA_TEST_* env, no marker parsing, just the
 // output. Unknown network hosts are silently denied (like a test run) - a chat
 // command must not park the sandbox waiting on a human egress approval.
-func RunShellCommand(ctx context.Context, projectRoot, worktree, command string) (ShellCommandResult, error) {
+//
+// onChunk, if non-nil, is called with each chunk of combined output as it
+// arrives (for live streaming to the UI). Because Stdout and Stderr point at the
+// same writer, os/exec funnels both through one copy goroutine, so onChunk is
+// invoked serially and in order - no interleaving races.
+func RunShellCommand(ctx context.Context, projectRoot, worktree, command string, onChunk func(string)) (ShellCommandResult, error) {
 	res := ShellCommandResult{Command: command, ExitCode: -1}
 	if strings.TrimSpace(command) == "" {
 		return res, errtrace.Errorf("empty command")
@@ -76,6 +81,9 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, command string)
 	// exactly what the command printed, in order, like a terminal.
 	var buf capBuffer
 	buf.max = shellCommandMaxOutput
+	if onChunk != nil {
+		buf.onChunk = func(b []byte) { onChunk(string(b)) }
+	}
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
@@ -105,14 +113,20 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, command string)
 
 // capBuffer is a bytes.Buffer that keeps only the last max bytes written, so a
 // command that spews megabytes can't exhaust memory. It records whether any
-// bytes were dropped so the caller can flag the output as truncated.
+// bytes were dropped so the caller can flag the output as truncated. onChunk, if
+// set, sees every write verbatim (before capping) - the live stream, which the
+// UI bounds on its own side.
 type capBuffer struct {
 	buf       bytes.Buffer
 	max       int
 	truncated bool
+	onChunk   func([]byte)
 }
 
 func (c *capBuffer) Write(p []byte) (int, error) {
+	if c.onChunk != nil {
+		c.onChunk(p)
+	}
 	n := len(p)
 	if c.max > 0 && c.buf.Len()+n > c.max {
 		// Keep the tail: append then drop the oldest bytes down to max.

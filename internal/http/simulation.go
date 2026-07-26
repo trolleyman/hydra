@@ -3415,22 +3415,41 @@ func handleSimChatWS(conn *safeConn) {
 		switch msg.Type {
 		case "shell_command":
 			// A composer "!command": mimic the daemon by running it (here, a canned
-			// result) and delivering the output as a normalized user_message whose
-			// payload carries the `shell` object the client renders as a card. A
-			// short delay lets the optimistic "running" card show before it settles.
+			// result) - streaming the output live via shell_output frames, then
+			// settling into a normalized user_message whose payload carries the
+			// `shell` object the client renders as a card. "!big ..." streams a long
+			// log so the scrollable output can be eyeballed.
 			cmd := msg.Command
+			id := msg.ID
 			go func() {
-				time.Sleep(900 * time.Millisecond)
-				output := "PASS\nok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s\nok  \tgithub.com/trolleyman/hydra/internal/http\t0.19s"
+				time.Sleep(500 * time.Millisecond)
+				var lines []string
 				exit := 0
-				if strings.Contains(cmd, "fail") {
-					output = "--- FAIL: TestThing (0.00s)\n    thing_test.go:12: boom\nFAIL\nexit status 1"
+				switch {
+				case strings.Contains(cmd, "fail"):
+					lines = []string{"go: running tests...", "--- FAIL: TestThing (0.00s)", "    thing_test.go:12: expected 3, got 4", "FAIL", "exit status 1"}
 					exit = 1
+				case strings.Contains(cmd, "big") || strings.Contains(cmd, "large"):
+					lines = append(lines, "\x1b[1mRunning full suite...\x1b[0m")
+					for i := 1; i <= 120; i++ {
+						lines = append(lines, fmt.Sprintf("ok  \tgithub.com/trolleyman/hydra/internal/pkg%03d\t%d.%02ds", i, i%5, i%100))
+					}
+					lines = append(lines, "\x1b[32mPASS\x1b[0m", "ok  \tall packages\t42.7s")
+				default:
+					lines = []string{"\x1b[1mrunning...\x1b[0m", "PASS", "ok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s", "ok  \tgithub.com/trolleyman/hydra/internal/http\t0.19s"}
+				}
+				var full strings.Builder
+				for _, ln := range lines {
+					chunk := ln + "\n"
+					full.WriteString(chunk)
+					frame, _ := json.Marshal(map[string]any{"type": "shell_output", "id": id, "chunk": chunk})
+					_ = conn.WriteMessage(websocket.TextMessage, frame)
+					time.Sleep(35 * time.Millisecond)
 				}
 				sendSimNormalizedChatEvent(conn, time.Now().UnixMilli(), "user_message", map[string]any{
-					"id":      msg.ID,
+					"id":      id,
 					"content": []map[string]any{{"type": "text", "text": "I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"}},
-					"shell":   map[string]any{"command": cmd, "output": output, "exit_code": exit, "truncated": false},
+					"shell":   map[string]any{"command": cmd, "output": full.String(), "exit_code": exit, "truncated": false},
 				})
 			}()
 		case "set_model":
