@@ -50,6 +50,12 @@ type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
+	// Builtin marks a project Hydra created and owns rather than one the user
+	// registered - currently only the scratch project (see docs/scratch-project.md).
+	// It is never added via the add-project flow and never prompts for trust.
+	// Callers asking "does the user have any projects yet?" must exclude these,
+	// otherwise first-run states never render again.
+	Builtin bool `json:"builtin,omitempty"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.

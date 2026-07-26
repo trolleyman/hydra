@@ -523,8 +523,18 @@ function RootLayout() {
       // project. Read up front so the persist effect below - which momentarily
       // sees the bare project route - can't overwrite it before we navigate.
       restoreProjectView(selectedProjectId, loadProjectView(selectedProjectId))
+      return
     }
-  }, [selectedProjectId, projects, restoreProjectView])
+    // Nothing to restore (first run, or the remembered project was removed):
+    // land in the built-in scratch project rather than on a dead-end page. The
+    // `scratch` guard also holds this off until the project list has loaded, so
+    // we never bounce off "/" before the remembered project arrives.
+    const scratch = projects.find((p) => p.builtin)
+    if (scratch) {
+      didAutoNavigate.current = true
+      navigate({ to: '/project/$projectId', params: { projectId: scratch.id } })
+    }
+  }, [selectedProjectId, projects, restoreProjectView, navigate])
 
   // Persist the current view per project so switching back (or reloading)
   // restores it. Keyed off the actual route params (not currentProjectId, which

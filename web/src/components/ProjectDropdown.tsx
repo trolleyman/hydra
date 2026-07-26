@@ -15,6 +15,60 @@ import { ServiceHealthWarning } from './ServiceHealthWarning'
 // binding everywhere.
 const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
+// Built-ins (the scratch project) first, everything else in server order. Only
+// the dropdown pins them: the Ctrl+` switcher is deliberately left on pure
+// recency, because pinning anything to the front of an alt-tab list breaks the
+// "one tap = previous project" model it exists for.
+function orderProjects(projects: ProjectInfo[]): ProjectInfo[] {
+  return [...projects].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))
+}
+
+// One row of the project menu. Built-ins render without the path line - a
+// built-in's path (~/.local/share/hydra/scratch) is noise, not information.
+function ProjectRow({
+  project: p,
+  selected,
+  onClick,
+}: {
+  project: ProjectInfo
+  selected: boolean
+  onClick: () => void
+}) {
+  return (
+    <div
+      // mx-1 + rounded: the highlight/hover is an inset pill, so the selected
+      // row doesn't butt against the menu's py-1 padding (which read as a stray
+      // white strip above/below edge rows).
+      className={`relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+        selected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+      }`}
+      onClick={onClick}
+    >
+      <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
+        <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</span>
+          {/* Needs-input/unread notification dot, right of the name so "this
+              project wants you" reads before the tally. */}
+          <ProjectAttentionDot project={p} />
+        </div>
+        {p.builtin ? (
+          <div className="text-xs text-gray-400 dark:text-gray-500 truncate">Just chatting - no repo</div>
+        ) : (
+          <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
+        )}
+      </div>
+      {/* Per-project agent tally (running/waiting/finished/needs_input). Fixed
+          to the trailing edge, centered against the two-line name/path - nothing
+          here appears on hover, so the counts never shift. Removal moved to the
+          project's Settings page. */}
+      <ProjectAgentCounts project={p} className="shrink-0 self-center" />
+    </div>
+  )
+}
+
 // ── Project Dropdown ───────────────────────────────────────────────────────────
 
 // memo: lives in the RootLayout sidebar header, which re-renders on every
@@ -222,42 +276,26 @@ export const ProjectDropdown = memo(function ProjectDropdown({
         >
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
-              {projects.map((p) => (
-                <div
-                  key={p.id}
-                  // mx-1 + rounded: the highlight/hover is an inset pill, so the
-                  // selected row doesn't butt against the menu's py-1 padding
-                  // (which read as a stray white strip above/below edge rows).
-                  className={`relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                    p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                  }`}
-                  onClick={() => {
-                    if (p.id === selectedId) {
-                      onDeselect()
-                    } else {
-                      onSelect(p.id)
-                    }
-                    setOpen(false)
-                  }}
-                >
-                  <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
-                    <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</span>
-                      {/* Needs-input/unread notification dot, right of the name
-                          so "this project wants you" reads before the tally. */}
-                      <ProjectAttentionDot project={p} />
-                    </div>
-                    <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
-                  </div>
-                  {/* Per-project agent tally (running/waiting/finished/
-                      needs_input). Fixed to the trailing edge, centered against
-                      the two-line name/path - nothing here appears on hover, so
-                      the counts never shift. Removal moved to the project's
-                      Settings page. */}
-                  <ProjectAgentCounts project={p} className="shrink-0 self-center" />
+              {/* Built-ins (the scratch project) are pinned above the user's own
+                  projects and kept out of any reordering, so their position is
+                  muscle-memory stable. */}
+              {orderProjects(projects).map((p, i, ordered) => (
+                <div key={p.id}>
+                  <ProjectRow
+                    project={p}
+                    selected={p.id === selectedId}
+                    onClick={() => {
+                      if (p.id === selectedId) {
+                        onDeselect()
+                      } else {
+                        onSelect(p.id)
+                      }
+                      setOpen(false)
+                    }}
+                  />
+                  {p.builtin && !ordered[i + 1]?.builtin && ordered[i + 1] && (
+                    <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                  )}
                 </div>
               ))}
             </div>

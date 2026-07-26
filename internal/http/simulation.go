@@ -16,6 +16,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 // simAgentByID returns a minimal fixture AgentResponse for the given id, used by
@@ -121,6 +122,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
 	simDisplayPath := "~/code/simulated/project"
 	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
+	// The built-in scratch project (docs/scratch-project.md). Deliberately listed
+	// *last* so the dropdown's pin-to-top sort is actually exercised rather than
+	// accidentally satisfied by server order.
+	scratchBuiltin := true
+	scratchIcon := "MessageSquare"
+	scratchDisplayPath := "~/.local/share/hydra/scratch"
+	scratchTotal, scratchRunning, scratchWaiting, scratchFinished := 2, 0, 1, 1
+	scratchUnread, scratchNeedsInput := 0, 0
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
@@ -147,6 +156,20 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			RunningCount:    &otherRunning,
 			WaitingCount:    &otherWaiting,
 			FinishedCount:   &otherFinished,
+		},
+		{
+			Id:              projects.ScratchProjectID,
+			Path:            "/home/sim/.local/share/hydra/scratch",
+			DisplayPath:     &scratchDisplayPath,
+			Name:            projects.ScratchProjectName,
+			Builtin:         &scratchBuiltin,
+			Icon:            &scratchIcon,
+			UnreadCount:     &scratchUnread,
+			NeedsInputCount: &scratchNeedsInput,
+			AgentCount:      &scratchTotal,
+			RunningCount:    &scratchRunning,
+			WaitingCount:    &scratchWaiting,
+			FinishedCount:   &scratchFinished,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)

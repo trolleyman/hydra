@@ -18,6 +18,7 @@ import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTe
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
+import { useProjectStore } from '../stores/projectStore'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -293,6 +294,13 @@ export const SpawnForm = memo(function SpawnForm({
   // is opened (which must preserve whatever the user picked). The background
   // refresh keeps the cached list visible and just swaps in fresh branches, so a
   // newly-spawned agent branch becomes stackable without a page reload.
+  // Built-in (scratch) projects drop the git chrome that has nothing to act on.
+  // Selector, not a whole-store subscribe: this form re-renders on every
+  // keystroke.
+  const isBuiltinProject = useProjectStore(
+    (s) => !!s.projects.find((p) => p.id === projectId)?.builtin,
+  )
+
   // Guards against a slow request for an old project resolving after the user
   // switched projects: each call captures the project it was issued for and only
   // applies its result if that's still the active project.
@@ -757,6 +765,9 @@ export const SpawnForm = memo(function SpawnForm({
   // footer it shrinks and truncates; on the full-page form it sizes to content.
   function renderBranchSelector(compactSel: boolean) {
     if (!branches || branches.length === 0) return null
+    // The built-in scratch project has no work to stack on - picking a base
+    // branch there is noise, so start every conversation from its default.
+    if (isBuiltinProject) return null
     // The compact sidebar footer is tight, so there the branch selector collapses
     // to a single branch icon (name shown in its tooltip + the open dropdown); the
     // full-page form keeps the labelled trigger.

@@ -856,6 +856,9 @@ type ProjectInfo struct {
 	// AgentCount Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
 	AgentCount *int `json:"agent_count,omitempty"`
 
+	// Builtin True for a project Hydra created and owns rather than one the user registered - currently only the scratch project (id `_scratch`). Built-ins are pinned in the project list, render without their path, and hide the spawn form's base-branch picker. They must be excluded when testing whether the user has any projects yet.
+	Builtin *bool `json:"builtin,omitempty"`
+
 	// DisplayPath The project path for display, with the server's home directory abbreviated to "~" (e.g. "~/code/hydra"). Computed server-side because only the server knows its HOME. Falls back to `path` verbatim when the path is not under HOME.
 	DisplayPath *string `json:"display_path,omitempty"`
 
