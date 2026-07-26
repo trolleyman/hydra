@@ -1,9 +1,16 @@
 # Plan: adopt an existing PR/MR as a head
 
-Status: **proposed, not built.** This captures an agreed design for working on a
-PR/MR that already exists on the forge - including someone else's, including one
-raised from a fork - so the work can be picked up later without re-deriving it.
-Nothing here exists yet.
+Status: **BUILT.** Steps 1-5 below are implemented: `forge.ListMRs`/`GetMR`,
+`git.PRHeadRefspec`/`FetchRefspec`, `heads.SpawnHeadOptions.Adopt`, the
+`adopt_mr` spawn field + `GET .../reviews` endpoint, the push-back path with the
+foreign-MR guards, and the web PR picker (`PRPicker.tsx`) + adopted-head
+labelling. This document is kept as the rationale/design record; the sections
+below describe how it works.
+
+Known follow-ups (not blockers): the `gh --json` fork-detection field names want
+a live-auth verification pass (see the CAVEAT in step 4); token/REST forge auth
+is still CLI-only; and the fetch-fresh spawn base (NON_LOCAL_INTEGRATION.md 3.6)
+that keeps an adopted head's diff crisp remains unbuilt.
 
 ## Problem
 

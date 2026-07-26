@@ -19,7 +19,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, Lock } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -1635,18 +1635,27 @@ export function AgentDetail({
   const linked = !!agent.review
   const ahead = agent.review?.ahead ?? 0
   const behind = agent.review?.behind ?? 0
+  // An adopted PR the author has not opened to maintainer edits is read-only: the
+  // backend rejects a push, so the push affordances are replaced with a disabled
+  // note (docs/pr-adoption.md).
+  const readOnlyPR = agent.review?.adopted === true && agent.review?.can_push === false
   const publishAction: AgentTopBarAction = publishing
     ? { label: 'Publishing...', icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
     : linked
       ? {
-          label: 'View MR',
+          label: agent.review?.adopted ? 'View PR' : 'View MR',
           icon: <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
           onClick: () => window.open(agent.review!.url, '_blank', 'noreferrer'),
           variant: 'segment',
           menu: [
-            ...(ahead > 0 ? [{ label: `Push to MR (${ahead} ahead)`, description: 'Push local commits to the MR branch.', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }] : []),
-            ...(behind > 0 ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote MR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
-            { label: 'Push to MR', description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing },
+            ...(readOnlyPR
+              ? [{ label: 'Read-only PR (no push access)', description: 'The author has not enabled maintainer edits, so commits cannot be pushed to this PR.', icon: <Lock className="w-4 h-4" />, onClick: () => {}, tone: 'neutral' as const, disabled: true }]
+              : [
+                  ...(ahead > 0 ? [{ label: `Push to MR (${ahead} ahead)`, description: 'Push local commits to the MR branch.', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }] : []),
+                  ...(behind > 0 ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote MR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
+                  { label: 'Push to MR', description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing },
+                ]),
+            ...(behind > 0 && readOnlyPR ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote PR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
             ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [{ label: 'Respond to review comments', description: 'Ask the agent to fetch and address the unresolved review comments.', icon: <MessageSquare className="w-4 h-4" />, onClick: () => void respondToReview(), tone: 'neutral' as const, disabled: busy }] : []),
           ] as AgentTopBarMenuItem[],
         }

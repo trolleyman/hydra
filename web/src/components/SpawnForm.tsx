@@ -19,6 +19,10 @@ import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { useProjectStore } from '../stores/projectStore'
+import { PRPicker } from './PRPicker'
+import { Badge } from './Badge'
+import { X, Lock } from 'lucide-react'
+import type { ReviewRef } from '../api/models/ReviewRef'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -225,6 +229,10 @@ export const SpawnForm = memo(function SpawnForm({
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [baseBranch, setBaseBranch] = useState('')
+  // When set, the spawn adopts an existing PR/MR instead of branching from a base
+  // branch: the worktree is based on the PR head and the head is pre-linked to the
+  // MR (docs/pr-adoption.md). The base-branch picker is hidden while adopting.
+  const [adopt, setAdopt] = useState<ReviewRef | null>(null)
   // Undo/redo for the composer spans the typed prompt AND the attachment chips:
   // a paste that becomes a chip calls preventDefault, so native textarea undo
   // never sees it. `present` is the live composer state; `commit`/`undo`/`redo`/
@@ -695,7 +703,9 @@ export const SpawnForm = memo(function SpawnForm({
         // Structured chat is available for Claude and Codex; a remembered value
         // must not leak into another agent type's spawn.
         ...((agentType === 'claude' || agentType === 'codex') && chatMode ? { chat_mode: true } : {}),
-        ...(baseBranch ? { base_branch: baseBranch } : {}),
+        // Adopting a PR takes precedence over (and ignores) the base branch: the
+        // server bases the head on the PR head and its target branch.
+        ...(adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -711,6 +721,7 @@ export const SpawnForm = memo(function SpawnForm({
       setLightboxIndex(null)
       pastedTextCounterRef.current = 0
       lastPasteRef.current = null
+      setAdopt(null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))
@@ -763,7 +774,39 @@ export const SpawnForm = memo(function SpawnForm({
   // The base-branch picker, shown immediately left of the Spawn button. Hidden
   // until branches load (or if the project has none). In the narrow compact
   // footer it shrinks and truncates; on the full-page form it sizes to content.
+  // The "work on an existing PR" control: while a PR is selected it shows a chip
+  // (with a read-only lock when the PR can't be pushed to) plus a clear button;
+  // otherwise the PRPicker trigger. Hidden on the built-in scratch project, which
+  // has no forge to adopt from.
+  function renderAdoptControl(compactSel: boolean) {
+    if (isBuiltinProject || !projectId) return null
+    if (adopt) {
+      return (
+        <div className="flex items-center gap-1 shrink-0 min-w-0">
+          <Badge
+            tone="blue"
+            icon={adopt.can_push === false ? <Lock className="w-3 h-3" /> : <GitBranch className="w-3 h-3" />}
+            title={`Adopting PR #${adopt.id}: ${adopt.title}${adopt.can_push === false ? ' (read-only - no push access)' : ''}`}
+          >
+            <span className="max-w-[8rem] truncate">PR #{adopt.id}</span>
+          </Badge>
+          <button
+            type="button"
+            onClick={() => setAdopt(null)}
+            title="Don't adopt a PR"
+            className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer shrink-0"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )
+    }
+    return <PRPicker projectId={projectId} onSelect={setAdopt} compact={compactSel} />
+  }
+
   function renderBranchSelector(compactSel: boolean) {
+    // While adopting a PR the base branch is the PR's target, chosen server-side.
+    if (adopt) return null
     if (!branches || branches.length === 0) return null
     // The built-in scratch project has no work to stack on - picking a base
     // branch there is noise, so start every conversation from its default.
@@ -897,6 +940,7 @@ export const SpawnForm = memo(function SpawnForm({
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
                 {renderChatToggle(true)}
+                {renderAdoptControl(true)}
               </div>
               {renderBranchSelector(true)}
               <button
@@ -904,7 +948,7 @@ export const SpawnForm = memo(function SpawnForm({
                 disabled={!canSubmit || loading || disabled}
                 className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
-                {loading ? '...' : 'Spawn'}
+                {loading ? '...' : adopt ? 'Adopt PR' : 'Spawn'}
               </button>
             </div>
             {renderResizeHandle()}
@@ -977,6 +1021,7 @@ export const SpawnForm = memo(function SpawnForm({
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
                   <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
                   {renderChatToggle(false)}
+                  {renderAdoptControl(false)}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                   {renderBranchSelector(false)}
@@ -989,7 +1034,12 @@ export const SpawnForm = memo(function SpawnForm({
                     {loading ? (
                       <>
                         <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                        Spawning...
+                        {adopt ? 'Adopting...' : 'Spawning...'}
+                      </>
+                    ) : adopt ? (
+                      <>
+                        <GitBranch className="w-3.5 h-3.5" />
+                        Adopt PR #{adopt.id}
                       </>
                     ) : (
                       <>

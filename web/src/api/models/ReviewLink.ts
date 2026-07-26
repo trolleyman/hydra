@@ -32,5 +32,13 @@ export type ReviewLink = {
      */
     behind?: number;
     state?: ReviewState;
+    /**
+     * True when this head was spawned ON an existing PR/MR Hydra did not create (docs/pr-adoption.md). Such a head has no "Create MR" affordance and its downstream branch (the PR author's source branch) is not editable.
+     */
+    adopted?: boolean;
+    /**
+     * Whether we may push to the adopted PR's head branch (always true for a same-repo PR; for a fork only when the author enabled maintainer edits). When false the head is read-only and the Push/Pull affordances are disabled. Only meaningful when adopted is true.
+     */
+    can_push?: boolean;
 };
 
