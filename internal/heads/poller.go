@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -109,17 +108,32 @@ const graceUnread = 5 * time.Second
 // own goroutine); a nil func disables the hook.
 type SettleFunc func(projectRoot, headID string)
 
+// pollInterval is the JSON status poller's backstop tick. It is deliberately slow
+// because the fsnotify watcher (watchStatusDirs) carries the latency-sensitive
+// path - poking an immediate poll the moment a head's status.json changes - so a
+// status/activity change surfaces in ~ms rather than waiting out the interval. The
+// tick still matures the time-based unread debounce and covers any change the
+// watcher misses (e.g. inotify unavailable, or a brand-new head not yet watched).
+const pollInterval = 5 * time.Second
+
 // RunJSONStatusPoller runs a polling loop that syncs JSON status files into the
-// DB every 1 second. roots returns the set of project roots to poll on each
-// tick; it is re-evaluated every cycle so projects added/removed at runtime are
-// picked up. onSettle (may be nil) is invoked on transitions into a resting
-// status so background artifact generation can start immediately.
+// DB. It ticks every pollInterval as a backstop and additionally polls a project
+// on demand when the fsnotify watcher signals a status.json change. roots returns
+// the set of project roots to poll; it is re-evaluated every cycle so projects
+// added/removed at runtime are picked up. onSettle (may be nil) is invoked on
+// transitions into a resting status so background artifact generation can start
+// immediately.
 func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string, hub *events.Hub, onSettle SettleFunc) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	// One debouncer for the lifetime of the loop: its pending-unread state must
-	// survive across ticks for the grace window to mean anything.
+	// survive across ticks/pokes for the grace window to mean anything. Both the
+	// tick and poke branches run on this single goroutine, so it needs no locking.
 	deb := newUnreadDebouncer()
+	// The watcher pokes a project root here when one of its status files changes;
+	// buffered so a burst never blocks the watcher goroutine.
+	poke := make(chan string, 64)
+	go watchStatusDirs(ctx, roots, poke)
 	for {
 		select {
 		case <-ctx.Done():
@@ -128,6 +142,8 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 			for _, root := range roots() {
 				pollJSONStatusOnce(store, root, deb, hub, onSettle)
 			}
+		case root := <-poke:
+			pollJSONStatusOnce(store, root, deb, hub, onSettle)
 		}
 	}
 }
@@ -220,6 +236,19 @@ type StatusFile struct {
 	api.AgentStatusInfo
 }
 
+// AgentStatusPayload is the events.Event.Payload of an agent_status_changed event,
+// published by the JSON poller and framed in internal/http/events_ws.go. It carries
+// the head's freshly-changed live status bundle (status + activity + last message)
+// so the client patches that one row in place instead of refetching the whole
+// agent list - the same trick as agent_tests_changed, but for the status line.
+type AgentStatusPayload struct {
+	AgentID                string
+	Status                 string
+	Activity               string
+	LastMessage            string
+	LastMessageIsSuggested bool
+}
+
 func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub, onSettle SettleFunc) {
 	agents, err := store.ListAgents(projectRoot)
 	if err != nil {
@@ -283,6 +312,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// raise the unread flag the instant they appear rather than riding out
 			// the finished grace window.
 			immediate := statusChanged && (agentStatus == "needs_input" || agentStatus == "errored")
+			activityChanged := false
 			// Only a change the client actually renders is worth an agents_changed
 			// event: the status string flipping, or the unread flag being raised
 			// (immediate). A running agent rewrites status.json on every tool call,
@@ -312,6 +342,35 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 				deb.forget(a.ID)
 			}
 
+			// Persist the live activity + last message alongside the status, reading
+			// the same status_log.jsonl tail enrichAgentStatus used to parse on every
+			// GET /agents. Storing it serves the line straight from the DB and lets it
+			// survive a daemon restart. Kept out of UpdateAgentStatus so it never
+			// touches agent_status_time, which owns the transition/unread logic.
+			activity, lastMsg, lastMsgIsQuestion := readStatusLogTail(projectRoot, a.ID)
+			// Activity is only meaningful while the agent is actively working; clear it
+			// at rest (matches the running-only gate in agentStatusDetail / ListHeads).
+			newActivity := ""
+			if agentStatus == "running" {
+				newActivity = activity
+			}
+			// Carry the previous message forward when this snapshot has none (it can
+			// scroll out of the 64KB tail window on a chatty head), so a finished agent
+			// keeps showing its closing summary rather than blanking.
+			newLastMsg := a.LastMessage
+			newSuggested := a.LastMessageIsSuggested
+			if lastMsg != "" {
+				newLastMsg = lastMsg
+				newSuggested = !lastMsgIsQuestion && IsSuggestedNextMessage(lastMsg)
+			}
+			if newActivity != a.Activity || newLastMsg != a.LastMessage || newSuggested != a.LastMessageIsSuggested {
+				if err := store.UpdateAgentActivity(a.ID, newActivity, newLastMsg, newSuggested); err != nil {
+					log.Printf("warn: json status poller: update agent activity for %s: %v", a.ID, err)
+				} else {
+					activityChanged = true
+				}
+			}
+
 			// A genuine transition into a resting status means the agent has stopped
 			// editing, so its worktree is a stable target: kick off background
 			// artifact generation now instead of waiting for the slower
@@ -322,6 +381,22 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			if onSettle != nil && statusChanged &&
 				(agentStatus == "finished" || agentStatus == "waiting" || agentStatus == "needs_input") {
 				onSettle(projectRoot, a.ID)
+			}
+
+			// Push the changed status bundle to clients viewing this project as a
+			// keyed (per-agent, coalesced) event so they patch the one row in place -
+			// no full agent-list refetch. Fired for a status flip OR an activity/message
+			// change; the latter is the per-tool-call live line, far too frequent for a
+			// blunt agents_changed refetch. The coarse agents_changed below still fires
+			// on a real status change for the unread / cross-project refetch paths.
+			if statusChanged || activityChanged {
+				hub.AgentStatusChanged(projectRoot, a.ID, AgentStatusPayload{
+					AgentID:                a.ID,
+					Status:                 agentStatus,
+					Activity:               newActivity,
+					LastMessage:            newLastMsg,
+					LastMessageIsSuggested: newSuggested,
+				})
 			}
 		}
 
@@ -356,8 +431,8 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 
 func readStatusJSON(projectRoot, id string) *StatusFile {
 	path := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
-	data, err := os.ReadFile(path)
-	if err != nil {
+	data := readStatusJSONBytes(path)
+	if data == nil {
 		return nil
 	}
 	var s StatusFile

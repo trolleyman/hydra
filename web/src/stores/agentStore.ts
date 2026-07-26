@@ -69,6 +69,10 @@ interface AgentState {
   // Patch just one agent's test summary (an agent_tests_changed payload event
   // - a streamed run ticking) without touching the rest of the row.
   patchAgentTests: (id: string, tests: AgentResponse['tests']) => void
+  // Patch just one agent's live status bundle (an agent_status_changed payload
+  // event - status flip or per-tool-call activity/last-message change) in place,
+  // without refetching the whole list.
+  patchAgentStatus: (id: string, patch: { status: string; activity: string; last_message: string; last_message_is_suggested: boolean }) => void
   // Reset the archived list (e.g. on project switch).
   resetArchived: () => void
   setArchivedLoading: (loading: boolean) => void
@@ -230,6 +234,31 @@ export const useAgentStore = create<AgentState>((set) => ({
     // Streamed runs re-send the summary on every marker; skip no-op patches.
     if (!prev || deepEqual(prev.tests, tests)) return {}
     return { agents: state.agents.map((a) => a.id === id ? { ...a, tests } : a) }
+  }),
+  patchAgentStatus: (id, patch) => set((state) => {
+    const prev = state.agents.find((a) => a.id === id)
+    if (!prev) return {}
+    // Respect an active optimistic status override (e.g. a just-submitted prompt):
+    // keep the optimistic status rather than let a slightly-stale pushed status flip
+    // the badge back - the same rule setAgents applies, comparing the *pushed*
+    // (backend) status against the override, not the already-overlaid current one.
+    // The override wins until the push catches up to it (or reports needs_input, the
+    // explicit "blocked on you" signal). Activity/last_message have no optimistic
+    // layer, so they always take the push.
+    const opt = state.optimistic[id]
+    const pushed = patch.status as AgentStatus
+    const overrideActive = !!opt && opt.until > Date.now()
+      && pushed !== opt.status && pushed !== AgentStatus.NEEDS_INPUT
+    const nextStatus = (overrideActive ? opt!.status : pushed)
+    const nextAgentStatus: AgentResponse['agent_status'] = {
+      ...(prev.agent_status ?? { status: nextStatus, timestamp: '' }),
+      status: nextStatus,
+      activity: patch.activity || undefined,
+      last_message: patch.last_message || undefined,
+      last_message_is_suggested_next_message: patch.last_message_is_suggested || undefined,
+    }
+    if (deepEqual(prev.agent_status, nextAgentStatus)) return {}
+    return { agents: state.agents.map((a) => a.id === id ? { ...a, agent_status: nextAgentStatus } : a) }
   }),
   resetArchived: () => set({ archived: [], archivedHasMore: true, archivedLoading: false }),
   setArchivedLoading: (loading) => set({ archivedLoading: loading }),

@@ -2,6 +2,27 @@ import { useEffect, useRef } from 'react'
 import type { TestSummary } from '../api/models/TestSummary'
 import { closeWebSocket } from './ws'
 
+// AgentStatusPatch is the inline payload of an agent_status_changed event: one
+// head's live status bundle, patched into that row in place (no list refetch).
+export interface AgentStatusPatch {
+  status: string
+  activity: string
+  last_message: string
+  last_message_is_suggested: boolean
+}
+
+// EventFrame is the raw JSON frame the events WebSocket delivers. Only `type` is
+// always present; the rest are payload fields for the inline-patch events.
+interface EventFrame {
+  type: string
+  agent_id?: string
+  tests?: TestSummary
+  status?: string
+  activity?: string
+  last_message?: string
+  last_message_is_suggested?: boolean
+}
+
 export interface EventStreamHandlers {
   onAgentsChanged?: () => void
   onProjectsChanged?: () => void
@@ -10,6 +31,9 @@ export interface EventStreamHandlers {
   // agent_tests_changed carries a payload (unlike the refetch nudges above):
   // one head's live test summary ticked mid-run - patch it in place.
   onAgentTestsChanged?: (agentId: string, tests: TestSummary) => void
+  // agent_status_changed carries a head's live status bundle (status + activity +
+  // last message) - patch it in place instead of refetching the whole list.
+  onAgentStatusChanged?: (agentId: string, patch: AgentStatusPatch) => void
 }
 
 // useEventStream subscribes to the daemon's per-project events WebSocket and
@@ -43,13 +67,19 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let stopped = false // unmounted or projectId changed
 
-    const dispatch = (msg: { type: string; agent_id?: string; tests?: TestSummary }) => {
+    const dispatch = (msg: EventFrame) => {
       const h = handlersRef.current
       if (msg.type === 'agents_changed') h.onAgentsChanged?.()
       else if (msg.type === 'projects_changed') h.onProjectsChanged?.()
       else if (msg.type === 'services_changed') h.onServicesChanged?.()
       else if (msg.type === 'push_status_changed') h.onPushStatusChanged?.()
       else if (msg.type === 'agent_tests_changed' && msg.agent_id && msg.tests) h.onAgentTestsChanged?.(msg.agent_id, msg.tests)
+      else if (msg.type === 'agent_status_changed' && msg.agent_id) h.onAgentStatusChanged?.(msg.agent_id, {
+        status: msg.status ?? '',
+        activity: msg.activity ?? '',
+        last_message: msg.last_message ?? '',
+        last_message_is_suggested: msg.last_message_is_suggested ?? false,
+      })
     }
 
     const clearReconnect = () => {
@@ -78,8 +108,8 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       }
       sock.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(ev.data as string) as { type?: string; agent_id?: string; tests?: TestSummary }
-          if (msg && typeof msg.type === 'string') dispatch(msg as { type: string; agent_id?: string; tests?: TestSummary })
+          const msg = JSON.parse(ev.data as string) as Partial<EventFrame>
+          if (msg && typeof msg.type === 'string') dispatch(msg as EventFrame)
         } catch {
           // ignore malformed frames
         }
