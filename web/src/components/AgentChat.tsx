@@ -1468,8 +1468,8 @@ function tailCap(s: string, max: number): string {
 }
 
 // ShellCommandBash renders the command line with bash highlighting and a leading
-// "$" prompt, so a "!command" card reads unmistakably as a shell the USER ran -
-// not an agent tool call. Falls back to plain mono text when highlighting fails.
+// "$" prompt, so a "!command" card reads unmistakably as a shell command. Falls
+// back to plain mono text when highlighting fails.
 function ShellCommandBash({ command }: { command: string }) {
   const html = useMemo(() => highlightHtml(command, 'bash'), [command])
   return (
@@ -1480,12 +1480,13 @@ function ShellCommandBash({ command }: { command: string }) {
   )
 }
 
-// ShellCommandCard renders a chat "!command" the user ran from the composer. It
-// is deliberately styled apart from the agent's tool cards - a terracotta left
-// rail (the user-action accent) and a "$" shell prompt - so it's obvious the
-// command was run by the user, not the agent. The header collapses the output;
-// output streams in live while running (see the shell_output frame handler). The
-// same output is also delivered to the agent as a user turn, so this card is the
+// ShellCommandCard renders a chat "!command" the user ran from the composer.
+// It reuses the agent tool-card chrome (the same collapsible container, rotating
+// chevron and Expandable open/close animation) with a shell-specific header (a
+// "$" prompt + bash-highlighted command + run status), and is right-aligned like
+// a user turn so it reads as something the user did, not the agent. Output
+// streams in live while running (see the shell_output frame handler). The same
+// output is also delivered to the agent as a user turn, so this card is the
 // human-facing view of that turn rather than a plain bubble.
 function ShellCommandCard({ command, output, exitCode, truncated, timedOut, running }: {
   command: string
@@ -1497,52 +1498,57 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, runn
 }) {
   const [open, setOpen] = useState(true)
   const failed = !running && !timedOut && typeof exitCode === 'number' && exitCode !== 0
-  const hasBody = running || output.trim().length > 0
+  const hasOutput = output.trim().length > 0
+  const toggle = () => setOpen((o) => !o)
   return (
-    <div className="overflow-hidden rounded-md border border-stone-200 border-l-2 border-l-[#c96442] bg-[#fbfaf7] dark:border-white/[0.06] dark:border-l-[#c96442] dark:bg-white/[0.02]">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+    <div className="flex justify-end">
+      <div
+        className={`w-full max-w-[85%] overflow-hidden rounded-lg border text-xs ${
+          failed
+            ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+        }`}
       >
-        {hasBody ? (
-          open ? (
-            <ChevronDown className="w-3.5 h-3.5 shrink-0 text-stone-400" />
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={toggle}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <ShellCommandBash command={command} />
+          {running ? (
+            <span className="shrink-0 self-center flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400/90">
+              <LoaderCircle className="w-3 h-3 animate-spin" /> running
+            </span>
+          ) : timedOut ? (
+            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
           ) : (
-            <ChevronRight className="w-3.5 h-3.5 shrink-0 text-stone-400" />
-          )
-        ) : (
-          <SquareTerminal className="w-3.5 h-3.5 shrink-0 text-stone-400" />
-        )}
-        <ShellCommandBash command={command} />
-        {running ? (
-          <span className="flex shrink-0 items-center gap-1 text-[11px] text-stone-500 dark:text-stone-400">
-            <LoaderCircle className="w-3 h-3 animate-spin" /> running
-          </span>
-        ) : timedOut ? (
-          <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
-        ) : (
-          <span className={`shrink-0 text-[11px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
-            exit {exitCode ?? 0}
-          </span>
-        )}
-      </button>
-      {open && hasBody && (
-        <div className="px-1.5 pb-1.5">
-          {output.trim().length > 0 ? (
-            <OutputPanel text={output} lang="" isError={failed} />
-          ) : (
-            <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-[11px] italic text-stone-400 dark:text-stone-500`}>
-              Waiting for output...
-            </div>
-          )}
-          {truncated && (
-            <div className="px-1 pt-1 text-[10px] text-stone-400 dark:text-stone-500">
-              Output truncated to the last part of a longer log.
-            </div>
+            <span className={`shrink-0 self-center text-[10px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
+              exit {exitCode ?? 0}
+            </span>
           )}
         </div>
-      )}
+        <Expandable open={open}>
+          <div className="px-2.5 pb-2 space-y-1.5">
+            {hasOutput ? (
+              <OutputPanel text={output} lang="" isError={failed} />
+            ) : (
+              <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-[11px] italic text-stone-400 dark:text-stone-500`}>
+                {running ? 'Waiting for output...' : '(no output)'}
+              </div>
+            )}
+            {truncated && (
+              <div className="px-1 text-[10px] text-stone-400 dark:text-stone-500">
+                Output truncated to the last part of a longer log.
+              </div>
+            )}
+          </div>
+        </Expandable>
+      </div>
     </div>
   )
 }
