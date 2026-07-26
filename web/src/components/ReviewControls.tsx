@@ -18,9 +18,13 @@ function FieldLabel({ children }: { children: ReactNode }) {
 }
 
 // providerIcon returns the small forge glyph for a provider name.
+// title="" suppresses the default SVG <title> the simple-icons marks render
+// ("GitHub"/"GitLab") - that <title> is a native OS tooltip in its own right, so
+// it double-tipped against the styled <Tooltip> these icons sit inside (and the
+// icon is decorative anyway; the surrounding link/badge carries the real name).
 export function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
-  if (provider === 'github') return <SiGithub className={className} />
-  if (provider === 'gitlab') return <SiGitlab className={className} />
+  if (provider === 'github') return <SiGithub className={className} title="" aria-hidden />
+  if (provider === 'gitlab') return <SiGitlab className={className} title="" aria-hidden />
   return <GitPullRequest className={className} />
 }
 
@@ -50,9 +54,11 @@ function CIChip({ status }: { status?: string }) {
   }
   const m = map[status] ?? map.pending
   return (
-    <Badge tone={m.tone} icon={m.icon} title={`CI: ${status}`}>
-      {m.label}
-    </Badge>
+    <Tooltip content={`CI: ${status}`}>
+      <Badge tone={m.tone} icon={m.icon}>
+        {m.label}
+      </Badge>
+    </Tooltip>
   )
 }
 
@@ -83,18 +89,21 @@ export function MRStateChip({ agent }: { agent: AgentResponse }) {
       </Tooltip>
       <CIChip status={st?.ci_status} />
       {st && st.approvals_required != null && st.approvals_required > 0 && (
-        <Badge
-          tone={(st.approvals ?? 0) >= st.approvals_required ? 'green' : 'neutral'}
-          icon={<CircleCheck className="w-3 h-3" />}
-          title="Approvals"
-        >
-          {st.approvals ?? 0}/{st.approvals_required}
-        </Badge>
+        <Tooltip content="Approvals">
+          <Badge
+            tone={(st.approvals ?? 0) >= st.approvals_required ? 'green' : 'neutral'}
+            icon={<CircleCheck className="w-3 h-3" />}
+          >
+            {st.approvals ?? 0}/{st.approvals_required}
+          </Badge>
+        </Tooltip>
       )}
       {st && (st.unresolved_discussions ?? 0) > 0 && (
-        <Badge tone="yellow" icon={<MessageSquare className="w-3 h-3" />} title="Unresolved discussions">
-          {st.unresolved_discussions}
-        </Badge>
+        <Tooltip content="Unresolved discussions">
+          <Badge tone="yellow" icon={<MessageSquare className="w-3 h-3" />}>
+            {st.unresolved_discussions}
+          </Badge>
+        </Tooltip>
       )}
     </span>
   )

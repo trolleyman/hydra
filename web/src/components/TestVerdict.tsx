@@ -1,5 +1,6 @@
 import { Check, X, AlertTriangle, Clock, SkipForward } from 'lucide-react'
 import { Badge } from './Badge'
+import { Tooltip } from './Tooltip'
 import { verdictTone } from './badgeTones'
 import type { TestSummary } from '../api/models/TestSummary'
 import type { TestStatus } from '../api/models/TestStatus'
@@ -142,12 +143,17 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
   const settledPass = tests.status === 'passing' || tests.status === 'stale'
   const showSkips = long && settledPass
   const showWarnings = long && settledPass
-  return (
+  const title = verdictTitle(tests)
+  const badge = (
     <Badge
       tone={tone}
       variant={variant}
       icon={<VerdictIcon status={tests.status} className="w-3 h-3 shrink-0" />}
-      title={verdictTitle(tests)}
+      // The full text is revealed differently per context: the sm header chip
+      // (one instance) wraps in a styled Tooltip below; the xs sidebar chip
+      // renders once per agent row, so it keeps a native title to avoid mounting
+      // a portal component per row (the same per-row carve-out as the rest).
+      title={long ? undefined : title}
       // min-w-0 lets the chip shrink within a tight sidebar row so its text can
       // ellipsize instead of overrunning the date / the sidebar edge.
       containerClassName="min-w-0"
@@ -180,6 +186,9 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
       </span>
     </Badge>
   )
+  // min-w-0 rides onto the Tooltip wrapper too, so the header chip can still
+  // shrink and ellipsize inside the meta strip.
+  return long ? <Tooltip content={title} className="min-w-0">{badge}</Tooltip> : badge
 }
 
 function verdictTitle(t: TestSummary): string {

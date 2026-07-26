@@ -91,6 +91,12 @@ Native `title=` is still correct for three cases:
    hover detaches and hangs stranded over the content being resized. The browser
    suppresses a native `title` once a drag starts.
 
+A native `title` is not only the `title=` attribute: an SVG `<title>` child is
+the same OS tooltip. `@icons-pack/react-simple-icons` marks (`SiGithub`,
+`SiGitlab`, via `ProviderIcon`) render one by DEFAULT, so an icon dropped inside
+a `<Tooltip>` double-tips - pass `title=""` to suppress it (see `ProviderIcon`).
+Grep for `title=` alone will miss these; check for brand-icon components too.
+
 Keep a card's body short enough to fit a phone screen. The card caps its height
 against the viewport and scrolls, but a card you have to scroll is a sign the
 content belongs in `docs/` with a pointer from the tooltip.
