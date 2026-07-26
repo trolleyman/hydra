@@ -371,7 +371,14 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 	}); err != nil {
 		log.Printf("warn: write post-turn status for %s: %v", id, err)
 	}
-	_ = m.store.UpdateAgentStatus(id, string(status), ts, false)
+	// Deliberately do NOT write the DB status here. The JSON status poller owns
+	// the running-to-finished transition: it compares status.json against the
+	// DB's last-known timestamp and, on that transition, arms the graceUnread
+	// debounce that raises the "unread changes" flag (see poller.go). Writing the
+	// DB directly with this same timestamp would make statusTimeAfter blind to the
+	// transition, so the debounce would never arm and the head would never go
+	// unread - which is exactly what regressed for every chat-mode head (Claude
+	// chat and Codex). Leave the DB to the poller, as terminal-mode finishes do.
 	m.drainAll(root, id)
 }
 
