@@ -20,6 +20,10 @@ export type ProjectInfo = {
      */
     name: string;
     /**
+     * True for a project Hydra created and owns rather than one the user registered - currently only the chat project (id `_chat`). Built-ins are pinned in the project list, render without their path, and hide the spawn form's base-branch picker. They must be excluded when testing whether the user has any projects yet.
+     */
+    builtin?: boolean;
+    /**
      * Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
      */
     icon?: string;

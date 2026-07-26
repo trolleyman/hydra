@@ -64,9 +64,13 @@ export function ProjectSwitcher({
                         so "this project wants you" reads before the tally. */}
                     <ProjectAttentionDot project={p} onAccent={active} />
                   </div>
-                  <div className={`text-xs font-mono truncate ${active ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {p.path}
-                  </div>
+                  {/* Built-ins have no meaningful path to show - same as the
+                      project dropdown, the second line is omitted. */}
+                  {!p.builtin && (
+                    <div className={`text-xs font-mono truncate ${active ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
+                      {p.path}
+                    </div>
+                  )}
                 </div>
                 {/* Per-project agent tally, matching the sidebar project
                     dropdown: a colored dot+count per non-zero status. onAccent

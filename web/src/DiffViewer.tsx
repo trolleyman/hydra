@@ -26,7 +26,17 @@ import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wo
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
-import { useMeasuredHeight } from './lib/useMeasuredHeight'
+import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
+import {
+  UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS,
+  SBS_ROW, SBS_HALF, SBS_LINE_NUM, SBS_MARKER, SBS_CODE,
+  EXPANDER_ROW, EXPANDER_BTN, NOTICE_BLOCK, HIDDEN_BLOCK,
+  measureBodyHeight, queueMeasure,
+} from './lib/diffMetrics'
+import {
+  buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
+  CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
+} from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
 import { TestsPanel } from './components/TestsPanel'
@@ -42,57 +52,6 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { addReviewComment, removeReviewComment, clearReviewDraft, loadReviewDraft, type PendingReviewComment } from './lib/reviewDrafts'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
-
-// ── Diff line building helpers ────────────────────────────────────────────────
-
-interface SideBySideLine {
-  oldLineNum: number | null
-  oldType: 'context' | 'deletion' | 'empty'
-  oldContent: string | null
-  newLineNum: number | null
-  newType: 'context' | 'addition' | 'empty'
-  newContent: string | null
-}
-
-function buildSideBySide(hunkLines: DiffHunk['lines']): SideBySideLine[] {
-  const result: SideBySideLine[] = []
-  let i = 0
-  while (i < hunkLines.length) {
-    const l = hunkLines[i]
-    if (l.type === 'context') {
-      result.push({
-        oldLineNum: l.old_line_num ?? null, oldType: 'context', oldContent: l.content,
-        newLineNum: l.new_line_num ?? null, newType: 'context', newContent: l.content,
-      })
-      i++
-    } else if (l.type === 'deletion') {
-      const dels: typeof hunkLines = []
-      const adds: typeof hunkLines = []
-      while (i < hunkLines.length && hunkLines[i].type === 'deletion') dels.push(hunkLines[i++])
-      while (i < hunkLines.length && hunkLines[i].type === 'addition') adds.push(hunkLines[i++])
-      const maxLen = Math.max(dels.length, adds.length)
-      for (let j = 0; j < maxLen; j++) {
-        result.push({
-          oldLineNum: dels[j]?.old_line_num ?? null,
-          oldType: j < dels.length ? 'deletion' : 'empty',
-          oldContent: dels[j]?.content ?? null,
-          newLineNum: adds[j]?.new_line_num ?? null,
-          newType: j < adds.length ? 'addition' : 'empty',
-          newContent: adds[j]?.content ?? null,
-        })
-      }
-    } else if (l.type === 'addition') {
-      result.push({
-        oldLineNum: null, oldType: 'empty', oldContent: null,
-        newLineNum: l.new_line_num ?? null, newType: 'addition', newContent: l.content,
-      })
-      i++
-    } else {
-      i++
-    }
-  }
-  return result
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -216,34 +175,7 @@ const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: numb
   )
 })
 
-// Computes the number of lines hidden between two adjacent hunks.
-function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
-  let lastNewLine = 0
-  let lastOldLine = 0
-  for (const l of prevHunk.lines) {
-    if (l.new_line_num != null) lastNewLine = l.new_line_num
-    if (l.old_line_num != null) lastOldLine = l.old_line_num
-  }
-  const lastLine = lastNewLine > 0 ? lastNewLine : lastOldLine
-  const nextStart = nextHunk.new_start > 0 ? nextHunk.new_start : nextHunk.old_start
-  return Math.max(0, nextStart - lastLine - 1)
-}
 
-// trailingContext counts the unchanged context lines at the very end of a hunk,
-// ignoring a trailing "no newline" marker. `git diff -U<n>` emits up to `n`
-// context lines after the last change, so when a hunk shows fewer than the
-// requested context it has run out of file - the hunk already reaches EOF and
-// there is nothing left below to expand into.
-function trailingContext(hunk: DiffHunk): number {
-  let count = 0
-  for (let i = hunk.lines.length - 1; i >= 0; i--) {
-    const t = hunk.lines[i].type
-    if (t === 'no_newline') continue
-    if (t === 'context') { count++; continue }
-    break
-  }
-  return count
-}
 
 // ── Line selection ────────────────────────────────────────────────────────────
 // Clicking a gutter number selects that line (shift+click extends the range);
@@ -298,8 +230,6 @@ const LineNumCell = memo(function LineNumCell({ num, side, baseClass, selected, 
 
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
-const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
-const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
 // Row hover tint. This is a translucent overlay rather than `hover:brightness-95`
 // on the row: a filter promotes the row to its own compositing layer and forces a
@@ -362,15 +292,15 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const rowSel = selOld || selNew
         return (
           <Fragment key={idx}>
-            <div className={`flex items-stretch ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
-              <div className="relative flex shrink-0 select-none">
+            <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+              <div className={UNIFIED_GUTTER}>
                 <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
                 {!isNoNewline && !readOnly && (
                   <CommentButton idx={idx} onToggle={toggleComment} />
                 )}
               </div>
-              <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+              <span className={`${UNIFIED_MARKER} ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
                 }`}>
                 {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
               </span>
@@ -406,8 +336,6 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
   )
 })
 
-const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
-const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
 const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
@@ -441,15 +369,15 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
         const selNew = selectionHas(selection, 'new', line.newLineNum)
         return (
           <Fragment key={idx}>
-            <div className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
-              <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`} style={selOld ? SELECTED_ROW_STYLE : undefined}>
-                <div className="relative flex shrink-0 select-none">
+            <div className={SBS_ROW}>
+              <div className={`${SBS_HALF} ${oldBg}`} style={selOld ? SELECTED_ROW_STYLE : undefined}>
+                <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.oldLineNum} side="old" baseClass={SBS_LINE_NUM} selected={selOld} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
                     <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
-                <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
+                <span className={`${SBS_MARKER} ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
                 </span>
                 {line.oldContent != null && oldCodeHtml != null
@@ -457,14 +385,14 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
-              <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`} style={selNew ? SELECTED_ROW_STYLE : undefined}>
-                <div className="relative flex shrink-0 select-none">
+              <div className={`${SBS_HALF} ${newBg}`} style={selNew ? SELECTED_ROW_STYLE : undefined}>
+                <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.newLineNum} side="new" baseClass={SBS_LINE_NUM} selected={selNew} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
                     <CommentButton idx={idx} onToggle={toggleComment} />
                   )}
                 </div>
-                <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
+                <span className={`${SBS_MARKER} ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
                   {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
                 </span>
                 {line.newContent != null && newCodeHtml != null
@@ -533,23 +461,9 @@ export function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: stri
   }
 }
 
-const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
-const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
-
-// Default surrounding-context lines shown around each change (mirrors the git
-// `-U3` the diff is first fetched with), and how many extra lines each ⌄/⌃
-// expander reveals per click.
-const CTX = 3
+// How many extra lines each ⌄/⌃ expander reveals per click (the default context
+// either side of a change is diffBody's CTX).
 const EXPAND_STEP = 20
-// An unchanged run that would hide this few lines behind an expander isn't worth
-// collapsing - a "··· 1 line ···" toggle saves no vertical space and just adds a
-// click - so show those lines inline instead.
-const MIN_COLLAPSE_GAP = 1
-// Files whose full content exceeds this many lines keep the lightweight `-U3`
-// view + network expansion rather than rendering the whole file client-side.
-// The server applies the same cap when deciding which files to expand in the
-// full_context response (max_full_lines); this is the matching client guard.
-const FULL_MAX_LINES = 6000
 
 // Files with at least this many changed lines start hidden ("Load diff" button)
 // and aren't auto-expanded in the full_context response (passed as
@@ -608,102 +522,25 @@ function buildHighlightMaps(lines: DiffLine[], lang: string) {
   return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
 }
 
-const isChangeLine = (l: DiffLine) => l.type === 'addition' || l.type === 'deletion'
 
-// isContiguous verifies the line-number sequence has no gaps, i.e. these lines
-// really are the *entire* file (`git diff -U<huge>`) and not several hunks with
-// hidden lines between them. Only then is client-side reveal correct.
-function isContiguous(lines: DiffLine[]): boolean {
-  let prevOld: number | null = null
-  let prevNew: number | null = null
-  for (const l of lines) {
-    if (l.old_line_num != null) {
-      if (prevOld != null && l.old_line_num !== prevOld + 1) return false
-      prevOld = l.old_line_num
-    }
-    if (l.new_line_num != null) {
-      if (prevNew != null && l.new_line_num !== prevNew + 1) return false
-      prevNew = l.new_line_num
-    }
-  }
-  return true
-}
-
-// How many context lines a region currently shows at its top (adjacent to the
-// preceding change) and bottom (adjacent to the following change). Absent ⇒
-// region uses its default.
-type RevealMap = Map<string, { top?: number; bot?: number }>
-
-interface RenderSeg {
-  kind: 'lines' | 'gap' | 'topedge' | 'botedge'
-  key: string
-  lines?: DiffLine[]
-  regionId?: string
-  hidden?: number
-  top?: number     // resolved context lines shown at the region's top
-  bot?: number     // resolved context lines shown at the region's bottom
-  length?: number  // total lines in the region
-}
-
-const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
-
-// buildSegments turns a fully-fetched file (every line as a diff line) plus the
-// user's per-region reveal state into a flat list of render segments: runs of
-// visible lines interleaved with collapsed-region expanders. Each unchanged run
-// between (or around) changes shows `CTX` lines next to the change by default
-// and collapses the rest behind an expander; expanders that would hide nothing
-// (short gaps, the file's true top/bottom once fully revealed) are omitted, so
-// e.g. a 1-line gap simply renders the line and the top expander vanishes at
-// line 1 / the bottom expander at EOF.
-function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
-  const n = fullLines.length
-  const runs: { change: boolean; s: number; e: number }[] = []
-  let i = 0
-  while (i < n) {
-    const change = isChangeLine(fullLines[i])
-    let e = i + 1
-    while (e < n && isChangeLine(fullLines[e]) === change) e++
-    runs.push({ change, s: i, e })
-    i = e
-  }
-
-  const segs: RenderSeg[] = []
-  runs.forEach((run, ri) => {
-    if (run.change) {
-      segs.push({ kind: 'lines', key: `b${run.s}`, lines: fullLines.slice(run.s, run.e) })
-      return
-    }
-    const L = run.e - run.s
-    const isLead = ri === 0
-    const isTrail = ri === runs.length - 1
-    const id = regionKey(fullLines[run.s])
-    const ov = reveal.get(id)
-    const top = Math.min(L, ov?.top ?? (isLead ? 0 : CTX))
-    const bot = Math.min(L - top, ov?.bot ?? (isTrail ? 0 : CTX))
-    const hidden = L - top - bot
-    if (hidden <= MIN_COLLAPSE_GAP) {
-      segs.push({ kind: 'lines', key: `c${run.s}`, lines: fullLines.slice(run.s, run.e) })
-      return
-    }
-    if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })
-    segs.push({
-      kind: isLead ? 'topedge' : isTrail ? 'botedge' : 'gap',
-      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L,
-    })
-    if (bot > 0) segs.push({ kind: 'lines', key: `cb${run.s}`, lines: fullLines.slice(run.e - bot, run.e) })
-  })
-  return segs
-}
 
 // ── Lazy body mounting ────────────────────────────────────────────────────────
 // A big diff used to mount every file's rows (and highlight them) in one render,
 // blocking the main thread for seconds. Instead each file's body stays an empty
-// placeholder until its card first scrolls near the viewport; the placeholder is
-// sized from the row estimate below so the scrollbar and sidebar jump-to-file
-// stay roughly honest before the real rows exist.
+// placeholder until its card first scrolls near the viewport.
+//
+// The placeholder's height is *measured*, not guessed: bodyShape below describes
+// exactly which lines and expander rows the body will render, and diffMetrics
+// lays that text out once offscreen at the real width (see the note there for
+// why the browser does the wrapping rather than us). Each file does this in an
+// idle slice right after load, so by the time you scroll to a card its
+// placeholder already holds the height its rows will take - the document stops
+// growing under the scrollbar as you go. estimateVisibleRows is the crude
+// stand-in used only for the frame or two before the measurement lands (and for
+// in-tree images, whose height nothing can predict).
 
 // Diff rows are one leading-5 (20px) line each (wrapped lines make a row taller,
-// but this is only a placeholder estimate).
+// but this is only the pre-measurement stand-in).
 const EST_ROW_H = 20
 // How far beyond the viewport a body mounts, so scrolling at a normal pace hits
 // already-rendered rows instead of placeholders.
@@ -754,6 +591,7 @@ function estimateVisibleRows(file: DiffFile): number {
   })
   return rows
 }
+
 
 function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
   return (
@@ -1017,9 +855,23 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // ResizeObserver's first measurement, and if every card rendered at ~0 body
   // height for that first frame they would all cluster inside the observer's
   // pre-mount margin and defeat the laziness entirely.
+  //
+  // measuredBodyH is the real thing - diffMetrics lays the body's text out
+  // offscreen at boxW (the width the rows will wrap at) and returns the exact
+  // height, so the placeholder doesn't have to be corrected once the rows mount.
+  // It runs in an idle slice, hence the row estimate as the interim value.
+  const [boxRef, boxW] = useMeasuredWidth(0)
+  const [measuredBodyH, setMeasuredBodyH] = useState<number | null>(null)
+  useEffect(() => {
+    if (near || headless || boxW <= 0) return
+    return queueMeasure(() => {
+      const shape = bodyShape(file, sideBySide, !!isHidden, currentContext)
+      setMeasuredBodyH(shape && measureBodyHeight(boxW, shape))
+    })
+  }, [near, headless, boxW, file, sideBySide, isHidden, currentContext])
   const estBodyH = useMemo(
-    () => (near ? 0 : isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H),
-    [near, isHidden, file],
+    () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
+    [near, measuredBodyH, isHidden, file],
   )
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
@@ -1162,6 +1014,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
           bodyOpen/bodyMounted. headless (the repo one-file view) is bare, always
           open, and never animates. */}
       <div
+        // Also the width reference for the offscreen body measurement above: its
+        // clientWidth is exactly the width the rows inside it wrap at.
+        ref={boxRef}
         // `isolate` keeps this body's positioned content (an in-tree image renders
         // as `absolute inset-0` via ImageDiffView) in its own stacking context so
         // it can't paint over the sticky file/section/changes bars above it - see
@@ -1183,9 +1038,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} name={file.path} />
             </div>
           ) : file.binary ? (
-            <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
+            <div className={NOTICE_BLOCK}>Binary file changed</div>
           ) : isHidden ? (
-            <div className="px-4 py-8 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 italic">
+            <div className={HIDDEN_BLOCK}>
               <div className="text-sm mb-2">{file.additions + file.deletions} lines changed</div>
               <button
                 onClick={onShow}
@@ -1200,9 +1055,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             // collapses it to a label so a rename doesn't dump the file inline.
             headless && fullLines
               ? <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
-              : <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
+              : <div className={NOTICE_BLOCK}>No changes</div>
           ) : !file.hunks || file.hunks.length === 0 ? (
-            <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
+            <div className={NOTICE_BLOCK}>No changes</div>
           ) : segments ? (
             // Full-file model: every expander reveals already-fetched lines
             // client-side (no network), per-region, with whole-file highlighting.

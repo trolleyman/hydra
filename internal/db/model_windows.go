@@ -54,6 +54,14 @@ type Agent struct {
 	AgentStatus     *string // starting|running|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
 
+	// Live activity, persisted by the JSON poller (see model_unix.go for details):
+	// Activity is the current tool action shown while running; LastMessage is the
+	// most recent assistant message kept across turns; LastMessageIsSuggested marks
+	// a terse send-straight-back instruction.
+	Activity               string
+	LastMessage            string
+	LastMessageIsSuggested bool `gorm:"default:false"`
+
 	// HasUnreadChanges is set when the agent settles into finished (deferred) or
 	// reaches needs_input (at once); the soft waiting status does not raise it. The
 	// JSON poller sets it, and it is cleared when the user opens the agent. Drives

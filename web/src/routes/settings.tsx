@@ -45,8 +45,10 @@ function SettingsPage() {
 
   const selectedProject = projects.find(p => p.id === selectedProjectId)
   // User config API requires a project ID in the path even though config is global.
-  // Fall back to first available project if none is selected.
-  const effectiveProjectId = selectedProjectId ?? projects[0]?.id ?? ''
+  // Fall back to first available project if none is selected - preferring a real
+  // one, since the built-in scratch project sorts first on a fresh install and
+  // shouldn't become the implicit carrier for global settings.
+  const effectiveProjectId = selectedProjectId ?? projects.find(p => !p.builtin)?.id ?? projects[0]?.id ?? ''
 
   const hasUnsavedChanges = useMemo(() => {
     if (!config || !baseConfig) return false

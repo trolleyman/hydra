@@ -11,6 +11,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -44,13 +45,30 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 		}
 	}
 
-	activity, lastMessage, lastMessageIsQuestion := readStatusLogTail(projectRoot, id)
-	if info.Status == api.Running && activity != "" {
+	// Activity + last_message are no longer parsed from the log here: the JSON
+	// status poller derives them (via readStatusLogTail) and persists them to the
+	// agent row, and ListHeads copies them onto the status from those columns
+	// (applyPersistedActivity). This keeps GET /agents off the per-request log tail
+	// and lets the live line survive a daemon restart.
+}
+
+// applyPersistedActivity copies a head's persisted live-activity columns onto its
+// computed status. Activity is surfaced only while running (it's stale the moment a
+// tool ends and the UI hides it at rest anyway); last_message is shown in every
+// state. The poller keeps these columns fresh; see UpdateAgentActivity / poller.go.
+func applyPersistedActivity(info *api.AgentStatusInfo, a *db.Agent) {
+	if info == nil || a == nil {
+		return
+	}
+	if info.Status == api.Running && a.Activity != "" {
+		activity := a.Activity
 		info.Activity = &activity
 	}
-	if info.LastMessage == nil && lastMessage != "" {
-		info.LastMessage = &lastMessage
-		if suggested := !lastMessageIsQuestion && IsSuggestedNextMessage(lastMessage); suggested {
+	if a.LastMessage != "" {
+		msg := a.LastMessage
+		info.LastMessage = &msg
+		if a.LastMessageIsSuggested {
+			suggested := true
 			info.LastMessageIsSuggestedNextMessage = &suggested
 		}
 	}

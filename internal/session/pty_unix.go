@@ -5,11 +5,11 @@ package session
 import (
 	"os"
 	"os/exec"
-	"runtime"
 
 	"braces.dev/errtrace"
 	"github.com/creack/pty"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 // ptyProcess is a child process attached to a pseudo-terminal master.
@@ -25,17 +25,6 @@ func startProcess(spec *sandbox.Spec, rows, cols uint16) (*ptyProcess, error) {
 	cmd.Dir = spec.Dir
 	cmd.ExtraFiles = spec.ExtraFiles
 
-	// Tie the sandbox to the daemon's lifetime (Linux only; Pdeathsig is not a
-	// darwin/bsd SysProcAttr field). If the daemon dies for any reason the
-	// graceful drain can't handle - a crash, an outright SIGKILL, a botched
-	// auto-upgrade - the kernel SIGKILLs the outermost sandbox process (pasta in
-	// hard-egress mode, otherwise bwrap). bwrap's own --die-with-parent then
-	// cascades the kill down through the unshared PID namespace, so the agent
-	// (and anything it spawned, e.g. a headless Chrome) dies too instead of being
-	// reparented to systemd and left running. creack/pty preserves this
-	// SysProcAttr and layers Setsid+Setctty on top.
-	setPdeathsig(cmd)
-
 	if rows == 0 {
 		rows = 24
 	}
@@ -43,16 +32,18 @@ func startProcess(spec *sandbox.Spec, rows, cols uint16) (*ptyProcess, error) {
 		cols = 80
 	}
 
-	// Pdeathsig is delivered when the OS thread that forked the child exits, not
-	// only when the whole daemon does - and the Go runtime can retire idle
-	// threads. Lock this goroutine to its thread across the fork so the runtime
-	// keeps that thread alive afterwards and the signal can't fire early (which
-	// would kill a live agent). Best-effort; a cgroup scope is the definitive
-	// guarantee (see internal/sandbox scope handling).
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	master, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	// scope.StartFunc ties the sandbox to the daemon's lifetime (parent-death
+	// SIGKILL + OS-thread pin across the fork) so an ungraceful daemon death
+	// cascades down through bwrap's --die-with-parent instead of orphaning the
+	// agent to systemd - the same guarantee every scoped runner gets, here doing
+	// the fork via pty.StartWithSize (which preserves our SysProcAttr and layers
+	// Setsid+Setctty on top) instead of cmd.Start.
+	var master *os.File
+	err := scope.StartFunc(cmd, func() error {
+		var e error
+		master, e = pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+		return errtrace.Wrap(e)
+	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
