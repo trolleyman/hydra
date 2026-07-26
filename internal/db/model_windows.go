@@ -94,6 +94,9 @@ type Agent struct {
 	ReviewTargetBranch string
 	ReviewState        string
 	ReviewStateTime    string
+	ReviewAdopted      bool `gorm:"default:false"`
+	ReviewPushURL      string
+	ReviewCanPush      bool `gorm:"default:false"`
 	PublishWhenGreen   bool `gorm:"default:false"`
 	PublishWhenGreenAt string
 

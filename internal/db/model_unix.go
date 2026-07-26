@@ -119,6 +119,24 @@ type Agent struct {
 	// ReviewStateTime is the RFC3339 time ReviewState was last refreshed.
 	ReviewStateTime string
 
+	// --- Adopted PR/MR (inbound integration, docs/pr-adoption.md) ---
+	// ReviewAdopted is true when this head was spawned ON an existing PR/MR that
+	// Hydra did NOT create (someone else's, or a fork's). It gates the guards that
+	// must not fire on a foreign MR: no EnsureMR/re-publish, no auto-push, no
+	// close/delete-branch on teardown. False for a normal head or one Hydra
+	// published itself.
+	ReviewAdopted bool `gorm:"default:false"`
+	// ReviewPushURL is the git remote a push to the adopted PR's head branch
+	// targets. Empty means the configured review remote (the same-repo case, and
+	// every non-adopted head); a fork PR carries the fork's clone URL here because
+	// its head branch does not live on the configured remote.
+	ReviewPushURL string
+	// ReviewCanPush records whether we may push to the adopted PR's head branch:
+	// always true for a same-repo PR, and for a fork only when the author enabled
+	// maintainer edits. When false the head is read-only (review-only) and the
+	// push affordances are disabled. Meaningless (and false) for a non-adopted head.
+	ReviewCanPush bool `gorm:"default:false"`
+
 	// PublishWhenGreen arms "publish when green" (Phase 3): once local tests pass
 	// and the agent has finished, an unlinked head auto-opens a draft MR and a
 	// linked head auto-pushes. PublishWhenGreenAt is the RFC3339 arm time.

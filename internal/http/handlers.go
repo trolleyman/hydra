@@ -633,6 +633,11 @@ func (s *Server) agentResponseWithReview(h heads.Head) api.AgentResponse {
 	if h.ReviewTargetBranch != "" {
 		link.TargetBranch = &h.ReviewTargetBranch
 	}
+	if h.ReviewAdopted {
+		adopted := true
+		link.Adopted = &adopted
+		link.CanPush = &h.ReviewCanPush
+	}
 	if h.Branch != nil && h.DownstreamBranch != "" {
 		remote := reviewRemote(h.ProjectPath)
 		if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
@@ -1457,6 +1462,24 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		}, nil
 	}
 
+	// Adopting an existing PR/MR: resolve it on the forge and fetch its head
+	// commit host-side before the spawn, so the worktree can be based on it and
+	// the head pre-linked to the MR (docs/pr-adoption.md).
+	var adopt *heads.AdoptSpec
+	if request.Body.AdoptMr != nil {
+		spec, detail := s.resolveAdoptSpec(ctx, projectRoot, *request.Body.AdoptMr)
+		if detail != "" {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: detail,
+			}, nil
+		}
+		adopt = spec
+		// An adopted head's base is the PR's target branch; ignore any base_branch.
+		baseBranch = ""
+	}
+
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
 	// 80x24 - those narrow-wrapped bytes can't be re-flowed once a wider client
@@ -1479,6 +1502,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		AgentType:     agentType,
 		Model:         model,
 		BaseBranch:    baseBranch,
+		Adopt:         adopt,
 		Ephemeral:     ephemeral,
 		ChatMode:      chatMode,
 		Replace:       force,
@@ -1506,7 +1530,9 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 	s.notifyAgentsChanged(projectRoot, true)
-	return api.SpawnAgent201JSONResponse(agentResponse(*head)), nil
+	// Use the review-aware response so an adopted head arrives already carrying its
+	// MR link (a normal head has none, so this is equivalent to agentResponse).
+	return api.SpawnAgent201JSONResponse(s.agentResponseWithReview(*head)), nil
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {

@@ -77,10 +77,21 @@ type Head struct {
 	ReviewState string
 	// PublishWhenGreen arms auto-publish (Phase 3).
 	PublishWhenGreen bool
+	// ReviewAdopted is true when the head was spawned ON an existing PR/MR Hydra
+	// did not create (docs/pr-adoption.md); it gates the foreign-MR guards.
+	ReviewAdopted bool
+	// ReviewPushURL is the push target for an adopted PR ("" = configured remote).
+	ReviewPushURL string
+	// ReviewCanPush reports whether the adopted PR's head branch is pushable
+	// (false = read-only / review-only head).
+	ReviewCanPush bool
 }
 
 // IsLinked reports whether this head is linked to a forge MR/PR.
 func (h Head) IsLinked() bool { return h.ReviewID != "" || h.ReviewURL != "" }
+
+// IsAdopted reports whether this head is working on a PR/MR Hydra did not create.
+func (h Head) IsAdopted() bool { return h.ReviewAdopted }
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
 // session state from the registry (best-effort; nil registry is allowed).
@@ -147,6 +158,9 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			ReviewTargetBranch: a.ReviewTargetBranch,
 			ReviewState:        a.ReviewState,
 			PublishWhenGreen:   a.PublishWhenGreen,
+			ReviewAdopted:      a.ReviewAdopted,
+			ReviewPushURL:      a.ReviewPushURL,
+			ReviewCanPush:      a.ReviewCanPush,
 		}
 		applyPersistedActivity(h.AgentStatus, &a)
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
@@ -347,7 +361,13 @@ type SpawnHeadOptions struct {
 	AgentType  sandbox.AgentType // empty = "claude"
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
 	BaseBranch string            // empty = current HEAD branch
-	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
+	// Adopt, when set, spawns this head ON an existing PR/MR instead of branching
+	// from BaseBranch: the worktree is created from the already-fetched PR head
+	// ref, BaseBranch is taken from the PR's target branch (so the diff shows the
+	// whole PR plus the head's own edits), and the head is pre-linked to the MR
+	// (docs/pr-adoption.md). Resolved + fetched by the caller.
+	Adopt     *AdoptSpec
+	Ephemeral bool // if true, a throwaway test agent: torn down on close, not resumed or listed by default
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
@@ -369,6 +389,21 @@ type SpawnHeadOptions struct {
 	// new title, so the caller can push an agents_changed event instead of waiting
 	// for the next poll. Best-effort, runs on the title goroutine; nil = no-op.
 	OnTitleChange func()
+}
+
+// AdoptSpec carries a resolved existing PR/MR to spawn a head onto. The caller
+// (the HTTP spawn handler) resolves it via forge.GetMR and fetches WorktreeBase
+// with git.FetchRefspec BEFORE calling SpawnHead, so this package stays free of
+// forge/network concerns.
+type AdoptSpec struct {
+	Provider     string // "github" | "gitlab"
+	ReviewID     string // PR number / MR iid
+	ReviewURL    string
+	TargetBranch string // the PR's target branch -> the head's BaseBranch (diff base)
+	HeadRef      string // the PR's source branch -> the head's downstream branch
+	HeadRepoURL  string // push target ("" = configured remote / same-repo PR)
+	WorktreeBase string // the already-fetched local ref (refs/hydra/pr/...) to base the worktree on
+	CanPush      bool   // whether the PR head branch is pushable (false = read-only head)
 }
 
 // SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
@@ -425,12 +460,23 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 
 	baseBranch := opts.BaseBranch
+	// An adopted head's diff base is the PR's target branch (so the diff shows the
+	// whole PR), even though its worktree is created from the PR head ref below.
+	if opts.Adopt != nil && opts.Adopt.TargetBranch != "" {
+		baseBranch = opts.Adopt.TargetBranch
+	}
 	if baseBranch == "" {
 		var err error
 		baseBranch, err = git.GetCurrentBranch(projectRoot)
 		if err != nil {
 			return nil, errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
 		}
+	}
+	// The worktree is normally created from the base branch; an adopted head is
+	// created from the already-fetched PR head ref instead.
+	worktreeBase := baseBranch
+	if opts.Adopt != nil {
+		worktreeBase = opts.Adopt.WorktreeBase
 	}
 
 	// Even ephemeral (test) agents get a real throwaway worktree + branch so the
@@ -467,6 +513,19 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			HeadStatus:    "idle",
 			CreatedAt:     now,
 		}
+		// Pre-link an adopted head to the PR/MR it was spawned onto, so the review
+		// watcher, diff viewer and MCP review file treat it like a published head
+		// from its first tick (docs/pr-adoption.md).
+		if opts.Adopt != nil {
+			agent.ReviewAdopted = true
+			agent.ReviewProvider = opts.Adopt.Provider
+			agent.ReviewID = opts.Adopt.ReviewID
+			agent.ReviewURL = opts.Adopt.ReviewURL
+			agent.ReviewTargetBranch = opts.Adopt.TargetBranch
+			agent.DownstreamBranch = opts.Adopt.HeadRef
+			agent.ReviewPushURL = opts.Adopt.HeadRepoURL
+			agent.ReviewCanPush = opts.Adopt.CanPush
+		}
 		if replacing {
 			// Take over the archived same-project record (Replace path): the
 			// unscoped save un-deletes and overwrites it.
@@ -491,7 +550,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 
-	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, worktreeBase); err != nil {
 		if store != nil {
 			// Hard-delete: an aborted spawn never really existed, and a
 			// soft-deleted tombstone would reserve the ID forever.
