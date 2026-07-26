@@ -229,6 +229,17 @@ HTML overlay produces real bugs.
   tree-sitter play worth considering later is using it *purely* to extract
   declaration ranges (a query, not a tree diff) for item 8 - but regexes get most
   of that benefit with zero wasm.
+
+  Even the reference implementation caps out and falls back to line+word diff,
+  which is exactly what this repo already does. difftastic's own defaults:
+  `DEFAULT_GRAPH_LIMIT` = 3,000,000 vertices, `DEFAULT_BYTE_LIMIT` = 1,000,000
+  bytes (files over ~1 MB are never structurally diffed), `DEFAULT_PARSE_ERROR_LIMIT`
+  = 0 (any parse error -> text fallback); it ships 44 syntaxes and its fallback is
+  "line-oriented diffing with word-level highlighting". The blow-up is structural:
+  a vertex is a *triple* (left pos, right pos, parents-to-exit-together) - the
+  third component tracks nesting - so the graph is O(L*R) in s-expression item
+  counts but O(2^N) in the deepest list-nesting depth N, which is why the graph
+  limit and lazy graph construction exist. Deeply-nested code is its worst case.
 - **Migrating to `react-diff-view` or `@git-diff-view/react`.** Both are good and
   feature-complete, but adopting either would discard the measured-placeholder
   lazy-mount architecture that [docs/web-agent-page.md](web-agent-page.md)
