@@ -98,3 +98,62 @@ func TestPollerPersistsActivityAndEmitsStatusEvent(t *testing.T) {
 		t.Fatalf("no-op re-poll emitted %d status events, want 0", len(p))
 	}
 }
+
+// TestPollerSelfSchedulesUnreadRecheck locks in the self-scheduling of the unread
+// debounce: arming a deferred running->finished flag schedules a one-shot re-poll
+// of that project, so a cleanly finished head (which writes nothing more, and so
+// never pokes the fs watcher) has its flag confirmed at the grace boundary instead
+// of waiting out the next backstop tick.
+func TestPollerSelfSchedulesUnreadRecheck(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "agent1"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+
+	deb := newUnreadDebouncer()
+	fixed := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+	deb.now = func() time.Time { return fixed }
+	var scheduled []string
+	deb.scheduleRepoll = func(r string) { scheduled = append(scheduled, r) }
+
+	unreadRaised := func() bool {
+		agents, err := store.ListAgents(root)
+		if err != nil {
+			t.Fatalf("list agents: %v", err)
+		}
+		return agents[0].HasUnreadChanges
+	}
+
+	// running, then running -> finished: arms the deferred flag and schedules one
+	// re-poll of this project. The flag is NOT raised yet (still within grace).
+	writeAgentStatusJSON(t, root, id, api.Running, "SessionStart", fixed.Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, nil, nil)
+	writeAgentStatusJSON(t, root, id, api.Finished, "Stop", fixed.Add(time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, nil, nil)
+	if len(scheduled) != 1 || scheduled[0] != root {
+		t.Fatalf("scheduleRepoll calls = %v, want one for %q", scheduled, root)
+	}
+	if unreadRaised() {
+		t.Fatal("unread raised within the grace window")
+	}
+
+	// The scheduled re-poll fires ~graceUnread later (the AfterFunc pokes the poll):
+	// simulate it by advancing the clock past the window and re-polling. The flag
+	// now matures - without needing a status.json write to trigger it.
+	fixed = fixed.Add(time.Second + graceUnread)
+	pollJSONStatusOnce(store, root, deb, nil, nil)
+	if !unreadRaised() {
+		t.Fatal("unread not raised after the grace window elapsed")
+	}
+	// And no second re-poll was scheduled (arm is idempotent within a window).
+	if len(scheduled) != 1 {
+		t.Fatalf("scheduleRepoll called %d times, want 1", len(scheduled))
+	}
+}

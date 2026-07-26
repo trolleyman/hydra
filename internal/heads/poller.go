@@ -95,9 +95,11 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 // briefly writes "finished" to the shared per-head status.json (its Stop hook),
 // and the subagent - which runs in the same sandbox and writes the same file -
 // resets it to "running" again within ~1s via its own tool hooks. Without this
-// grace the 1s poller would latch a spurious unread dot on that blip even though
+// grace the poller would latch a spurious unread dot on that blip even though
 // the head is still working and resumes on its own. A genuine finish (nothing
-// resetting it) outlasts the window and still raises the flag.
+// resetting it) outlasts the window and still raises the flag. A finish schedules
+// its own re-poll at this boundary (unreadDebouncer.scheduleRepoll) so the flag is
+// confirmed promptly rather than on the next, slower backstop tick.
 const graceUnread = 5 * time.Second
 
 // SettleFunc is called by the poller the moment a head transitions into a
@@ -111,9 +113,10 @@ type SettleFunc func(projectRoot, headID string)
 // pollInterval is the JSON status poller's backstop tick. It is deliberately slow
 // because the fsnotify watcher (watchStatusDirs) carries the latency-sensitive
 // path - poking an immediate poll the moment a head's status.json changes - so a
-// status/activity change surfaces in ~ms rather than waiting out the interval. The
-// tick still matures the time-based unread debounce and covers any change the
-// watcher misses (e.g. inotify unavailable, or a brand-new head not yet watched).
+// status/activity change surfaces in ~ms rather than waiting out the interval, and
+// a finished head self-schedules its own unread-flag re-poll (see graceUnread). The
+// tick is the backstop that covers anything both of those miss (e.g. inotify
+// unavailable, or a brand-new head not yet watched).
 const pollInterval = 5 * time.Second
 
 // RunJSONStatusPoller runs a polling loop that syncs JSON status files into the
@@ -133,6 +136,18 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 	// The watcher pokes a project root here when one of its status files changes;
 	// buffered so a burst never blocks the watcher goroutine.
 	poke := make(chan string, 64)
+	// Self-schedule: when a deferred unread is armed, re-poll that project just past
+	// the grace boundary so a cleanly finished head's flag matures at ~graceUnread
+	// rather than on the next (slower) backstop tick. Non-blocking send: if the loop
+	// has exited or the buffer is full, the tick still covers it.
+	deb.scheduleRepoll = func(root string) {
+		time.AfterFunc(graceUnread+50*time.Millisecond, func() {
+			select {
+			case poke <- root:
+			default:
+			}
+		})
+	}
 	go watchStatusDirs(ctx, roots, poke)
 	for {
 		select {
@@ -172,20 +187,30 @@ type pendingUnread struct {
 type unreadDebouncer struct {
 	pending map[string]pendingUnread
 	now     func() time.Time
+	// scheduleRepoll, when set, is called with a project root the moment a deferred
+	// unread is freshly armed for one of its heads. RunJSONStatusPoller wires it to
+	// schedule a one-shot re-poll of that project ~graceUnread later, so a cleanly
+	// finished head (which writes nothing more, and so never pokes the fs watcher)
+	// still has its flag confirmed at the grace boundary instead of waiting out the
+	// next backstop tick. nil for the boot-warmup / test debouncers (no scheduling).
+	scheduleRepoll func(projectRoot string)
 }
 
 func newUnreadDebouncer() *unreadDebouncer {
 	return &unreadDebouncer{pending: make(map[string]pendingUnread), now: time.Now}
 }
 
-// arm starts (or keeps) deferring the unread flag for id in the given status.
-// Re-arming the same status preserves the original timestamp so the grace
-// window keeps counting rather than restarting each poll.
-func (d *unreadDebouncer) arm(id, status string, now time.Time) {
+// arm starts (or keeps) deferring the unread flag for id in the given status,
+// reporting whether this call *freshly* armed it (a new pending entry, or a switch
+// to a different status). Re-arming the same status preserves the original
+// timestamp so the grace window keeps counting rather than restarting each poll,
+// and returns false so the caller schedules the re-poll only once per window.
+func (d *unreadDebouncer) arm(id, status string, now time.Time) bool {
 	if cur, ok := d.pending[id]; ok && cur.status == status {
-		return
+		return false
 	}
 	d.pending[id] = pendingUnread{status: status, since: now}
+	return true
 }
 
 func (d *unreadDebouncer) forget(id string) {
@@ -335,7 +360,9 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			case immediate:
 				deb.forget(a.ID)
 			case prevRunning && agentStatus == "finished":
-				deb.arm(a.ID, agentStatus, now)
+				if deb.arm(a.ID, agentStatus, now) && deb.scheduleRepoll != nil {
+					deb.scheduleRepoll(projectRoot)
+				}
 			case agentStatus == "running" || agentStatus == "starting":
 				// Activity resumed (e.g. the subagent's next tool hook) - cancel
 				// any pending flag before it can mature.
