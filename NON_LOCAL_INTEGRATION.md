@@ -30,6 +30,11 @@ implemented yet:)
   sits below the spawn box; `browse_url` is returned by the API but no
   component renders a forge link.~~ Done: Repository row sits above the spawn
   box and carries an external-link icon to the forge (`__root.tsx`).
+- [ ] **Inbound: adopt an existing PR/MR as a head.** The whole flow here is
+  outbound-only (spawn a fresh branch -> open a *new* MR). There is no way to
+  start a head on a PR that already exists - especially someone else's, or one
+  from a fork - and no `forge.Provider` enumeration to pick one from. Designed
+  in [docs/pr-adoption.md](docs/pr-adoption.md) (proposed, unbuilt).
 - [ ] **Phase 4: spawn-from-ticket / JIRA fetch.** Only the `{ticket}`
   branch-template rung is wired (`ExtractTicket`, `ticket_pattern`); there is
   no JIRA REST client, no ticket-summary-into-prompt, no "my open tickets"

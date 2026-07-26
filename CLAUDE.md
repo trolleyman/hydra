@@ -91,6 +91,10 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Improving the diff review workflow** (per-file "viewed" state, "reviewed up
   to" marker) -> [docs/diff-review-state.md](docs/diff-review-state.md) (proposed,
   unbuilt design + build order)
+- **Working on an existing PR/MR** (adopting someone else's PR as a head,
+  fetching a PR head, pushing back to a fork, `internal/forge` enumeration) ->
+  [docs/pr-adoption.md](docs/pr-adoption.md) (proposed, unbuilt design + build
+  order; the built outbound publish flow is NON_LOCAL_INTEGRATION.md)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
