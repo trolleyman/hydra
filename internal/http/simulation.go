@@ -16,6 +16,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 // simAgentByID returns a minimal fixture AgentResponse for the given id, used by
@@ -121,6 +122,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
 	simDisplayPath := "~/code/simulated/project"
 	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
+	// The built-in chat project (docs/chat-project.md). Deliberately listed
+	// *last* so the dropdown's pin-to-top sort is actually exercised rather than
+	// accidentally satisfied by server order.
+	chatBuiltin := true
+	chatIcon := "MessageSquare"
+	chatDisplayPath := "~/.local/share/hydra/chat"
+	chatTotal, chatRunning, chatWaiting, chatFinished := 2, 0, 1, 1
+	chatUnread, chatNeedsInput := 0, 0
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
@@ -147,6 +156,20 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			RunningCount:    &otherRunning,
 			WaitingCount:    &otherWaiting,
 			FinishedCount:   &otherFinished,
+		},
+		{
+			Id:              projects.ChatProjectID,
+			Path:            "/home/sim/.local/share/hydra/chat",
+			DisplayPath:     &chatDisplayPath,
+			Name:            projects.ChatProjectName,
+			Builtin:         &chatBuiltin,
+			Icon:            &chatIcon,
+			UnreadCount:     &chatUnread,
+			NeedsInputCount: &chatNeedsInput,
+			AgentCount:      &chatTotal,
+			RunningCount:    &chatRunning,
+			WaitingCount:    &chatWaiting,
+			FinishedCount:   &chatFinished,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
