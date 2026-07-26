@@ -17,8 +17,8 @@ import (
 // file. Returns nil if the file doesn't exist or is invalid.
 func ReadAgentStatus(projectDir, id string) *api.AgentStatusInfo {
 	path := paths.GetStatusJsonFromProjectRoot(projectDir, id)
-	data, err := os.ReadFile(path)
-	if err != nil {
+	data := readStatusJSONBytes(path)
+	if data == nil {
 		return nil
 	}
 	var s api.AgentStatusInfo
@@ -26,6 +26,27 @@ func ReadAgentStatus(projectDir, id string) *api.AgentStatusInfo {
 		return nil
 	}
 	return &s
+}
+
+// readStatusJSONBytes reads a status.json, retrying briefly on an apparent torn
+// read (missing/empty/invalid JSON). status.json is written in place (os.WriteFile,
+// truncate+write) by both the in-sandbox trigger-hook and the daemon-side
+// WriteAgentStatus - deliberately, so the host and the sandbox's file-level bind
+// mount keep sharing one inode (an atomic temp+rename would orphan the bind). The
+// cost is a brief truncate window a concurrent reader can catch; such a read is
+// rare and self-heals within microseconds, so a few short retries make it
+// invisible. Returns nil if it never reads valid JSON.
+func readStatusJSONBytes(path string) []byte {
+	for attempt := 0; ; attempt++ {
+		data, err := os.ReadFile(path)
+		if err == nil && json.Valid(data) {
+			return data
+		}
+		if attempt >= 3 {
+			return nil
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // MarkPromptSubmitted records the provider-neutral lifecycle edge that a user
@@ -57,6 +78,13 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	// Deliberately an in-place os.WriteFile (truncate+write), NOT an atomic
+	// temp+rename: status.json is bind-mounted into the head's sandbox at the file
+	// level (sandbox.linux.go `--bind p p`), and the in-sandbox trigger-hook writes
+	// the same file in place. A rename would swap the host inode and orphan the
+	// sandbox's bind mount (host and sandbox would then see different inodes), so
+	// this must keep the same inode. The brief truncate window a concurrent reader
+	// could catch is absorbed by readStatusJSONBytes, which retries a torn read.
 	return errtrace.Wrap(os.WriteFile(path, data, 0644))
 }
 

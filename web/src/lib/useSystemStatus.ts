@@ -39,12 +39,13 @@ export function useSystemStatus(): SystemStatus {
       setProjects(ps)
       const currentId = useProjectStore.getState().selectedProjectId
       if (currentId == null || !ps.some((p) => p.id === currentId)) {
-        let newId: string | null = null
-        if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
-          newId = status.default_project_id
-        } else if (ps.length > 0) {
-          newId = ps[0].id
-        }
+        const newId =
+          status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)
+            ? status.default_project_id
+            // Prefer a project the user actually registered. The built-in scratch
+            // project is always present, so a bare ps[0] could silently make it
+            // the landing project for someone who has real work to open.
+            : (ps.find((p) => !p.builtin)?.id ?? ps[0]?.id ?? null)
         // Just record the selection; the redirect effect in RootLayout moves the
         // UI onto the project's page if we're sitting on the root route.
         if (newId != null) setSelectedProjectId(newId)

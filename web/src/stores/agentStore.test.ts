@@ -230,6 +230,67 @@ describe('removeAgent prunes per-id overrides', () => {
   })
 })
 
+describe('patchAgentStatus (agent_status_changed in-place patch)', () => {
+  const agentStatusOf = (id: string) =>
+    useAgentStore.getState().agents.find((a) => a.id === id)?.agent_status
+
+  it('patches status, activity and last_message in place', () => {
+    const store = useAgentStore.getState
+    store().setAgents([makeAgent('a1', { status: AgentStatus.RUNNING })])
+    store().patchAgentStatus('a1', {
+      status: 'running',
+      activity: 'Editing main.go',
+      last_message: '',
+      last_message_is_suggested: false,
+    })
+    const s = agentStatusOf('a1')
+    expect(s?.status).toBe(AgentStatus.RUNNING)
+    expect(s?.activity).toBe('Editing main.go')
+
+    // A finish patch clears activity, sets the last message + suggested flag.
+    store().patchAgentStatus('a1', {
+      status: 'finished',
+      activity: '',
+      last_message: 'run it',
+      last_message_is_suggested: true,
+    })
+    const f = agentStatusOf('a1')
+    expect(f?.status).toBe(AgentStatus.FINISHED)
+    expect(f?.activity).toBeUndefined()
+    expect(f?.last_message).toBe('run it')
+    expect(f?.last_message_is_suggested_next_message).toBe(true)
+  })
+
+  it('respects an active optimistic status override but still patches activity', () => {
+    const store = useAgentStore.getState
+    store().setAgents([makeAgent('a1', { status: AgentStatus.RUNNING })])
+    // User just submitted → optimistically WAITING.
+    store().setOptimisticStatus('a1', AgentStatus.WAITING)
+    // A slightly-stale pushed status must NOT flip the badge back to RUNNING...
+    store().patchAgentStatus('a1', {
+      status: 'running',
+      activity: 'Reading foo.go',
+      last_message: '',
+      last_message_is_suggested: false,
+    })
+    const s = agentStatusOf('a1')
+    expect(s?.status).toBe(AgentStatus.WAITING)
+    // ...but activity (which has no optimistic layer) still updates.
+    expect(s?.activity).toBe('Reading foo.go')
+  })
+
+  it('is a no-op for an unknown id', () => {
+    const store = useAgentStore.getState
+    store().setAgents([makeAgent('a1', { status: AgentStatus.RUNNING })])
+    const before = useAgentStore.getState().agents
+    store().patchAgentStatus('nope', {
+      status: 'running', activity: 'x', last_message: '', last_message_is_suggested: false,
+    })
+    // Same array reference back: nothing re-rendered.
+    expect(useAgentStore.getState().agents).toBe(before)
+  })
+})
+
 describe('overlays only touch matching ids', () => {
   it('leaves other agents in the polled list unmodified', () => {
     const store = useAgentStore.getState

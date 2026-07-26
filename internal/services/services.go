@@ -23,6 +23,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 // State is the lifecycle state of a supervised service, surfaced to the UI.
@@ -467,7 +468,7 @@ func (m *Manager) supervise(ctx context.Context, root string, ps *projectService
 		}
 
 		startedAt := time.Now()
-		startErr := cmd.Start()
+		startErr := scope.Start(cmd)
 		if startErr == nil {
 			pid := cmd.Process.Pid
 			sv.set(func(s *Status) {
@@ -624,14 +625,10 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	// Run the service under a transient systemd scope (best-effort) so its
 	// process subtree gets its own cgroup with the project's resolved resource
 	// limits and a single kill handle, and can't outlive the daemon. Reaped in the
-	// ctx.Done path below. config.Load is cached, so this re-read is cheap.
-	limitsCfg, _ := config.Load(root)
-	sandbox.WrapScope(serviceScopeUnit(root, sv), spec, limitsCfg.ResolveResourceLimits())
+	// ctx.Done path below.
+	scope.Apply(root, serviceScopeUnit(root, sv), spec)
 
-	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
-	cmd.Dir = spec.Dir
-	cmd.Env = spec.Env
-	cmd.ExtraFiles = spec.ExtraFiles
+	cmd := scope.Command(ctx, spec)
 	cmd.Stdout = sv.sink
 	cmd.Stderr = sv.sink
 	// On unix this sets a process group and disables the default CommandContext

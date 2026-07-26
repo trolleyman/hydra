@@ -299,11 +299,13 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 				finished = n
 			}
 		}
+		builtin := p.Builtin
 		resp[i] = api.ProjectInfo{
 			Id:              p.ID,
 			Path:            p.Path,
 			DisplayPath:     displayPathPtr(p.Path),
 			Name:            p.Name,
+			Builtin:         &builtin,
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
 			AgentCount:      &total,

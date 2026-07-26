@@ -43,6 +43,20 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   })
 }
 
+// jsdom doesn't implement ResizeObserver, and constructing one throws - which
+// takes down any component that measures itself (useMeasuredHeight /
+// useMeasuredWidth: the diff file bodies, the sticky bars, the masonry grid).
+// There is no layout to observe under jsdom, so a no-op that never fires is the
+// honest stub: those components fall back to their initial measurement (0),
+// exactly as they do on the first frame in a browser.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+}
+
 // jsdom doesn't implement HTMLCanvasElement.getContext and logs a noisy "Not
 // implemented" error the first time any imported module touches a canvas (the
 // artifact diff viewers' pixel-diff overlays - DiffCanvas / VideoDiffView). No
