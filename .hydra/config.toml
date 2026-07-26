@@ -238,7 +238,7 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 # in bitexact mode) so the video diff viewer is exercised too - see the [artifacts.<name>]
 # docs above on why video must be lossless. Building Go + the frontend is slow, so
 # allow a generous timeout (results are cached per resolved ref).
-command = "cd web && npm install && node scripts/screenshots/take-screenshots.ts"
+command = "cd web && if command -v aube >/dev/null 2>&1; then aube install; else npm install; fi && node scripts/screenshots/take-screenshots.ts"
 timeout_sec = 900
 
 [artifacts.demo]
@@ -254,7 +254,7 @@ timeout_sec = 900
 # readable stack trace instead of minified chunk soup. The preview exists to
 # inspect and debug UI changes; readable beats small here.
 type = "server"
-command = "cd web && npm install && npm run build -- --mode development && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
+command = "cd web && if command -v aube >/dev/null 2>&1; then aube install; else npm install; fi && npm run build -- --mode development && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
 ready_timeout_sec = 900
 
 ## [services.<name>]: per-project long-running commands the daemon supervises while

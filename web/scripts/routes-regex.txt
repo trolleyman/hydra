@@ -1,1 +1,1 @@
-(?:^\/$|^\/settings$|^\/project\/[^/]+$|^\/project\/[^/]+\/repository$|^\/project\/[^/]+\/settings$|^\/project\/[^/]+\/$|^\/project\/[^/]+\/agent\/[^/]+$|^\/project\/[^/]+\/repository\/.*$)
+(?:^\/$|^\/settings$|^\/project\/[^/]+$|^\/project\/[^/]+\/repository$|^\/project\/[^/]+\/settings$|^\/project\/[^/]+\/$|^\/project\/[^/]+\/agent\/[^/]+$|^\/project\/[^/]+\/repository\/.*$|^\/project\/[^/]+\/repository\/$)
