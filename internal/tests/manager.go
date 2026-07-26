@@ -774,10 +774,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
-	cmd.Dir = launch.Dir
-	cmd.Env = launch.Env
-	cmd.ExtraFiles = launch.ExtraFiles
+	cmd := scope.Command(ctx, launch)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return errored(rep, err.Error())
@@ -787,7 +784,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		return errored(rep, err.Error())
 	}
 	start := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := scope.Start(cmd); err != nil {
 		// Couldn't even launch the command - an infrastructure failure, not a
 		// test result.
 		return errored(rep, err.Error())

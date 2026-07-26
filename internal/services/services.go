@@ -468,7 +468,7 @@ func (m *Manager) supervise(ctx context.Context, root string, ps *projectService
 		}
 
 		startedAt := time.Now()
-		startErr := cmd.Start()
+		startErr := scope.Start(cmd)
 		if startErr == nil {
 			pid := cmd.Process.Pid
 			sv.set(func(s *Status) {
@@ -628,10 +628,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	// ctx.Done path below.
 	scope.Apply(root, serviceScopeUnit(root, sv), spec)
 
-	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
-	cmd.Dir = spec.Dir
-	cmd.Env = spec.Env
-	cmd.ExtraFiles = spec.ExtraFiles
+	cmd := scope.Command(ctx, spec)
 	cmd.Stdout = sv.sink
 	cmd.Stderr = sv.sink
 	// On unix this sets a process group and disables the default CommandContext

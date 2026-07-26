@@ -46,30 +46,46 @@ set configurable per project, with a Settings UI section.
     to run under `systemd-run --user --scope --unit=<unit> [props] -- <argv>`.
   - `StopScope(unit)`, `SweepOrphanScopes()`.
 - `scope_other.go` - no-op stubs for non-linux.
+- Shared seam - `internal/scope` (`scope.go` + `pdeathsig_{linux,other}.go`).
+  Every runner that launches a sandboxed command tied to the daemon goes through
+  it, so limits + lifetime policy live in one place:
+  - `scope.Apply(projectRoot, unit, spec)` - `config.Load` ->
+    `ResolveResourceLimits` -> `sandbox.WrapScope`. The caller still builds its own
+    `unit` name and owns `StopScope` teardown (the timing genuinely differs: defer
+    vs stored-field vs recompute), so only the "resolve this project's limits and
+    apply them" invariant is shared.
+  - `scope.Command(ctx, spec)` - the `exec.CommandContext` + `Path/Args/Dir/Env/
+    ExtraFiles` wiring every runner repeats. Caller still wires stdout/stderr and
+    any `configureProc` process-group setup.
+  - `scope.Start(cmd)` - sets the parent-death signal (SIGKILL cmd when the daemon
+    dies; Linux-only, additive to any Setpgid) + `runtime.LockOSThread()` across the
+    fork (so the runtime can't retire the forking thread and fire pdeathsig early).
+    This is what makes an ungraceful daemon death (crash, SIGKILL, botched upgrade)
+    bring the whole sandbox subtree down at once (via systemd-run + bwrap's
+    `--die-with-parent`) instead of orphaning it to systemd until the boot sweep.
 - Call sites (each already has the workload's project config in scope):
   - agent (the whole head): `internal/heads/nshost.go` `launchNamespaceHost` wraps
-    the per-head *supervisor* bwrap, so the agent AND its sibling sandboxed bash
-    shells (all children of that one bwrap) share one `hydra-<id>.scope`. It sets
-    Pdeathsig on the (systemd-run) cmd + `runtime.LockOSThread()` across the fork so
-    an ungraceful daemon death still SIGKILLs it and bwrap's `--die-with-parent`
-    cascades immediately; `watchNamespaceHost` `StopScope`s the unit on teardown.
+    the per-head *supervisor* bwrap (so the agent AND its sibling sandboxed bash
+    shells share one `hydra-<id>.scope`), calls `WrapScope` directly (it needs the
+    `scoped` bool for conditional error-path `StopScope`) then `scope.Start(cmd)`;
+    `watchNamespaceHost` `StopScope`s the unit on teardown.
     (`internal/session/registry.go` `Registry.Start` still wraps the *standalone*
     fallback shell - the path taken only when no supervisor is live - via
     `StartOptions.Limits`, with an unwrap-and-retry fallback if the scoped spawn
     fails to exec.)
-  - The four non-agent runners below share one seam: `scope.Apply(projectRoot,
-    unit, spec)` (`internal/scope/scope.go`) does the `config.Load` ->
-    `ResolveResourceLimits` -> `sandbox.WrapScope` policy in one place; each caller
-    still builds its own `unit` name and owns `StopScope` teardown (the timing
-    differs: defer vs stored-field vs recompute).
-  - preview: `internal/preview/spawn.go` `run()` (`scope.Apply`) + `stopChild()` (StopScope).
-  - service: `internal/services/services.go` `buildCmd()` (`scope.Apply`) + the ctx.Done
-    goroutine in `supervise()` (StopScope). Helper `serviceScopeUnit`.
-  - artifact: `internal/artifacts/artifacts.go` `generate()` (`scope.Apply` + `defer StopScope`).
-  - test: `internal/tests/manager.go` `generate()` (`scope.Apply` + `defer StopScope`),
-    unit kind `"test"`. Added for parity - a test command (e.g. a Playwright e2e
-    that spawns Chromium) is as capable of a CPU/memory runaway as an artifact.
-- boot sweep: `internal/cli/runtime.go` `setupRuntime` calls `sandbox.SweepOrphanScopes()`.
+  - preview: `internal/preview/spawn.go` `run()` (`scope.Apply`/`Command`/`Start`) +
+    `stopChild()` (StopScope).
+  - service: `internal/services/services.go` `buildCmd()` (`scope.Apply`/`Command`) +
+    `supervise()` (`scope.Start`, StopScope on the ctx.Done goroutine). Helper
+    `serviceScopeUnit`.
+  - artifact: `internal/artifacts/artifacts.go` `generate()`
+    (`scope.Apply`/`Command`/`Start` + `defer StopScope`).
+  - test: `internal/tests/manager.go` `generate()`
+    (`scope.Apply`/`Command`/`Start` + `defer StopScope`), unit kind `"test"`. Added
+    for parity - a test command (e.g. a Playwright e2e that spawns Chromium) is as
+    capable of a CPU/memory runaway, and of orphaning, as an artifact.
+- boot sweep: `internal/cli/runtime.go` `setupRuntime` calls `sandbox.SweepOrphanScopes()`
+  as the backstop for any scope that outlived its runner despite the pdeathsig tie.
 
 ## Key tension to resolve first
 

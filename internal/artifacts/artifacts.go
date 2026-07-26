@@ -1195,10 +1195,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	scope.Apply(m.projectRoot, scopeUnit, launch)
 	defer sandbox.StopScope(scopeUnit)
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
-	cmd.Dir = launch.Dir
-	cmd.Env = launch.Env
-	cmd.ExtraFiles = launch.ExtraFiles
+	cmd := scope.Command(ctx, launch)
 	// Stream both stdout and stderr line-by-line into the live log (the UI shows
 	// it as a scrollable, auto-updating log, stderr in red), while still keeping
 	// stderr for the error tail. The latest non-blank stdout line also becomes the
@@ -1213,7 +1210,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
 	}
-	if err := cmd.Start(); err != nil {
+	if err := scope.Start(cmd); err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
 	}

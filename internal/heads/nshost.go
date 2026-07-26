@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +18,7 @@ import (
 	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -152,19 +152,13 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	var errTail capWriter
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
-	// Tie the outermost process to the daemon's lifetime so an ungraceful daemon
-	// death (crash, SIGKILL, botched auto-upgrade) SIGKILLs it and bwrap's
-	// --die-with-parent cascades the kill through the head's PID namespace - the
-	// agent and anything it spawned die immediately instead of orphaning to
-	// systemd (the ~load-106 incident that motivated scoping). When unscoped bwrap
-	// is that direct child; when scoped systemd-run is, so it needs the signal to
-	// pass the kill down. The scope + boot-time sweep are only the backstop. Lock
-	// the OS thread across the fork so the Go runtime can't retire the forking
-	// thread and fire Pdeathsig early (see session.startProcess).
-	setSupervisorPdeathsig(cmd)
-	runtime.LockOSThread()
-	startErr := cmd.Start()
-	runtime.UnlockOSThread()
+	// scope.Start ties the outermost process to the daemon's lifetime (parent-death
+	// SIGKILL + bwrap's --die-with-parent cascade through the head's PID namespace)
+	// so an ungraceful daemon death (crash, SIGKILL, botched auto-upgrade) brings
+	// the agent and everything it spawned down immediately instead of orphaning to
+	// systemd (the ~load-106 incident that motivated scoping) - the scope +
+	// boot-time sweep are only the backstop. Every scoped runner shares this now.
+	startErr := scope.Start(cmd)
 	if startErr != nil {
 		if scoped {
 			sandbox.StopScope(scopeUnit)

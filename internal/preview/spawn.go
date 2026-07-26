@@ -10,7 +10,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -204,10 +203,7 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	scopeUnit := sandbox.ScopeUnit("preview", spec.Name+"-"+in.version.HeadID+"-"+strconv.Itoa(childPort))
 	scope.Apply(in.root, scopeUnit, launch)
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
-	cmd.Dir = launch.Dir
-	cmd.Env = launch.Env
-	cmd.ExtraFiles = launch.ExtraFiles
+	cmd := scope.Command(ctx, launch)
 	configureProc(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -220,7 +216,7 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 		in.settleError(gen, err.Error())
 		return
 	}
-	if err := cmd.Start(); err != nil {
+	if err := scope.Start(cmd); err != nil {
 		in.settleError(gen, err.Error())
 		return
 	}

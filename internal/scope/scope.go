@@ -1,15 +1,18 @@
-// Package scope is the single seam where a non-agent workload runner (artifact
-// generator, preview server, long-running service, test runner) wraps its launch
-// spec in a transient systemd scope carrying the project's configured cgroup
-// resource limits. Centralising it keeps the "resolve [resources] and apply it"
-// policy in one place instead of copy-pasted at every runner.
-//
-// The agent head path is deliberately NOT routed through here: it resolves its
-// limits into StartOptions and wraps the supervisor bwrap with extra fork
-// handling (LockOSThread + Pdeathsig), so it stays in internal/heads.
+// Package scope is the single seam where a workload runner (artifact generator,
+// preview server, long-running service, test runner, agent head supervisor)
+// launches a sandboxed command tied to the daemon: it wraps the launch spec in a
+// transient systemd scope carrying the project's configured cgroup resource
+// limits, and starts it with a parent-death signal so the whole subtree dies with
+// the daemon instead of orphaning. Centralising it keeps that policy in one place
+// instead of copy-pasted at every runner.
 package scope
 
 import (
+	"context"
+	"os/exec"
+	"runtime"
+
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -23,4 +26,32 @@ import (
 func Apply(projectRoot, unit string, spec *sandbox.Spec) {
 	limits, _ := config.Load(projectRoot)
 	sandbox.WrapScope(unit, spec, limits.ResolveResourceLimits())
+}
+
+// Command builds the exec.Cmd for a launch spec - the Path/Args/Dir/Env/ExtraFiles
+// wiring every runner repeats. The caller still wires stdout/stderr (each does it
+// differently) plus any process-group setup (configureProc), then hands the cmd
+// to Start.
+func Command(ctx context.Context, spec *sandbox.Spec) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
+	cmd.Dir = spec.Dir
+	cmd.Env = spec.Env
+	cmd.ExtraFiles = spec.ExtraFiles
+	return cmd
+}
+
+// Start launches cmd tied to the daemon's lifetime. It sets the parent-death
+// signal so the kernel SIGKILLs cmd when the daemon (its parent) dies; combined
+// with the scope's systemd-run and bwrap's --die-with-parent, that brings the
+// whole sandbox subtree down immediately on an ungraceful daemon death (crash,
+// SIGKILL, botched auto-upgrade) instead of orphaning it to systemd until the
+// next boot-time sweep. It pins the OS thread across the fork so the Go runtime
+// can't retire the forking thread and fire the parent-death signal early. The
+// parent-death signal is Linux-only (a no-op elsewhere); the OS-thread pin is
+// cheap and harmless everywhere.
+func Start(cmd *exec.Cmd) error {
+	setPdeathsig(cmd)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	return errtrace.Wrap(cmd.Start())
 }
