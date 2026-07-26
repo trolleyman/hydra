@@ -10,20 +10,52 @@ import type { DiffLine } from '../api'
 // A [start, end) half-open character range into a line's raw content.
 export type WordRange = [number, number]
 
-// Token granularity: runs of identifiers/numbers, and every other character on
-// its own. Whitespace deliberately does *not* clump into runs - a re-indent from
-// four spaces to eight is then a four-space insertion, so only the added spaces
-// at the end of the indent light up instead of the whole indent being repainted
-// as a substitution. Every character of the input lands in exactly one token, so
-// token lengths sum to the string length and char offsets stay exact.
-const TOKEN_RE = /[0-9A-Za-z_]+|[^0-9A-Za-z_]/g
-// Coarse fallback used only when the fine tokenization would make the LCS grid
-// too big: whitespace clumps back into runs, cutting the token count on lines
-// that are mostly padding.
+// The LCS runs over "tokens", but the finest tokenization is a single character:
+// diffing character-by-character lets a highlight land *inside* an identifier, so
+// `getUserName` -> `getUserId` lights only `Name`/`Id` rather than the whole
+// token. It is a strict refinement of a word diff. Whichever level is used, every
+// character of the input lands in exactly one token, so token lengths sum to the
+// string length and char offsets stay exact.
+//
+// Character granularity would make the O(n*m) grid too big on long lines, and can
+// scatter matches across stray shared letters, so tokenize() takes a level and
+// computeWordDiff walks a ladder from fine to coarse, dropping to the next level
+// only when the grid exceeds MAX_CELLS:
+//   0 - single characters (finest; sub-identifier precision)
+//   1 - identifier/number runs, every other character on its own (a word diff,
+//       but whitespace still per-char so a re-indent lights only the added
+//       columns instead of the whole indent)
+//   2 - as 1 but whitespace clumps into runs too, cutting the token count on
+//       lines that are mostly padding
+const TOKEN_RE_WORD = /[0-9A-Za-z_]+|[^0-9A-Za-z_]/g
 const TOKEN_RE_COARSE = /[0-9A-Za-z_]+|\s+|[^0-9A-Za-z_\s]/g
 
-function tokenize(s: string, coarse = false): string[] {
-  return s.match(coarse ? TOKEN_RE_COARSE : TOKEN_RE) ?? []
+function tokenize(s: string, level: number): string[] {
+  // Array.from splits on code points, so a surrogate pair stays one token and a
+  // range boundary can never fall inside it (offsets remain UTF-16 code units,
+  // matching how applyWordRanges counts).
+  if (level === 0) return Array.from(s)
+  return s.match(level === 1 ? TOKEN_RE_WORD : TOKEN_RE_COARSE) ?? []
+}
+
+// Adjacent changed ranges separated by only a short run of unchanged characters
+// are merged into one. A character diff of two similar identifiers otherwise
+// reads as confetti - `counter` -> `pointer` matching the stray shared `o` would
+// light `c`,`u` and `p`,`i` separately - so coalescing across a <=2 char gap
+// restores a single `cou`/`poi` edit. Larger gaps are a real unchanged stretch
+// worth showing, so they are left alone.
+const COALESCE_GAP = 2
+
+function coalesceRanges(ranges: WordRange[]): WordRange[] {
+  if (ranges.length < 2) return ranges
+  const out: WordRange[] = [[ranges[0][0], ranges[0][1]]]
+  for (let k = 1; k < ranges.length; k++) {
+    const prev = out[out.length - 1]
+    const [s, e] = ranges[k]
+    if (s - prev[1] <= COALESCE_GAP) prev[1] = e
+    else out.push([s, e])
+  }
+  return out
 }
 
 // Shared prefix/suffix token counts. Those tokens are unchanged by definition
@@ -69,9 +101,67 @@ function contiguousRanges(tokens: string[], changed: boolean[]): WordRange[] {
   return ranges
 }
 
-function coversWhole(ranges: WordRange[], len: number): boolean {
-  return len > 0 && ranges.length === 1 && ranges[0][0] === 0 && ranges[0][1] === len
+function isWord(ch: string): boolean {
+  return /[0-9A-Za-z_]/.test(ch)
 }
+
+// isSubwordBoundary reports whether an *internal* subword boundary sits between
+// str[i-1] and str[i] - a camelCase hump (handle|Click), a snake_case underscore
+// edge, an acronym/word split (HTTP|Server), or a letter<->digit change (item|1).
+// It is deliberately blind to token edges (word<->punctuation, start/end of the
+// identifier): those are handled by the tokenizer, and snapping to them would
+// drag a highlight across a whole monocase run. So `counter`/`pointer`, which has
+// no internal boundary, keeps its precise `cou`/`poi` char diff, while
+// `handleClick`/`handleClose` snaps out to `Click`/`Close`.
+function isSubwordBoundary(str: string, i: number): boolean {
+  if (i <= 0 || i >= str.length) return false
+  const p = str[i - 1]
+  const c = str[i]
+  if (!isWord(p) || !isWord(c)) return false
+  if (p === '_' || c === '_') return true
+  const pDigit = p >= '0' && p <= '9'
+  const cDigit = c >= '0' && c <= '9'
+  if (pDigit !== cDigit) return true
+  const pUpper = p >= 'A' && p <= 'Z'
+  const cUpper = c >= 'A' && c <= 'Z'
+  const pLower = p >= 'a' && p <= 'z'
+  if (pLower && cUpper) return true // camelCase hump
+  // Acronym followed by a word: the last capital starts the next subword,
+  // e.g. HTTP|Server splits before the S that precedes "erver".
+  if (pUpper && cUpper && i + 1 < str.length && str[i + 1] >= 'a' && str[i + 1] <= 'z') return true
+  return false
+}
+
+// snapToSubwords grows each changed range outward to the nearest internal subword
+// boundary, but only while stepping over word characters and only if a boundary
+// is actually reached - so a pure character diff snaps `lick`/`lose` back to the
+// camelCase `Click`/`Close`, yet a monocase edit that has no boundary to snap to
+// is left exactly as the char diff found it. Whitespace/punctuation ranges never
+// move (their neighbours are non-word).
+function snapToSubwords(ranges: WordRange[], str: string): WordRange[] {
+  return ranges.map(([s, e]) => {
+    let ns = s
+    while (ns > 0 && isWord(str[ns - 1]) && isWord(str[ns]) && !isSubwordBoundary(str, ns)) ns--
+    if (!isSubwordBoundary(str, ns)) ns = s
+    let ne = e
+    while (ne < str.length && isWord(str[ne - 1]) && isWord(str[ne]) && !isSubwordBoundary(str, ne)) ne++
+    if (!isSubwordBoundary(str, ne)) ne = e
+    return [ns, ne] as WordRange
+  })
+}
+
+// changedFraction is the share of a line's characters that fall inside a changed
+// range. When *both* sides are mostly changed the pair is really a rewrite, and a
+// character diff would just scatter highlights across whatever stray characters
+// happen to line up (apple/orange -> "ppl"/"orang"), so computeWordDiff drops the
+// ranges and lets the whole-row tint carry the change.
+function changedFraction(ranges: WordRange[], len: number): number {
+  if (len === 0) return 0
+  let sum = 0
+  for (const [s, e] of ranges) sum += e - s
+  return sum / len
+}
+const REWRITE_FRACTION = 0.5
 
 // computeWordDiff finds the changed character ranges on each side of a
 // deletion/addition pair. It trims the common leading/trailing tokens (which are
@@ -83,17 +173,20 @@ export function computeWordDiff(oldStr: string, newStr: string): { old: WordRang
   if (oldStr === newStr) return { old: [], new: [] }
   if (oldStr.length > MAX_LINE_LEN || newStr.length > MAX_LINE_LEN) return { old: [], new: [] }
 
-  let a = tokenize(oldStr)
-  let b = tokenize(newStr)
+  // Walk the tokenization ladder from finest (per-character) to coarsest,
+  // dropping a level only when the LCS grid would exceed MAX_CELLS. Character
+  // granularity is the goal - it lets a highlight land inside an identifier - and
+  // the coarser levels only kick in for long lines where an O(n*m) char grid is
+  // too expensive.
+  let a = tokenize(oldStr, 0)
+  let b = tokenize(newStr, 0)
   let t = trimCommon(a, b)
-  if (gridCells(t) > MAX_CELLS) {
-    // Too big at character granularity - retry with whitespace clumped, and give
-    // up if even that is pathological (the row tint still conveys the change).
-    a = tokenize(oldStr, true)
-    b = tokenize(newStr, true)
+  for (let level = 1; level <= 2 && gridCells(t) > MAX_CELLS; level++) {
+    a = tokenize(oldStr, level)
+    b = tokenize(newStr, level)
     t = trimCommon(a, b)
-    if (gridCells(t) > MAX_CELLS) return { old: [], new: [] }
   }
+  if (gridCells(t) > MAX_CELLS) return { old: [], new: [] }
 
   const oldChanged = new Array<boolean>(a.length).fill(false)
   const newChanged = new Array<boolean>(b.length).fill(false)
@@ -132,9 +225,16 @@ export function computeWordDiff(oldStr: string, newStr: string): { old: WordRang
     while (j < bn) { newChanged[lo + j] = true; j++ }
   }
 
-  const oldRanges = contiguousRanges(a, oldChanged)
-  const newRanges = contiguousRanges(b, newChanged)
-  if (coversWhole(oldRanges, oldStr.length) && coversWhole(newRanges, newStr.length)) {
+  // contiguousRanges -> coalesce stray char-diff confetti -> snap to camelCase /
+  // snake_case boundaries -> coalesce again in case snapping merged neighbours.
+  const refine = (changed: boolean[], tokens: string[], str: string) =>
+    coalesceRanges(snapToSubwords(coalesceRanges(contiguousRanges(tokens, changed)), str))
+  const oldRanges = refine(oldChanged, a, oldStr)
+  const newRanges = refine(newChanged, b, newStr)
+  if (
+    changedFraction(oldRanges, oldStr.length) > REWRITE_FRACTION &&
+    changedFraction(newRanges, newStr.length) > REWRITE_FRACTION
+  ) {
     return { old: [], new: [] }
   }
   return { old: oldRanges, new: newRanges }

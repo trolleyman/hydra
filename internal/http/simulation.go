@@ -1368,6 +1368,35 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					},
 				},
 				{
+					Path:       "web/src/lib/handlers.ts",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  4,
+					Deletions:  4,
+					Hunks: []api.DiffHunk{
+						{
+							// Intra-line word diff: character granularity + camelCase/snake_case
+							// boundary snapping. getUserName->getUserId lights only the changed
+							// subword; handleClick->handleClose snaps to "Click"/"Close" (not
+							// "lick"/"lose"); counter->pointer stays the precise "cou"/"poi".
+							Header:   "@@ -12,6 +12,6 @@ export function wire(el: HTMLElement) {",
+							OldStart: 12,
+							NewStart: 12,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "export function wire(el: HTMLElement) {", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+								{Type: api.Deletion, Content: "  const id = getUserName()", OldLineNum: ptr(13)},
+								{Type: api.Addition, Content: "  const id = getUserId()", NewLineNum: ptr(13)},
+								{Type: api.Deletion, Content: "  el.addEventListener(\"click\", handleClick)", OldLineNum: ptr(14)},
+								{Type: api.Addition, Content: "  el.addEventListener(\"click\", handleClose)", NewLineNum: ptr(14)},
+								{Type: api.Deletion, Content: "  register(handle_click)", OldLineNum: ptr(15)},
+								{Type: api.Addition, Content: "  register(handle_close)", NewLineNum: ptr(15)},
+								{Type: api.Deletion, Content: "  let counter = MAX_CELLS", OldLineNum: ptr(16)},
+								{Type: api.Addition, Content: "  let pointer = MAX_LINES", NewLineNum: ptr(16)},
+								{Type: api.Context, Content: "}", OldLineNum: ptr(17), NewLineNum: ptr(17)},
+							},
+						},
+					},
+				},
+				{
 					Path:       "internal/http/server.go",
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  12,

@@ -14,7 +14,7 @@ Grounding, because it changes the cost/benefit of everything below.
 | Concern | Status |
 |---|---|
 | Line diff | Server-side `git diff -U<n>` in `internal/git/diff.go:190`, parsed by `parseDiff` into structured `DiffFile{hunks:[{header, old_start, new_start, lines:[{type,content,old_line_num,new_line_num}]}]}` JSON - not a patch string on the wire. |
-| Intra-line (word) diff | Hand-rolled `web/src/lib/wordDiff.ts`: token regex -> trim common prefix/suffix -> O(n*m) `Uint32Array` LCS -> contiguous ranges -> HTML overlay onto highlight.js output. Caps `MAX_LINE_LEN=3000`, `MAX_CELLS=160_000`. Whitespace is tokenized one char at a time so a re-indent highlights only the added columns (built - see below). |
+| Intra-line diff | Hand-rolled `web/src/lib/wordDiff.ts`: **character-level** by default (a tokenization ladder drops to identifier-run / whitespace-clumped tokens only when the O(n*m) grid would exceed `MAX_CELLS=160_000`) -> trim common prefix/suffix -> `Uint32Array` LCS -> contiguous ranges -> coalesce stray confetti (<=2 char gaps) -> snap to camelCase/snake_case subword boundaries -> HTML overlay onto highlight.js output. A both-sides-mostly-changed pair (`REWRITE_FRACTION`) drops its ranges as noise. Caps `MAX_LINE_LEN=3000`. Built - see below. |
 | Diff libraries | None. `web/package.json` has only `highlight.js`. No `diff`/`diff-match-patch`/`react-diff-view`/`@git-diff-view`/`shiki`/`web-tree-sitter`. |
 | Ignore whitespace | Built - server flag `--ignore-space-change` (toggle in the Files settings cog). |
 | Hunk collapse / expand | Built - `GapExpander`/`EdgeExpander`, `EXPAND_STEP=20`, re-fetch with larger `context`. |
@@ -36,7 +36,8 @@ benefit from it. No action needed there.
 
 | # | Change | Complexity | Payoff | Where |
 |---|---|---|---|---|
-| 0 | **Indent word diff: highlight only the changed columns** | done | - | `wordDiff.ts` (built, commit "Word diff: highlight only the changed part of an indent") |
+| 0a | **Indent word diff: highlight only the changed columns** | done | - | `wordDiff.ts` (built) |
+| 0b | **Character-level diff + confetti coalesce + subword-boundary snap** | done | - | `wordDiff.ts` (built; char granularity so a highlight lands inside an identifier - `getUserName`->`getUserId` lights `Name`/`Id`; snapping pulls a mid-camelCase edit out to the hump so `handleClick`->`handleClose` shows `Click`/`Close` not `lick`/`lose`, while monocase `counter`->`pointer` stays the precise `cou`/`poi`) |
 | 1 | `--diff-algorithm=histogram` | trivial | medium | `internal/git/diff.go:190` |
 | 2 | Render git's existing funcname in hunk separators | low | med-high | `parseHunkHeader` (`diff.go:579`) + `DiffViewer.tsx` (~line 1094) |
 | 3 | Similarity-based del/add line pairing | low-med | **high** | `wordDiff.ts` `buildWordRangeMaps` (~line 148) |

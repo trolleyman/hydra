@@ -97,9 +97,47 @@ describe('computeWordDiff', () => {
     const oldS = 'return ok'
     const newS = 'return okay'
     const r = computeWordDiff(oldS, newS)
-    // "ok" -> "okay": the whole word differs.
-    expect(slices(oldS, r.old)).toEqual(['ok'])
-    expect(slices(newS, r.new)).toEqual(['okay'])
+    // "ok" -> "okay": a character diff highlights only the inserted suffix.
+    expect(r.old).toEqual([])
+    expect(slices(newS, r.new)).toEqual(['ay'])
+  })
+
+  it('diffs inside an identifier at character granularity', () => {
+    const oldS = 'const id = getUserName()'
+    const newS = 'const id = getUserId()'
+    const r = computeWordDiff(oldS, newS)
+    // getUserName -> getUserId: only the differing subwords, not the whole token.
+    expect(slices(oldS, r.old)).toEqual(['Name'])
+    expect(slices(newS, r.new)).toEqual(['Id'])
+  })
+
+  it('snaps a mid-camelCase edit out to the subword boundary', () => {
+    const oldS = 'onClick={handleClick}'
+    const newS = 'onClick={handleClose}'
+    const r = computeWordDiff(oldS, newS)
+    // The raw char diff is "lick"/"lose"; snapping to the camelCase hump lights
+    // the whole changed subword "Click"/"Close" instead.
+    expect(slices(oldS, r.old)).toEqual(['Click'])
+    expect(slices(newS, r.new)).toEqual(['Close'])
+  })
+
+  it('snaps a snake_case edit out to the underscore boundary', () => {
+    const oldS = 'handle_click'
+    const newS = 'handle_close'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['click'])
+    expect(slices(newS, r.new)).toEqual(['close'])
+  })
+
+  it('keeps a monocase edit precise instead of snapping to the whole word', () => {
+    const oldS = 'return counter'
+    const newS = 'return pointer'
+    const r = computeWordDiff(oldS, newS)
+    // No internal subword boundary in counter/pointer, so the char diff stands:
+    // the shared "nter" suffix stays unhighlighted (coalesced across the shared
+    // "o", not scattered).
+    expect(slices(oldS, r.old)).toEqual(['cou'])
+    expect(slices(newS, r.new)).toEqual(['poi'])
   })
 })
 
