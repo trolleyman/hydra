@@ -13,9 +13,9 @@ import { splitBashChains } from '../lib/bashFormat'
 // outbound fetch (with the host and URL) - plus the requesting agent, which is
 // clickable to jump to it, including when it runs in another project.
 
-// A small pill: a tinted, uppercase kind/verb label.
+// A small pill: a tinted kind/verb label.
 const Badge: React.FC<{ text: string; tone: BadgeTone }> = ({ text, tone }) => (
-  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${BADGE_TONES[tone]}`}>
+  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${BADGE_TONES[tone]}`}>
     {text}
   </span>
 )
@@ -69,24 +69,24 @@ function kindVisual(data: ApprovalToastData): {
         title: 'Run MCP tool',
         // WRITE is the risky one - flag it in the amber/warning tone; READ stays a
         // calm teal.
-        badge: data.rw ? { text: read ? 'READ' : 'WRITE', tone: read ? 'teal' : 'amber' } : null,
+        badge: data.rw ? { text: read ? 'Read' : 'Write', tone: read ? 'teal' : 'amber' } : null,
       }
     }
     case 'webfetch':
-      return { Icon: Globe, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Web fetch', badge: { text: 'NETWORK', tone: 'teal' } }
+      return { Icon: Globe, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Web fetch', badge: { text: 'Network', tone: 'teal' } }
     case 'egress':
-      return { Icon: Network, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Allow network host', badge: { text: 'NETWORK', tone: 'teal' } }
+      return { Icon: Network, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Allow network host', badge: { text: 'Network', tone: 'teal' } }
     case 'tool':
       // A tool Hydra's gate doesn't recognize (not a known built-in, no mcp__
       // prefix) - flagged amber because it could be an un-vetted MCP/connector tool.
-      return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'TOOL', tone: 'amber' } }
+      return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'Tool', tone: 'amber' } }
     case 'host_command':
       // The sandbox escape hatch: the agent is asking to run a command OUTSIDE its
       // sandbox, on the host. The most dangerous ask there is, so it wears the
       // loudest red identity to make sure it's never rubber-stamped.
-      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host (outside sandbox)', badge: { text: 'HOST', tone: 'red' } }
+      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host (outside sandbox)', badge: { text: 'Host', tone: 'red' } }
     default:
-      return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'SHELL', tone: 'gray' } }
+      return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'Shell', tone: 'gray' } }
   }
 }
 

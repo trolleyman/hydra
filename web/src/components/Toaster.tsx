@@ -91,7 +91,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
             {toast.code && (
               <div className="mt-2 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-900/60">
                 {toast.codeLang && (
-                  <div className="px-2.5 pt-1.5 text-[10px] font-mono uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  <div className="px-2.5 pt-1.5 text-[10px] font-mono tracking-wide text-gray-400 dark:text-gray-500">
                     {toast.codeLang}
                   </div>
                 )}
