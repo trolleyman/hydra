@@ -64,6 +64,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 const (
@@ -1191,14 +1192,10 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	// cgroup on every return path (this is the exact runaway-headless-Chrome case
 	// that motivated scoping).
 	scopeUnit := sandbox.ScopeUnit("artifact", spec.Name+"-"+sandbox.ScopeHash(dir))
-	limitsCfg, _ := config.Load(m.projectRoot)
-	sandbox.WrapScope(scopeUnit, launch, limitsCfg.ResolveResourceLimits())
+	scope.Apply(m.projectRoot, scopeUnit, launch)
 	defer sandbox.StopScope(scopeUnit)
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
-	cmd.Dir = launch.Dir
-	cmd.Env = launch.Env
-	cmd.ExtraFiles = launch.ExtraFiles
+	cmd := scope.Command(ctx, launch)
 	// Stream both stdout and stderr line-by-line into the live log (the UI shows
 	// it as a scrollable, auto-updating log, stderr in red), while still keeping
 	// stderr for the error tail. The latest non-blank stdout line also becomes the
@@ -1213,7 +1210,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
 	}
-	if err := cmd.Start(); err != nil {
+	if err := scope.Start(cmd); err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
 	}
