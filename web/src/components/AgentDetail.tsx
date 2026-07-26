@@ -157,7 +157,6 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
         className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer hover:bg-gray-100/70 dark:hover:bg-gray-700/40 transition-colors"
       >
         <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
-        <span className="text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 shrink-0">Prompt</span>
         {!open && (
           // Render the one-line preview through the inline markdown renderer (the
           // same one the live-activity line uses) so `code`, *italic*, **bold**
