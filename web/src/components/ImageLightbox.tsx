@@ -6,6 +6,7 @@ import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
+import { Tooltip } from './Tooltip'
 
 export interface LightboxImage {
   url: string
@@ -345,9 +346,11 @@ export function ImageLightbox({
             <span key="name" className="flex items-center gap-1.5 text-white/70">
               {current.filename}
               {current.changeType && (
-                <span title={current.changeType} className="flex items-center">
-                  <ChangeTypeGlyph type={current.changeType} />
-                </span>
+                <Tooltip content={current.changeType}>
+                  <span className="flex items-center">
+                    <ChangeTypeGlyph type={current.changeType} />
+                  </span>
+                </Tooltip>
               )}
             </span>,
             dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}{current.dpi && current.dpi > 1 ? ` @${current.dpi}×` : ''}</span>,

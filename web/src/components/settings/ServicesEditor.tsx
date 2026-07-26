@@ -27,11 +27,13 @@ function ServiceStateBadge({ status }: { status: ServiceStatus | undefined }) {
   }
   const m = map[status.state] ?? map.down
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${m.cls}`} title={status.message || undefined}>
-      {m.icon}
-      {m.label}
-      {status.restarts > 0 && <span className="font-normal opacity-70">· {status.restarts}/{status.max_restarts} restarts</span>}
-    </span>
+    <Tooltip content={status.message || undefined}>
+      <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${m.cls}`}>
+        {m.icon}
+        {m.label}
+        {status.restarts > 0 && <span className="font-normal opacity-70">· {status.restarts}/{status.max_restarts} restarts</span>}
+      </span>
+    </Tooltip>
   )
 }
 

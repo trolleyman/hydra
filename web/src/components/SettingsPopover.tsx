@@ -128,19 +128,24 @@ export function SettingsOptionRow({
   title?: string
 }) {
   return (
-    <label
-      title={title}
-      className={`flex items-center gap-2 py-0.5 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      <input
-        type={type}
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="w-3 h-3 accent-blue-500"
-      />
-      <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
-    </label>
+    // w-full on both: the wrapper replaces the label as the menu's block-level
+    // child, and the label has to keep filling it so the whole row stays
+    // clickable. In practice `title` is only passed to explain a DISABLED row,
+    // so the tip rarely competes with the menu it sits over.
+    <Tooltip content={title} className="w-full">
+      <label
+        className={`w-full flex items-center gap-2 py-0.5 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        <input
+          type={type}
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="w-3 h-3 accent-blue-500"
+        />
+        <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+      </label>
+    </Tooltip>
   )
 }

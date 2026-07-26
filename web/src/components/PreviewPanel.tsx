@@ -237,7 +237,9 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
             <span className="text-[11px] text-red-500 dark:text-red-400 truncate max-w-64" title={p.message}>{p.message}</span>
           )}
           {p.state === 'running' && p.stale && (
-            <span className="text-[11px] text-amber-600 dark:text-amber-500" title="The code changed since this server was built. Restart to rebuild.">code changed - restart</span>
+            <Tooltip content="The code changed since this server was built. Restart to rebuild.">
+              <span className="text-[11px] text-amber-600 dark:text-amber-500">code changed - restart</span>
+            </Tooltip>
           )}
         </span>
       }

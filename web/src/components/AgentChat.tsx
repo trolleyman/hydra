@@ -1529,14 +1529,17 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
                 <LoaderCircle className="w-3 h-3 animate-spin" /> running
               </span>
               {onStop && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onStop() }}
-                  className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
-                  title="Stop the command"
-                >
-                  <CircleStop className="w-3 h-3" /> stop
-                </button>
+                // Only mounted while a command is actually running, so this is not
+                // the per-transcript-row cost the native-title carve-out avoids.
+                <Tooltip content="Stop the command">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onStop() }}
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
+                  >
+                    <CircleStop className="w-3 h-3" /> stop
+                  </button>
+                </Tooltip>
               )}
             </span>
           ) : timedOut ? (
