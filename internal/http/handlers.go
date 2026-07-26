@@ -638,10 +638,18 @@ func (s *Server) agentResponseWithReview(h heads.Head) api.AgentResponse {
 		link.Adopted = &adopted
 		link.CanPush = &h.ReviewCanPush
 	}
-	if h.Branch != nil && h.DownstreamBranch != "" {
-		remote := reviewRemote(h.ProjectPath)
-		if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
-			link.Ahead, link.Behind = &ahead, &behind
+	if h.Branch != nil {
+		if h.ReviewAdopted {
+			// An adopted head tracks the PR's read-only head pseudo-ref, cached in a
+			// private local ref (refreshed by the watcher / Pull from MR).
+			if ahead, behind, ok := git.AheadBehind(h.ProjectPath, *h.Branch, git.PRLocalRef(h.ReviewProvider, h.ReviewID)); ok {
+				link.Ahead, link.Behind = &ahead, &behind
+			}
+		} else if h.DownstreamBranch != "" {
+			remote := reviewRemote(h.ProjectPath)
+			if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
+				link.Ahead, link.Behind = &ahead, &behind
+			}
 		}
 	}
 	if h.ReviewState != "" {

@@ -144,12 +144,16 @@ func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID stri
 	// Fast-forward the local target branch to what merged remotely, so the trunk is
 	// current before we drop the head. Best-effort - a pull that can't ff is left to
 	// the user (their working tree may be dirty).
+	//
+	// Skip this entirely for an adopted PR: its target branch belongs to a repo we
+	// may not own or track locally, so advancing a same-named local branch would be
+	// wrong. We still archive the head as merged below (the MR state is the truth).
 	target := head.ReviewTargetBranch
 	if target == "" {
 		target = head.BaseBranch
 	}
 	remote := reviewConfigFor(projectRoot).GetRemote()
-	if target != "" {
+	if target != "" && !head.ReviewAdopted {
 		fetchCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), 30*time.Second)
 		if err := git.Fetch(fetchCtx, projectRoot, remote); err == nil {
 			authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
@@ -244,6 +248,12 @@ func (s *Server) headTestsGreen(projectRoot string, head heads.Head) bool {
 func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads.Head) {
 	// Consume the arm up front (a failed publish shouldn't retry forever).
 	_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+	// Never auto-push to a PR Hydra did not create - pushing into someone else's
+	// PR must be an explicit, deliberate action (docs/pr-adoption.md).
+	if head.ReviewAdopted {
+		log.Printf("review watcher: skipping auto-publish for adopted head %s (push to a foreign PR must be manual)", head.ID)
+		return
+	}
 	if head.IsLinked() {
 		if err := s.pushHeadToMR(ctx, projectRoot, head); err != nil {
 			log.Printf("warn: auto-publish push for %s failed: %v", head.ID, err)

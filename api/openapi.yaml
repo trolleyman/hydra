@@ -1517,6 +1517,12 @@ paths:
       responses:
         '204':
           description: No Content (publish-when-green armed)
+        '400':
+          description: Bad Request (e.g. an adopted PR, which must not auto-push)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Not Found
           content:

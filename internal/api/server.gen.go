@@ -5631,6 +5631,15 @@ func (response ArmPublishWhenGreen204Response) VisitArmPublishWhenGreenResponse(
 	return nil
 }
 
+type ArmPublishWhenGreen400JSONResponse ErrorResponse
+
+func (response ArmPublishWhenGreen400JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ArmPublishWhenGreen404JSONResponse ErrorResponse
 
 func (response ArmPublishWhenGreen404JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
