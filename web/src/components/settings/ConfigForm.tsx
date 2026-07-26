@@ -590,7 +590,7 @@ export function ConfigForm({
                   onChange={(e) => toggleMcp(s.name, e.target.checked)}
                 />
                 <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{s.name}</span>
-                <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1 py-px">{s.source}</span>
+                <span className="text-[10px] tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1 py-px">{s.source}</span>
               </label>
             ))}
             {extraAllowed.map((name) => (
@@ -602,7 +602,7 @@ export function ConfigForm({
                   onChange={() => toggleMcp(name, false)}
                 />
                 <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{name}</span>
-                <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900 rounded px-1 py-px">not found</span>
+                <span className="text-[10px] tracking-wide text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900 rounded px-1 py-px">not found</span>
               </label>
             ))}
           </div>

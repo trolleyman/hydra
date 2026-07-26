@@ -100,7 +100,7 @@ export function SettingsPopover({
   )
 }
 
-// The tiny uppercase group label inside a settings popover.
+// The tiny group label inside a settings popover.
 export function SettingsGroupLabel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <p className={`text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide ${className}`}>

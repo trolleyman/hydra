@@ -34,10 +34,10 @@ export function DialogIconTile({ tone, children }: { tone: DialogTone; children:
   )
 }
 
-// An uppercase, letter-spaced section label (e.g. "CONFLICTING FILES").
+// A small, letter-spaced section label (e.g. "Conflicting files").
 export function DialogSectionLabel({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+    <p className="text-[11px] font-semibold tracking-wider text-gray-400 dark:text-gray-500 mb-2">
       {children}
     </p>
   )

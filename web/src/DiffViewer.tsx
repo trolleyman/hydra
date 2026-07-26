@@ -1811,7 +1811,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
             <div className="absolute inset-0" onClick={() => setOpen(false)} />
 
             {/* Panel - mirrors the merge/kill RichConfirmPanel: icon tile + stacked
-                title/description, uppercase section labels, shared footer buttons. */}
+                title/description, section labels, shared footer buttons. */}
             <div
               className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[560px] overflow-hidden animate-in zoom-in-95 duration-200"
               role="dialog"

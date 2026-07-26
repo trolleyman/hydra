@@ -5,6 +5,7 @@
 import type { AgentConfig } from './AgentConfig';
 import type { ArtifactScript } from './ArtifactScript';
 import type { McpServer } from './McpServer';
+import type { ResourceLimits } from './ResourceLimits';
 import type { ReviewConfig } from './ReviewConfig';
 import type { ServiceScript } from './ServiceScript';
 import type { TestScript } from './TestScript';
@@ -48,5 +49,6 @@ export type ConfigResponse = {
      */
     default_pre_prompt?: string;
     review?: ReviewConfig;
+    resources?: ResourceLimits;
 };
 

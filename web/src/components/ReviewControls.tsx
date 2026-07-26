@@ -10,8 +10,8 @@ import { DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ResizeHandle } from '../lib/ResizeHandle'
 
-// FieldLabel is the Create MR dialog's field caption: sentence case (not the
-// uppercase DialogSectionLabel) and tight to the input below it.
+// FieldLabel is the Create MR dialog's field caption: sentence case (like the
+// DialogSectionLabel) and tight to the input below it.
 function FieldLabel({ children }: { children: ReactNode }) {
   return <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{children}</span>
 }

@@ -486,6 +486,65 @@ func (t TestScript) IsStrict() bool { return t.Strict == nil || *t.Strict }
 // (type = "stdout") rather than from report files after exit.
 func (t TestScript) IsStreaming() bool { return t.Type == "stdout" }
 
+// ResourceLimits configures the cgroup limits applied to every scoped workload
+// (agent, preview, service, artifact) of a project via its transient systemd
+// scope. It is deliberately per-project and one section for all workload kinds -
+// this matches the failure mode it guards against (total machine load), not any
+// single agent. All fields are pointers so a config layer can override one
+// without clobbering the rest (nil = inherit the layer below, then the built-in
+// default). Values resolve into a sandbox.ScopeLimits at each call site via
+// ResolveResourceLimits; the sandbox package never reads config.
+//
+// Weights are soft (they only bite under contention); the hard caps apply even on
+// an idle box, so they can break a legitimate workload (an OOM-kill mid-render, a
+// quota that starves a build) and are opt-in - unset means no cap.
+type ResourceLimits struct {
+	// CPUWeight is the relative CPU share under contention (systemd CPUWeight,
+	// 1-10000). Soft. nil = the built-in default (sandbox.ScopeCPUWeight).
+	CPUWeight *int `toml:"cpu_weight"`
+	// IOWeight is the relative block-IO share under contention (systemd IOWeight,
+	// 1-10000). Soft, like CPUWeight. Needs a weight-capable IO scheduler. nil =
+	// the built-in default (sandbox.ScopeIOWeight).
+	IOWeight *int `toml:"io_weight"`
+	// CPUQuota is a hard CPU cap in percent of one core (systemd CPUQuota; 200 =
+	// 2 cores). Applies even on an idle box. nil / 0 = no cap.
+	CPUQuota *int `toml:"cpu_quota"`
+	// MemoryMax is a hard memory ceiling in MB (systemd MemoryMax); the cgroup is
+	// OOM-killed past it. nil / 0 = no cap.
+	MemoryMax *int `toml:"memory_max"`
+	// TasksMax is a hard cap on processes/threads (systemd TasksMax); guards
+	// against fork bombs / PID exhaustion. nil / 0 = no cap.
+	TasksMax *int `toml:"tasks_max"`
+}
+
+// isEmpty reports whether no field is set at this layer (all pointers nil), so
+// the renderer emits the commented example instead of an empty [resources] table.
+func (r ResourceLimits) isEmpty() bool {
+	return r.CPUWeight == nil && r.IOWeight == nil && r.CPUQuota == nil &&
+		r.MemoryMax == nil && r.TasksMax == nil
+}
+
+// Merge merges another ResourceLimits into this one: per-field last-wins, so a
+// later layer overriding one field leaves the rest inherited. A nil field in
+// other leaves the existing value (NOT union - these are scalars).
+func (r *ResourceLimits) Merge(other ResourceLimits) {
+	if other.CPUWeight != nil {
+		r.CPUWeight = other.CPUWeight
+	}
+	if other.IOWeight != nil {
+		r.IOWeight = other.IOWeight
+	}
+	if other.CPUQuota != nil {
+		r.CPUQuota = other.CPUQuota
+	}
+	if other.MemoryMax != nil {
+		r.MemoryMax = other.MemoryMax
+	}
+	if other.TasksMax != nil {
+		r.TasksMax = other.TasksMax
+	}
+}
+
 type Config struct {
 	// Defaults for all agents.
 	Defaults AgentConfig `toml:"defaults"`
@@ -574,6 +633,44 @@ type Config struct {
 	// Jira configures ticket-key extraction and the JIRA base URL for {ticket}
 	// templating and spawn-from-ticket. nil = unset.
 	Jira *JiraConfig `toml:"jira"`
+	// Resources configures the cgroup limits (CPU/IO weight, CPU quota, memory max,
+	// tasks max) applied to every scoped workload of this project via its transient
+	// systemd scope. nil = all defaults (weights on, hard caps off). Pointer so its
+	// own fields' nil-means-default convention is preserved across merge layers.
+	Resources *ResourceLimits `toml:"resources"`
+}
+
+// ResolveResourceLimits resolves this project's [resources] table into the
+// sandbox.ScopeLimits threaded to each scoped-workload call site. Unset weights
+// fall back to the built-in defaults (sandbox.ScopeCPUWeight/ScopeIOWeight);
+// unset hard caps stay 0 (no cap). This is the single seam the four call sites
+// (agent, preview, service, artifact) use, so limits never leak config into the
+// sandbox package.
+func (c Config) ResolveResourceLimits() sandbox.ScopeLimits {
+	limits := sandbox.ScopeLimits{
+		CPUWeight: sandbox.ScopeCPUWeight,
+		IOWeight:  sandbox.ScopeIOWeight,
+	}
+	r := c.Resources
+	if r == nil {
+		return limits
+	}
+	if r.CPUWeight != nil {
+		limits.CPUWeight = *r.CPUWeight
+	}
+	if r.IOWeight != nil {
+		limits.IOWeight = *r.IOWeight
+	}
+	if r.CPUQuota != nil {
+		limits.CPUQuota = *r.CPUQuota
+	}
+	if r.MemoryMax != nil {
+		limits.MemoryMax = *r.MemoryMax
+	}
+	if r.TasksMax != nil {
+		limits.TasksMax = *r.TasksMax
+	}
+	return limits
 }
 
 // DefaultTestConcurrency is the test-runner parallelism used when the config
@@ -686,18 +783,19 @@ type rawConfig struct {
 	// Shared. The three script sections accept two shapes - the canonical named
 	// tables ([tests.go]) and the legacy array-of-tables ([[tests]]) - so they
 	// are captured as primitives and decoded by decodeScriptSection.
-	Artifacts           toml.Primitive `toml:"artifacts"`
-	Services            toml.Primitive `toml:"services"`
-	Tests               toml.Primitive `toml:"tests"`
-	Icon                *string        `toml:"icon"`
-	ResumePrompt        *string        `toml:"resume_prompt"`
-	ArtifactConcurrency *int           `toml:"artifact_concurrency"`
-	ArtifactPrefetch    *bool          `toml:"artifact_prefetch"`
-	TestConcurrency     *int           `toml:"test_concurrency"`
-	TestPrefetch        *bool          `toml:"test_prefetch"`
-	PreviewPorts        *string        `toml:"preview_ports"`
-	Review              *ReviewConfig  `toml:"review"`
-	Jira                *JiraConfig    `toml:"jira"`
+	Artifacts           toml.Primitive  `toml:"artifacts"`
+	Services            toml.Primitive  `toml:"services"`
+	Tests               toml.Primitive  `toml:"tests"`
+	Icon                *string         `toml:"icon"`
+	ResumePrompt        *string         `toml:"resume_prompt"`
+	ArtifactConcurrency *int            `toml:"artifact_concurrency"`
+	ArtifactPrefetch    *bool           `toml:"artifact_prefetch"`
+	TestConcurrency     *int            `toml:"test_concurrency"`
+	TestPrefetch        *bool           `toml:"test_prefetch"`
+	PreviewPorts        *string         `toml:"preview_ports"`
+	Review              *ReviewConfig   `toml:"review"`
+	Jira                *JiraConfig     `toml:"jira"`
+	Resources           *ResourceLimits `toml:"resources"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -712,7 +810,7 @@ var reservedTopLevel = map[string]bool{
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true, "preview_ports": true,
-	"review": true, "jira": true,
+	"review": true, "jira": true, "resources": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -865,6 +963,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.PreviewPorts = raw.PreviewPorts
 	cfg.Review = raw.Review
 	cfg.Jira = raw.Jira
+	cfg.Resources = raw.Resources
 	if err := cfg.Review.Validate(); err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
@@ -1067,6 +1166,14 @@ func (c *Config) Merge(other Config) {
 			c.Jira = &JiraConfig{}
 		}
 		c.Jira.Merge(*other.Jira)
+	}
+	// Resources merges field-by-field (its own nil-means-default convention), so a
+	// later layer overriding one limit leaves the rest inherited.
+	if other.Resources != nil {
+		if c.Resources == nil {
+			c.Resources = &ResourceLimits{}
+		}
+		c.Resources.Merge(*other.Resources)
 	}
 }
 
@@ -2409,17 +2516,19 @@ func emitTestsAuthoritative(out *[]string, tests []TestScript, meta map[string]a
 // per expression), so multi-line string and array values can never confuse
 // comment attribution the way a naive line-by-line scan once did.
 type existingAnalysis struct {
-	tableComments  map[string][]string         // normalized table -> leading user comments
-	keyComments    map[string][]string         // "normTable\x00key" -> preceding user comments
-	artifactBlocks [][]string                  // verbatim [[artifacts]] blocks, in source order
-	artifactMeta   map[string]artifactComments // artifact name -> preserved comments
-	serviceBlocks  [][]string                  // verbatim [[services]] blocks, in source order
-	serviceMeta    map[string]artifactComments // service name -> preserved comments
-	testBlocks     [][]string                  // verbatim [[tests]] blocks, in source order
-	testMeta       map[string]artifactComments // test runner name -> preserved comments
-	reviewBlock    []string                    // verbatim [review] table (comments + table), fallback when cfg.Review is unset
-	reviewComments []string                    // just the user comments above [review], kept when the table is regenerated from cfg.Review
-	jiraBlock      []string                    // verbatim [jira] table, preserved on save
+	tableComments     map[string][]string         // normalized table -> leading user comments
+	keyComments       map[string][]string         // "normTable\x00key" -> preceding user comments
+	artifactBlocks    [][]string                  // verbatim [[artifacts]] blocks, in source order
+	artifactMeta      map[string]artifactComments // artifact name -> preserved comments
+	serviceBlocks     [][]string                  // verbatim [[services]] blocks, in source order
+	serviceMeta       map[string]artifactComments // service name -> preserved comments
+	testBlocks        [][]string                  // verbatim [[tests]] blocks, in source order
+	testMeta          map[string]artifactComments // test runner name -> preserved comments
+	reviewBlock       []string                    // verbatim [review] table (comments + table), fallback when cfg.Review is unset
+	reviewComments    []string                    // just the user comments above [review], kept when the table is regenerated from cfg.Review
+	jiraBlock         []string                    // verbatim [jira] table, preserved on save
+	resourcesBlock    []string                    // verbatim [resources] table, fallback when cfg.Resources is unset
+	resourcesComments []string                    // just the user comments above [resources], kept when it is regenerated from cfg.Resources
 }
 
 // tomlItem is one top-level TOML expression (a table header or a key/value),
@@ -2613,10 +2722,15 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 			res.reviewComments = comments
 		case "jira":
 			res.jiraBlock = block
+		case "resources":
+			res.resourcesBlock = block
+			res.resourcesComments = comments
 		}
 		inVerbatim, verbNorm, verbLeading = false, "", nil
 	}
-	isVerbatimTable := func(norm string) bool { return norm == "review" || norm == "jira" }
+	isVerbatimTable := func(norm string) bool {
+		return norm == "review" || norm == "jira" || norm == "resources"
+	}
 
 	for _, it := range items {
 		g := gap(prevEnd, it.startLine)
@@ -2767,7 +2881,7 @@ func isManagedCommentedArrayHeader(line string) bool {
 // managedExampleTables are the single tables whose commented-out example blocks
 // ("# [review]" followed by "# key = value" lines) Hydra regenerates on every
 // save, mirroring managedArraySections for array-of-tables examples.
-var managedExampleTables = []string{"review", "jira"}
+var managedExampleTables = []string{"review", "jira", "resources"}
 
 // isManagedCommentedTableHeader reports whether a line is a commented-out header
 // for a managed example table (e.g. "# [review]") - the start of a regenerated
@@ -3066,6 +3180,20 @@ func renderConfig(existing []byte, cfg Config) string {
 		out = append(out, prior.jiraBlock...)
 	}
 
+	// Resources: like [review], the Settings editor sends it, so regenerate the
+	// [resources] table from cfg when it carries values (keeping any user comments
+	// above it). Otherwise preserve a hand-written table verbatim, or show a
+	// documented commented example so the section self-documents.
+	out = appendBlank(out)
+	if cfg.Resources != nil && !cfg.Resources.isEmpty() {
+		out = append(out, prior.resourcesComments...)
+		out = append(out, resourceFieldLines(*cfg.Resources)...)
+	} else if len(prior.resourcesBlock) > 0 {
+		out = append(out, prior.resourcesBlock...)
+	} else {
+		out = append(out, resourcesExampleLines()...)
+	}
+
 	result := strings.Join(out, "\n")
 	if result != "" && !strings.HasSuffix(result, "\n") {
 		result += "\n"
@@ -3100,6 +3228,44 @@ func reviewExampleLines() []string {
 		"# [jira]",
 		`# url = "https://mycorp.atlassian.net"`,
 		`# ticket_pattern = "[A-Z]+-[0-9]+"`,
+	}
+}
+
+// resourceFieldLines renders the [resources] table for renderConfig, emitting
+// only the fields set at this layer (a nil pointer is left out so it keeps
+// inheriting the layer below / the built-in default). Mirrors reviewFieldLines.
+func resourceFieldLines(r ResourceLimits) []string {
+	out := []string{"[resources]"}
+	addInt := func(key string, v *int) {
+		if v != nil {
+			out = append(out, key+" = "+strconv.Itoa(*v))
+		}
+	}
+	addInt("cpu_weight", r.CPUWeight)
+	addInt("io_weight", r.IOWeight)
+	addInt("cpu_quota", r.CPUQuota)
+	addInt("memory_max", r.MemoryMax)
+	addInt("tasks_max", r.TasksMax)
+	return out
+}
+
+// resourcesExampleLines returns a commented-out, self-documenting [resources]
+// example for a config that has none, so the cgroup limits are discoverable.
+func resourcesExampleLines() []string {
+	return []string{
+		docPrefix + " [resources] caps the cgroup limits applied to every scoped workload of this",
+		docPrefix + " project (agent, preview, service, artifact) via its transient systemd scope, so",
+		docPrefix + " one runaway workload yields to the daemon and interactive work instead of",
+		docPrefix + " starving the box. Weights are soft (they only bite under contention); the hard",
+		docPrefix + " caps (cpu_quota/memory_max/tasks_max) apply even on an idle box and are opt-in.",
+		docPrefix + " A hard cap is silently skipped where its cgroup controller is not delegated to",
+		docPrefix + " the user systemd manager (cpu/io often are not).",
+		"# [resources]",
+		fmt.Sprintf("# cpu_weight = %d   # 1-10000, soft CPU share under contention (default %d; below the daemon's 100)", sandbox.ScopeCPUWeight, sandbox.ScopeCPUWeight),
+		fmt.Sprintf("# io_weight  = %d   # 1-10000, soft block-IO share under contention (default %d)", sandbox.ScopeIOWeight, sandbox.ScopeIOWeight),
+		"# cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap",
+		"# memory_max = 2048 # hard memory ceiling in MB (OOM-killed past it); omit = no cap",
+		"# tasks_max  = 512  # hard cap on processes/threads; omit = no cap",
 	}
 }
 

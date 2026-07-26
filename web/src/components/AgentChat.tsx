@@ -1676,7 +1676,7 @@ function MemoryPanel({ text }: { text: string }) {
   )
 }
 
-// LabeledField is a small uppercase label over a value block - the shape the
+// LabeledField is a small label over a value block - the shape the
 // Output panel header uses, reused for the Task tool's subject/description/output.
 function LabeledField({ label, children }: { label: string; children: ReactNode }) {
   return (

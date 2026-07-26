@@ -31,6 +31,10 @@ type StartOptions struct {
 	// a short grace period, and removed from the registry as soon as it exits.
 	// Unlike agents, it is not meant to outlive its terminal.
 	Ephemeral bool
+	// Limits are the resolved cgroup limits applied to this session's transient
+	// systemd scope (see sandbox.WrapScope). The zero value emits no properties;
+	// callers pass config.ResolveResourceLimits() for the workload's project.
+	Limits sandbox.ScopeLimits
 }
 
 // Registry owns all live agent sessions for the daemon.
@@ -312,7 +316,7 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 	// the sandbox directly so a scope problem can never block an agent.
 	origPath, origArgs := spec.Path, spec.Args
 	unit := sandbox.ScopeUnit("", opts.ID)
-	scoped := sandbox.WrapScope(unit, spec)
+	scoped := sandbox.WrapScope(unit, spec, opts.Limits)
 
 	proc, err := startProcess(spec, opts.Rows, opts.Cols)
 	if err != nil && scoped {

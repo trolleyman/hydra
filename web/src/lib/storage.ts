@@ -45,6 +45,8 @@ export const StorageKeys = {
   defaultChatMode: 'hydra-default-chat-mode',
   // '1' when the Settings Review section is collapsed (it starts collapsed).
   settingsReviewCollapsed: 'hydra-settings-review-collapsed',
+  // '1' when the Settings Resource limits section is collapsed (starts collapsed).
+  settingsResourcesCollapsed: 'hydra-settings-resources-collapsed',
   spawnHeight: 'hydra-sidebar-spawn-height',
   // 'sans' when the user has turned OFF the serif font for chat-mode agent
   // messages (the default is serif, Claude-app style). User text stays sans
