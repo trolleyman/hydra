@@ -27,9 +27,11 @@ type ShellCommandResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Truncated bool   `json:"truncated"`
 	// DurationMs is the wall-clock run time; TimedOut is set when the command was
-	// killed for exceeding shellCommandTimeout (ExitCode is then -1).
+	// killed for exceeding shellCommandTimeout (ExitCode is then -1). Stopped is
+	// set when the user cancelled it mid-run (via a shell_stop frame).
 	DurationMs int64 `json:"duration_ms"`
 	TimedOut   bool  `json:"timed_out,omitempty"`
+	Stopped    bool  `json:"stopped,omitempty"`
 }
 
 // ShellCommandTimeout bounds a chat `!command`. A user-typed inspection command
@@ -95,6 +97,12 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, command string,
 
 	if runCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
+		return res, nil
+	}
+	// A cancel from the caller (a shell_stop frame): the user killed it. Report it
+	// as stopped, keeping whatever output ran so far.
+	if errors.Is(runCtx.Err(), context.Canceled) {
+		res.Stopped = true
 		return res, nil
 	}
 	if runErr == nil {

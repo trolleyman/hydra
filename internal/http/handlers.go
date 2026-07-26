@@ -128,6 +128,11 @@ type Server struct {
 	fetchMu     sync.Mutex
 	fetchActive map[string]bool
 	fetchLast   map[string]time.Time
+
+	// shellCancels maps a running chat "!command"'s client id to its cancel func,
+	// so a shell_stop frame can kill it mid-run (see runChatShellCommand). A
+	// sync.Map needs no init and tolerates the concurrent register/stop/cleanup.
+	shellCancels sync.Map
 }
 
 // remoteFetchInterval throttles background `git fetch`es kicked off by the push

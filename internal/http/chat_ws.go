@@ -240,6 +240,17 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			return
 		}
 		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, msg.ID, msg.Command)
+	case "shell_stop":
+		// Stop button on a running "!command" card: cancel its context, which
+		// kills the sandboxed process. The run then settles as "stopped" with
+		// whatever output it produced (see runChatShellCommand).
+		if msg.ID != "" {
+			if v, ok := s.shellCancels.Load(msg.ID); ok {
+				if cancel, ok := v.(context.CancelFunc); ok {
+					cancel()
+				}
+			}
+		}
 	case "dequeue":
 		// Recall a still-queued message (Up-arrow edit): drop it from the queue.
 		if s.ChatQueues != nil && msg.ID != "" {
@@ -296,6 +307,14 @@ type shellOutputFrame struct {
 // goroutine. conn streams the live output; a closed socket just drops the live
 // frames (the durable settle still persists).
 func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID, msgID, command string) {
+	// Make the run cancellable so a shell_stop frame can kill it mid-flight. Keyed
+	// by the send id; registered for its whole lifetime and cleaned up on exit.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if msgID != "" {
+		s.shellCancels.Store(msgID, cancel)
+		defer s.shellCancels.Delete(msgID)
+	}
 	onChunk := func(chunk string) {
 		frame, err := json.Marshal(shellOutputFrame{
 			terminalEvent: terminalEvent{Type: "shell_output"}, ID: msgID, Chunk: chunk,
@@ -304,7 +323,7 @@ func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sess
 			_ = conn.WriteMessage(websocket.TextMessage, frame)
 		}
 	}
-	res, err := heads.RunShellCommand(context.Background(), projectRoot, worktree, command, onChunk)
+	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, command, onChunk)
 	if err != nil {
 		// A launch/spec failure (e.g. no worktree): surface it in the card's output
 		// so the user isn't left with a silently-hung "running" card.
@@ -339,6 +358,8 @@ func shellCommandUserContent(res heads.ShellCommandResult) json.RawMessage {
 	b.WriteString("\n```\n\n")
 	if res.TimedOut {
 		fmt.Fprintf(&b, "The command timed out after %s and was killed.\n\n", heads.ShellCommandTimeout)
+	} else if res.Stopped {
+		b.WriteString("The command was stopped before it finished.\n\n")
 	} else {
 		fmt.Fprintf(&b, "Exit code: %d\n\n", res.ExitCode)
 	}

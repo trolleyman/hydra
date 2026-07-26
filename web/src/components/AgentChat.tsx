@@ -213,7 +213,7 @@ type ChatItem =
   // output shown as a card AND delivered to the agent as a user turn. clientId is
   // the send frame's id, used to settle the optimistic running card in place when
   // the daemon's result event arrives. running is the optimistic in-flight state.
-  | { kind: 'shellCmd'; id: number; clientId?: string; command: string; output: string; exitCode?: number; truncated?: boolean; timedOut?: boolean; running?: boolean; noEntrance?: boolean }
+  | { kind: 'shellCmd'; id: number; clientId?: string; command: string; output: string; exitCode?: number; truncated?: boolean; timedOut?: boolean; stopped?: boolean; running?: boolean; noEntrance?: boolean }
   // A harness-injected system notice (e.g. a <task-notification> when a
   // background task finishes), rendered as a compact muted line, not raw XML.
   // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
@@ -474,7 +474,7 @@ interface ProviderEvent {
   // shell rides on a synthesized 'shellcmd' event (built from a user_message
   // whose payload carried a `shell` object): a chat "!command"'s sandboxed
   // result, rendered as a ShellCommandCard instead of a user bubble.
-  shell?: { command: string; output: string; exit_code: number; truncated?: boolean; timed_out?: boolean }
+  shell?: { command: string; output: string; exit_code: number; truncated?: boolean; timed_out?: boolean; stopped?: boolean }
 }
 
 // parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
@@ -620,7 +620,7 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning 
       // A "!command" the user ran: its user_message payload carries the sandboxed
       // result under `shell`. Render it as a shell-command card, not a user bubble
       // (the same text is still what the agent received as its turn).
-      const sh = p.shell as { command?: unknown; output?: unknown; exit_code?: unknown; truncated?: unknown; timed_out?: unknown } | undefined
+      const sh = p.shell as { command?: unknown; output?: unknown; exit_code?: unknown; truncated?: unknown; timed_out?: unknown; stopped?: unknown } | undefined
       if (sh && typeof sh === 'object') {
         return [{
           ...base,
@@ -631,6 +631,7 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning 
             exit_code: typeof sh.exit_code === 'number' ? sh.exit_code : -1,
             truncated: sh.truncated === true,
             timed_out: sh.timed_out === true,
+            stopped: sh.stopped === true,
           },
         }]
       }
@@ -1488,16 +1489,18 @@ function ShellCommandBash({ command }: { command: string }) {
 // streams in live while running (see the shell_output frame handler). The same
 // output is also delivered to the agent as a user turn, so this card is the
 // human-facing view of that turn rather than a plain bubble.
-function ShellCommandCard({ command, output, exitCode, truncated, timedOut, running }: {
+function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stopped, running, onStop }: {
   command: string
   output: string
   exitCode?: number
   truncated?: boolean
   timedOut?: boolean
+  stopped?: boolean
   running?: boolean
+  onStop?: () => void
 }) {
   const [open, setOpen] = useState(true)
-  const failed = !running && !timedOut && typeof exitCode === 'number' && exitCode !== 0
+  const failed = !running && !timedOut && !stopped && typeof exitCode === 'number' && exitCode !== 0
   const hasOutput = output.trim().length > 0
   const toggle = () => setOpen((o) => !o)
   return (
@@ -1521,11 +1524,25 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, runn
           />
           <ShellCommandBash command={command} />
           {running ? (
-            <span className="shrink-0 self-center flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400/90">
-              <LoaderCircle className="w-3 h-3 animate-spin" /> running
+            <span className="shrink-0 self-center flex items-center gap-1.5">
+              <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400/90">
+                <LoaderCircle className="w-3 h-3 animate-spin" /> running
+              </span>
+              {onStop && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onStop() }}
+                  className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
+                  title="Stop the command"
+                >
+                  <CircleStop className="w-3 h-3" /> stop
+                </button>
+              )}
             </span>
           ) : timedOut ? (
             <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
+          ) : stopped ? (
+            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">stopped</span>
           ) : (
             <span className={`shrink-0 self-center text-[10px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
               exit {exitCode ?? 0}
@@ -3888,6 +3905,7 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
         exitCode: ev.shell.exit_code,
         truncated: ev.shell.truncated,
         timedOut: ev.shell.timed_out,
+        stopped: ev.shell.stopped,
         running: false,
       })
       continue
@@ -5457,6 +5475,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             exitCode: sh.exit_code,
             truncated: sh.truncated,
             timedOut: sh.timed_out,
+            stopped: sh.stopped,
             running: false,
           }
           if (cid && optimisticShellRef.current.has(cid)) {
@@ -6902,6 +6921,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return true
   }
 
+  // stopShellCommand asks the daemon to kill a running "!command" (the card's
+  // Stop button). The card stays "running" until the command's settle event
+  // arrives marked stopped - the same path a natural finish takes.
+  function stopShellCommand(clientId: string) {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: 'shell_stop', id: clientId }))
+  }
+
   // renderComposerBackdrop highlights the composer's transparent-text backdrop:
   // a "!command" gets a terracotta "!" and bash syntax highlighting (so shell
   // mode is unmistakable as you type), everything else the usual inline markdown.
@@ -7242,7 +7270,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             exitCode={item.exitCode}
             truncated={item.truncated}
             timedOut={item.timedOut}
+            stopped={item.stopped}
             running={item.running}
+            onStop={item.running && item.clientId ? () => stopShellCommand(item.clientId as string) : undefined}
           />
         )
       case 'notice': {

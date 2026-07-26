@@ -3430,6 +3430,11 @@ func handleSimChatWS(conn *safeConn) {
 		streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
 	}
 
+	// Per-"!command" stop channels, so a shell_stop frame can cut a streaming run
+	// short (mirrors the daemon cancelling the sandboxed process).
+	shellStops := map[string]chan struct{}{}
+	var shellStopsMu sync.Mutex
+
 	for {
 		msg, ok := readSimChatClientMsg(conn)
 		if !ok {
@@ -3444,7 +3449,16 @@ func handleSimChatWS(conn *safeConn) {
 			// log so the scrollable output can be eyeballed.
 			cmd := msg.Command
 			id := msg.ID
+			stop := make(chan struct{})
+			shellStopsMu.Lock()
+			shellStops[id] = stop
+			shellStopsMu.Unlock()
 			go func() {
+				defer func() {
+					shellStopsMu.Lock()
+					delete(shellStops, id)
+					shellStopsMu.Unlock()
+				}()
 				time.Sleep(500 * time.Millisecond)
 				var lines []string
 				exit := 0
@@ -3462,19 +3476,39 @@ func handleSimChatWS(conn *safeConn) {
 					lines = []string{"\x1b[1mrunning...\x1b[0m", "PASS", "ok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s", "ok  \tgithub.com/trolleyman/hydra/internal/http\t0.19s"}
 				}
 				var full strings.Builder
+				stopped := false
 				for _, ln := range lines {
+					select {
+					case <-stop:
+						stopped = true
+					default:
+					}
+					if stopped {
+						break
+					}
 					chunk := ln + "\n"
 					full.WriteString(chunk)
 					frame, _ := json.Marshal(map[string]any{"type": "shell_output", "id": id, "chunk": chunk})
 					_ = conn.WriteMessage(websocket.TextMessage, frame)
 					time.Sleep(35 * time.Millisecond)
 				}
+				shell := map[string]any{"command": cmd, "output": full.String(), "exit_code": exit, "truncated": false}
+				if stopped {
+					shell["stopped"] = true
+				}
 				sendSimNormalizedChatEvent(conn, time.Now().UnixMilli(), "user_message", map[string]any{
 					"id":      id,
 					"content": []map[string]any{{"type": "text", "text": "I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"}},
-					"shell":   map[string]any{"command": cmd, "output": full.String(), "exit_code": exit, "truncated": false},
+					"shell":   shell,
 				})
 			}()
+		case "shell_stop":
+			shellStopsMu.Lock()
+			if ch, ok := shellStops[msg.ID]; ok {
+				close(ch)
+				delete(shellStops, msg.ID)
+			}
+			shellStopsMu.Unlock()
 		case "set_model":
 			// The real CLI confirms a set_model control_request with a
 			// local-command echo (wrapped in a caveat, which the chat hides) -
