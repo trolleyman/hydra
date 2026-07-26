@@ -329,6 +329,27 @@ func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, que
 	}
 }
 
+// SubmitShellResult delivers a chat `!command`'s output to the agent as a user
+// turn AND records it as a shell-command card in the durable stream. Unlike a
+// typed message it is never queued: the user ran the command to feed the agent,
+// so the result goes to the CLI now (injected at the running turn's next step
+// boundary if one is in flight, exactly like typed-ahead steering). The write
+// runs under the queue's sendMu so it can't interleave with a concurrent drain.
+//
+// content is the agent-facing text (command + output); shell is the structured
+// ShellCommandResult the client renders as the card - it rides on the emitted
+// user_message payload's `shell` field. The CLI's replay echo of the same
+// content folds into a user_message_echoed (reconcileClaudeUserEcho), so the
+// card is the sole visible copy.
+func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, content json.RawMessage, shell any) {
+	q := m.queue(projectRoot, id)
+	q.sendMu.Lock()
+	defer q.sendMu.Unlock()
+	if m.writeToStdin(id, content) {
+		m.emit(id, "user_message", map[string]any{"id": msgID, "content": content, "shell": shell})
+	}
+}
+
 // Dequeue removes a still-queued message (the Up-arrow recall), reporting
 // whether it was found.
 func (m *ChatQueueManager) Dequeue(projectRoot, id, msgID string) bool {
