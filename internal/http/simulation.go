@@ -45,6 +45,31 @@ type SimulationServer struct {
 	// panel is drivable deterministically (no wall clock - see simNow).
 	previewMu    sync.Mutex
 	previewPolls map[string]int
+
+	// approvalMu/approvalKind/approvalGen back the approval picker (the
+	// agent-approvals head): answering its question card parks one kind of
+	// security-gate approval, which the normal endpoints then serve exactly like
+	// a real one. approvalGen bumps on every change so the events stream can nudge
+	// the client to refetch. Empty kind = nothing parked, which is the state every
+	// other page (and every screenshot) sees.
+	approvalMu   sync.Mutex
+	approvalKind string
+	approvalGen  int
+}
+
+// setSimApproval parks (or with "" clears) the picked approval kind.
+func (s *SimulationServer) setSimApproval(kind string) {
+	s.approvalMu.Lock()
+	defer s.approvalMu.Unlock()
+	s.approvalKind = kind
+	s.approvalGen++
+}
+
+// simApproval reports the parked kind and the current generation.
+func (s *SimulationServer) simApproval() (string, int) {
+	s.approvalMu.Lock()
+	defer s.approvalMu.Unlock()
+	return s.approvalKind, s.approvalGen
 }
 
 // simNow is the fixed wall-clock instant ALL time-derived simulation values are
@@ -319,6 +344,54 @@ func simAgentAsk() api.AgentResponse {
 	}
 }
 
+// simAgentApprovalsPrompt seeds the approval-preview head, whose chat parks on a
+// question card listing every kind of security-gate approval (see
+// handleSimApprovalsWS).
+const simAgentApprovalsPrompt = "Check what the daemon is listening on, then show me each approval card in turn."
+
+// simApprovalsHostRun is the command the transcript's `hydra host-run` card asks
+// to run on the host. The host_command option parks this SAME text, so picking it
+// grows the Allow/Deny row on that very card (a host-run approval is matched to
+// its card by the command itself).
+const simApprovalsHostRun = "echo '== listeners 26600-26699 =='; ss -Hltnp | grep -E ':266[0-9][0-9]' | sort -t: -k2 | head -60; echo; echo '== count =='; ss -Hltn | grep -cE ':266[0-9][0-9]'; echo; echo '== tailscale serve status =='; tailscale serve status 2>&1 | head -30"
+
+// simAgentApprovals is the approval-picker head, shared by ListAgents and
+// GetAgent. While a kind is parked it reports the policy_approval wait a real
+// gated head would, which is what makes the client fetch the approval and raise
+// the toast.
+//
+// Not to be confused with `agent-approval` (singular), the static head the
+// approval-card screenshots are attributed to: this one is the live playground.
+func (s *SimulationServer) simAgentApprovals() api.AgentResponse {
+	createdAt := simNow().Add(-15 * time.Minute).Unix()
+	status := &api.AgentStatusInfo{
+		Status:      api.NeedsInput,
+		Timestamp:   simNow().Format(time.RFC3339),
+		LastMessage: ptr("Which approval card should I raise?"),
+	}
+	if kind, _ := s.simApproval(); kind != "" {
+		req, ok := simApprovalRequest(kind)
+		if ok {
+			status.NotificationType = ptr("policy_approval")
+			status.LastMessage = ptr(req.Summary)
+		}
+	}
+	return api.AgentResponse{
+		Id:            "agent-approvals",
+		Title:         ptr("Preview the approval cards"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/sim-approvals"),
+		SessionPid:    1008,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentApprovalsPrompt,
+		ChatMode:      ptr(true),
+		Model:         ptr("claude-opus-4-8"),
+		AgentStatus:   status,
+	}
+}
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -385,6 +458,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.
 		simAgentAsk(),
+		// The approval picker: its question card raises any one of the gate's
+		// approval cards on demand (nothing is parked until you pick).
+		s.simAgentApprovals(),
 		{
 			// Blocked on the user (AskUserQuestion) while you were away → the red
 			// "needs you" status, which also lights the red needs-input marker on
@@ -614,6 +690,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 	if id == "agent-ask" {
 		write(simAgentAsk())
+		return
+	}
+	if id == "agent-approvals" {
+		write(s.simAgentApprovals())
 		return
 	}
 	if id == "agent-approval" {
@@ -2308,13 +2388,26 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	// No simulated agent parks a live gate approval - the approval cards are
-	// documented as their own harness screenshots (agent-approvals-*.png) so they
-	// don't leak onto every simulated page. Always return an empty set.
-	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: []api.ApprovalRequest{}})
+	// Only the picker head (agent-approvals) ever parks one, and only while its
+	// question card has been answered - so no other simulated page (and no
+	// screenshot) grows an approval it didn't ask for.
+	approvals := []api.ApprovalRequest{}
+	if id == "agent-approvals" {
+		if kind, _ := s.simApproval(); kind != "" {
+			if req, ok := simApprovalRequest(kind); ok {
+				approvals = append(approvals, req)
+			}
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: approvals})
 }
 
 func (s *SimulationServer) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {
+	// Answering it (from the toast or the tool card) retires the request, exactly
+	// as the real daemon does - the head then leaves its policy_approval wait.
+	if id == "agent-approvals" {
+		s.setSimApproval("")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -4160,6 +4253,203 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 	sendSimChatEvent(conn, string(result))
 }
 
+// --- Simulated approval picker (agent-approvals) ------------------------------
+
+// simApprovalOption is one choice on the picker's question card: the label the
+// user clicks and the approval kind it parks.
+type simApprovalOption struct {
+	label       string
+	description string
+	kind        string
+}
+
+// The picker offers every kind the gate can park, so each card can be looked at
+// (and allowed/denied) without a live sandbox to provoke it.
+var simApprovalOptions = []simApprovalOption{
+	{"Host command", "The escape hatch: run the command above on the host, outside the sandbox.", "host_command"},
+	{"MCP tool", "One tool call on an allowed server, with its arguments.", "mcp_tool"},
+	{"MCP server", "The first call to a whole MCP server.", "mcp"},
+	{"Web fetch", "An outbound fetch - allowing trusts the host for the session.", "webfetch"},
+	{"Egress host", "A connection the proxy is holding: the host is on no list.", "egress"},
+	{"Unrecognized tool", "A tool Hydra's gate has no rule for.", "tool"},
+}
+
+// simApprovalRequest builds the parked request for a picked kind, mirroring what
+// the gate (or `hydra host-run`) would have written.
+func simApprovalRequest(kind string) (api.ApprovalRequest, bool) {
+	req := api.ApprovalRequest{Reqid: "sim-approval-" + kind, Kind: kind, Ts: ptr(simNow().Format(time.RFC3339))}
+	switch kind {
+	case "host_command":
+		req.Tool = "host-run"
+		req.Target = simApprovalsHostRun
+		req.Reason = ptr("the agent asked to run a command outside its sandbox, on the host")
+		req.Summary = "wants to run a command on the host"
+	case "mcp_tool":
+		req.Tool = "mcp__linear__create_issue"
+		req.Target = "linear__create_issue"
+		req.Rw = ptr("write")
+		req.ArgsPreview = ptr(`{"title":"Retry uploads with backoff","teamId":"eng","priority":2,"labels":["infra","reliability"]}`)
+		req.Reason = ptr("this tool writes, and the server is not on the allow-list")
+		req.Summary = "wants to run MCP tool \"linear__create_issue\""
+	case "mcp":
+		req.Tool = "mcp__github__create_pull_request"
+		req.Target = "github"
+		req.Reason = ptr("the MCP server is not on this agent's allow-list")
+		req.Summary = "wants to use MCP server \"github\""
+	case "webfetch":
+		req.Tool = "WebFetch"
+		req.Target = "docs.anthropic.com"
+		req.Url = ptr("https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview")
+		req.Reason = ptr("the host is not on this agent's network allow-list")
+		req.Summary = "wants to fetch from \"docs.anthropic.com\""
+	case "egress":
+		req.Tool = "Bash"
+		req.Target = "telemetry.example.com"
+		req.Reason = ptr("the connection is held at the egress proxy: the host is on neither list")
+		req.Summary = "wants to connect to \"telemetry.example.com\""
+	case "tool":
+		req.Tool = "weather__forecast"
+		req.Target = "weather__forecast"
+		req.Reason = ptr("Hydra's gate has no rule for this tool")
+		req.Summary = "wants to use the unrecognized tool \"weather__forecast\""
+	default:
+		return api.ApprovalRequest{}, false
+	}
+	return req, true
+}
+
+// simApprovalsQuestion is the picker's AskUserQuestion input (one single-select
+// question whose options are the approval kinds).
+func simApprovalsQuestion() string {
+	options := make([]map[string]string, 0, len(simApprovalOptions))
+	for _, o := range simApprovalOptions {
+		options = append(options, map[string]string{"label": o.label, "description": o.description})
+	}
+	input, _ := json.Marshal(map[string]any{"questions": []map[string]any{{
+		"question":    "Which approval card should I raise?",
+		"header":      "Approval",
+		"multiSelect": false,
+		"options":     options,
+	}}})
+	return string(input)
+}
+
+// simApprovalsEvents is the canned history for agent-approvals: a `hydra
+// host-run` ask left without a result (so the chat shows the host-run card - and
+// grows its Allow/Deny row the moment the host_command option is picked), then
+// the question card that drives the picker.
+func simApprovalsEvents(questionToolID, requestID string) []string {
+	hostRun, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{"id": "msg_approvals_hostrun", "content": []map[string]any{{
+			"type": "tool_use",
+			"id":   "toolu_approvals_hostrun",
+			"name": "Bash",
+			"input": map[string]any{
+				"command":     `/tmp/hydra-internal host-run -- bash -c "` + simApprovalsHostRun + `"`,
+				"description": "Check the daemon's listeners on the host",
+			},
+		}}},
+	})
+	question, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{"id": "msg_approvals_q", "content": []map[string]any{{
+			"type": "tool_use", "id": questionToolID, "name": "AskUserQuestion",
+			"input": json.RawMessage(simApprovalsQuestion()),
+		}}},
+	})
+	control, _ := json.Marshal(map[string]any{
+		"type": "control_request", "request_id": requestID,
+		"request": map[string]any{
+			"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "display_name": "AskUserQuestion",
+			"input": json.RawMessage(simApprovalsQuestion()), "tool_use_id": questionToolID,
+			"requires_user_interaction": true,
+		},
+	})
+	return []string{
+		`{"type":"system","subtype":"init","session_id":"sim-approvals","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","usage"]}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentApprovalsPrompt + `"}]}}`,
+		`{"type":"assistant","message":{"id":"msg_approvals_1","content":[{"type":"text","text":"Listener check first. I can't see host ports from inside the sandbox, so this one has to go through the escape hatch:"}]}}`,
+		string(hostRun),
+		`{"type":"assistant","message":{"id":"msg_approvals_2","content":[{"type":"text","text":"Pick a card below and I'll raise it. It behaves like the real thing: the toast appears bottom-right, a matching tool card grows its own Allow / Deny row, and either one answers it."}]}}`,
+		string(question),
+		string(control),
+	}
+}
+
+// handleSimApprovalsWS speaks the chat framing for agent-approvals: replay the
+// transcript, then park the chosen approval kind on every answer and re-ask, so
+// the picker stays usable round after round.
+func (s *SimulationServer) handleSimApprovalsWS(conn *safeConn) {
+	// A fresh connection starts from a clean slate - a card parked by an earlier
+	// visit would otherwise still be up with no question card answered for it.
+	s.setSimApproval("")
+	sendStatusUpdate(conn, "needs_input")
+	round := 1
+	for _, line := range simApprovalsEvents("toolu_approvals_q1", "sim-approvals-req-1") {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+
+	for {
+		msg, ok := readSimChatClientMsg(conn)
+		if !ok {
+			return
+		}
+		switch msg.Type {
+		case "control_response":
+			var payload struct {
+				Response struct {
+					UpdatedInput struct {
+						Answers map[string]string `json:"answers"`
+					} `json:"updatedInput"`
+				} `json:"response"`
+			}
+			_ = json.Unmarshal(msg.Response, &payload)
+			label := ""
+			for _, a := range payload.Response.UpdatedInput.Answers {
+				label = a
+			}
+			picked := ""
+			for _, o := range simApprovalOptions {
+				if o.label == label {
+					picked = o.kind
+				}
+			}
+			s.setSimApproval(picked)
+			result := fmt.Sprintf("Raised the %q approval. It is parked until you allow or deny it.", label)
+			if picked == "" {
+				result = fmt.Sprintf("No approval matches %q.", label)
+			}
+			toolResult, _ := json.Marshal(map[string]any{
+				"type": "user",
+				"message": map[string]any{"role": "user", "content": []map[string]any{
+					{"type": "tool_result", "tool_use_id": fmt.Sprintf("toolu_approvals_q%d", round), "content": result},
+				}},
+				"session_id": "sim-approvals",
+			})
+			sendSimChatEvent(conn, string(toolResult))
+			// Re-ask, so another kind can be picked without reloading the page.
+			round++
+			questionToolID := fmt.Sprintf("toolu_approvals_q%d", round)
+			requestID := fmt.Sprintf("sim-approvals-req-%d", round)
+			events := simApprovalsEvents(questionToolID, requestID)
+			for _, line := range events[len(events)-2:] {
+				sendSimChatEvent(conn, line)
+			}
+			sendStatusUpdate(conn, "needs_input")
+		case "set_model":
+			sendSimUserText(conn, "sim-approvals", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
+		case "interrupt":
+			sendSimUserText(conn, "sim-approvals", "[Request interrupted by user]")
+		case "user_message":
+			userEv, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": msg.Content}})
+			sendSimChatEvent(conn, string(userEv))
+			streamSimReply(conn, "sim-approvals", fmt.Sprintf("msg_approvals_reply_%d", round), "Simulated reply: pick a card from the question above and I'll raise it.")
+		}
+	}
+}
+
 // --- Simulated AskUserQuestion agent (agent-ask) ------------------------------
 
 // simAskQuestionInput is the AskUserQuestion input the simulated agent-ask
@@ -4282,6 +4572,10 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 		handleSimAskWS(conn)
 		return
 	}
+	if agentID == "agent-approvals" && r.URL.Query().Get("shell") != "true" {
+		s.handleSimApprovalsWS(conn)
+		return
+	}
 
 	// 1. Simulate sandbox startup. Emit the whole boot transcript in one burst
 	// rather than pacing it with sleeps: the screenshot generator captures this
@@ -4318,10 +4612,15 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// simEventPollInterval is how often the events stream re-checks the one piece of
+// simulation state that DOES change - the approval picker's parked card - so the
+// client refetches the agent list and raises (or drops) the approval promptly.
+const simEventPollInterval = 300 * time.Millisecond
+
 // HandleEventsWS mirrors the real server's events stream. Simulation data is
-// static, so it just sends the one-time "refetch everything" nudge on connect and
-// then holds the connection open (ignoring client messages) until the peer
-// closes - enough for the client to do its initial load without a reconnect loop.
+// static apart from the approval picker, so it sends the one-time "refetch
+// everything" nudge on connect and then only re-nudges when a card is parked or
+// answered, holding the connection open until the peer closes.
 func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -4335,9 +4634,30 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	// Client frames are ignored, but the read has to run for close detection.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	_, gen := s.simApproval()
+	ticker := time.NewTicker(simEventPollInterval)
+	defer ticker.Stop()
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		select {
+		case <-done:
 			return
+		case <-ticker.C:
+			if _, current := s.simApproval(); current != gen {
+				gen = current
+				if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
+					return
+				}
+			}
 		}
 	}
 }

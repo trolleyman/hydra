@@ -1042,17 +1042,27 @@ function RootLayout() {
             })()}
           </div>
         </div>
+      </aside>
 
-          {/* Resize handle (md+ only - the mobile panel has a fixed width).
-              Invisible strip; the shared pill appears on hover. */}
+        {/* Resize handle (md+ only - the mobile panel has a fixed width).
+            Invisible strip; the shared pill appears on hover.
+
+            It lives OUTSIDE the <aside>, positioned over the seam, because the
+            aside is `overflow-hidden`: a handle parked at its inner right edge
+            sat squarely on top of the agent list's scrollbar and swallowed all
+            but a couple of pixels of the thumb. Straddling the seam (3px over
+            the sidebar, 7px over the content) leaves the scrollbar grabbable
+            while keeping a comfortable drag target. */}
+        {!desktopCollapsed && (
           <div
             onPointerDown={handleSidebarResizeStart}
             title="Drag to resize"
-            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group/resize items-center justify-center touch-none"
+            style={{ left: sidebarWidth - 3 }}
+            className={`hidden md:flex absolute inset-y-0 w-2.5 cursor-col-resize z-30 group/resize items-center justify-center touch-none ${sidebarResizing ? '' : 'transition-[left] duration-200'}`}
           >
             <ResizeGrip orientation="vertical" />
           </div>
-        </aside>
+        )}
 
         <div className="flex-1 flex min-w-0 overflow-hidden">
           <Outlet />

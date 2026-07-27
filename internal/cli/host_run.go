@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func runHostRun(args []string) int {
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
 	}
-	command := strings.TrimSpace(strings.Join(args, " "))
+	command := hostRunCommandText(args)
 	if command == "" {
 		fmt.Fprintln(os.Stderr, "host-run: no command given")
 		return hostRunExitDenied
@@ -112,6 +113,76 @@ func runHostRun(args []string) int {
 		}
 		time.Sleep(askPollInterval)
 	}
+}
+
+// hostRunCommandText renders the argv left after `--` as the single shell script
+// the daemon runs (with `bash -lc`) and the approval card shows. That one string
+// is both what the user reads and what executes, so it has to be a FAITHFUL
+// rendering of the argv - a naive strings.Join dropped the shell quoting the
+// agent's own shell had already consumed, turning
+//
+//	host-run -- bash -c "echo one; echo two"
+//
+// into `bash -c echo one; echo two`, which reads as nonsense and, worse, runs
+// something else entirely (bash -c gets only `echo one`). Three rules:
+//
+//   - A lone argument is passed through verbatim: it is already a script, and
+//     quoting it would run it as a command whose name is the whole string.
+//   - `bash -c <script>` (or `-lc`, or a full path to bash) is unwrapped to just
+//     the script - the daemon already runs it through `bash -lc`, so the wrapper
+//     is redundant noise in the card.
+//   - Anything else is quoted argv-faithfully, so a word carrying spaces or shell
+//     metacharacters survives as one word instead of splitting apart.
+func hostRunCommandText(args []string) string {
+	if script, ok := unwrapBashDashC(args); ok {
+		return strings.TrimSpace(script)
+	}
+	if len(args) == 1 {
+		return strings.TrimSpace(args[0])
+	}
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, shellQuote(a))
+	}
+	return strings.TrimSpace(strings.Join(quoted, " "))
+}
+
+// unwrapBashDashC recognises the exact `bash -c <script>` shape (nothing after
+// the script, since trailing words become $0/$1... and would change meaning) and
+// returns the script. Only bash is unwrapped - re-running an `sh -c` script under
+// bash could change its dialect, so that wrapper is left intact and quoted.
+func unwrapBashDashC(args []string) (string, bool) {
+	if len(args) != 3 {
+		return "", false
+	}
+	switch args[0] {
+	case "bash", "/bin/bash", "/usr/bin/bash":
+	default:
+		return "", false
+	}
+	switch args[1] {
+	case "-c", "-lc", "-cl":
+	default:
+		return "", false
+	}
+	return args[2], true
+}
+
+// shellSafeWord matches a word that needs no quoting: it survives `bash -lc`
+// unchanged and reads better bare.
+var shellSafeWord = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// shellQuote renders one argv word as bash source text.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if shellSafeWord.MatchString(s) {
+		return s
+	}
+	// Single quotes take everything literally; a literal `'` is spliced in as
+	// '\'' (close, escaped quote, reopen).
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // awaitHostRunResult waits for the daemon to run the approved command host-side
