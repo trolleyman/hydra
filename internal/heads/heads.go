@@ -777,12 +777,19 @@ func commonDirForSandbox(projectRoot string, _ sandbox.GitIsolationMode) string 
 // per-head override (from the spawn request, persisted on the agent) when set,
 // else the agent-type policy default from config. See docs/git-isolation.md.
 func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.GitIsolationMode {
+	mode := cfg.ResolvePolicy(agentType).ResolveGitIsolation()
 	if override != "" {
 		if m := sandbox.NormalizeGitIsolation(override); sandbox.ValidGitIsolation(string(m)) && m != "" {
-			return m
+			mode = m
 		}
 	}
-	return cfg.ResolvePolicy(agentType).ResolveGitIsolation()
+	// readonly is host-mediated: commits go through the hydra git_* tools. An agent
+	// without those tools would be unable to commit at all, so fall back to off.
+	if mode.HostMediatedCommit() && !sandbox.AgentSupportsGitTools(sandbox.AgentType(agentType)) {
+		log.Printf("warn: git_isolation=%q is not supported for agent %q (needs the hydra git tools); using off", mode, agentType)
+		return sandbox.GitIsolationOff
+	}
+	return mode
 }
 
 // EffectiveGitIsolation resolves the git-isolation mode actually applied to a

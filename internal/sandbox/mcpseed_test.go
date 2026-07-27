@@ -66,3 +66,16 @@ func TestBuildCodexConfigRejectsMalformed(t *testing.T) {
 		t.Error("malformed host config should error (so the caller skips rather than clobbers)")
 	}
 }
+
+func TestAgentSupportsGitTools(t *testing.T) {
+	for _, a := range []AgentType{AgentTypeClaude, AgentTypeCodex, AgentTypeGemini} {
+		if !AgentSupportsGitTools(a) {
+			t.Errorf("%s should support git tools", a)
+		}
+	}
+	for _, a := range []AgentType{AgentTypeCopilot, AgentTypeBash} {
+		if AgentSupportsGitTools(a) {
+			t.Errorf("%s should NOT support git tools (no hydra MCP server seeded)", a)
+		}
+	}
+}

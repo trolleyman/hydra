@@ -397,6 +397,19 @@ func HydraMCPServer(hydraBin, agentType string) (name, command string, args []st
 	return gate.HydraControlServer, hydraBin, []string{"mcp", agentType}
 }
 
+// AgentSupportsGitTools reports whether the agent type gets the Hydra control MCP
+// server (and thus the git_* tools) seeded - the set seedHead seeds it for
+// (claude/codex/gemini). Only these can commit under git_isolation=readonly, where
+// .git is read-only in the sandbox and raw git can't write it; agents without the
+// tools would be stuck unable to commit, so readonly falls back to off for them.
+func AgentSupportsGitTools(a AgentType) bool {
+	switch a {
+	case AgentTypeClaude, AgentTypeCodex, AgentTypeGemini:
+		return true
+	}
+	return false
+}
+
 // BuildCopilotHooks generates a hooks JSON file for GitHub Copilot CLI.
 // Copilot CLI loads hooks from .github/hooks/*.json in the working directory.
 // The format differs from Claude/Gemini: it uses {"version":1,"hooks":{...}}.

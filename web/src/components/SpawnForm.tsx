@@ -200,6 +200,10 @@ const AgentModelPicker = memo(function AgentModelPicker({
 // The git-isolation choices offered in the spawn Options menu. '' means "use the
 // project's configured policy default" (the request omits git_isolation). The
 // rest are explicit per-head overrides. See docs/git-isolation.md.
+// Agents that get the hydra git_* tools (needed to commit under readonly). Keep
+// in sync with sandbox.AgentSupportsGitTools.
+const GIT_TOOL_AGENTS = ['claude', 'codex', 'gemini']
+
 const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
   { id: '', label: 'Default', desc: "Project's policy default." },
   { id: 'off', label: 'Off', desc: 'Full .git access.' },
@@ -306,6 +310,13 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     writeLocal(StorageKeys.defaultChatMode, chatMode ? 'true' : 'false')
   }, [chatMode])
+
+  // readonly needs the hydra git tools; if the agent is switched to one without
+  // them while readonly is selected, drop back to the default (the server would
+  // downgrade it anyway).
+  useEffect(() => {
+    if (gitIsolation === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)) setGitIsolation('')
+  }, [agentType, gitIsolation])
 
   // Remember the chosen model per agent type so the next spawn of that agent
   // defaults to it (mirrors defaultAgentType).
@@ -835,20 +846,27 @@ export const SpawnForm = memo(function SpawnForm({
             See docs/git-isolation.md. */}
         <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>
         <div className="flex flex-col gap-0.5">
-          {GIT_ISOLATION_OPTS.map((o) => (
-            <button
-              key={o.id || 'default'}
-              type="button"
-              onClick={() => setGitIsolation(o.id)}
-              className="w-full flex items-start gap-2 px-2 py-1 rounded-md text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
-            >
-              <span className="w-3.5 shrink-0 pt-0.5">{gitIsolation === o.id && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
-                <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{o.desc}</span>
-              </span>
-            </button>
-          ))}
+          {GIT_ISOLATION_OPTS.map((o) => {
+            // readonly commits go through the hydra git tools, which only claude/
+            // codex/gemini get - disable it for others (the server downgrades to
+            // off anyway).
+            const disabled = o.id === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)
+            return (
+              <button
+                key={o.id || 'default'}
+                type="button"
+                disabled={disabled}
+                onClick={() => setGitIsolation(o.id)}
+                className={`w-full flex items-start gap-2 px-2 py-1 rounded-md text-left transition-colors ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer'}`}
+              >
+                <span className="w-3.5 shrink-0 pt-0.5">{gitIsolation === o.id && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
+                  <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{disabled ? `Not available for ${agentType} (no git tools).` : o.desc}</span>
+                </span>
+              </button>
+            )
+          })}
         </div>
         {showBranch && branches && (
           <>
