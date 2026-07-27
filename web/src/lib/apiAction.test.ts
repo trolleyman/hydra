@@ -66,7 +66,7 @@ describe('runWithToast', () => {
     const res = await runWithToast(() => Promise.reject(err), { errorPrefix: 'Failed to switch mode' })
     expect(res.ok).toBe(false)
     const toast = useToastStore.getState().toasts[0]
-    expect(toast.message).toBe('Failed to switch mode (`501 Not Implemented`)')
+    expect(toast.message).toBe('Failed to switch mode `501 Not Implemented`')
     expect(toast.code).toBe(JSON.stringify(body, null, 2))
     expect(toast.codeLang).toBe('json')
   })

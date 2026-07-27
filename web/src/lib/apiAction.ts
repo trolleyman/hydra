@@ -82,8 +82,9 @@ export async function runWithToast<T>(
     const { status, code, lang } = apiErrorCodeParts(error)
     if (opts.errorPrefix && code && !humanDetail) {
       // Structured HTTP body: show it as a (JSON) code block and pin the status
-      // into the headline - "Failed to switch mode (`501 Not Implemented`)".
-      const message = status ? `${opts.errorPrefix} (\`${status}\`)` : opts.errorPrefix
+      // into the headline - "Failed to switch mode `501 Not Implemented`". The
+      // status pill is its own visual chip, so it carries no brackets.
+      const message = status ? `${opts.errorPrefix} \`${status}\`` : opts.errorPrefix
       useToastStore.getState().show({ message, code, codeLang: lang, type: 'error' })
     } else if (opts.errorPrefix && !humanDetail && looksLikeCode(detail)) {
       // No structured body, but the raw detail reads as code (e.g. a stack trace).
