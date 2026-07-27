@@ -804,7 +804,7 @@ func (Deploy) Tailscale() error {
 // permission hint below).
 func runTailscale(args ...string) (string, error) {
 	out, err := exec.Command("tailscale", args...).CombinedOutput()
-	return string(out), err
+	return string(out), errtrace.Wrap(err)
 }
 
 // looksLikePermissionError reports whether a failed `tailscale serve` looks like
