@@ -105,8 +105,14 @@ in-sandbox (`off`) or host-mediated (`readonly`).
 
 ### The git tools
 
-Exposed on the `hydra` MCP server (Claude-only), advertised whenever the git path is
-wired. Reads (`status`/`diff`/`log`/`show`) still run in the shell.
+Exposed on the `hydra` MCP server, seeded for claude/codex/gemini
+(`sandbox.AgentSupportsGitTools`) and advertised whenever the git path is wired.
+Reads (`status`/`diff`/`log`/`show`) still run in the shell. Agents without the
+tools (copilot, bash) can't do host-mediated git, so `readonly` falls back to `off`
+for them (`heads.resolveGitIsolation`; the spawn dropdown disables the option too).
+The decision gate - the wrong-branch heuristic and the readonly raw-git redirect -
+is still Claude-only (its deny-hook wiring differs per agent); the tools carry their
+own own-branch guard, so they're safe on codex/gemini without it.
 
 - **`git_commit`** - stage (`add -A` or `paths`) + commit, or `amend`.
 - **`git_add`** - stage whole files, or specific new-file line ranges (a filtered
