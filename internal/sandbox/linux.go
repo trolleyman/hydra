@@ -231,10 +231,9 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 	switch opts.GitIsolation {
-	case GitIsolationReadonly, GitIsolationClone:
+	case GitIsolationReadonly:
 		// Whole common dir read-only: the agent cannot write .git at all (no commit,
 		// add, stash, or object destruction). Staging + commit are host-mediated.
-		// (clone should be intercepted earlier; ro-bind is the safe fallback if not.)
 		addROPath(opts.GitCommonDir)
 	case GitIsolationRefs:
 		// Common dir writable (objects + the per-worktree gitdir stay writable so

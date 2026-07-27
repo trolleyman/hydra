@@ -122,9 +122,9 @@ type PolicyConfig struct {
 	GateEnabled *bool `toml:"gate_enabled"`
 	// GitIsolation bounds how much of the repo's shared .git the head may write:
 	// "off" (default) writable; "refs" locks refs/ so commits are host-mediated and
-	// can't leave the branch; "readonly" locks the whole common dir (anti-rogue);
-	// "clone" gives the head its own repo (follow-up). See GIT_ISOLATION.md. nil =
-	// default (off). A last-writer-wins scalar, not a union list.
+	// can't leave the branch; "readonly" locks the whole common dir (anti-rogue).
+	// See docs/git-isolation.md. nil = default (off). A last-writer-wins scalar, not
+	// a union list.
 	GitIsolation *string `toml:"git_isolation"`
 	// MCPAllowed lists the MCP server names the agent may use. Any server not
 	// listed (and not referenced by MCPToolsAllowed) is stripped from the seeded
@@ -2051,7 +2051,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "policy", key: "git_isolation",
-			doc: `how much of the repo's shared .git the head may write: "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue); "clone" gives the head its own repo (see GIT_ISOLATION.md).`,
+			doc: `how much of the repo's shared .git the head may write: "off" (default) writable; "refs" locks refs/ so commits go through the mcp__hydra__git_commit tool and can't leave the branch; "readonly" locks the whole .git (anti-rogue). See docs/git-isolation.md.`,
 			def: func() string { return `"off"` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Policy != nil && a.Policy.GitIsolation != nil {

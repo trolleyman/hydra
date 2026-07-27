@@ -53,7 +53,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// Seatbelt is last-match-wins, so a deny after the allow carves out subpaths.
 	if opts.GitCommonDir != "" {
 		switch opts.GitIsolation {
-		case GitIsolationReadonly, GitIsolationClone:
+		case GitIsolationReadonly:
 			// No write grant -> the whole common dir is read-only.
 		case GitIsolationRefs:
 			fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))

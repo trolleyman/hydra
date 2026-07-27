@@ -93,11 +93,6 @@ const (
 	// write .git at all (no commit, add, stash, or object destruction). Staging and
 	// commit are host-mediated. Anti-rogue; costs in-sandbox git add / history edit.
 	GitIsolationReadonly GitIsolationMode = "readonly"
-	// GitIsolationClone gives the head its own standalone repo borrowing main's
-	// objects read-only via git alternates: full native git, a rogue agent can only
-	// trash its own private store, and the daemon mirrors the branch back into the
-	// main repo (see docs/git-isolation.md).
-	GitIsolationClone GitIsolationMode = "clone"
 )
 
 // NormalizeGitIsolation canonicalises a git-isolation string. Every canonical
@@ -111,7 +106,7 @@ func NormalizeGitIsolation(s string) GitIsolationMode {
 // default", which is off).
 func ValidGitIsolation(s string) bool {
 	switch NormalizeGitIsolation(s) {
-	case "", GitIsolationOff, GitIsolationRefs, GitIsolationReadonly, GitIsolationClone:
+	case "", GitIsolationOff, GitIsolationRefs, GitIsolationReadonly:
 		return true
 	}
 	return false
@@ -291,10 +286,9 @@ type Options struct {
 	// skip. See git.GetCommonDir.
 	GitCommonDir string
 	// GitIsolation controls how much of GitCommonDir is writable in the sandbox
-	// (see GIT_ISOLATION.md): off (default) = whole dir writable; refs = refs/ +
+	// (see docs/git-isolation.md): off (default) = whole dir writable; refs = refs/ +
 	// packed-refs re-bound read-only on top; readonly = the whole common dir bound
-	// read-only. clone is handled at the head-lifecycle layer, not here. Empty ==
-	// off.
+	// read-only. Empty == off.
 	GitIsolation GitIsolationMode
 	// Home is the HOME directory the agent should see.
 	Home string

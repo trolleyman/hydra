@@ -501,15 +501,10 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 
-	// Resolve the git-isolation mode up front: clone mode changes how the worktree
-	// is created (a standalone `git clone --shared` instead of a linked worktree).
+	// Resolve the git-isolation mode up front (drives the sandbox .git bind below).
 	cfg, _ := config.Load(projectRoot)
 	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
-	createWorktree := git.CreateWorktree
-	if gitIso == sandbox.GitIsolationClone {
-		createWorktree = git.CreateCloneWorktree
-	}
-	if err := createWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 		if store != nil {
 			// Hard-delete: an aborted spawn never really existed, and a
 			// soft-deleted tombstone would reserve the ID forever.
@@ -670,7 +665,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 // spawnCleanup tears down a partially-created head after an early failure.
 func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
-	_ = git.RemoveWorktreeTree(projectRoot, worktreePath)
+	_ = git.RemoveWorktree(projectRoot, worktreePath)
 	_ = git.DeleteBranch(projectRoot, branchName)
 	if store != nil {
 		// Hard-delete: an aborted spawn never really existed, and a soft-deleted
@@ -705,30 +700,12 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
-// commonDirForSandbox returns the shared git dir to bind into a head's sandbox,
-// or "" for clone mode - a clone head has its OWN .git inside the (writable)
-// worktree, and the main repo's objects are reachable read-only via the sandbox's
-// root bind for the clone's alternate, so no shared common dir is bound.
-func commonDirForSandbox(projectRoot string, mode sandbox.GitIsolationMode) string {
-	if mode == sandbox.GitIsolationClone {
-		return ""
-	}
+// commonDirForSandbox returns the shared git dir to bind into a head's sandbox.
+// The mode argument is retained so future isolation modes can vary the bind; off
+// and readonly both bind the same shared common dir (readonly just binds it
+// read-only - see BuildSpec).
+func commonDirForSandbox(projectRoot string, _ sandbox.GitIsolationMode) string {
 	return gitCommonDir(projectRoot)
-}
-
-// MirrorCloneHead force-refreshes the main repo's mirror of a clone head's branch
-// from its private standalone repo, so committed diffs, conflict checks, tests and
-// merge see the agent's latest commits. A no-op for a linked worktree (shared .git)
-// or a head without a live worktree/branch. Call it synchronously before an
-// operation that reads the branch from the main repo and can't tolerate the
-// mirror watcher's poll lag (notably merge).
-func MirrorCloneHead(head Head) {
-	if head.Worktree == nil || head.Branch == nil {
-		return
-	}
-	if err := git.MirrorCloneBranch(head.ProjectPath, *head.Worktree, *head.Branch); err != nil {
-		log.Printf("warn: mirror clone head %s: %v", head.ID, err)
-	}
 }
 
 // resolveGitIsolation picks the effective git-isolation mode for a head: the
@@ -1481,7 +1458,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {
 			log.Printf("heads: removing worktree %s for agent %s", *head.Worktree, head.ID)
-			if err := git.RemoveWorktreeTree(head.ProjectPath, *head.Worktree); err != nil {
+			if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
 				log.Printf("warn: heads: remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
 			}
 		}
@@ -1636,7 +1613,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 	}
 
 	if head.Worktree != nil && head.ProjectPath != "" {
-		if err := git.RemoveWorktreeTree(head.ProjectPath, *head.Worktree); err != nil {
+		if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
 			log.Printf("warn: heads: purge remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
 		}
 	}

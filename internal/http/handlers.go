@@ -1818,9 +1818,6 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: "agent has no git branch to merge"}, nil
 	}
 	branchName := *head.Branch
-	// A clone-mode head's commits live in its own repo; sync its branch into the
-	// main repo synchronously (the mirror watcher's lag is not safe for a merge).
-	heads.MirrorCloneHead(head)
 
 	// Merge the agent's branch INTO its base branch (which may be another agent's
 	// hydra/<id> branch for stacked agents), not into whatever the project root
@@ -1939,20 +1936,9 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
-	// Attempt merge (base branch into current branch). For a clone-mode head the
-	// worktree is its own repo whose local base branch is a stale clone-time
-	// snapshot, so refresh origin and merge the main repo's latest base (origin/<base>).
+	// Attempt merge (base branch into current branch). The worktree shares the main
+	// repo's .git, so the local base ref is already current - no fetch needed.
 	mergeRef := head.BaseBranch
-	if head.Worktree != nil && git.IsCloneWorktree(*head.Worktree) {
-		if err := git.FetchOrigin(*head.Worktree); err != nil {
-			return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
-				Error:   api.MergeConflictErrorErrorMergeConflict,
-				Code:    409,
-				Details: fmt.Sprintf("could not fetch base from origin: %v", err),
-			}), nil
-		}
-		mergeRef = "origin/" + head.BaseBranch
-	}
 
 	authorName, authorEmail := gitConfigVal(mergeDir, "user.name"), gitConfigVal(mergeDir, "user.email")
 

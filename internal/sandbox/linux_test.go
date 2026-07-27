@@ -213,14 +213,6 @@ func TestBuildSpecLinuxGitIsolation(t *testing.T) {
 	if argIndex(rf, refs) < argIndex(rf, gitdir) {
 		t.Error("refs: refs/ ro-bind must follow the writable common-dir bind")
 	}
-
-	// clone heads pass GitCommonDir="" (their .git lives in the writable worktree),
-	// so nothing is bound; if a common dir IS supplied it is ro-bound as a safe
-	// fallback (the agent must never write the main repo's .git).
-	cl := build(GitIsolationClone)
-	if !hasPair(cl, "--ro-bind", gitdir, gitdir) {
-		t.Error("clone: a supplied common dir should be bound read-only (safe fallback)")
-	}
 }
 
 func TestBuildSpecLinuxCowMount(t *testing.T) {
