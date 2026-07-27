@@ -132,18 +132,18 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	res.WritablePaths = append(res.WritablePaths, subagentsDirHost)
 	res.Env = append(res.Env, "HYDRA_SUBAGENTS_DIR="+subagentsDirHost)
 
-	// Host-mediated commit channel: when git_isolation is readonly, .git is
-	// read-only in the sandbox, so the git_commit tool hands the commit to the
-	// daemon's commit watcher via this writable per-head dir (see
-	// docs/git-isolation.md). HYDRA_COMMIT_DIR both points the tool at the channel AND
-	// signals that host-mediated mode is active; absent => commit in-sandbox.
+	// Host-mediated git channel: when git_isolation is readonly, .git is read-only
+	// in the sandbox, so the git tools hand each write-op to the daemon's gitops
+	// watcher via this writable per-head dir (see docs/git-isolation.md).
+	// HYDRA_GITOPS_DIR both points the tools at the channel AND signals that
+	// host-mediated mode is active; absent => run in-sandbox.
 	if gitIso.HostMediatedCommit() {
-		commitDirHost := paths.GetCommitDirFromProjectRoot(projectRoot, id)
-		if err := os.MkdirAll(commitDirHost, 0755); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", commitDirHost, err))
+		gitopsDirHost := paths.GetGitopsDir(projectRoot, id)
+		if err := os.MkdirAll(gitopsDirHost, 0755); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", gitopsDirHost, err))
 		}
-		res.WritablePaths = append(res.WritablePaths, commitDirHost)
-		res.Env = append(res.Env, "HYDRA_COMMIT_DIR="+commitDirHost)
+		res.WritablePaths = append(res.WritablePaths, gitopsDirHost)
+		res.Env = append(res.Env, "HYDRA_GITOPS_DIR="+gitopsDirHost)
 	}
 
 	// The hydra binary's real path, so hooks can invoke it. Visible read-only

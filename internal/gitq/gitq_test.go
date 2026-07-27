@@ -1,4 +1,4 @@
-package commitq
+package gitq
 
 import (
 	"path/filepath"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestChannelRoundTrip(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "commits", "head-1")
+	dir := filepath.Join(t.TempDir(), "gitops", "head-1")
 
 	// A missing dir lists no requests (not an error).
 	if reqs, err := ListRequests(dir); err != nil || len(reqs) != 0 {

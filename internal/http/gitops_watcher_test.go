@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trolleyman/hydra/internal/commitq"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/gitq"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -44,15 +44,15 @@ func TestDrainCommitRequests(t *testing.T) {
 	}
 
 	// Drop a commit request into the head's channel, as the in-sandbox tool would.
-	dir := paths.GetCommitDirFromProjectRoot(projectRoot, id)
-	if err := commitq.WriteRequest(dir, commitq.Request{ReqID: "r1", Message: "host commit", TS: "t"}); err != nil {
+	dir := paths.GetGitopsDir(projectRoot, id)
+	if err := gitq.WriteRequest(dir, gitq.Request{ReqID: "r1", Op: gitq.OpCommit, Message: "host commit", TS: "t"}); err != nil {
 		t.Fatal(err)
 	}
 
-	(&Server{}).drainCommitRequests(projectRoot)
+	(&Server{}).drainGitopsRequests(projectRoot)
 
 	// Result written, and the commit actually landed on the branch.
-	res, ok, err := commitq.ReadResult(dir, "r1")
+	res, ok, err := gitq.ReadResult(dir, "r1")
 	if err != nil || !ok {
 		t.Fatalf("no result written: ok=%v err=%v", ok, err)
 	}
@@ -65,8 +65,8 @@ func TestDrainCommitRequests(t *testing.T) {
 	}
 
 	// Idempotency: a second drain finds no pending request (result retires it).
-	(&Server{}).drainCommitRequests(projectRoot)
-	if reqs, _ := commitq.ListRequests(dir); len(reqs) != 0 {
+	(&Server{}).drainGitopsRequests(projectRoot)
+	if reqs, _ := gitq.ListRequests(dir); len(reqs) != 0 {
 		t.Errorf("request should be retired after result, still pending: %+v", reqs)
 	}
 }

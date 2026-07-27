@@ -7,8 +7,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trolleyman/hydra/internal/mcpserver"
+	"github.com/trolleyman/hydra/internal/git"
 )
+
+// commitResult adapts git.GuardedCommit's (ok, msg) to the small shape these
+// tests assert on. GuardedCommit is the guard behind the git_commit tool, run
+// both in-sandbox and host-side.
+type commitResult struct {
+	OK      bool
+	Message string
+}
+
+func gitCommit(worktree, branch, message string, paths ...string) commitResult {
+	ok, msg := git.GuardedCommit(worktree, branch, message, paths, false)
+	return commitResult{OK: ok, Message: msg}
+}
 
 // initCommitRepo makes a temp git repo checked out on `branch` with one initial
 // commit, and returns its path. Identity + gpgsign are pinned so commits succeed
@@ -47,7 +60,7 @@ func TestGitCommitOnOwnBranch(t *testing.T) {
 	dir := initCommitRepo(t, "hydra/test")
 	writeFile(t, dir, "new.txt", "hi\n")
 
-	r := gitCommit(dir, "hydra/test", mcpserver.CommitRequest{Message: "add new"})
+	r := gitCommit(dir, "hydra/test", "add new")
 	if !r.OK {
 		t.Fatalf("expected OK, got %q", r.Message)
 	}
@@ -66,7 +79,7 @@ func TestGitCommitRefusesWrongBranch(t *testing.T) {
 	writeFile(t, dir, "new.txt", "hi\n")
 
 	// Worktree on main but the head's branch is hydra/test - refuse.
-	r := gitCommit(dir, "hydra/test", mcpserver.CommitRequest{Message: "x"})
+	r := gitCommit(dir, "hydra/test", "x")
 	if r.OK || !strings.Contains(r.Message, "Refusing to commit") {
 		t.Errorf("expected refusal, got OK=%v msg=%q", r.OK, r.Message)
 	}
@@ -81,13 +94,13 @@ func TestGitCommitBranchFallback(t *testing.T) {
 	// When HYDRA_BRANCH is unknown (empty), only a hydra/* checkout may commit.
 	own := initCommitRepo(t, "hydra/abc")
 	writeFile(t, own, "a.txt", "x\n")
-	if r := gitCommit(own, "", mcpserver.CommitRequest{Message: "ok"}); !r.OK {
+	if r := gitCommit(own, "", "ok"); !r.OK {
 		t.Errorf("hydra/* fallback should commit, got %q", r.Message)
 	}
 
 	shared := initCommitRepo(t, "main")
 	writeFile(t, shared, "a.txt", "x\n")
-	if r := gitCommit(shared, "", mcpserver.CommitRequest{Message: "ok"}); r.OK || !strings.Contains(r.Message, "hydra/*") {
+	if r := gitCommit(shared, "", "ok"); r.OK || !strings.Contains(r.Message, "hydra/*") {
 		t.Errorf("non-hydra branch should be refused, got OK=%v msg=%q", r.OK, r.Message)
 	}
 }
@@ -99,7 +112,7 @@ func TestGitCommitRefusesDetachedHead(t *testing.T) {
 		t.Fatalf("detach: %v\n%s", err, out)
 	}
 	writeFile(t, dir, "new.txt", "hi\n")
-	r := gitCommit(dir, "hydra/test", mcpserver.CommitRequest{Message: "x"})
+	r := gitCommit(dir, "hydra/test", "x")
 	if r.OK || !strings.Contains(r.Message, "detached") {
 		t.Errorf("expected detached-HEAD refusal, got OK=%v msg=%q", r.OK, r.Message)
 	}
@@ -110,7 +123,7 @@ func TestGitCommitStagesOnlyGivenPaths(t *testing.T) {
 	writeFile(t, dir, "keep.txt", "a\n")
 	writeFile(t, dir, "skip.txt", "b\n")
 
-	r := gitCommit(dir, "hydra/test", mcpserver.CommitRequest{Message: "partial", Paths: []string{"keep.txt"}})
+	r := gitCommit(dir, "hydra/test", "partial", "keep.txt")
 	if !r.OK {
 		t.Fatalf("expected OK, got %q", r.Message)
 	}
@@ -127,7 +140,7 @@ func TestGitCommitStagesOnlyGivenPaths(t *testing.T) {
 }
 
 func TestGitCommitNoWorktree(t *testing.T) {
-	r := gitCommit("", "hydra/test", mcpserver.CommitRequest{Message: "x"})
+	r := gitCommit("", "hydra/test", "x")
 	if r.OK || !strings.Contains(r.Message, "worktree") {
 		t.Errorf("empty worktree should error, got OK=%v msg=%q", r.OK, r.Message)
 	}

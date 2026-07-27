@@ -153,42 +153,47 @@ func TestReviewToolsAdvertisedAndCalled(t *testing.T) {
 }
 
 func TestGitCommitToolAdvertisedAndCalled(t *testing.T) {
-	var got CommitRequest
+	var calls []GitOpRequest
 	deps := Deps{
 		ListAvailable: func() []Candidate { return nil },
 		RequestAccess: func(string) (bool, string) { return false, "" },
-		Commit: func(r CommitRequest) CommitResult {
-			got = r
-			return CommitResult{OK: true, Message: "Committed abc123 on hydra/x: wip"}
+		GitOp: func(r GitOpRequest) GitOpResult {
+			calls = append(calls, r)
+			return GitOpResult{OK: true, Message: "Committed abc123 on hydra/x: wip"}
 		},
 	}
 	resps := runLines(t, deps,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git_commit","arguments":{"message":"wip","paths":["a.go"]}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"git_commit","arguments":{"message":"  "}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"git_reset","arguments":{"to":"HEAD~1","mode":"soft"}}}`,
 	)
-	// Advertised alongside the two base tools.
+	// The git tools are advertised alongside the base tools.
 	names := map[string]bool{}
 	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	if !names["git_commit"] {
-		t.Fatalf("git_commit not advertised: %v", names)
+	for _, n := range []string{"git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick"} {
+		if !names[n] {
+			t.Errorf("%s not advertised: %v", n, names)
+		}
 	}
-	// A real call forwards message + paths and reports success.
-	if got.Message != "wip" || len(got.Paths) != 1 || got.Paths[0] != "a.go" {
-		t.Errorf("Commit received %+v, want message=wip paths=[a.go]", got)
+	// The blank-message commit is rejected BEFORE GitOp runs, so only the valid
+	// git_commit and git_reset reach the dep.
+	if len(calls) != 2 {
+		t.Fatalf("GitOp called %d times, want 2 (blank message rejected early): %+v", len(calls), calls)
+	}
+	if calls[0].Op != "commit" || calls[0].Message != "wip" || len(calls[0].Paths) != 1 || calls[0].Paths[0] != "a.go" {
+		t.Errorf("commit routed as %+v, want op=commit message=wip paths=[a.go]", calls[0])
+	}
+	if calls[1].Op != "reset" || calls[1].To != "HEAD~1" || calls[1].Mode != "soft" {
+		t.Errorf("git_reset routed as %+v, want op=reset to=HEAD~1 mode=soft", calls[1])
 	}
 	if resps[1]["result"].(map[string]any)["isError"] != false {
 		t.Errorf("successful commit should not be isError: %v", resps[1])
 	}
-	// A blank message is rejected before Commit runs.
-	got = CommitRequest{}
 	if resps[2]["result"].(map[string]any)["isError"] != true {
 		t.Errorf("blank message should be isError: %v", resps[2])
-	}
-	if got.Message != "" {
-		t.Errorf("blank message should not reach Commit, got %+v", got)
 	}
 }
 

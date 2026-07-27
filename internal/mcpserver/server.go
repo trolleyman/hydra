@@ -43,26 +43,58 @@ type Deps struct {
 	// review file the MR watcher writes; nil disables the review tools. See
 	// NON_LOCAL_INTEGRATION.md 3.5a.
 	GetReview func() *ReviewFile
-	// Commit stages and commits the head's changes onto its OWN branch, inside its
-	// worktree - never another branch or a path outside the worktree. It is the
-	// sanctioned commit path: raw `git commit` in the shell is gate-denied, so a
-	// commit can't accidentally land on the main repo or a sibling head's branch
-	// (the whole shared .git is writable in the sandbox). Nil disables git_commit.
-	Commit func(CommitRequest) CommitResult
+	// GitOp performs a git write-operation on the head's OWN branch, inside its
+	// worktree - never another branch or a path outside the worktree. It backs the
+	// git_* tools (commit / reset / revert / add / rebase / cherry-pick): raw git
+	// writes are gate-denied (and in readonly mode .git is read-only), so these are
+	// the sanctioned path - a write can't land on the main repo or a sibling head.
+	// Nil disables all the git_* tools.
+	GitOp func(GitOpRequest) GitOpResult
 }
 
-// CommitRequest is the input to the git_commit tool: a commit message plus
-// optional staging controls. Paths, when set, stage only those repo-relative
-// files; otherwise all changes (tracked + untracked) are staged.
-type CommitRequest struct {
-	Message string   `json:"message"`
-	Paths   []string `json:"paths,omitempty"`
-	Amend   bool     `json:"amend,omitempty"`
+// GitOpRequest is the union input to the git_* tools. Op selects the operation;
+// the remaining fields are op-specific (see git.RunGuardedOp for their semantics).
+type GitOpRequest struct {
+	Op string
+
+	// commit
+	Message string
+	Paths   []string
+	Amend   bool
+
+	// reset
+	Mode    string
+	To      string
+	Unstage []string
+	Confirm bool
+
+	// add
+	Add []GitAddSpec
+
+	// revert / cherry_pick
+	Commit string
+
+	// rebase
+	Base string
+	Plan []GitRebaseStep
 }
 
-// CommitResult is the outcome of a git_commit call: OK plus an agent-readable
-// summary (the new commit's hash/subject) or an error explanation.
-type CommitResult struct {
+// GitAddSpec stages a file, optionally restricted to new-file line ranges.
+type GitAddSpec struct {
+	Path   string   `json:"path"`
+	Ranges [][2]int `json:"ranges,omitempty"`
+}
+
+// GitRebaseStep is one step of a plan-based interactive rebase.
+type GitRebaseStep struct {
+	Commit  string `json:"commit"`
+	Action  string `json:"action"`
+	Message string `json:"message,omitempty"`
+}
+
+// GitOpResult is the outcome of a git_* call: OK plus an agent-readable summary
+// (e.g. the new commit's hash/subject) or an error explanation.
+type GitOpResult struct {
 	OK      bool
 	Message string
 }
@@ -193,20 +225,8 @@ func toolDefs(deps Deps) []map[string]any {
 			},
 		},
 	}
-	if deps.Commit != nil {
-		defs = append(defs, map[string]any{
-			"name":        "git_commit",
-			"description": "Commit your work onto YOUR branch, inside your worktree. This is the sanctioned way to commit: raw `git commit` in the shell is blocked, so a commit can never accidentally land on the main repo or another branch. By default it stages ALL your changes (tracked and untracked, like `git add -A`) then commits; pass `paths` to stage only specific files, or `amend` to amend your last commit. Read-only git (status/diff/log) and `git add` still work normally in the shell.",
-			"inputSchema": map[string]any{
-				"type":     "object",
-				"required": []string{"message"},
-				"properties": map[string]any{
-					"message": map[string]any{"type": "string", "description": "The commit message."},
-					"paths":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional: repo-relative paths to stage before committing. Omit to stage all changes."},
-					"amend":   map[string]any{"type": "boolean", "description": "Amend your previous commit instead of creating a new one."},
-				},
-			},
-		})
+	if deps.GitOp != nil {
+		defs = append(defs, gitToolDefs()...)
 	}
 	if deps.GetReview != nil {
 		defs = append(defs,
@@ -248,16 +268,15 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		approved, msg := deps.RequestAccess(args.Name)
 		return textResult(msg, !approved)
-	case "git_commit":
-		if deps.Commit == nil {
-			return textResult("git_commit is not available in this session.", true)
+	case "git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick":
+		if deps.GitOp == nil {
+			return textResult(p.Name+" is not available in this session.", true)
 		}
-		var args CommitRequest
-		_ = json.Unmarshal(p.Arguments, &args)
-		if strings.TrimSpace(args.Message) == "" {
-			return textResult("git_commit requires a non-empty \"message\".", true)
+		req, errMsg := parseGitOp(p.Name, p.Arguments)
+		if errMsg != "" {
+			return textResult(errMsg, true)
 		}
-		r := deps.Commit(args)
+		r := deps.GitOp(req)
 		return textResult(r.Message, !r.OK)
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)

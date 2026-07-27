@@ -277,20 +277,20 @@ func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
 }
 
-// GetCommitsDirFromProjectRoot returns the parent dir holding every head's
-// host-mediated commit channel (.hydra/local/commits). The daemon's commit
-// watcher scans it to find heads with pending commit requests.
-func GetCommitsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "commits")
+// GetGitopsRootDir returns the parent dir holding every head's host-mediated git
+// channel (.hydra/local/gitops). The daemon's gitops watcher scans it to find
+// heads with pending git-operation requests.
+func GetGitopsRootDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "gitops")
 }
 
-// GetCommitDirFromProjectRoot returns the per-head directory used for the
-// host-mediated commit round-trip (git_isolation readonly): the in-sandbox
-// git_commit tool writes a commit request here (the dir is made writable at its
-// real host path, like the approvals dir) and the daemon's commit watcher writes
-// back the result. Lives under .hydra/local/commits/<id>.
-func GetCommitDirFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetCommitsDirFromProjectRoot(projectRoot), id)
+// GetGitopsDir returns the per-head directory used for the host-mediated git
+// round-trip (git_isolation readonly): the in-sandbox git tools write a request
+// here (the dir is made writable at its real host path, like the approvals dir)
+// and the daemon's gitops watcher writes back the result. Lives under
+// .hydra/local/gitops/<id>.
+func GetGitopsDir(projectRoot, id string) string {
+	return filepath.Join(GetGitopsRootDir(projectRoot), id)
 }
 
 // WriteFileIfChanged writes content to path only when it differs from the existing file.

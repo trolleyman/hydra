@@ -10,9 +10,9 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/commitq"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/gitq"
 	"github.com/trolleyman/hydra/internal/mcpserver"
 )
 
@@ -45,7 +45,7 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	deps := mcpserver.Deps{
 		ListAvailable: availableMCPServers,
 		RequestAccess: func(name string) (bool, string) { return requestMCPAccess(agentType, name) },
-		Commit:        commitHeadChanges,
+		GitOp:         gitOpFromMCP,
 	}
 	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
 	// is seeded for every head; the file reports linked=false until published).
@@ -55,51 +55,69 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
 
-// commitPollInterval / commitTimeout bound the in-sandbox wait for a
-// host-mediated commit result (the watcher runs on a ~1s cadence).
+// gitOpPollInterval / gitOpTimeout bound the in-sandbox wait for a host-mediated
+// git-op result (the watcher runs on a ~1s cadence). Rebase/cherry-pick can run a
+// little long, so the timeout is generous.
 const (
-	commitPollInterval = 200 * time.Millisecond
-	commitTimeout      = 30 * time.Second
+	gitOpPollInterval = 200 * time.Millisecond
+	gitOpTimeout      = 60 * time.Second
 )
 
-// commitHeadChanges backs the git_commit MCP tool. It commits the head's changes
-// onto its own branch inside its worktree, using the head-context env
-// (HYDRA_WORKTREE / HYDRA_BRANCH). When HYDRA_COMMIT_DIR is set (git_isolation
-// readonly, where .git is read-only in the sandbox), it hands the commit to the
-// host daemon over the commitq file channel instead of running git itself.
-func commitHeadChanges(req mcpserver.CommitRequest) mcpserver.CommitResult {
-	if dir := os.Getenv("HYDRA_COMMIT_DIR"); dir != "" {
-		return commitViaDaemon(dir, req)
+// gitOpFromMCP backs the git_* MCP tools. It translates the tool's GitOpRequest
+// into a gitq.Request and runs it on the head's own branch, using the
+// head-context env (HYDRA_WORKTREE / HYDRA_BRANCH). When HYDRA_GITOPS_DIR is set
+// (git_isolation readonly, where .git is read-only in the sandbox), it hands the
+// op to the host daemon over the gitq file channel instead of running git itself.
+func gitOpFromMCP(req mcpserver.GitOpRequest) mcpserver.GitOpResult {
+	add := make([]gitq.AddSpec, len(req.Add))
+	for i, a := range req.Add {
+		add[i] = gitq.AddSpec{Path: a.Path, Ranges: a.Ranges}
 	}
-	return gitCommit(os.Getenv("HYDRA_WORKTREE"), os.Getenv("HYDRA_BRANCH"), req)
+	plan := make([]gitq.RebaseStep, len(req.Plan))
+	for i, s := range req.Plan {
+		plan[i] = gitq.RebaseStep{Commit: s.Commit, Action: s.Action, Message: s.Message}
+	}
+	res := runGitOp(gitq.Request{
+		Op:      gitq.Op(req.Op),
+		Message: req.Message, Paths: req.Paths, Amend: req.Amend,
+		Mode: req.Mode, To: req.To, Unstage: req.Unstage, Confirm: req.Confirm,
+		Add:    add,
+		Commit: req.Commit,
+		Base:   req.Base, Plan: plan,
+	})
+	return mcpserver.GitOpResult{OK: res.OK, Message: res.Message}
 }
 
-// gitCommit commits in-sandbox via the shared guardrail (git_isolation off).
-func gitCommit(worktree, branch string, req mcpserver.CommitRequest) mcpserver.CommitResult {
-	ok, msg := git.GuardedCommit(worktree, branch, req.Message, req.Paths, req.Amend)
-	return mcpserver.CommitResult{OK: ok, Message: msg}
+// runGitOp performs a git write-op on the head's own branch: in-sandbox via the
+// shared own-branch guard (git_isolation off), or host-mediated over the gitq
+// channel when HYDRA_GITOPS_DIR is set (readonly, where .git is read-only in the
+// sandbox and the daemon socket is unreachable - so it writes a request and polls
+// for the result, like the gate approval channel).
+func runGitOp(req gitq.Request) gitq.Result {
+	if dir := os.Getenv("HYDRA_GITOPS_DIR"); dir != "" {
+		return gitOpViaDaemon(dir, req)
+	}
+	ok, msg := git.RunGuardedOp(os.Getenv("HYDRA_WORKTREE"), os.Getenv("HYDRA_BRANCH"), req)
+	return gitq.Result{OK: ok, Message: msg}
 }
 
-// commitViaDaemon submits the commit to the daemon's commit watcher and blocks
-// for the result (the sandbox can't write refs, and can't reach the daemon
-// socket, so it uses the writable commitq dir + polling - like gate approvals).
-func commitViaDaemon(dir string, req mcpserver.CommitRequest) mcpserver.CommitResult {
-	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
-	if err := commitq.WriteRequest(dir, commitq.Request{
-		ReqID: reqid, Message: req.Message, Paths: req.Paths, Amend: req.Amend,
-		TS: time.Now().Format(time.RFC3339Nano),
-	}); err != nil {
-		return mcpserver.CommitResult{Message: "Failed to submit the commit to Hydra: " + err.Error()}
+// gitOpViaDaemon submits req to the daemon's gitops watcher and blocks for the
+// result over the writable gitq dir + polling.
+func gitOpViaDaemon(dir string, req gitq.Request) gitq.Result {
+	req.ReqID = strconv.FormatInt(time.Now().UnixNano(), 10)
+	req.TS = time.Now().Format(time.RFC3339Nano)
+	if err := gitq.WriteRequest(dir, req); err != nil {
+		return gitq.Result{Message: "Failed to submit the git operation to Hydra: " + err.Error()}
 	}
-	deadline := time.Now().Add(commitTimeout)
+	deadline := time.Now().Add(gitOpTimeout)
 	for {
-		if res, ok, err := commitq.ReadResult(dir, reqid); err == nil && ok {
-			return mcpserver.CommitResult{OK: res.OK, Message: res.Message}
+		if res, ok, err := gitq.ReadResult(dir, req.ReqID); err == nil && ok {
+			return res
 		}
 		if time.Now().After(deadline) {
-			return mcpserver.CommitResult{Message: "Timed out waiting for Hydra to perform the commit. Ask the user to check the daemon."}
+			return gitq.Result{Message: "Timed out waiting for Hydra to perform the git operation. Ask the user to check the daemon."}
 		}
-		time.Sleep(commitPollInterval)
+		time.Sleep(gitOpPollInterval)
 	}
 }
 
