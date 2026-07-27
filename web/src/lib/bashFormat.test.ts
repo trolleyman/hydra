@@ -17,6 +17,30 @@ describe('Codex bash display', () => {
   })
 
   it.each([
+    ['cd . && bun test', 'bun test'],
+    ['cd ./ && bun test', 'bun test'],
+    ["cd '.' && bun test", 'bun test'],
+    ['cd "." ; bun test', 'bun test'],
+    ['cd .\nbun test', 'bun test'],
+    ['cd . && cd . && bun test', 'bun test'],
+  ])('drops the no-op cd in %j', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it('lets a dropped no-op cd fall back to the real working directory', () => {
+    expect(formatBashForDisplay('cd . && bun test', 'web')).toBe('cd web\nbun test')
+  })
+
+  it.each([
+    ['cd .', 'cd .'],
+    ['cd ./', 'cd ./'],
+    ['cd .config && ls', 'cd .config &&\nls'],
+    ["echo 'cd . && x'", "echo 'cd . && x'"],
+  ])('keeps %j as written', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it.each([
     ['bash -lc echo hi', 'echo hi'],
     ["bash -lc 'echo hi'", 'echo hi'],
     ['bash -lc "echo hi"', 'echo hi'],

@@ -229,12 +229,28 @@ export function parseHostRunScript(command: string): string | null {
   return parseOneShellWord(rest) ?? rest
 }
 
+// dropNoopCd removes a leading `cd .` (or `cd ./`, quoted or not) together with
+// the `&&` / `;` / newline that chains it to the real command. Changing to `.`
+// is a no-op, so the prefix is pure noise - and worse, it makes the script look
+// like it already has a `cd`, which suppresses the real working-directory
+// preamble below. A command that is *only* `cd .` is left as written; there
+// would be nothing left to show. Display-only (chat, not the approval card)
+// since it removes characters.
+export function dropNoopCd(cmd: string): string {
+  let out = cmd
+  for (;;) {
+    const next = out.replace(/^[ \t]*cd[ \t]+(['"]?)\.\/?\1[ \t]*(?:&&|;|\n)[ \t\n]*/, '')
+    if (next === out || !next.trim()) return out
+    out = next
+  }
+}
+
 function quoteShellPath(path: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
 
 export function formatBashForDisplay(command: string, cwd?: string): string {
-  const script = dropRedundantSemicolons(splitBashChains(stripLineContinuations(unwrapBashLoginCommand(command))))
+  const script = dropRedundantSemicolons(splitBashChains(dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command)))))
   if (!cwd || cwd === '.' || /^\s*cd(?:\s|$)/.test(script)) return script
   return `cd ${quoteShellPath(cwd)}\n${script}`
 }
