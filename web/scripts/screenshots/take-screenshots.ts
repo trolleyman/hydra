@@ -898,9 +898,10 @@ try {
       // 3f. The sandbox escape hatch: the agent asks to run a command on the HOST,
       // outside its sandbox (`hydra host-run`). Loud red HOST identity, the full
       // command shown in a red mono box - chain-split (a newline per top-level
-      // ;/&&) and bash syntax-highlighted for auditability - and one-shot only (no
-      // Always allow), the most dangerous ask there is. The target is a chained
-      // command so the shot exercises the splitting + highlighting.
+      // ;/&&), line-numbered and bash syntax-highlighted for auditability - and
+      // one-shot only (no Always allow), the most dangerous ask there is. The
+      // target is a chained command so the shot exercises the splitting, the
+      // gutter and the highlighting.
       {
         name: 'agent-approvals-host-command',
         path: '/settings',

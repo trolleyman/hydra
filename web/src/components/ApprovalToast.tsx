@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Fragment } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X, TriangleAlert } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
@@ -6,7 +6,9 @@ import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { Tooltip } from './Tooltip'
 import hljs from '../lib/hljs'
+import { highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
+import { useChatCodeLinesStore } from '../lib/chatPrefs'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
 // tool calls). It names exactly what's being requested - a whole MCP server, a
@@ -165,7 +167,7 @@ const JsonPreview: React.FC<{ raw: string }> = ({ raw }) => {
 const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   if (data.kind === 'mcp_tool') {
     return (
-      <pre className="max-h-40 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+      <pre className="max-h-56 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
         {data.argsPreview ? <JsonPreview raw={data.argsPreview} /> : <span className="text-gray-400 dark:text-gray-500">(no arguments)</span>}
       </pre>
     )
@@ -190,13 +192,44 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
     // moved to the end of a line and the whitespace before it - `cmd;` + newline
     // is exactly `cmd` + newline in bash, so nothing can hide behind one. Every
     // other byte of the command is still shown, in order.
-    const boxCls = 'max-h-56 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[10.5px] leading-[1.5] whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
     const split = dropRedundantSemicolons(splitBashChains(data.target))
+    if (split.includes('\n')) return <CommandLines code={split} />
     const html = highlightBash(split)
-    if (html != null) return <pre className={boxCls} dangerouslySetInnerHTML={{ __html: html }} />
-    return <pre className={boxCls}>{split}</pre>
+    if (html != null) return <pre className={COMMAND_BOX} dangerouslySetInnerHTML={{ __html: html }} />
+    return <pre className={COMMAND_BOX}>{split}</pre>
   }
   return null
+}
+
+const COMMAND_BOX =
+  'max-h-56 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[10.5px] leading-[1.5] whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
+
+// CommandLines renders a multi-step command with a 1..N gutter. These boxes wrap
+// rather than scroll sideways, so without the numbers a long line that wraps
+// reads as another step of the script - exactly the thing you are being asked to
+// vet. Follows the same "Code line numbers" preference as the chat transcript.
+const CommandLines: React.FC<{ code: string }> = ({ code }) => {
+  const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
+  const lines = code.split('\n')
+  const html = highlightLines(code, 'bash')
+  if (!lineNumbers) {
+    return <pre className={COMMAND_BOX} dangerouslySetInnerHTML={{ __html: html.join('\n') }} />
+  }
+  return (
+    <div className={`${COMMAND_BOX} whitespace-normal`}>
+      <div className="grid grid-cols-[auto_1fr]">
+        {lines.map((_, i) => (
+          <Fragment key={i}>
+            {/* min-h keeps a blank line one row tall. */}
+            <span className="min-h-[1.5em] select-none pr-2 text-right text-red-400/80 dark:text-red-300/40 border-r border-red-200/80 dark:border-red-500/20">
+              {i + 1}
+            </span>
+            <span className="min-w-0 whitespace-pre-wrap break-all pl-2" dangerouslySetInnerHTML={{ __html: html[i] ?? '' }} />
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // highlightBash returns highlight.js bash token HTML for a command, or null when
@@ -246,11 +279,15 @@ export const ApprovalCard: React.FC<{
   const agentTarget = data.agentId && data.projectId
     ? { projectId: data.projectId, agentId: data.agentId }
     : undefined
+  // Wider than a plain toast (which caps at 22rem): an approval is read, not
+  // glanced at - a command, a URL or a JSON argument list needs the room, and
+  // fewer wrapped lines is fewer places for something nasty to hide. Clamped to
+  // the viewport so it still fits a phone.
   return (
     <div
       role="alertdialog"
       aria-label={title}
-      className="relative w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
+      className="relative w-[28rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
     >
       {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">
