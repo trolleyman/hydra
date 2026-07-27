@@ -61,6 +61,15 @@ interface AgentState {
   // background merge completing (an armed agent that vanishes on a same-project
   // refresh) can be detected and toasted; omit it to skip that detection.
   setAgents: (agents: AgentResponse[], projectId?: string | null) => void
+  // Paint a project's agents from the localStorage cache while its real list
+  // request is in flight (see lib/agentCache.ts). Unlike setAgents this leaves
+  // `loading` true - callers use that flag to mean "the server's list for this
+  // project has landed", and acting on a cached list as if it were authoritative
+  // would, for instance, make the agent page redirect off a live agent that
+  // simply isn't in the cache yet. The list is tagged with a null project id so
+  // the fetch that follows reads as a project switch, not a same-project refresh
+  // (which would toast a "background merge" for anything the cache still holds).
+  seedAgents: (agents: AgentResponse[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   addAgent: (agent: AgentResponse) => void
@@ -212,6 +221,7 @@ export const useAgentStore = create<AgentState>((set) => ({
       error: null,
     }
   }),
+  seedAgents: (agents) => set({ agents, agentsProjectId: null, loading: true, error: null }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
   addAgent: (agent) => set((state) => ({

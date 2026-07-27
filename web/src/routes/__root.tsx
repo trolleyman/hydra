@@ -49,8 +49,15 @@ import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { pruneReviewDrafts } from '../lib/reviewDrafts'
+import { pruneAgentCaches } from '../lib/agentCache'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
-import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
+import {
+  loadProjectView,
+  parseProjectView,
+  saveProjectView,
+  splitProjectHref,
+  type ProjectViewRoute,
+} from '../lib/projectView'
 
 // Server uptime, rendered as "up 2 hours" (the exact spawn time is in the
 // tooltip). Mirrors a process "uptime" rather than the old "Spawned X ago".
@@ -193,32 +200,10 @@ const AgentSidebarList = memo(function AgentSidebarList({
 
 // ── Root Layout ────────────────────────────────────────────────────────────────
 
-// Derive the current view from the active route so it can be persisted as the
-// project's last-open view. Agent routes set agentId; the repository browser is
-// recognised by its path (and its splat preserved so a deep file path restores);
-// anything else is the bare project page.
-function currentViewFromRoute(projectId: string, agentId: string | undefined, pathname: string): ProjectView {
-  if (agentId != null) return { kind: 'agent', agentId }
-  const repoBase = `/project/${projectId}/repository`
-  if (pathname === repoBase || pathname.startsWith(`${repoBase}/`)) {
-    const path = pathname.startsWith(`${repoBase}/`)
-      ? decodeURIComponent(pathname.slice(repoBase.length + 1))
-      : ''
-    return { kind: 'repository', path }
-  }
-  return { kind: 'project' }
-}
-
 function RootLayout() {
   // Guards the one-time redirect from the bare root path to the selected
   // project (see effect below).
   const didAutoNavigate = useRef(false)
-  // When restoring a project view lands on the bare project page *because* the
-  // remembered agent had unread changes (see restoreProjectView), this holds
-  // that project id for one persist cycle so the deflection doesn't overwrite
-  // the remembered agent with `{ kind: 'project' }`. The memory is kept so a
-  // later switch back restores the agent once it's been read.
-  const deflectedUnreadProject = useRef<string | null>(null)
   const [restarting, setRestarting] = useState(false)
   // Sidebar visibility: the persisted desktop collapse preference and the
   // transient mobile panel state are independent flags (see lib/sidebar.ts), so
@@ -296,55 +281,48 @@ function RootLayout() {
   // silently dismiss agents the user hasn't actually looked at.
   const pageActive = usePageActive()
 
-  // Navigate to a project's remembered view (agent / repository / bare project).
-  // Used by the boot restore and the project-switch dropdown. A remembered agent
-  // that no longer exists is corrected to the project page by the agent page
-  // itself (which redirects + resets the memory once a getAgent lookup confirms
-  // it's truly gone), so it's safe to route to it optimistically here without
-  // first waiting for the agent list.
-  const navigateToProjectView = useCallback((projectId: string, view: ProjectView) => {
+  // Navigate to a project's remembered view (agent / repository / settings /
+  // bare project). Used by the boot restore and the project-switch dropdown.
+  //
+  // Deliberately unconditional: no lookup runs first, so the switch is instant.
+  // That means a remembered agent is opened even if it has unread changes (which
+  // opening it clears - the point of a switch is to get back to what you were
+  // doing, not to preserve a dot) and even if it no longer exists, in which case
+  // the agent page corrects itself once its own getAgent confirms it is gone.
+  const navigateToProjectView = useCallback((projectId: string, view: ProjectViewRoute) => {
     if (view.kind === 'agent') {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: view.agentId } })
-    } else if (view.kind === 'repository' && view.path) {
-      navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: view.path } })
+    } else if (view.kind === 'settings') {
+      navigate({ to: '/project/$projectId/settings', params: { projectId } })
     } else if (view.kind === 'repository') {
-      navigate({ to: '/project/$projectId/repository', params: { projectId } })
+      // The compare-diff selection and its line anchor ride the search params /
+      // hash, so a remembered diff restores on the same file and line.
+      const search = { compare: view.compare, dfile: view.dfile }
+      if (view.path) {
+        navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: view.path }, search, hash: view.hash })
+      } else {
+        navigate({ to: '/project/$projectId/repository', params: { projectId }, search, hash: view.hash })
+      }
     } else {
       navigate({ to: '/project/$projectId', params: { projectId } })
     }
   }, [navigate])
 
-  // Restore a project's remembered view when switching into it - but never
-  // auto-open a remembered agent that currently has unread changes. Opening an
-  // agent clears its unread dot (the auto-clear effect below), so silently
-  // restoring an unread agent on a project switch would "read" a notification
-  // the user never looked at. In that case land on the bare project page
-  // instead; the agent stays in the sidebar (dot lit) for the user to open
-  // deliberately, and its remembered view is preserved (deflectedUnreadProject)
-  // so a later switch back restores it once read. A remembered agent that's
-  // already read - or whose lookup fails (gone / offline) - is opened as before;
-  // the agent page self-corrects a truly-dead one.
-  const restoreProjectView = useCallback(async (projectId: string, view: ProjectView) => {
-    if (view.kind === 'agent') {
-      try {
-        const agent = await api.default.getAgent(projectId, view.agentId)
-        if (agent.has_unread_changes) {
-          deflectedUnreadProject.current = projectId
-          navigate({ to: '/project/$projectId', params: { projectId } })
-          return
-        }
-      } catch { /* lookup failed - fall through and open optimistically */ }
-    }
-    navigateToProjectView(projectId, view)
-  }, [navigate, navigateToProjectView])
+  // Restore a project's remembered view when switching into it.
+  const restoreProjectView = useCallback((projectId: string, stored: string) => {
+    navigateToProjectView(projectId, parseProjectView(stored))
+  }, [navigateToProjectView])
 
   // Switch the active project: record the selection and route to its remembered
-  // view (or stay on settings if that's the current page). Shared by the header
-  // dropdown and the Ctrl/Cmd+` keyboard shortcut so both behave identically.
+  // view. Shared by the header dropdown and the Ctrl/Cmd+` keyboard shortcut so
+  // both behave identically. The one exception is the *global* settings page,
+  // which belongs to no project and so has no memory to restore - picking a
+  // project there opens that project's settings, as it always has. Project
+  // settings pages need no such special case any more: they are remembered like
+  // any other view, so a project you left on its settings page comes back to it.
   const selectProject = useCallback((id: string) => {
     setSelectedProjectId(id)
-    const isOnSettings = window.location.pathname.endsWith('/settings')
-    if (isOnSettings) {
+    if (window.location.pathname === '/settings') {
       navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
       return
     }
@@ -542,10 +520,13 @@ function RootLayout() {
   }, [selectedProjectId, projects, restoreProjectView, navigate])
 
   // Persist the current view per project so switching back (or reloading)
-  // restores it. Keyed off the actual route params (not currentProjectId, which
-  // falls back to the stored project on "/" and would let this overwrite the
-  // memory before the boot restore above runs). Single writer for the three view
-  // kinds: agent, repository (path included), and the bare project page.
+  // restores it. Both the project id and the suffix to remember come from the
+  // one location string (splitProjectHref): route params lag the location by a
+  // render mid-navigation, and pairing the *old* project id with the *new*
+  // pathname is what used to wipe the memory of the project being left. A
+  // non-project location ("/", "/settings") has no memory and is left alone -
+  // in particular the fall-back-to-stored-project id is never used here, so this
+  // cannot overwrite a project's memory before the boot restore above runs.
   //
   // Correcting a remembered-but-dead agent is deliberately NOT done here. A
   // killed/merged head is now a valid read-only *archived* page, so it must not
@@ -555,33 +536,19 @@ function RootLayout() {
   // itself - it does a one-shot getAgent and, only if truly missing, redirects
   // off the dead agent and resets this memory to the project page.
   useEffect(() => {
-    const projectId = routeParams.projectId
-    if (!projectId) return // not on a project route ("/", "/settings") - leave storage alone
-    const agentId = routeParams.agentId
-    // The deflection from restoreProjectView lands on the bare project page,
-    // but that isn't a deliberate navigation - skip it so the remembered agent
-    // survives (one cycle only, then resume normal persistence). If the user
-    // has already moved on to an agent, just drop the stale marker and persist
-    // as usual.
-    if (deflectedUnreadProject.current === projectId) {
-      deflectedUnreadProject.current = null
-      if (agentId == null) return
-    }
-    if (agentId == null) {
-      // Repository browser or bare project page - persisted verbatim.
-      saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
-      return
-    }
-    saveProjectView(projectId, { kind: 'agent', agentId })
-  }, [routeParams.projectId, routeParams.agentId, location.pathname])
+    const here = splitProjectHref(location.href)
+    if (!here) return // not on a project route ("/", "/settings") - leave storage alone
+    saveProjectView(here.projectId, here.view)
+  }, [location.href])
 
-  // Drop expired per-artifact and per-agent-view UI prefs once on boot, plus
-  // the retired split-layout opt-out key (the toggle is gone; split is always
-  // on).
+  // Drop expired per-artifact, per-agent-view and cached-agent-list entries once
+  // on boot, plus the retired split-layout opt-out key (the toggle is gone;
+  // split is always on).
   useEffect(() => {
     pruneArtifactPrefs()
     pruneAgentViewPrefs()
     pruneReviewDrafts()
+    pruneAgentCaches()
     try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
   }, [])
 
