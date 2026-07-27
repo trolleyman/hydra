@@ -41,6 +41,23 @@ const SKIP_TAGS = new Set([
   'BUTTON', 'SELECT', 'OPTION', 'TEXTAREA', 'VIDEO', 'AUDIO', 'CANVAS',
 ])
 
+// SOURCES maps a rendered [data-md-root] element to the markdown it was
+// rendered from. When a selection covers ALL of a root's text, that source is
+// copied verbatim instead of re-serializing the DOM - so a whole message comes
+// back byte-for-byte as the agent (or the user) wrote it, keeping the details a
+// round-trip cannot recover: '*' vs '-' bullets, setext headings, reference
+// links, the original table alignment and column padding, hard-wrap positions.
+// A WeakMap rather than a data-* attribute so a long transcript doesn't hold a
+// second copy of every message in the DOM.
+const SOURCES = new WeakMap<Element, string>()
+
+// setMarkdownSource is called by the Markdown component for its root element;
+// passing null (on unmount) forgets it.
+export function setMarkdownSource(el: Element, text: string | null): void {
+  if (text == null) SOURCES.delete(el)
+  else SOURCES.set(el, text)
+}
+
 interface Ctx {
   range: Range
   // Inside a [data-md-root] subtree, so emit markdown syntax rather than plain text.
@@ -74,6 +91,40 @@ function intersectsRange(range: Range, node: Node): boolean {
     range.compareBoundaryPoints(Range.END_TO_START, r) < 0 &&
     range.compareBoundaryPoints(Range.START_TO_END, r) > 0
   )
+}
+
+// wholeSource returns the original markdown for a rendered root when the
+// selection covers all of its text, and '' otherwise.
+//
+// "Covers all of its text" is measured from the first to the last non-blank
+// character rather than from the element's boundaries: react-markdown leaves
+// whitespace-only text nodes between block elements, and a drag (or a
+// triple-click) that visually spans the whole message usually stops at the last
+// visible character, which would fail a strict element-containment test.
+function wholeSource(el: Element, range: Range): string {
+  const text = SOURCES.get(el)
+  if (!text) return ''
+  const doc = el.ownerDocument
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let first: Text | null = null
+  let last: Text | null = null
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!/\S/.test((n as Text).data)) continue
+    if (!first) first = n as Text
+    last = n as Text
+  }
+  if (!first || !last) return ''
+  const r = doc.createRange()
+  try {
+    r.setStart(first, first.data.search(/\S/))
+    r.setEnd(last, last.data.length - (/\s*$/.exec(last.data)?.[0].length ?? 0))
+  } catch {
+    return ''
+  }
+  const covered =
+    range.compareBoundaryPoints(Range.START_TO_START, r) <= 0 &&
+    range.compareBoundaryPoints(Range.END_TO_END, r) >= 0
+  return covered ? text.trim() : ''
 }
 
 // isUnselectable skips what the browser's own copy would skip: `select-none`
@@ -236,8 +287,11 @@ function convert(node: Node, ctx: Ctx): string {
 
   // Entering rendered markdown: the root is itself a block boundary, so two
   // messages selected together come out separated by a blank line even though
-  // the chrome between them is joined with single newlines.
+  // the chrome between them is joined with single newlines. A root the
+  // selection covers entirely is copied from its original source.
   if (!ctx.md && el.hasAttribute('data-md-root')) {
+    const source = wholeSource(el, ctx.range)
+    if (source) return '\n\n' + source + '\n\n'
     const inner = children(el, { ...ctx, md: true })
     const body = inner.replace(/^\s+|\s+$/g, '')
     return body ? '\n\n' + body + '\n\n' : ''
@@ -322,12 +376,21 @@ export function rangeToMarkdown(range: Range): string {
   const ctx: Ctx = { range, md: false, pre: false, tight: false }
   // Start from the common ancestor so ancestor context (list type, code block,
   // markdown root) is known, and let the intersection test prune the rest.
+  // Walking up also catches the selection-within-one-message case: whichever of
+  // the two markers is hit first wins, so a selection inside a code block stays
+  // raw code even when it happens to be that message's only content.
   for (let n: Node | null = root; n; n = n.parentNode) {
-    if (n.nodeType === Node.ELEMENT_NODE && (n as Element).hasAttribute('data-md-root')) {
+    if (n.nodeType !== Node.ELEMENT_NODE) continue
+    const el = n as Element
+    if (el.hasAttribute('data-md-root')) {
+      // The whole message is selected - hand back exactly what it was rendered
+      // from rather than a re-serialization of it.
+      const source = wholeSource(el, range)
+      if (source) return source
       ctx.md = true
       break
     }
-    if (n.nodeType === Node.ELEMENT_NODE && (n as Element).hasAttribute('data-md-code-block')) {
+    if (el.hasAttribute('data-md-code-block')) {
       ctx.md = true
       ctx.pre = true
       break

@@ -79,8 +79,11 @@ describe('selectionToMarkdown', () => {
   })
 
   it('widens the fence when the code contains backticks', () => {
-    const out = copyAll('```\na ``` b\nsecond line\n```')
-    expect(out).toBe('````\na ``` b\nsecond line\n````')
+    // Not a whole-message selection (that would copy the source verbatim) -
+    // a partial drag from the intro through the end of the block.
+    const { container } = render(<Markdown text={'Intro line\n\n```\na ``` b\nsecond line\n```'} />)
+    const out = copyBetween(container, { text: 'Intro', offset: 6 }, { text: 'second line', offset: 11 })
+    expect(out).toBe('line\n\n````\na ``` b\nsecond line\n````')
   })
 
   it('restores a GFM table', () => {
@@ -158,6 +161,76 @@ describe('selectionToMarkdown', () => {
     const range = document.createRange()
     range.selectNodeContents(container)
     expect(selectionToMarkdown(sel(range))).toBe('visible text')
+  })
+
+  // A whole-message selection short-circuits the DOM walk and copies the source
+  // the message was rendered from, so nothing normalises away.
+  describe('whole-message selection', () => {
+    // Source whose rendering the serializer would faithfully round-trip but not
+    // character-for-character: '*' bullets, a setext heading, a reference link,
+    // padded table columns, a hard-wrapped paragraph.
+    const source = [
+      'Title',
+      '=====',
+      '',
+      'A paragraph hard-wrapped',
+      'across two source lines.',
+      '',
+      '* first',
+      '* second',
+      '',
+      'See [the docs][d] for more.',
+      '',
+      '| col | other |',
+      '|:----|------:|',
+      '| 1   |     2 |',
+      '',
+      '[d]: https://example.com/docs',
+    ].join('\n')
+
+    it('copies the original source verbatim when the whole root is selected', () => {
+      const { container } = render(<Markdown text={source} variant="doc" />)
+      const range = document.createRange()
+      range.selectNodeContents(container)
+      // Including the reference definition, which renders to nothing but which
+      // the copied link would be broken without.
+      expect(selectionToMarkdown(sel(range))).toBe(source.trim())
+    })
+
+    it('takes the verbatim path from inside the message too (triple-click)', () => {
+      const { container } = render(<Markdown text={'a **b** c'} />)
+      const p = container.querySelector('p')!
+      const range = document.createRange()
+      range.selectNodeContents(p)
+      expect(selectionToMarkdown(sel(range))).toBe('a **b** c')
+    })
+
+    it('falls back to serializing when the selection stops short', () => {
+      const { container } = render(<Markdown text={'* first\n* second'} />)
+      // Everything except the last character of the last item.
+      const out = copyBetween(container, { text: 'first', offset: 0 }, { text: 'second', offset: 5 })
+      expect(out).toBe('- first\n- secon')
+    })
+
+    it('copies each fully selected message from its own source', () => {
+      const { container } = render(
+        <div>
+          <div><Markdown text={'* one'} /></div>
+          <div><Markdown text={'* two'} /></div>
+        </div>,
+      )
+      const range = document.createRange()
+      range.selectNodeContents(container)
+      expect(selectionToMarkdown(sel(range))).toBe('* one\n\n* two')
+    })
+
+    it('still copies raw code for a code block that is the whole message', () => {
+      const { container } = render(<Markdown text={'```js\nconst a = 1\n```'} />)
+      const code = container.querySelector('[data-md-code-block]')!
+      const range = document.createRange()
+      range.selectNodeContents(code)
+      expect(selectionToMarkdown(sel(range))).toBe('const a = 1')
+    })
   })
 
   it('returns nothing for an empty selection', () => {

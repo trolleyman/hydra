@@ -59,7 +59,14 @@ and `web/src/DiffViewer.tsx`):
   lists), blockquotes, fenced blocks with their language, and GFM tables.
   `MarkdownRenderer` marks the surfaces it owns with `data-md-root` /
   `data-md-code-block` + `data-md-lang`; everything else in the transcript (tool
-  cards, diffs) is copied as plain text. It deliberately mirrors what the browser
+  cards, diffs) is copied as plain text. When a selection covers *all* of a
+  root's text (a whole message, or every message under a select-all) the walk is
+  skipped entirely and the message's own source is copied verbatim - the
+  renderer registers it in a `WeakMap` (`setMarkdownSource`, keyed by the root
+  element, not a `data-` attribute, so a long transcript doesn't hold a second
+  copy of every message). That keeps what a round-trip cannot recover: `*` vs
+  `-` bullets, setext headings, reference-link definitions, table alignment and
+  column padding, hard-wrap positions. It deliberately mirrors what the browser
   itself would leave out - `user-select: none` subtrees and control labels
   (`<button>`), which a drag can't select in the first place - so taking over the
   copy event doesn't start pulling chrome into the clipboard. A selection that
