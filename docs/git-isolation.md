@@ -71,38 +71,63 @@ Bind the **whole** common dir read-only; keep only the worktree writable. Effect
   operations (writable) and `git add -A` picks up the deletions/renames. So the
   common loop - edit files, commit everything - works out of the box.
 
-The casualties are in-sandbox operations that legitimately write `.git`: `git add -p`
-(hunk staging), `stash`, and history-editing (`reset --soft`, squash, `rebase -i`,
-`--fixup`). These are *advanced* ops; add host-mediated tools for them lazily, only
-when a real workflow needs one. Setup-time `.git` writers (husky, git-lfs,
-submodules) are handled separately - see [the long tail](#the-readonly-long-tail-husky--git-lfs--submodules).
+History and staging operations that write `.git` are provided as host-mediated
+**git tools** (below), so the common loop plus reset/revert/rebase/partial-staging
+all work. The remaining casualties are setup-time `.git` writers (husky, git-lfs,
+submodules) - handled separately, see
+[the long tail](#the-readonly-long-tail-husky--git-lfs--submodules).
 
-## Host-mediated commit path (`readonly`)
+## Host-mediated git path (`readonly`)
 
-When `.git` is read-only, an in-sandbox `git commit` fails writing the object/ref, so
-the commit must run on the host. The sandbox cannot reach the daemon socket, so it
-uses the same **file-channel** the gate approval flow uses (a writable per-head
-request dir + polling), not the socket.
+When `.git` is read-only, any git write (commit, reset, rebase, ...) must run on the
+host. The sandbox cannot reach the daemon socket, so it uses the same **file-channel**
+the gate approval flow uses (a writable per-head request dir + polling), not the socket.
 
-- **Channel dir:** `paths.GetCommitDirFromProjectRoot(projectRoot, id)` ->
-  `.hydra/local/commits/<id>`, bound writable into the sandbox and pointed at by
-  `HYDRA_COMMIT_DIR`.
-- **In-sandbox side** (`mcp__hydra__git_commit`, `internal/cli/mcp.go`): when
-  `HYDRA_COMMIT_DIR` is set (i.e. `readonly`), the tool writes a request file
-  `<reqid>.req.json` (`{message, paths, amend}`) and polls for `<reqid>.result.json`
-  instead of running git itself. When it is unset (`off`), it commits in-sandbox as
-  today.
-- **Host side** (`internal/http/commit_watcher.go`, modelled on
-  `review_watcher.go`): a ticker loop iterates heads across all projects, and for
-  each pending request resolves the head's worktree + branch, re-validates the
-  guardrails host-side (`git.GuardedCommit`: the worktree is on the head's own
-  `hydra/<id>` branch), runs `git -C <worktree> add ... && git commit ...` with the
-  real (writable) `.git`, and writes back `<reqid>.result.json`. Registered via
-  `go server.RunCommitWatcher(ctx, roots)` in `internal/cli/runtime.go`.
+- **Channel** (`internal/gitq`): `paths.GetGitopsDir(projectRoot, id)` ->
+  `.hydra/local/gitops/<id>`, bound writable into the sandbox and pointed at by
+  `HYDRA_GITOPS_DIR`. Each request is a `gitq.Request` with an `Op` tag
+  (`commit`/`reset`/`revert`/`add`/`rebase`/`cherry_pick`/...) plus op-specific
+  fields, one `<reqid>.req.json` / `<reqid>.result.json` pair.
+- **In-sandbox side** (`internal/cli/mcp.go`): the `git_*` tools build a
+  `gitq.Request`; when `HYDRA_GITOPS_DIR` is set (`readonly`) they write it to the
+  channel and poll for the result, otherwise (`off`) they run it in-process via
+  `git.RunGuardedOp`.
+- **Host side** (`internal/http/gitops_watcher.go`, `RunGitopsWatcher`): a ~1s ticker
+  iterates heads across projects and dispatches each pending request through
+  `git.RunGuardedOp(worktree, hydra/<id>, req)` against the real writable `.git`,
+  writing back the result. Registered in `internal/cli/runtime.go`.
 
-The own-branch-only / inside-worktree guardrails run in the same `git.GuardedCommit`
-helper whether the commit is in-sandbox (`off`) or host-side (`readonly`) - same
-checks, trusted location.
+**Same guard, every op, both paths.** `git.RunGuardedOp` fans out to a `Guarded*`
+helper per op (`internal/git/guarded_ops.go`), and each re-checks that HEAD is the
+head's own `hydra/<id>` branch (the `GuardedCommit` check) before touching git - so a
+sandboxed agent can never rewrite `main` or a sibling through these tools, whether
+in-sandbox (`off`) or host-mediated (`readonly`).
+
+### The git tools
+
+Exposed on the `hydra` MCP server (Claude-only), advertised whenever the git path is
+wired. Reads (`status`/`diff`/`log`/`show`) still run in the shell.
+
+- **`git_commit`** - stage (`add -A` or `paths`) + commit, or `amend`.
+- **`git_add`** - stage whole files, or specific new-file line ranges (a filtered
+  `-U0` patch applied with `git apply --cached`), for splitting one file across commits.
+- **`git_reset`** - move HEAD (`soft`/`mixed`/`hard`; `hard` needs `confirm`) or
+  unstage paths. The uncommit primitive.
+- **`git_revert`** / **`git_cherry_pick`** - new commit; abort on conflict.
+- **`git_rebase`** - plan-based non-interactive history edit (`pick`/`reword`/`squash`/
+  `fixup`/`drop`, translated to a todo + `exec git commit --amend`). Leaves the rebase
+  in progress on conflict; **`git_rebase_continue`** / **`git_rebase_abort`** drive it
+  from there (they validate the in-progress rebase's `head-name` is the head's branch,
+  since HEAD is detached mid-rebase).
+
+### Readonly gate redirect
+
+In `readonly`, a raw `git reset`/`add`/`revert`/`rebase`/`cherry-pick`/`commit` would
+fail at the OS with a cryptic read-only-filesystem error. The gate (seeded with
+`HostMediatedGit`, from `gitIso.HostMediatedCommit`) instead **denies those
+subcommands with a message pointing at the matching `mcp__hydra__git_*` tool**. This
+is UX, not a boundary - it's the same porous string match as the commit gate, but the
+bypasses just hit the OS wall (readonly is the boundary).
 
 ## The readonly long tail: husky / git-lfs / submodules
 
@@ -205,18 +230,24 @@ everything Hydra does internally is untouched. (The pre-existing `origin/hydra/*
 remote-tracking refs are fine for the same reason - the `origin/` prefix avoids the
 collision.)
 
+## Built surface
+
+- **Settings selector:** an off/readonly control in project Settings (Sandbox
+  Policy card, under Network Egress) for the per-agent config default, with an
+  explanation tooltip. `SpawnForm.tsx`'s `SegmentedControl`.
+- **Header indicator:** a lock badge to the right of the network-sandbox shield on
+  the agent page (`AgentDetail.tsx` `GitIsolationBadge`), shown for `readonly` heads
+  with a card tooltip. The effective mode is on the agent API response
+  (`heads.EffectiveGitIsolation`).
+- **Git tools + readonly gate redirect:** see
+  [Host-mediated git path](#host-mediated-git-path-readonly).
+
 ## Open questions / not yet built
 
 - **Track affordance:** a "Track branch" button on the agent page that ensures the
   `agents` remote + refspec exist and copies `git checkout -t agents/<id>` for the
   head in view, so nobody has to remember the incantation. A copy button also hides
   the remote name, which is why the branch-split below isn't worth its cost.
-- **Settings selector + explanation:** a git-isolation control (off/readonly) in
-  project Settings for the config default, alongside the network-mode selector, with
-  a one-line explanation. Today the default is only settable via `config.toml`.
-- **Header indicator:** a git-isolation indicator to the right of the network-sandbox
-  shield in the agent header, matching the "egress locked" affordance - a small badge
-  + tooltip so a `readonly` head is visible at rest.
 - **Branch-split alternative (considered, not preferred):** move the worktree onto
   `hydra-internal/<id>` and leave `hydra/<id>` as a plain, non-worktree-locked branch
   the user checks out directly - optionally with `branch.hydra/<id>.remote = .` and
