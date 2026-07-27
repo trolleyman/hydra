@@ -2074,6 +2074,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => { writeLocal(StorageKeys.diffArtifactView, artifactView) }, [artifactView])
   useEffect(() => { writeLocal(StorageKeys.diffArtifactHighlight, String(artifactHighlight)) }, [artifactHighlight])
 
+  // Deep-links each diff file's header to the repository browser at the agent's
+  // branch - the same target the tests panel builds (see TestsPanel's
+  // onOpenInRepo). Undefined (button hidden) when there's no ref to browse.
+  const openInRepo = useMemo(() => {
+    const ref = agent.branch_name
+    if (!ref || !projectId) return undefined
+    return (path: string) => linkOptions({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: `${ref}/${path}` },
+    })
+  }, [projectId, agent.branch_name])
+
   // DiffViewer is remounted on every agent switch (the route keys the whole
   // AgentDetail subtree by project+agent), so the collapsed-file set and the
   // commit selectors initialise fresh from this agent's prefs above - no
@@ -2843,18 +2855,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       </div>
     </SettingsPopover>
   )
-
-  // Deep-links each diff file's header to the repository browser at the agent's
-  // branch - the same target the tests panel builds (see TestsPanel's
-  // onOpenInRepo). Undefined (button hidden) when there's no ref to browse.
-  const openInRepo = useMemo(() => {
-    const ref = agent.branch_name
-    if (!ref || !projectId) return undefined
-    return (path: string) => linkOptions({
-      to: '/project/$projectId/repository/$',
-      params: { projectId, _splat: `${ref}/${path}` },
-    })
-  }, [projectId, agent.branch_name])
 
   const testsPanelEl = agent.branch_name && projectId && (
     <TestsPanel
