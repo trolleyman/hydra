@@ -124,7 +124,7 @@ mode = "hard"
 ##       *.oaiusercontent.com
 ##     gemini: *.googleapis.com
 ##     copilot: *.githubcopilot.com
-allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com", "aube.jdx.dev", "npm.jsr.io", "api.osv.dev"]
+allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com", "aube.jdx.dev", "npm.jsr.io", "api.osv.dev", "git-scm.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []
@@ -383,3 +383,17 @@ type = "stdout"
 # [jira]
 # url = "https://mycorp.atlassian.net"
 # ticket_pattern = "[A-Z]+-[0-9]+"
+
+## [resources] caps the cgroup limits applied to every scoped workload of this
+## project (agent, preview, service, artifact) via its transient systemd scope, so
+## one runaway workload yields to the daemon and interactive work instead of
+## starving the box. Weights are soft (they only bite under contention); the hard
+## caps (cpu_quota/memory_max/tasks_max) apply even on an idle box and are opt-in.
+## A hard cap is silently skipped where its cgroup controller is not delegated to
+## the user systemd manager (cpu/io often are not).
+# [resources]
+# cpu_weight = 50   # 1-10000, soft CPU share under contention (default 50; below the daemon's 100)
+# io_weight  = 50   # 1-10000, soft block-IO share under contention (default 50)
+# cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap
+# memory_max = 2048 # hard memory ceiling in MB (OOM-killed past it); omit = no cap
+# tasks_max  = 512  # hard cap on processes/threads; omit = no cap

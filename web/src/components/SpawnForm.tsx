@@ -152,26 +152,29 @@ const AgentModelPicker = memo(function AgentModelPicker({
   }
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        title={`Agent: ${active.label}${label ? ` · ${label}` : ''}`}
-        aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
-        // Measure the trigger before opening so the fixed-position menu lands in
-        // the right spot on its first paint; scroll/resize keep it pinned after.
-        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
-          open
-            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-            : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
-      >
-        <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
-          <AgentTypeIcon name={active.id} className={iconCls} />
-        </span>
-        {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
-      </button>
+    // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
+    // add baseline/descender space under the trigger.
+    <div ref={ref} className="relative flex shrink-0">
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
+          // Measure the trigger before opening so the fixed-position menu lands in
+          // the right spot on its first paint; scroll/resize keep it pinned after.
+          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
+            open
+              ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+              : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
+            <AgentTypeIcon name={active.id} className={iconCls} />
+          </span>
+          {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
+        </button>
+      </Tooltip>
       {open && coords && (
         <div
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
@@ -783,21 +786,24 @@ export const SpawnForm = memo(function SpawnForm({
     if (adopt) {
       return (
         <div className="flex items-center gap-1 shrink-0 min-w-0">
-          <Badge
-            tone="blue"
-            icon={adopt.can_push === false ? <Lock className="w-3 h-3" /> : <GitBranch className="w-3 h-3" />}
-            title={`Adopting PR #${adopt.id}: ${adopt.title}${adopt.can_push === false ? ' (read-only - no push access)' : ''}`}
-          >
-            <span className="max-w-[8rem] truncate">PR #{adopt.id}</span>
-          </Badge>
-          <button
-            type="button"
-            onClick={() => setAdopt(null)}
-            title="Don't adopt a PR"
-            className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer shrink-0"
-          >
-            <X className="w-3 h-3" />
-          </button>
+          <Tooltip content={`Adopting PR #${adopt.id}: ${adopt.title}${adopt.can_push === false ? ' (read-only - no push access)' : ''}`}>
+            <Badge
+              tone="blue"
+              icon={adopt.can_push === false ? <Lock className="w-3 h-3" /> : <GitBranch className="w-3 h-3" />}
+            >
+              <span className="max-w-[8rem] truncate">PR #{adopt.id}</span>
+            </Badge>
+          </Tooltip>
+          <Tooltip content="Don't adopt a PR">
+            <button
+              type="button"
+              onClick={() => setAdopt(null)}
+              aria-label="Don't adopt a PR"
+              className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer shrink-0"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </Tooltip>
         </div>
       )
     }

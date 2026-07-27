@@ -4,6 +4,7 @@ import { X, Terminal, AlertCircle, Save } from 'lucide-react'
 import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, type AgentTypeIconName } from '../AgentTypeIcon'
+import { Tooltip } from '../Tooltip'
 import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
 import { SettingSection, type SettingsSection } from './shared'
 import { ReviewSection } from './ReviewSection'
@@ -171,15 +172,18 @@ export function SettingsContent({
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."
         action={
-          <button
-            onClick={() => onTest(activeSection === 'all' ? 'bash' : activeSection)}
-            disabled={testing}
-            title="Spawn a throwaway agent to try this configuration"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            {testing ? 'Spawning...' : 'Test'}
-          </button>
+          /* shrink-0 rides on the Tooltip wrapper: it is what the section
+             header's flex row now sees in place of the button. */
+          <Tooltip content="Spawn a throwaway agent to try this configuration" className="shrink-0">
+            <button
+              onClick={() => onTest(activeSection === 'all' ? 'bash' : activeSection)}
+              disabled={testing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              {testing ? 'Spawning...' : 'Test'}
+            </button>
+          </Tooltip>
         }
       >
         <AgentSelector value={activeSection} onChange={setActiveSection} />

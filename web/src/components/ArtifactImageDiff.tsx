@@ -7,6 +7,7 @@ import {
 import { ABControlsContext } from './artifactDiffContext'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
+import { Tooltip } from './Tooltip'
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
@@ -189,21 +190,27 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
             onChange={setLocalView}
             options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
           />
-          <label
-            title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-            className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-              canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-            }`}
+          {/* ml-auto rides on the tooltip wrapper - it is the row's flex child now,
+              and it is what has to push the checkbox to the right edge. */}
+          <Tooltip
+            content={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
+            className="ml-auto"
           >
-            <input
-              type="checkbox"
-              checked={localHighlight && canDiff}
-              disabled={!canDiff}
-              onChange={(e) => setLocalHighlight(e.target.checked)}
-              className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
-            />
-            Highlight
-          </label>
+            <label
+              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={localHighlight && canDiff}
+                disabled={!canDiff}
+                onChange={(e) => setLocalHighlight(e.target.checked)}
+                className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+              />
+              Highlight
+            </label>
+          </Tooltip>
         </div>
       )}
       {/* select-none: flipping is a rapid click target, so without this a quick

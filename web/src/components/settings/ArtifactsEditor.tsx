@@ -1,6 +1,7 @@
 import { X, Plus, Image, AlertTriangle } from 'lucide-react'
 import type { ArtifactScript } from '../../api'
 import { InfoTooltip } from '../InfoTooltip'
+import { Tooltip } from '../Tooltip'
 import { ShellEditor } from '../ShellEditor'
 import { EnabledToggle } from './shared'
 
@@ -274,13 +275,17 @@ export function ArtifactsEditor({
                   )}
                   </div>
                 </div>
-                <button
-                  onClick={() => remove(index)}
-                  className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer shrink-0"
-                  title="Remove artifact"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {/* shrink-0 rides on the Tooltip wrapper: it is what the row's
+                    flex layout now sees in place of the button. */}
+                <Tooltip content="Remove artifact" className="shrink-0">
+                  <button
+                    onClick={() => remove(index)}
+                    className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                    aria-label="Remove artifact"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )

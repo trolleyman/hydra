@@ -3,6 +3,7 @@ import { GitPullRequest, LoaderCircle, Lock, Search } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { ReviewRef } from '../api/models/ReviewRef'
 import { Badge } from './Badge'
+import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
 import { formatError } from '../api/format_error'
 
@@ -95,24 +96,25 @@ export function PRPicker({
   })
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        title="Work on an existing pull request"
-        aria-label="Work on an existing pull request"
-        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-1 rounded-lg border transition-colors cursor-pointer ${
-          compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'
-        } ${
-          open
-            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'
-            : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
-      >
-        <GitPullRequest className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
-        {!compact && <span>PR</span>}
-      </button>
+    <div ref={ref} className="relative flex shrink-0">
+      <Tooltip content="Work on an existing pull request" className="shrink-0">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label="Work on an existing pull request"
+          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          className={`flex items-center gap-1 rounded-lg border transition-colors cursor-pointer ${
+            compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'
+          } ${
+            open
+              ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200'
+              : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <GitPullRequest className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
+          {!compact && <span>PR</span>}
+        </button>
+      </Tooltip>
       {open && coords && (
         <div
           style={{ position: 'fixed', left: coords.left, top: coords.top, width: 340 }}
