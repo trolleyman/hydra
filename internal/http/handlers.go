@@ -1161,6 +1161,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 		p := c.Policy
 		out.Policy = &api.PolicyConfig{
 			GateEnabled:      p.GateEnabled,
+			GitIsolation:     p.GitIsolation,
 			McpAllowed:       &p.MCPAllowed,
 			McpToolsAllowed:  &p.MCPToolsAllowed,
 			McpBlocked:       &p.MCPBlocked,
@@ -1220,7 +1221,7 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		out.Sandbox = sb
 	}
 	if a.Policy != nil {
-		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, MCPAutoAllowRead: a.Policy.McpAutoAllowRead}
+		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, GitIsolation: a.Policy.GitIsolation, MCPAutoAllowRead: a.Policy.McpAutoAllowRead}
 		if a.Policy.McpAllowed != nil {
 			p.MCPAllowed = *a.Policy.McpAllowed
 		}

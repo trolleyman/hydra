@@ -790,6 +790,9 @@ type PolicyConfig struct {
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 
+	// GitIsolation How much of the repo's shared .git the head may write: "off" (default, writable) or "readonly" (whole .git bound read-only, commits host-mediated). Unset inherits the default (off). See docs/git-isolation.md.
+	GitIsolation *string `json:"git_isolation"`
+
 	// KnownTools Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
 	KnownTools *[]string `json:"known_tools"`
 

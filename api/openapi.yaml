@@ -3741,6 +3741,14 @@ components:
           type: boolean
           nullable: true
           description: Enable the decision-capable gate (default true when unset).
+        git_isolation:
+          type: string
+          nullable: true
+          description: >-
+            How much of the repo's shared .git the head may write: "off" (default,
+            writable) or "readonly" (whole .git bound read-only, commits
+            host-mediated). Unset inherits the default (off). See
+            docs/git-isolation.md.
         mcp_allowed:
           type: array
           items:

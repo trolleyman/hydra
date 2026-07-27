@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, AlertTriangle } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, AlertTriangle, Lock } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -27,19 +27,34 @@ const NETWORK_MODE_WARNINGS: Partial<Record<NetworkMode, string>> = {
   off: 'No network access at all - tools that fetch dependencies or call APIs will fail.',
 }
 
-// Animated segmented control for the egress mode. A single "thumb" slides under
-// the active pill (transform-based so it's GPU-cheap and honours reduced-motion
-// via the CSS class); the labels themselves just cross-fade their colour.
-function NetworkModeSelector({ value, onChange }: { value: NetworkMode; onChange: (m: NetworkMode) => void }) {
-  const activeIndex = Math.max(0, NETWORK_MODES.indexOf(value))
+// The two git-isolation modes, mirroring sandbox.GitIsolationMode on the backend.
+// (Ordered gentlest -> strictest, like the network control.)
+type GitIsolation = 'off' | 'readonly'
+const GIT_ISOLATION_MODES: GitIsolation[] = ['off', 'readonly']
+const GIT_ISOLATION_LABELS: Record<GitIsolation, string> = {
+  off: 'Off',
+  readonly: 'Read-only .git',
+}
+
+// Animated segmented control: a single "thumb" slides under the active pill
+// (transform-based so it's GPU-cheap and honours reduced-motion via the CSS
+// class); the labels themselves just cross-fade their colour. Shared by the
+// network-egress and git-isolation selectors.
+function SegmentedControl<T extends string>({ options, labels, value, onChange }: {
+  options: T[]
+  labels: Record<T, string>
+  value: T
+  onChange: (m: T) => void
+}) {
+  const activeIndex = Math.max(0, options.indexOf(value))
   return (
     <div className="relative flex w-full rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-900/40">
       <div
         aria-hidden
         className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-md bg-white dark:bg-gray-700 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/5 motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
-        style={{ width: `calc((100% - 0.5rem) / ${NETWORK_MODES.length})`, transform: `translateX(${activeIndex * 100}%)` }}
+        style={{ width: `calc((100% - 0.5rem) / ${options.length})`, transform: `translateX(${activeIndex * 100}%)` }}
       />
-      {NETWORK_MODES.map((m) => {
+      {options.map((m) => {
         const isActive = m === value
         return (
           <button
@@ -53,7 +68,7 @@ function NetworkModeSelector({ value, onChange }: { value: NetworkMode; onChange
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
           >
-            {NETWORK_MODE_LABELS[m]}
+            {labels[m]}
           </button>
         )
       })}
@@ -273,6 +288,7 @@ export function ConfigForm({
     const next: PolicyConfig = { ...policy, ...patch }
     const empty =
       next.gate_enabled == null &&
+      next.git_isolation == null &&
       next.mcp_auto_allow_read == null &&
       !next.mcp_allowed?.length &&
       !next.mcp_tools_allowed?.length &&
@@ -280,6 +296,13 @@ export function ConfigForm({
       !next.mcp_tools_blocked?.length &&
       !next.known_tools?.length
     onChange({ ...value, policy: empty ? null : next })
+  }
+
+  // Git-isolation default. nil = off (the backend default), so selecting Off
+  // writes null to keep the emitted config minimal; Read-only writes it explicitly.
+  const gitIsolation: GitIsolation = (policy.git_isolation as GitIsolation | null | undefined) ?? 'off'
+  function setGitIsolation(next: GitIsolation) {
+    updatePolicy({ git_isolation: next === 'off' ? null : next })
   }
 
   function toggleMcp(name: string, on: boolean) {
@@ -395,7 +418,7 @@ export function ConfigForm({
               <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
             </InfoTooltip>
           </div>
-          <NetworkModeSelector value={mode} onChange={setMode} />
+          <SegmentedControl options={NETWORK_MODES} labels={NETWORK_MODE_LABELS} value={mode} onChange={setMode} />
           {NETWORK_MODE_WARNINGS[mode] && (
             <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5 motion-safe:animate-egress-warn-in">
               <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
@@ -440,6 +463,28 @@ export function ConfigForm({
                   />
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Git isolation */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
+              Git isolation
+            </label>
+            <InfoTooltip title="Git isolation">
+              <p><strong>Off</strong> (default): the repo's shared <code className="text-blue-300">.git</code> is writable in the sandbox, guarded only by the decision gate. The agent commits in-sandbox onto its own branch.</p>
+              <p className="mt-1.5"><strong>Read-only .git</strong>: the whole <code className="text-blue-300">.git</code> is bound read-only, so a rogue agent cannot write it at all - no wrong-branch commit, no destroying the shared object store. Commits are staged and made host-side via the <code className="text-blue-300">git_commit</code> tool onto the head's own branch.</p>
+              <p className="mt-1.5 text-gray-400 italic">Read-only disables in-sandbox <code className="text-blue-300">git add -p</code> / <code className="text-blue-300">stash</code> / <code className="text-blue-300">rebase -i</code> and setup-time .git writers (husky / git-lfs / submodules); use host-run for those. See docs/git-isolation.md.</p>
+            </InfoTooltip>
+          </div>
+          <SegmentedControl options={GIT_ISOLATION_MODES} labels={GIT_ISOLATION_LABELS} value={gitIsolation} onChange={setGitIsolation} />
+          {gitIsolation === 'readonly' && (
+            <div className="flex items-start gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/40 rounded-lg px-2.5 py-1.5">
+              <Lock className="w-3.5 h-3.5 mt-px shrink-0" />
+              <span>Commits run host-side via the git_commit tool. In-sandbox <code className="text-[10px]">git add -p</code> / <code className="text-[10px]">rebase</code> and husky/LFS/submodule setup won't work - use host-run for those.</span>
             </div>
           )}
         </div>

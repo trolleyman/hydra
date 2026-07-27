@@ -11,6 +11,10 @@ export type PolicyConfig = {
      */
     gate_enabled?: boolean | null;
     /**
+     * How much of the repo's shared .git the head may write: "off" (default, writable) or "readonly" (whole .git bound read-only, commits host-mediated). Unset inherits the default (off). See docs/git-isolation.md.
+     */
+    git_isolation?: string | null;
+    /**
      * MCP server names the agent may use (whole-server grant). Servers not listed (nor referenced by mcp_tools_allowed) are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
      */
     mcp_allowed?: Array<string> | null;
