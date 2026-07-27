@@ -51,19 +51,27 @@ import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { addReviewComment, removeReviewComment, clearReviewDraft, loadReviewDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { copyText } from './lib/clipboard'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
-  const handleCopy = (e: React.MouseEvent) => {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(text).catch(() => { })
+    // copyText works on insecure LAN origins too (a bare writeText silently
+    // no-ops there); only flip to the tick once the text actually landed.
+    if (!(await copyText(text))) return
     setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <Tooltip content="Copy path">
+    // Reuse the same hint tooltip rather than adding a second one: swap its label
+    // to "Copied to clipboard" while the tick is up, so a click that happened
+    // mid-hover reads as confirmation, then it reverts to "Copy path".
+    <Tooltip content={copied ? 'Copied to clipboard' : 'Copy path'}>
       <button
         onClick={handleCopy}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"

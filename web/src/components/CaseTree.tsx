@@ -4,6 +4,7 @@ import { AlertTriangle, Box, Braces, Check, ChevronRight, Copy, Folder, FolderOp
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
+import { copyText } from '../lib/clipboard'
 
 // CaseTree renders test cases as a collapsible location tree (TESTS_PLAN.md
 // Feature 1), built from each case's structured location:
@@ -169,10 +170,6 @@ function segText(segs: Seg[]): string {
 // like "internal/git/commit_test.go" → "commit_test.go".
 function filenameOf(label: string): string {
   return label.split('/').pop() ?? label
-}
-
-function copyText(text: string): void {
-  void navigator.clipboard?.writeText(text).catch(() => {})
 }
 
 const STATUS_RENDER_ORDER = ['failed', 'warning', 'passed', 'skipped']

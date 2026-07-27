@@ -17,7 +17,7 @@ import {
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
-import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
+import { canCopyImages, copyImageToClipboard, copyText } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
@@ -218,10 +218,13 @@ function useFileActions(file: RepositoryFileResponse, projectId: string, refStr:
   const copyLabel = state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'
   const handleCopy = async () => {
     try {
-      if (file.content != null) await navigator.clipboard.writeText(file.content)
-      else if (isImg) await copyImageToClipboard(rawUrl)
+      // copyText handles insecure LAN origins (undefined navigator.clipboard);
+      // it reports success as a boolean rather than throwing, so honour it.
+      let ok: boolean
+      if (file.content != null) ok = await copyText(file.content)
+      else if (isImg) { await copyImageToClipboard(rawUrl); ok = true }
       else return
-      flash(true)
+      flash(ok)
     } catch {
       flash(false)
     }

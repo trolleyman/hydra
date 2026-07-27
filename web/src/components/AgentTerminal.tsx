@@ -8,6 +8,7 @@ import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
+import { copyText } from '../lib/clipboard'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { useDialogStore } from '../stores/dialogStore'
@@ -465,11 +466,15 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (isCopyShortcut) {
         const selection = term.getSelection()
         if (selection) {
-          navigator.clipboard.writeText(selection).then(() => {
+          // copyText works on insecure LAN origins (undefined navigator.clipboard),
+          // and only resolves true once the text landed - so the "Copied" toast
+          // never lies.
+          void copyText(selection).then((ok) => {
+            if (!ok) return
             if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
             setShowCopiedAt(Date.now())
             copyTimeoutRef.current = setTimeout(() => setShowCopiedAt(0), 2000)
-          }).catch(() => {})
+          })
           term.clearSelection()
           return false
         }
