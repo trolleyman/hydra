@@ -1397,6 +1397,53 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					},
 				},
 				{
+					Path:       "internal/cache/keys.go",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  0,
+					Deletions:  4,
+					Hunks: []api.DiffHunk{
+						{
+							// A helper block that moved out of this file into registry.go - shown
+							// zebra-tinted (a move) rather than red (a plain deletion).
+							Header:   "@@ -18,6 +18,2 @@ package cache",
+							OldStart: 18,
+							NewStart: 18,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "var cacheEnabled = true", OldLineNum: ptr(18), NewLineNum: ptr(18)},
+								{Type: api.Context, Content: "", OldLineNum: ptr(19), NewLineNum: ptr(19)},
+								{Type: api.Deletion, Content: "func cacheKey(project, ref string) string {", OldLineNum: ptr(20)},
+								{Type: api.Deletion, Content: "	return project + \"::\" + ref", OldLineNum: ptr(21)},
+								{Type: api.Deletion, Content: "}", OldLineNum: ptr(22)},
+								{Type: api.Deletion, Content: "", OldLineNum: ptr(23)},
+								{Type: api.Context, Content: "var cacheHits int64", OldLineNum: ptr(24), NewLineNum: ptr(20)},
+							},
+						},
+					},
+				},
+				{
+					Path:       "internal/cache/registry.go",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  4,
+					Deletions:  0,
+					Hunks: []api.DiffHunk{
+						{
+							// The same block, now living here one indent level deeper (wrapped in a
+							// method) - the added half of the move, zebra-tinted to match keys.go.
+							Header:   "@@ -30,4 +30,8 @@ func (r *Registry) init() {",
+							OldStart: 30,
+							NewStart: 30,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "func (r *Registry) init() {", OldLineNum: ptr(30), NewLineNum: ptr(30)},
+								{Type: api.Addition, Content: "	func cacheKey(project, ref string) string {", NewLineNum: ptr(31)},
+								{Type: api.Addition, Content: "		return project + \"::\" + ref", NewLineNum: ptr(32)},
+								{Type: api.Addition, Content: "	}", NewLineNum: ptr(33)},
+								{Type: api.Addition, Content: "", NewLineNum: ptr(34)},
+								{Type: api.Context, Content: "	r.ready = true", OldLineNum: ptr(31), NewLineNum: ptr(35)},
+							},
+						},
+					},
+				},
+				{
 					Path:       "internal/http/server.go",
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  12,
