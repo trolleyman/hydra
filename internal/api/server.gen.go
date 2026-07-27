@@ -651,8 +651,11 @@ type DiffFile struct {
 	Deletions int `json:"deletions"`
 
 	// Expanded True when hunks contain the file's entire content as a single whole-file hunk (full_context view), so the client can drive the context reveal/collapse model without re-fetching. Absent/false means the file is shown at the requested windowed context.
-	Expanded *bool      `json:"expanded,omitempty"`
-	Hunks    []DiffHunk `json:"hunks"`
+	Expanded *bool `json:"expanded,omitempty"`
+
+	// HeadBlobSha git blob sha of the file's content on the head side of the comparison (from the head tree, or a hash-object of the working-tree file for an uncommitted diff). Absent for a deletion or when it can't be resolved. The client keys per-file "viewed" state on it, so a file re-shows as unviewed exactly when its content changes.
+	HeadBlobSha *string    `json:"head_blob_sha"`
+	Hunks       []DiffHunk `json:"hunks"`
 
 	// OldPath Original file path (only set for renamed files)
 	OldPath *string `json:"old_path"`

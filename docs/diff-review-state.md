@@ -1,8 +1,13 @@
 # Plan: per-file "viewed" state for the diff review workflow
 
-Status: **proposed, not built.** This captures an agreed design for tracking
-review progress in the agent diff viewer, so the work can be picked up later
-without re-deriving it. Nothing here exists yet.
+Status: **per-file viewed state BUILT (v1, client storage); the "reviewed up to"
+marker and DB-backed storage remain unbuilt.** Build steps 1-2 below are done:
+`git.HeadBlobSHAs` fills `git.DiffFile.HeadBlobSHA` -> `api.DiffFile.head_blob_sha`;
+the client keys `agentViewPrefs.viewedFiles` (path -> last-viewed head blob sha)
+off it, with a "Viewed" checkbox per file card and an `N/M viewed` count in the
+Files header. Steps 3-4 (promote storage to `internal/db`; the `reviewed_up_to_sha`
+marker + *Since last review* selector) are still open, as is the optional
+auto-collapse of viewed files.
 
 ## Problem
 

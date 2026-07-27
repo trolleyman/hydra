@@ -27,7 +27,7 @@ import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
+import { pinCardToTop, scrollCardToTop, scrollToDiffLine, anchorScrollBelow } from './lib/diffScroll'
 import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
 import {
   UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS,
@@ -37,7 +37,7 @@ import {
 } from './lib/diffMetrics'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
-  CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
+  hunkContext, regionKey, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
 } from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
@@ -493,6 +493,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
           : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
         const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
+        const markerClass = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
         const selOld = selectionHas(selection, 'old', line.old_line_num)
         const selNew = selectionHas(selection, 'new', line.new_line_num)
         const rowSel = selOld || selNew
@@ -512,8 +513,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
                   <CommentButton idx={idx} onToggle={toggleComment} />
                 )}
               </div>
-              <span className={`${UNIFIED_MARKER} ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
-                }`}>
+              <span className={`${UNIFIED_MARKER} ${markerClass}`}>
                 {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
               </span>
               {isNoNewline ? (
@@ -811,6 +811,21 @@ function estimateVisibleRows(file: DiffFile): number {
 }
 
 
+// The enclosing function/section git computed for the hunk below an expander,
+// shown muted at the row's right edge (same row, so it adds no height). Truncates
+// from the left tail rather than wrapping, keeping the expander one line tall.
+function HunkContextLabel({ text }: { text: string | undefined }) {
+  if (!text) return null
+  return (
+    <span
+      className="ml-auto pl-3 min-w-0 shrink truncate text-right text-xs font-mono text-gray-400 dark:text-gray-500 select-none"
+      title={text}
+    >
+      {text}
+    </span>
+  )
+}
+
 function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
   return (
     <button
@@ -839,6 +854,7 @@ function GapExpander({ seg, onDown, onUp, onAll }: {
         </Tooltip>
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
+      <HunkContextLabel text={seg.context} />
     </div>
   )
 }
@@ -858,6 +874,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
         </button>
       </Tooltip>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
+      <HunkContextLabel text={seg.context} />
     </div>
   )
 }
@@ -879,12 +896,17 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
   // whole-row tint). Defaults on; the diff toolbar's settings cog toggles it.
   wordHighlight?: boolean
+  // Per-file review "viewed" state. `viewed` is the resolved flag; onToggleViewed
+  // flips it (given the head blob sha to key on). Both omitted in the read-only
+  // repo view, which has no per-agent review progress.
+  viewed?: boolean
+  onToggleViewed?: (path: string, headBlobSha: string | null | undefined) => void
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
   // Optional "Add to review" (queue for batch submit). Omitted in the read-only
@@ -1131,7 +1153,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // rename) has nothing to collapse - render its lines plainly rather than
   // folding the entire body behind one expander.
   const noChanges = file.additions === 0 && file.deletions === 0
-  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
+  // git already worked out each hunk's enclosing function (the `@@ ... @@ <ctx>`
+  // trailer); key it by the hunk's first changed line so buildSegments can label
+  // the matching collapsed gap with it. Cheap and derived from hunksSig only.
+  const hunkFuncByKey = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const h of file.hunks ?? []) {
+      const ctx = hunkContext(h.header)
+      if (!ctx) continue
+      const first = h.lines.find(isChangeLine)
+      if (first) m.set(regionKey(first), ctx)
+    }
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hunksSig])
+  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal, hunkFuncByKey) : null), [fullLines, reveal, noChanges, hunkFuncByKey])
 
   const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
     setReveal((prev) => {
@@ -1140,6 +1176,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
       return next
     })
   }, [])
+
+  // Revealing context *upward* (toward the change below the gap) should keep that
+  // change visually anchored, so the new lines grow up toward it instead of
+  // shoving it down the page (which is what "expand up" felt wrong doing).
+  // Downward reveals already anchor the change above the gap for free - nothing
+  // is inserted above it - so only the upward case needs it. The body's height
+  // lands a frame or two after the reveal commits (its measured wrapper), so we
+  // capture the card's current bottom and let anchorScrollBelow re-pin it each
+  // frame until the layout settles.
+  const revealUpward = useCallback((id: string, patch: { top?: number; bot?: number }) => {
+    const card = cardRef.current
+    const targetBottom = card?.getBoundingClientRect().bottom
+    setRegion(id, patch)
+    if (card && targetBottom != null) anchorScrollBelow(card, targetBottom)
+  }, [setRegion])
 
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
 
@@ -1263,6 +1314,26 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{file.deletions}</span>}
           </div>
         )}
+        {onToggleViewed && (
+          // Marking a file viewed records its current head blob sha; when the
+          // agent later changes the file the sha no longer matches and it re-shows
+          // as unviewed. Stops propagation so ticking it doesn't also collapse the
+          // card (the header row toggles collapse).
+          <label
+            className="flex items-center gap-1 shrink-0 ml-1 pl-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none"
+            title={file.head_blob_sha ? 'Mark this file as reviewed' : 'Nothing to mark viewed (file deleted)'}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              className="cursor-pointer accent-blue-500"
+              checked={!!viewed}
+              disabled={!file.head_blob_sha}
+              onChange={() => onToggleViewed(file.path, file.head_blob_sha)}
+            />
+            Viewed
+          </label>
+        )}
       </div>
       )}
       {/* Body. rounded-b-lg + overflow-hidden clip the edge-to-edge diff content's
@@ -1325,14 +1396,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 if (seg.kind === 'gap') return (
                   <GapExpander key={seg.key} seg={seg}
                     onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
-                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
+                    onUp={() => revealUpward(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
                     onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
                 )
+                // topedge reveals upward (toward line 1), so it anchors the change
+                // below the gap; botedge reveals downward and anchors the top.
+                const revealEdge = seg.kind === 'topedge' ? revealUpward : setRegion
                 return (
                   <EdgeExpander key={seg.key} seg={seg}
-                    onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                    onStep={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
                       ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
-                    onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                    onAll={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
                       ? { bot: seg.length! } : { top: seg.length! })} />
                 )
               })}
@@ -1357,6 +1431,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                             <ChevronUp className="w-3 h-3" />
                           </button>
                         </Tooltip>
+                        <HunkContextLabel text={hunkContext(hunk.header)} />
                       </div>
                     )}
                     {!isFirst && gapSize > 0 && (
@@ -1374,6 +1449,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                           </Tooltip>
                         </div>
                         <GapCount hidden={gapSize} onClick={() => expand(currentContext + Math.max(gapSize, EXPAND_STEP))} />
+                        <HunkContextLabel text={hunkContext(hunk.header)} />
                       </div>
                     )}
                     {sideBySide
@@ -2272,7 +2348,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [refreshKey, setRefreshKey] = useState(0)
 
   const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
+  // On by default: whitespace-only churn (re-indents, reflow) is rarely what a
+  // reviewer wants to read; `!== 'false'` so an explicit opt-out still sticks.
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) !== 'false')
   const [wordHighlight, setWordHighlight] = useState(() => readLocal(StorageKeys.diffWordHighlight) !== 'false')
   const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
   const [fileView, setFileView] = useState<FileView>(() => {
@@ -2321,6 +2399,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
     () => new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []),
   )
+  // Per-file "viewed" review state: path -> the head blob sha the file had when
+  // marked viewed. A file is viewed iff this equals its current head_blob_sha, so
+  // it auto-reverts to unviewed the instant the agent changes it.
+  const [viewedFiles, setViewedFiles] = useState<Record<string, string>>(
+    () => loadAgentViewPrefs(projectId, agent.id).viewedFiles ?? {},
+  )
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -2361,6 +2445,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])
+
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agent.id, { viewedFiles })
+  }, [projectId, agent.id, viewedFiles])
+
+  // Toggle a file's viewed state. Marking viewed records the file's current head
+  // blob sha; unmarking (or a missing sha) clears it. A file with no head blob
+  // sha (a deletion) can't be marked - there is nothing to key on.
+  const toggleFileViewed = useCallback((path: string, headBlobSha: string | null | undefined) => {
+    setViewedFiles((prev) => {
+      const isViewed = !!headBlobSha && prev[path] === headBlobSha
+      if (isViewed) {
+        const next = { ...prev }
+        delete next[path]
+        return next
+      }
+      if (!headBlobSha) return prev
+      return { ...prev, [path]: headBlobSha }
+    })
+  }, [])
+
+  // A file is viewed iff the sha we stored equals its current head blob sha.
+  const isFileViewed = useCallback(
+    (f: DiffFile) => !!f.head_blob_sha && viewedFiles[f.path] === f.head_blob_sha,
+    [viewedFiles],
+  )
+  const viewedCount = useMemo(
+    () => (diff ? diff.files.reduce((n, f) => n + (isFileViewed(f) ? 1 : 0), 0) : 0),
+    [diff, isFileViewed],
+  )
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
@@ -3279,6 +3393,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               file={diff.files[singleFileIdx]!}
               sideBySide={sideBySide}
               wordHighlight={wordHighlight}
+              viewed={isFileViewed(diff.files[singleFileIdx])}
+              onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
@@ -3315,6 +3431,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             const img = imageUrlsFor(f)
             return (
             <FileDiff key={f.path} file={f} sideBySide={sideBySide} wordHighlight={wordHighlight}
+              viewed={isFileViewed(f)}
+              onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(f.path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
@@ -3368,6 +3486,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>
       <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      {viewedCount > 0 && (
+        <span className="text-[11px] font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
+          {viewedCount}/{diff.files.length} viewed
+        </span>
+      )}
       <div className="ml-auto flex items-center gap-1.5">
         {/* Show/hide the file-list column (hidden on mobile anyway, where the
             diffs take the full width - so the toggle only bites at md+). */}

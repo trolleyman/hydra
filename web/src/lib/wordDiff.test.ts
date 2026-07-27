@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeWordDiff, applyWordRanges, buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './wordDiff'
+import { computeWordDiff, applyWordRanges, buildWordRangeMaps, pairLines, isWhitespaceOnlyChange, renderWordDiffHtml, type WordRange } from './wordDiff'
 import { DiffLine } from '../api/models/DiffLine'
 
 // Substring helper: assert each range picks out the expected slice of the line.
@@ -50,13 +50,114 @@ describe('computeWordDiff', () => {
     expect(slices(newS, r.new)).toEqual(['y', '2'])
   })
 
+  it('highlights only the added spaces when a line is indented deeper', () => {
+    const oldS = '    return ok'
+    const newS = '        return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    // The four added spaces sit at the end of the indent, right before the code;
+    // the four that were already there stay unhighlighted.
+    expect(r.new).toEqual([[4, 8]])
+  })
+
+  it('highlights only the removed spaces when a line is dedented', () => {
+    const oldS = '        return ok'
+    const newS = '    return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([[4, 8]])
+    expect(r.new).toEqual([])
+  })
+
+  it('highlights the whole indent when the indent character changes', () => {
+    const oldS = '\treturn ok'
+    const newS = '    return ok'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['\t'])
+    expect(slices(newS, r.new)).toEqual(['    '])
+  })
+
+  it('highlights only the changed part of a mixed indent', () => {
+    const oldS = '\t\tx = 1'
+    const newS = '\t    x = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['\t'])
+    expect(slices(newS, r.new)).toEqual(['    '])
+  })
+
+  it('highlights only the added spaces of a realignment', () => {
+    const oldS = 'a  = 1'
+    const newS = 'a    = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    // Two spaces added; only they light up, not the whole padding run.
+    expect(r.new).toEqual([[3, 5]])
+  })
+
+  it('slides an inserted range to a clean boundary', () => {
+    // Inserting an argument: the changed range should read "b, " (aligned to the
+    // token boundaries) rather than a ragged ", b" straddling the comma.
+    const oldS = 'call(a)'
+    const newS = 'call(b, a)'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    expect(slices(newS, r.new)).toEqual(['b, '])
+  })
+
+  it('does not slide a whitespace-only indent range off the code', () => {
+    // Sliding prefers whitespace boundaries, which for a re-indent would drag the
+    // highlight away from the code; the guard keeps it on the added columns.
+    const oldS = '    x = 1'
+    const newS = '        x = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    expect(r.new).toEqual([[4, 8]])
+  })
+
   it('handles a change at the end of line', () => {
     const oldS = 'return ok'
     const newS = 'return okay'
     const r = computeWordDiff(oldS, newS)
-    // "ok" -> "okay": the whole word differs.
-    expect(slices(oldS, r.old)).toEqual(['ok'])
-    expect(slices(newS, r.new)).toEqual(['okay'])
+    // "ok" -> "okay": a character diff highlights only the inserted suffix.
+    expect(r.old).toEqual([])
+    expect(slices(newS, r.new)).toEqual(['ay'])
+  })
+
+  it('diffs inside an identifier at character granularity', () => {
+    const oldS = 'const id = getUserName()'
+    const newS = 'const id = getUserId()'
+    const r = computeWordDiff(oldS, newS)
+    // getUserName -> getUserId: only the differing subwords, not the whole token.
+    expect(slices(oldS, r.old)).toEqual(['Name'])
+    expect(slices(newS, r.new)).toEqual(['Id'])
+  })
+
+  it('snaps a mid-camelCase edit out to the subword boundary', () => {
+    const oldS = 'onClick={handleClick}'
+    const newS = 'onClick={handleClose}'
+    const r = computeWordDiff(oldS, newS)
+    // The raw char diff is "lick"/"lose"; snapping to the camelCase hump lights
+    // the whole changed subword "Click"/"Close" instead.
+    expect(slices(oldS, r.old)).toEqual(['Click'])
+    expect(slices(newS, r.new)).toEqual(['Close'])
+  })
+
+  it('snaps a snake_case edit out to the underscore boundary', () => {
+    const oldS = 'handle_click'
+    const newS = 'handle_close'
+    const r = computeWordDiff(oldS, newS)
+    expect(slices(oldS, r.old)).toEqual(['click'])
+    expect(slices(newS, r.new)).toEqual(['close'])
+  })
+
+  it('keeps a monocase edit precise instead of snapping to the whole word', () => {
+    const oldS = 'return counter'
+    const newS = 'return pointer'
+    const r = computeWordDiff(oldS, newS)
+    // No internal subword boundary in counter/pointer, so the char diff stands:
+    // the shared "nter" suffix stays unhighlighted (coalesced across the shared
+    // "o", not scattered).
+    expect(slices(oldS, r.old)).toEqual(['cou'])
+    expect(slices(newS, r.new)).toEqual(['poi'])
   })
 })
 
@@ -118,5 +219,64 @@ describe('buildWordRangeMaps', () => {
     const maps = buildWordRangeMaps(lines)
     expect(maps.old.size).toBe(0)
     expect(maps.new.size).toBe(0)
+  })
+
+  it('aligns the edited line when an addition is inserted ahead of the block', () => {
+    // A comment is inserted, then the two originals reappear with one edited.
+    // Index pairing would diff "const a = 1" against the comment; similarity
+    // pairing lines them up with their real counterparts.
+    const lines: DiffLine[] = [
+      line(DiffLine.type.DELETION, '  const a = 1', 2, null),
+      line(DiffLine.type.DELETION, '  const b = 2', 3, null),
+      line(DiffLine.type.ADDITION, '  // a new note', null, 2),
+      line(DiffLine.type.ADDITION, '  const a = 1', null, 3),
+      line(DiffLine.type.ADDITION, '  const b = 3', null, 4),
+    ]
+    const maps = buildWordRangeMaps(lines)
+    // "const a = 1" is unchanged on both sides -> no highlight at all.
+    expect(maps.old.has(2)).toBe(false)
+    expect(maps.new.has(3)).toBe(false)
+    // The inserted comment has no partner -> no highlight.
+    expect(maps.new.has(2)).toBe(false)
+    // Only "2" -> "3" is highlighted, on its real pair.
+    expect(slices('  const b = 2', maps.old.get(3)!)).toEqual(['2'])
+    expect(slices('  const b = 3', maps.new.get(4)!)).toEqual(['3'])
+  })
+})
+
+describe('pairLines', () => {
+  it('pairs one-to-one similar lines in order', () => {
+    expect(pairLines(['const x = 1', 'const y = 2'], ['const x = 9', 'const y = 8']))
+      .toEqual([[0, 0], [1, 1]])
+  })
+
+  it('leaves an unbalanced block partly unpaired', () => {
+    // Two removed, one added: only the best match pairs; the other is dropped.
+    const pairs = pairLines(['foo(a, b)', 'wildly different line'], ['foo(a, b, c)'])
+    expect(pairs).toEqual([[0, 0]])
+  })
+
+  it('refuses to pair unrelated lines', () => {
+    expect(pairLines(['the quick brown fox'], ['SELECT * FROM users'])).toEqual([])
+  })
+
+  it('skips a mid-block insertion to keep later lines aligned', () => {
+    const pairs = pairLines(
+      ['alpha = 1', 'beta = 2'],
+      ['inserted = 0', 'alpha = 1', 'beta = 20'],
+    )
+    expect(pairs).toEqual([[0, 1], [1, 2]])
+  })
+})
+
+describe('isWhitespaceOnlyChange', () => {
+  it('is true for a re-indent and an internal realignment', () => {
+    expect(isWhitespaceOnlyChange('  doThing()', '      doThing()')).toBe(true)
+    expect(isWhitespaceOnlyChange('Host   = 1', 'Host = 1')).toBe(true)
+  })
+
+  it('is false for a real code change and for identical lines', () => {
+    expect(isWhitespaceOnlyChange('const x = 1', 'const x = 2')).toBe(false)
+    expect(isWhitespaceOnlyChange('same', 'same')).toBe(false)
   })
 })

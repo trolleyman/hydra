@@ -2494,15 +2494,21 @@ func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
 			t := true
 			expanded = &t
 		}
+		var headBlobSHA *string
+		if f.HeadBlobSHA != "" {
+			s := f.HeadBlobSHA
+			headBlobSHA = &s
+		}
 		apiFiles[i] = api.DiffFile{
-			Path:       f.Path,
-			OldPath:    f.OldPath,
-			ChangeType: api.DiffFileChangeType(f.ChangeType),
-			Additions:  f.Additions,
-			Deletions:  f.Deletions,
-			Binary:     f.Binary,
-			Expanded:   expanded,
-			Hunks:      apiHunks,
+			Path:        f.Path,
+			OldPath:     f.OldPath,
+			ChangeType:  api.DiffFileChangeType(f.ChangeType),
+			Additions:   f.Additions,
+			Deletions:   f.Deletions,
+			Binary:      f.Binary,
+			Expanded:    expanded,
+			HeadBlobSha: headBlobSHA,
+			Hunks:       apiHunks,
 		}
 	}
 	return apiFiles
