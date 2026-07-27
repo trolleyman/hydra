@@ -246,12 +246,21 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
         return <code className={s.codeInline}>{children}</code>
       }
       const html = highlightCode(text, lang)
+      // data-md-code-block / data-md-lang let copy-as-markdown (lib/copyMarkdown)
+      // put the fence and its info string back when this block is copied.
       if (html != null) {
         // No `.hljs` root class: the token `.hljs-*` spans carry their own
         // colours, while `.hljs` would also pull in github.css's white bg.
-        return <code className={s.codeBlock} dangerouslySetInnerHTML={{ __html: html }} />
+        return (
+          <code
+            className={s.codeBlock}
+            data-md-code-block=""
+            data-md-lang={lang}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        )
       }
-      return <code className={s.codeBlock}>{text}</code>
+      return <code className={s.codeBlock} data-md-code-block="" data-md-lang={lang}>{text}</code>
     },
   }
 }
@@ -279,8 +288,10 @@ export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx
     () => buildComponents(STYLES[variant], linkCtx),
     [variant, linkCtx],
   )
+  // data-md-root marks the subtree as rendered markdown: copying a selection
+  // that touches it re-serializes it back to markdown source (lib/copyMarkdown).
   return (
-    <div className={className ?? ''}>
+    <div className={className ?? ''} data-md-root="">
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS[variant]}
         components={components}

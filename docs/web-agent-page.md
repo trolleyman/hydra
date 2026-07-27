@@ -51,6 +51,19 @@ and `web/src/DiffViewer.tsx`):
   fallback). Get this wrong and the document grows as you scroll - the scrollbar
   thumb visibly shrinks - which is what `diffScroll.ts`'s re-correcting rAF loops
   used to exist for.
+- Copying out of the chat yields **markdown source**, not the flattened rendered
+  text: the transcript's scroll container owns an `onCopy`
+  (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to
+  `selectionToMarkdown` (`web/src/lib/copyMarkdown.ts`), which walks the selected
+  DOM and re-serializes headings, emphasis, inline code, links, lists (incl. task
+  lists), blockquotes, fenced blocks with their language, and GFM tables.
+  `MarkdownRenderer` marks the surfaces it owns with `data-md-root` /
+  `data-md-code-block` + `data-md-lang`; everything else in the transcript (tool
+  cards, diffs) is copied as plain text. It deliberately mirrors what the browser
+  itself would leave out - `user-select: none` subtrees and control labels
+  (`<button>`), which a drag can't select in the first place - so taking over the
+  copy event doesn't start pulling chrome into the clipboard. A selection that
+  stays inside one code block copies the raw code, no fence.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles).
