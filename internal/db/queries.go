@@ -380,6 +380,9 @@ func (s *Store) ClearReviewLink(id string) error {
 		"review_target_branch": "",
 		"review_state":         "",
 		"review_state_time":    "",
+		"review_adopted":       false,
+		"review_push_url":      "",
+		"review_can_push":      false,
 	}
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)

@@ -635,10 +635,23 @@ func (s *Server) agentResponseWithReview(h heads.Head) api.AgentResponse {
 	if h.ReviewTargetBranch != "" {
 		link.TargetBranch = &h.ReviewTargetBranch
 	}
-	if h.Branch != nil && h.DownstreamBranch != "" {
-		remote := reviewRemote(h.ProjectPath)
-		if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
-			link.Ahead, link.Behind = &ahead, &behind
+	if h.ReviewAdopted {
+		adopted := true
+		link.Adopted = &adopted
+		link.CanPush = &h.ReviewCanPush
+	}
+	if h.Branch != nil {
+		if h.ReviewAdopted {
+			// An adopted head tracks the PR's read-only head pseudo-ref, cached in a
+			// private local ref (refreshed by the watcher / Pull from MR).
+			if ahead, behind, ok := git.AheadBehind(h.ProjectPath, *h.Branch, git.PRLocalRef(h.ReviewProvider, h.ReviewID)); ok {
+				link.Ahead, link.Behind = &ahead, &behind
+			}
+		} else if h.DownstreamBranch != "" {
+			remote := reviewRemote(h.ProjectPath)
+			if ahead, behind, ok := downstreamAheadBehind(h.ProjectPath, *h.Branch, remote, h.DownstreamBranch); ok {
+				link.Ahead, link.Behind = &ahead, &behind
+			}
 		}
 	}
 	if h.ReviewState != "" {
@@ -1470,6 +1483,23 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if request.Body.GitIsolation != nil {
 		gitIsolation = string(*request.Body.GitIsolation)
 	}
+	// Adopting an existing PR/MR: resolve it on the forge and fetch its head
+	// commit host-side before the spawn, so the worktree can be based on it and
+	// the head pre-linked to the MR (docs/pr-adoption.md).
+	var adopt *heads.AdoptSpec
+	if request.Body.AdoptMr != nil {
+		spec, detail := s.resolveAdoptSpec(ctx, projectRoot, *request.Body.AdoptMr)
+		if detail != "" {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: detail,
+			}, nil
+		}
+		adopt = spec
+		// An adopted head's base is the PR's target branch; ignore any base_branch.
+		baseBranch = ""
+	}
 
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
@@ -1493,6 +1523,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		AgentType:     agentType,
 		Model:         model,
 		BaseBranch:    baseBranch,
+		Adopt:         adopt,
 		Ephemeral:     ephemeral,
 		ChatMode:      chatMode,
 		GitIsolation:  gitIsolation,
@@ -1521,7 +1552,9 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 	s.notifyAgentsChanged(projectRoot, true)
-	return api.SpawnAgent201JSONResponse(agentResponse(*head)), nil
+	// Use the review-aware response so an adopted head arrives already carrying its
+	// MR link (a normal head has none, so this is equivalent to agentResponse).
+	return api.SpawnAgent201JSONResponse(s.agentResponseWithReview(*head)), nil
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {

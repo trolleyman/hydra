@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink } from 'lucide-react'
+import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock } from 'lucide-react'
 // lucide-react dropped brand glyphs in v1, so the forge icons come from
 // simple-icons instead (@icons-pack/react-simple-icons).
 import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
@@ -87,6 +87,20 @@ export function MRStateChip({ agent }: { agent: AgentResponse }) {
           </Badge>
         </a>
       </Tooltip>
+      {review.adopted && (
+        <Tooltip
+          content={review.can_push === false
+            ? 'Adopted PR - read-only (the author has not enabled maintainer edits, so changes cannot be pushed)'
+            : 'Adopted PR - this head is working on an existing PR Hydra did not create'}
+        >
+          <Badge
+            tone={review.can_push === false ? 'yellow' : 'neutral'}
+            icon={review.can_push === false ? <Lock className="w-3 h-3" /> : undefined}
+          >
+            {review.can_push === false ? 'Adopted (read-only)' : 'Adopted'}
+          </Badge>
+        </Tooltip>
+      )}
       <CIChip status={st?.ci_status} />
       {st && st.approvals_required != null && st.approvals_required > 0 && (
         <Tooltip content="Approvals">

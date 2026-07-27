@@ -150,6 +150,12 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 // bypasses), host-side refspec push, forge.EnsureMR, store the link, refresh
 // cached state. Returns the updated head on success, else a *publishFailure.
 func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads.Head, ov publishOverrides, force bool) (*heads.Head, *publishFailure) {
+	// An adopted head is already linked to a PR Hydra did not create; opening a
+	// new MR for it would duplicate (or no-op). Push to MR is the way to send
+	// commits (docs/pr-adoption.md).
+	if head.ReviewAdopted {
+		return nil, &publishFailure{badReq: true, detail: "this head is working on an existing PR; use Push to MR rather than creating a new one"}
+	}
 	review := reviewConfigFor(projectRoot)
 	cfg, _ := config.Load(projectRoot)
 	remote := firstNonEmpty(ov.Remote, review.GetRemote())
@@ -286,13 +292,28 @@ func (s *Server) PushToMr(ctx context.Context, request api.PushToMrRequestObject
 	return api.PushToMr200JSONResponse(s.agentResponseWithReview(*updated)), nil
 }
 
+// reviewPushTarget returns where a push to the head's MR should go: the adopted
+// PR's head-repo clone URL when set (a fork, whose head branch does not live on
+// the configured remote), else the configured review remote. PushRefspec accepts
+// a URL in the remote position, so a fork needs no `git remote add`.
+func reviewPushTarget(projectRoot string, head heads.Head) string {
+	if head.ReviewPushURL != "" {
+		return head.ReviewPushURL
+	}
+	return reviewRemote(projectRoot)
+}
+
 // pushHeadToMR pushes a linked head's local branch to its downstream branch
-// (plain push, idempotent). Shared by the PushToMr handler and auto-publish.
+// (plain push, idempotent). Shared by the PushToMr handler and auto-publish. An
+// adopted read-only PR (no maintainer-edit access) is rejected up front.
 func (s *Server) pushHeadToMR(ctx context.Context, projectRoot string, head heads.Head) error {
 	if head.Branch == nil || head.DownstreamBranch == "" {
 		return errtrace.Wrap(fmt.Errorf("head is not linked to an MR"))
 	}
-	remote := reviewRemote(projectRoot)
+	if head.ReviewAdopted && !head.ReviewCanPush {
+		return errtrace.Wrap(fmt.Errorf("this PR is read-only: its author has not enabled maintainer edits, so changes cannot be pushed to it"))
+	}
+	remote := reviewPushTarget(projectRoot, head)
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
 	refspec := *head.Branch + ":refs/heads/" + head.DownstreamBranch
@@ -314,10 +335,22 @@ func (s *Server) PullFromMr(ctx context.Context, request api.PullFromMrRequestOb
 	}
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
-	if err := git.Fetch(pubCtx, projectRoot, remote); err != nil {
-		return api.PullFromMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("fetch failed: %v", err)}, nil
+	// The ref we merge in depends on how the head is linked. An adopted PR is
+	// tracked by the forge's read-only head pseudo-ref, refreshed into a private
+	// local ref; a published head is tracked by <remote>/<downstream>.
+	var track string
+	if head.ReviewAdopted {
+		localRef, refspec := git.PRHeadRefspec(head.ReviewProvider, head.ReviewID)
+		if err := git.FetchRefspec(pubCtx, projectRoot, remote, refspec); err != nil {
+			return api.PullFromMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("fetch failed: %v", err)}, nil
+		}
+		track = localRef
+	} else {
+		if err := git.Fetch(pubCtx, projectRoot, remote); err != nil {
+			return api.PullFromMr400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("fetch failed: %v", err)}, nil
+		}
+		track = remote + "/" + head.DownstreamBranch
 	}
-	track := remote + "/" + head.DownstreamBranch
 	authorName, authorEmail := gitConfigVal(mergeDir, "user.name"), gitConfigVal(mergeDir, "user.email")
 	if err := git.Merge(mergeDir, track, authorName, authorEmail); err != nil {
 		var conflict *git.ConflictError
@@ -512,6 +545,11 @@ func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublish
 	}
 	if head == nil || head.Branch == nil {
 		return api.ArmPublishWhenGreen404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+	}
+	// Arming auto-publish on an adopted PR would auto-push into someone else's PR
+	// once tests go green - never do that implicitly (docs/pr-adoption.md).
+	if head.ReviewAdopted {
+		return api.ArmPublishWhenGreen400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "publish-when-green is not available for an adopted PR: pushing to it must be a deliberate action"}, nil
 	}
 	if s.DB != nil {
 		if err := s.DB.SetPublishWhenGreen(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {

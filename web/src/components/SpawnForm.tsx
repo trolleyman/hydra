@@ -5,7 +5,7 @@ import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, X, Lock } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -20,6 +20,9 @@ import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { useProjectStore } from '../stores/projectStore'
+import { PRPicker } from './PRPicker'
+import { Badge } from './Badge'
+import type { ReviewRef } from '../api/models/ReviewRef'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -243,6 +246,10 @@ export const SpawnForm = memo(function SpawnForm({
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [baseBranch, setBaseBranch] = useState('')
+  // When set, the spawn adopts an existing PR/MR instead of branching from a base
+  // branch: the worktree is based on the PR head and the head is pre-linked to the
+  // MR (docs/pr-adoption.md). The base-branch picker is hidden while adopting.
+  const [adopt, setAdopt] = useState<ReviewRef | null>(null)
   // Undo/redo for the composer spans the typed prompt AND the attachment chips:
   // a paste that becomes a chip calls preventDefault, so native textarea undo
   // never sees it. `present` is the live composer state; `commit`/`undo`/`redo`/
@@ -714,7 +721,9 @@ export const SpawnForm = memo(function SpawnForm({
         // explicitly so turning the toggle off wins over the server-side
         // default-on, and a remembered value never leaks into another agent type.
         ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: chatMode } : {}),
-        ...(baseBranch ? { base_branch: baseBranch } : {}),
+        // Adopting a PR takes precedence over (and ignores) the base branch: the
+        // server bases the head on the PR head and its target branch.
+        ...(adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {}),
         // Omit git_isolation when '' so the server applies the project policy default.
         ...(gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
@@ -732,6 +741,7 @@ export const SpawnForm = memo(function SpawnForm({
       setLightboxIndex(null)
       pastedTextCounterRef.current = 0
       lastPasteRef.current = null
+      setAdopt(null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))
@@ -754,13 +764,49 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
+  // The "work on an existing PR" control: while a PR is selected it shows a chip
+  // (with a read-only lock when the PR can't be pushed to) plus a clear button;
+  // otherwise the PRPicker trigger. Hidden on the built-in scratch project, which
+  // has no forge to adopt from. Rendered inline in both spawn layouts (not folded
+  // into the cog), since adopting a PR is a prominent, distinct choice.
+  function renderAdoptControl(compactSel: boolean) {
+    if (isBuiltinProject || !projectId) return null
+    if (adopt) {
+      return (
+        <div className="flex items-center gap-1 shrink-0 min-w-0">
+          <Tooltip content={`Adopting PR #${adopt.id}: ${adopt.title}${adopt.can_push === false ? ' (read-only - no push access)' : ''}`}>
+            <Badge
+              tone="blue"
+              icon={adopt.can_push === false ? <Lock className="w-3 h-3" /> : <GitBranch className="w-3 h-3" />}
+            >
+              <span className="max-w-[8rem] truncate">PR #{adopt.id}</span>
+            </Badge>
+          </Tooltip>
+          <Tooltip content="Don't adopt a PR">
+            <button
+              type="button"
+              onClick={() => setAdopt(null)}
+              aria-label="Don't adopt a PR"
+              className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer shrink-0"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </Tooltip>
+        </div>
+      )
+    }
+    return <PRPicker projectId={projectId} onSelect={setAdopt} compact={compactSel} />
+  }
+
   // Both spawn layouts collapse the per-spawn options (chat/terminal mode, git
   // isolation, base branch) into a single settings cog, styled like the
   // per-section options popovers elsewhere. Git isolation applies to every head,
   // so the cog always renders.
   function renderSpawnSettings() {
     const showChat = agentType === 'claude' || agentType === 'codex'
-    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject
+    // While adopting a PR the base branch is the PR's target, chosen server-side,
+    // so the base-branch section is suppressed (mirrors renderAdoptControl).
+    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt
     // A two-option segmented control: a chat-mode head opens the web chat view,
     // otherwise the head runs in a terminal. `chatMode === false` selects the
     // terminal segment.
@@ -923,6 +969,10 @@ export const SpawnForm = memo(function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
+                {/* The PR-adopt control stays inline (not in the Spawn options
+                    popover) so the "Adopting PR #n" chip is visible in the
+                    collapsed footer; chat mode + base branch live in the popover. */}
+                {renderAdoptControl(true)}
               </div>
               {renderSpawnSettings()}
               <button
@@ -930,7 +980,7 @@ export const SpawnForm = memo(function SpawnForm({
                 disabled={!canSubmit || loading || disabled}
                 className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
-                {loading ? '...' : 'Spawn'}
+                {loading ? '...' : adopt ? 'Adopt PR' : 'Spawn'}
               </button>
             </div>
             {renderResizeHandle()}
@@ -1003,6 +1053,7 @@ export const SpawnForm = memo(function SpawnForm({
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
                   <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
                   {renderSpawnSettings()}
+                  {renderAdoptControl(false)}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                   <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
@@ -1014,7 +1065,12 @@ export const SpawnForm = memo(function SpawnForm({
                     {loading ? (
                       <>
                         <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                        Spawning...
+                        {adopt ? 'Adopting...' : 'Spawning...'}
+                      </>
+                    ) : adopt ? (
+                      <>
+                        <GitBranch className="w-3.5 h-3.5" />
+                        Adopt PR #{adopt.id}
                       </>
                     ) : (
                       <>

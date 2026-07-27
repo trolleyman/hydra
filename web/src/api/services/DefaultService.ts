@@ -14,6 +14,7 @@ import type { CommitRepositoryRequest } from '../models/CommitRepositoryRequest'
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
+import type { ListReviewsResponse } from '../models/ListReviewsResponse';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
@@ -561,6 +562,41 @@ export class DefaultService {
         });
     }
     /**
+     * List existing PRs/MRs on the project's forge, for the adoption picker
+     * Enumerates open PRs/MRs (via gh/glab) so a head can be spawned onto one (docs/pr-adoption.md). Host-side, using the user's forge CLI auth. Never fails hard - an unconfigured/unauthenticated forge returns configured/authenticated flags and an error hint with an empty list.
+     * @param projectId
+     * @param state "open" (default) | "all" | "merged" | "closed".
+     * @param author "@me" to list only the authenticated user's own PRs.
+     * @param search Free-text search (forge-native syntax).
+     * @param limit
+     * @returns ListReviewsResponse OK
+     * @throws ApiError
+     */
+    public listReviews(
+        projectId: string,
+        state?: string,
+        author?: string,
+        search?: string,
+        limit?: number,
+    ): CancelablePromise<ListReviewsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/reviews',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'state': state,
+                'author': author,
+                'search': search,
+                'limit': limit,
+            },
+            errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
      * Resolved [review] config + live forge auth status for a project
      * The effective, resolved review settings (provider auto-detected from the remote URL) plus the forge CLI's live auth status, for the Settings Review section and the Create MR dialog prefill.
      * @param projectId
@@ -979,6 +1015,7 @@ export class DefaultService {
                 'id': id,
             },
             errors: {
+                400: `Bad Request (e.g. an adopted PR, which must not auto-push)`,
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },

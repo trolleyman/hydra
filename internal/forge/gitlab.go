@@ -230,6 +230,113 @@ func (p *gitlabProvider) Discussions(ctx context.Context, repoDir, _ string, id 
 	return res, nil
 }
 
+// glabMRRef is the subset of `glab mr {list,view} -F json` fields needed to
+// adopt an MR. GitLab MR JSON is snake_case.
+type glabMRRef struct {
+	IID                int    `json:"iid"`
+	WebURL             string `json:"web_url"`
+	Title              string `json:"title"`
+	State              string `json:"state"`
+	Draft              bool   `json:"draft"`
+	WorkInProgress     bool   `json:"work_in_progress"`
+	SourceBranch       string `json:"source_branch"`
+	TargetBranch       string `json:"target_branch"`
+	AllowCollaboration bool   `json:"allow_collaboration"`
+	SourceProjectID    int    `json:"source_project_id"`
+	TargetProjectID    int    `json:"target_project_id"`
+	Author             struct {
+		Username string `json:"username"`
+	} `json:"author"`
+}
+
+func (r glabMRRef) toMRRef() MRRef {
+	cross := r.SourceProjectID != 0 && r.TargetProjectID != 0 && r.SourceProjectID != r.TargetProjectID
+	return MRRef{
+		ID:           strconv.Itoa(r.IID),
+		URL:          r.WebURL,
+		Title:        r.Title,
+		Author:       r.Author.Username,
+		State:        glabState(r.State, r.Draft || r.WorkInProgress),
+		Draft:        r.Draft || r.WorkInProgress,
+		HeadRef:      r.SourceBranch,
+		TargetBranch: r.TargetBranch,
+		CrossRepo:    cross,
+		CanPush:      !cross || r.AllowCollaboration,
+	}
+}
+
+func (p *gitlabProvider) ListMRs(ctx context.Context, repoDir, _ string, o ListMROptions) ([]MRRef, error) {
+	args := []string{"mr", "list", "-F", "json"}
+	switch strings.ToLower(o.State) {
+	case "", "open":
+		args = append(args, "--opened")
+	case "all":
+		args = append(args, "--all")
+	case "merged":
+		args = append(args, "--merged")
+	case "closed":
+		args = append(args, "--closed")
+	}
+	if o.Author == "@me" {
+		args = append(args, "--mine")
+	}
+	if o.Search != "" {
+		args = append(args, "--search", o.Search)
+	}
+	if o.Limit > 0 {
+		args = append(args, "--per-page", strconv.Itoa(o.Limit))
+	}
+	out, err := p.run(ctx, repoDir, "glab", args...)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	var list []glabMRRef
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	res := make([]MRRef, 0, len(list))
+	for _, r := range list {
+		res = append(res, r.toMRRef())
+	}
+	return res, nil
+}
+
+func (p *gitlabProvider) GetMR(ctx context.Context, repoDir, _ string, id string) (MRRef, error) {
+	out, err := p.run(ctx, repoDir, "glab", "mr", "view", id, "-F", "json")
+	if err != nil {
+		return MRRef{}, errtrace.Wrap(err)
+	}
+	var r glabMRRef
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &r); err != nil {
+		return MRRef{}, errtrace.Wrap(err)
+	}
+	ref := r.toMRRef()
+	// A fork MR's source project has its own clone URL, which the MR JSON does not
+	// carry. Resolve it with one extra API call. Best-effort: on failure the push
+	// path falls back to the configured remote (and fails loudly for a real fork).
+	if ref.CrossRepo && r.SourceProjectID != 0 {
+		if cloneURL := p.projectCloneURL(ctx, repoDir, r.SourceProjectID); cloneURL != "" {
+			ref.HeadRepoURL = cloneURL
+		}
+	}
+	return ref, nil
+}
+
+// projectCloneURL resolves a GitLab project id to its HTTP clone URL via the API.
+func (p *gitlabProvider) projectCloneURL(ctx context.Context, repoDir string, projectID int) string {
+	out, err := p.run(ctx, repoDir, "glab", "api", "projects/"+strconv.Itoa(projectID))
+	if err != nil {
+		return ""
+	}
+	var proj struct {
+		HTTPURLToRepo string `json:"http_url_to_repo"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &proj); err != nil {
+		return ""
+	}
+	return proj.HTTPURLToRepo
+}
+
 // glabAuthStatus reports glab login state via `glab auth status`.
 func glabAuthStatus(ctx context.Context) (bool, string, error) {
 	if !cliAvailable("glab") {

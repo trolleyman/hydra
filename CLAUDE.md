@@ -145,6 +145,12 @@ area; do not re-derive it by reading source. Skip them otherwise.
   and whitespace-row dimming were tried and reverted - see the doc). A proper
   boxes+jump redesign of moved-block viz is specced in
   [docs/diff-moved-blocks.md](docs/diff-moved-blocks.md) (unbuilt)
+- **Working on an existing PR/MR** (adopting someone else's PR as a head,
+  fetching a PR head, pushing back to a fork, `internal/forge` enumeration) ->
+  [docs/pr-adoption.md](docs/pr-adoption.md) (BUILT; `forge.ListMRs`/`GetMR`,
+  `git.PRHeadRefspec`/`FetchRefspec`, `heads.SpawnHeadOptions.Adopt`, the
+  `adopt_mr` spawn field + `GET .../reviews`, `web/.../PRPicker.tsx`; the
+  outbound publish flow is NON_LOCAL_INTEGRATION.md)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;

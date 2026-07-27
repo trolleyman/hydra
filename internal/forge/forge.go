@@ -108,6 +108,13 @@ type Provider interface {
 	Merge(ctx context.Context, repoDir, remote, id string, o MergeOptions) error
 	// Discussions returns the unresolved review threads on the MR.
 	Discussions(ctx context.Context, repoDir, remote, id string) ([]Discussion, error)
+	// ListMRs enumerates existing MRs/PRs for the adoption picker (open by
+	// default). It returns light MRRefs - the per-PR detail that needs an extra
+	// round trip (a fork's clone URL) is filled by GetMR on selection.
+	ListMRs(ctx context.Context, repoDir, remote string, o ListMROptions) ([]MRRef, error)
+	// GetMR resolves a single MR/PR by id in full, including the head repo's
+	// clone URL for a fork PR - everything needed to adopt it as a head.
+	GetMR(ctx context.Context, repoDir, remote, id string) (MRRef, error)
 }
 
 // runner runs a CLI command in dir and returns combined stdout (for JSON parsing)

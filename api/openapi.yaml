@@ -817,6 +817,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/reviews:
+    get:
+      summary: List existing PRs/MRs on the project's forge, for the adoption picker
+      operationId: listReviews
+      description: Enumerates open PRs/MRs (via gh/glab) so a head can be spawned onto one (docs/pr-adoption.md). Host-side, using the user's forge CLI auth. Never fails hard - an unconfigured/unauthenticated forge returns configured/authenticated flags and an error hint with an empty list.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: false
+          schema: { type: string }
+          description: '"open" (default) | "all" | "merged" | "closed".'
+        - in: query
+          name: author
+          required: false
+          schema: { type: string }
+          description: '"@me" to list only the authenticated user''s own PRs.'
+        - in: query
+          name: search
+          required: false
+          schema: { type: string }
+          description: Free-text search (forge-native syntax).
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListReviewsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/review-config:
     get:
       summary: Resolved [review] config + live forge auth status for a project
@@ -1474,6 +1517,12 @@ paths:
       responses:
         '204':
           description: No Content (publish-when-green armed)
+        '400':
+          description: Bad Request (e.g. an adopted PR, which must not auto-push)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Not Found
           content:
@@ -2709,6 +2758,8 @@ components:
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to current branch)
+        adopt_mr:
+          $ref: '#/components/schemas/AdoptMRRequest'
         chat_mode:
           type: boolean
           description: >-
@@ -2925,6 +2976,84 @@ components:
           description: Commits the remote downstream branch has that the local head branch does not (drives "Pull from MR").
         state:
           $ref: '#/components/schemas/ReviewState'
+        adopted:
+          type: boolean
+          description: True when this head was spawned ON an existing PR/MR Hydra did not create (docs/pr-adoption.md). Such a head has no "Create MR" affordance and its downstream branch (the PR author's source branch) is not editable.
+        can_push:
+          type: boolean
+          description: Whether we may push to the adopted PR's head branch (always true for a same-repo PR; for a fork only when the author enabled maintainer edits). When false the head is read-only and the Push/Pull affordances are disabled. Only meaningful when adopted is true.
+
+    AdoptMRRequest:
+      type: object
+      description: Adopt an existing PR/MR as this head instead of branching from base (docs/pr-adoption.md). The worktree is created from the PR's head commit, the head's base becomes the PR's target branch, and the head is pre-linked to the MR.
+      required: [id]
+      properties:
+        id:
+          type: string
+          description: The PR number / MR iid to adopt.
+        remote:
+          type: string
+          description: Git remote to resolve the forge against (defaults to the configured review remote, usually "origin").
+
+    ReviewRef:
+      type: object
+      description: One existing PR/MR from the forge, for the adoption picker (docs/pr-adoption.md).
+      required: [id, url, title, state, head_ref, target_branch, cross_repo, can_push]
+      properties:
+        id:
+          type: string
+          description: PR number / MR iid.
+        url:
+          type: string
+        title:
+          type: string
+        author:
+          type: string
+          description: Login / username of the PR author.
+        state:
+          type: string
+          description: Normalized state (draft | open | merged | closed).
+        draft:
+          type: boolean
+        head_ref:
+          type: string
+          description: Source branch name on the head repo.
+        head_repo_url:
+          type: string
+          description: Clone URL of the repo hosting head_ref (empty for a same-repo PR).
+        target_branch:
+          type: string
+          description: The branch the PR merges into (becomes the head's base).
+        cross_repo:
+          type: boolean
+          description: True when the PR was raised from a fork.
+        can_push:
+          type: boolean
+          description: Whether we can push to the PR's head branch (false = adoptable read-only only).
+
+    ListReviewsResponse:
+      type: object
+      description: The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
+      required: [configured, authenticated, reviews]
+      properties:
+        configured:
+          type: boolean
+          description: True when a forge provider could be resolved for the project.
+        authenticated:
+          type: boolean
+          description: Whether the forge CLI is authenticated.
+        provider:
+          type: string
+          description: Resolved provider ("github" | "gitlab" | "").
+        auth_status:
+          type: string
+          description: Live auth status line, when not authenticated / configured.
+        error:
+          type: string
+          description: Human-readable reason the list is empty/unavailable (not configured, CLI missing, list failed).
+        reviews:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewRef' }
 
     ReviewConfigResponse:
       type: object

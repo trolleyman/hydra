@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AdoptMRRequest } from './AdoptMRRequest';
 export type SpawnAgentRequest = {
     /**
      * The prompt to give to the agent
@@ -27,6 +28,7 @@ export type SpawnAgentRequest = {
      * Base branch to create the worktree from (defaults to current branch)
      */
     base_branch?: string;
+    adopt_mr?: AdoptMRRequest;
     /**
      * Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.
      */

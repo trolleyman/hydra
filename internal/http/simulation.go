@@ -814,6 +814,35 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+func (s *SimulationServer) ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params api.ListReviewsParams) {
+	api.WriteJSON(w, http.StatusOK, api.ListReviewsResponse{
+		Configured:    true,
+		Authenticated: true,
+		Provider:      ptr(forge.ProviderGitLab),
+		Reviews: []api.ReviewRef{
+			{
+				Id: "128", Url: "https://gitlab.example.com/team/repo/-/merge_requests/128",
+				Title: "Add rate limiting to the ingest API", Author: ptr("priya"),
+				State: forge.StateOpen, Draft: ptr(false),
+				HeadRef: "feat/rate-limit", TargetBranch: "main", CrossRepo: false, CanPush: true,
+			},
+			{
+				Id: "131", Url: "https://gitlab.example.com/team/repo/-/merge_requests/131",
+				Title: "Fix flaky screenshot test", Author: ptr("sam"),
+				State: forge.StateDraft, Draft: ptr(true),
+				HeadRef: "fix/flaky-shot", TargetBranch: "main", CrossRepo: false, CanPush: true,
+			},
+			{
+				Id: "134", Url: "https://gitlab.example.com/team/repo/-/merge_requests/134",
+				Title: "Community: typo fixes in docs", Author: ptr("external-contributor"),
+				State: forge.StateOpen, Draft: ptr(false),
+				HeadRef: "docs/typos", HeadRepoUrl: ptr("https://gitlab.example.com/external-contributor/repo.git"),
+				TargetBranch: "main", CrossRepo: true, CanPush: false,
+			},
+		},
+	})
+}
+
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }

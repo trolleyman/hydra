@@ -218,6 +218,15 @@ type AddProjectRequest struct {
 	Path string `json:"path"`
 }
 
+// AdoptMRRequest Adopt an existing PR/MR as this head instead of branching from base (docs/pr-adoption.md). The worktree is created from the PR's head commit, the head's base becomes the PR's target branch, and the head is pre-linked to the MR.
+type AdoptMRRequest struct {
+	// Id The PR number / MR iid to adopt.
+	Id string `json:"id"`
+
+	// Remote Git remote to resolve the forge against (defaults to the configured review remote, usually "origin").
+	Remote *string `json:"remote,omitempty"`
+}
+
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
 	// Fullscreen Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
@@ -736,6 +745,25 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
+// ListReviewsResponse The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
+type ListReviewsResponse struct {
+	// AuthStatus Live auth status line, when not authenticated / configured.
+	AuthStatus *string `json:"auth_status,omitempty"`
+
+	// Authenticated Whether the forge CLI is authenticated.
+	Authenticated bool `json:"authenticated"`
+
+	// Configured True when a forge provider could be resolved for the project.
+	Configured bool `json:"configured"`
+
+	// Error Human-readable reason the list is empty/unavailable (not configured, CLI missing, list failed).
+	Error *string `json:"error,omitempty"`
+
+	// Provider Resolved provider ("github" | "gitlab" | "").
+	Provider *string     `json:"provider,omitempty"`
+	Reviews  []ReviewRef `json:"reviews"`
+}
+
 // McpServer A candidate MCP server discovered in the host/project config.
 type McpServer struct {
 	// Name The server key as it appears under mcpServers.
@@ -1152,11 +1180,17 @@ type ReviewConfigResponse struct {
 
 // ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 type ReviewLink struct {
+	// Adopted True when this head was spawned ON an existing PR/MR Hydra did not create (docs/pr-adoption.md). Such a head has no "Create MR" affordance and its downstream branch (the PR author's source branch) is not editable.
+	Adopted *bool `json:"adopted,omitempty"`
+
 	// Ahead Commits the local head branch has that the remote downstream branch does not (drives "Push to MR").
 	Ahead *int `json:"ahead,omitempty"`
 
 	// Behind Commits the remote downstream branch has that the local head branch does not (drives "Pull from MR").
 	Behind *int `json:"behind,omitempty"`
+
+	// CanPush Whether we may push to the adopted PR's head branch (always true for a same-repo PR; for a fork only when the author enabled maintainer edits). When false the head is read-only and the Push/Pull affordances are disabled. Only meaningful when adopted is true.
+	CanPush *bool `json:"can_push,omitempty"`
 
 	// Id MR/PR identifier on the forge (GitLab IID / GitHub number).
 	Id string `json:"id"`
@@ -1172,6 +1206,36 @@ type ReviewLink struct {
 
 	// Url Forge URL of the MR/PR (deep link for "View MR").
 	Url string `json:"url"`
+}
+
+// ReviewRef One existing PR/MR from the forge, for the adoption picker (docs/pr-adoption.md).
+type ReviewRef struct {
+	// Author Login / username of the PR author.
+	Author *string `json:"author,omitempty"`
+
+	// CanPush Whether we can push to the PR's head branch (false = adoptable read-only only).
+	CanPush bool `json:"can_push"`
+
+	// CrossRepo True when the PR was raised from a fork.
+	CrossRepo bool  `json:"cross_repo"`
+	Draft     *bool `json:"draft,omitempty"`
+
+	// HeadRef Source branch name on the head repo.
+	HeadRef string `json:"head_ref"`
+
+	// HeadRepoUrl Clone URL of the repo hosting head_ref (empty for a same-repo PR).
+	HeadRepoUrl *string `json:"head_repo_url,omitempty"`
+
+	// Id PR number / MR iid.
+	Id string `json:"id"`
+
+	// State Normalized state (draft | open | merged | closed).
+	State string `json:"state"`
+
+	// TargetBranch The branch the PR merges into (becomes the head's base).
+	TargetBranch string `json:"target_branch"`
+	Title        string `json:"title"`
+	Url          string `json:"url"`
 }
 
 // ReviewState Cached forge MR state from the lifecycle watcher (Phase 3). Absent until the watcher has polled.
@@ -1261,6 +1325,9 @@ type SetProjectIconRequest struct {
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
 type SpawnAgentRequest struct {
+	// AdoptMr Adopt an existing PR/MR as this head instead of branching from base (docs/pr-adoption.md). The worktree is created from the PR's head commit, the head's base becomes the PR's target branch, and the head is pre-linked to the MR.
+	AdoptMr *AdoptMRRequest `json:"adopt_mr,omitempty"`
+
 	// AgentType Agent type: claude, gemini, copilot, codex, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
@@ -1746,6 +1813,19 @@ type GetRepositoryTreeParams struct {
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
+// ListReviewsParams defines parameters for ListReviews.
+type ListReviewsParams struct {
+	// State "open" (default) | "all" | "merged" | "closed".
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// Author "@me" to list only the authenticated user's own PRs.
+	Author *string `form:"author,omitempty" json:"author,omitempty"`
+
+	// Search Free-text search (forge-native syntax).
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetClaudeUsageParams defines parameters for GetClaudeUsage.
 type GetClaudeUsageParams struct {
 	// Refresh Bypass the cache and re-probe the CLI.
@@ -1946,6 +2026,9 @@ type ServerInterface interface {
 	// Resolved [review] config + live forge auth status for a project
 	// (GET /api/projects/{project_id}/review-config)
 	GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
+	// List existing PRs/MRs on the project's forge, for the adoption picker
+	// (GET /api/projects/{project_id}/reviews)
+	ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
@@ -4041,6 +4124,66 @@ func (siw *ServerInterfaceWrapper) GetReviewConfig(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListReviews operation middleware
+func (siw *ServerInterfaceWrapper) ListReviews(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReviewsParams
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "state", r.URL.Query(), &params.State)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "author" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "author", r.URL.Query(), &params.Author)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "author", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "search", r.URL.Query(), &params.Search)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReviews(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetServices operation middleware
 func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
 
@@ -4320,6 +4463,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/sync", wrapper.SyncRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/review-config", wrapper.GetReviewConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/reviews", wrapper.ListReviews)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -5499,6 +5643,15 @@ func (response ArmPublishWhenGreen204Response) VisitArmPublishWhenGreenResponse(
 	return nil
 }
 
+type ArmPublishWhenGreen400JSONResponse ErrorResponse
+
+func (response ArmPublishWhenGreen400JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ArmPublishWhenGreen404JSONResponse ErrorResponse
 
 func (response ArmPublishWhenGreen404JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
@@ -6417,6 +6570,33 @@ func (response GetReviewConfig404JSONResponse) VisitGetReviewConfigResponse(w ht
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListReviewsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    ListReviewsParams
+}
+
+type ListReviewsResponseObject interface {
+	VisitListReviewsResponse(w http.ResponseWriter) error
+}
+
+type ListReviews200JSONResponse ListReviewsResponse
+
+func (response ListReviews200JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListReviews404JSONResponse ErrorResponse
+
+func (response ListReviews404JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetServicesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -6701,6 +6881,9 @@ type StrictServerInterface interface {
 	// Resolved [review] config + live forge auth status for a project
 	// (GET /api/projects/{project_id}/review-config)
 	GetReviewConfig(ctx context.Context, request GetReviewConfigRequestObject) (GetReviewConfigResponseObject, error)
+	// List existing PRs/MRs on the project's forge, for the adoption picker
+	// (GET /api/projects/{project_id}/reviews)
+	ListReviews(ctx context.Context, request ListReviewsRequestObject) (ListReviewsResponseObject, error)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
@@ -8257,6 +8440,33 @@ func (sh *strictHandler) GetReviewConfig(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReviewConfigResponseObject); ok {
 		if err := validResponse.VisitGetReviewConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReviews operation middleware
+func (sh *strictHandler) ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams) {
+	var request ListReviewsRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReviews(ctx, request.(ListReviewsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReviews")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReviewsResponseObject); ok {
+		if err := validResponse.VisitListReviewsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
