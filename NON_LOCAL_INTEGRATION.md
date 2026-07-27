@@ -454,7 +454,7 @@ credentials you already provision once on the host:
     git stderr. A later upgrade could forward the prompt to the web UI
     instead of failing fast (git/ssh support this via
     `GIT_ASKPASS`/`SSH_ASKPASS` pointing at a small hydra helper) -
-    tracked as a follow-up in PLAN.md, explicitly not part of this plan. If the agent socket needs pinning on odd setups, a
+    tracked as a follow-up in docs/roadmap.md, explicitly not part of this plan. If the agent socket needs pinning on odd setups, a
     NON-secret pointer like `ssh_auth_sock` or a `ssh_command` override
     is a legitimate `config.local.toml` entry - the *passphrase itself
     never is*.
@@ -727,7 +727,7 @@ changing steps 1-3 at all.
   matching what `git.Fetch` half-does today) and surface an actionable
   auth error. Standalone fix: the existing sidebar Push button can hang
   the daemon on a credential prompt right now (3.4). The interactive
-  askpass-to-web-UI upgrade is a PLAN.md follow-up, not this.
+  askpass-to-web-UI upgrade is a docs/roadmap.md follow-up, not this.
 - `config.local.toml` as a fourth merge layer in `config.Load`
   (`internal/config/config.go:1085`); gitignore it next to `deploy.toml`;
   include it in the `unsafe_host` trusted-set derivation.

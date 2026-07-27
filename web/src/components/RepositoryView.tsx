@@ -30,6 +30,7 @@ import { scrollCardToTop } from '../lib/diffScroll'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
+import { buildRepoSplat, parseRepoSplat, splatNeedsBranchList } from '../lib/repoSplat'
 import {
   parseLineRange, formatLineHash, inRange, type LineRange,
   parseDiffLineRange, formatDiffLineHash,
@@ -114,7 +115,7 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
 
 // ancestorsOf returns every directory path containing the given file path, so we
 // can auto-expand the tree down to a deep-linked file even though folders start
-// collapsed (PLAN.md #41c).
+// collapsed.
 function ancestorsOf(filePath: string): string[] {
   const parts = filePath.split('/')
   const acc: string[] = []
@@ -144,7 +145,7 @@ function escapeHtml(s: string): string {
 // per-line HTML strings, re-opening any <span> left open across a newline so
 // each line is independently valid HTML. Rendering each logical line as its own
 // element is what lets line numbers stay aligned even when wrapping is on
-// (PLAN.md #41a/#41d).
+//.
 function splitHighlightedLines(html: string): string[] {
   const lines: string[] = []
   const stack: string[] = [] // currently-open tag strings
@@ -173,7 +174,7 @@ function splitHighlightedLines(html: string): string[] {
 // formatBytes now lives in ../lib/formatBytes, shared with the artifact
 // download tiles.
 
-// File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
+// File icons now live in ../lib/fileIcons (getFileIcon), shared
 // with the diff viewer so both render files identically.
 
 // ── File header actions (copy contents + raw) ─────────────────────────────────
@@ -281,7 +282,7 @@ function FileActionMenuRows({ file, projectId, refStr, onAction }: { file: Repos
   )
 }
 
-// ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
+// ── Settings popup ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
 
 type RepoSettings = { wrap: boolean; showIcons: boolean }
@@ -328,16 +329,18 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 
   return (
     <div ref={ref} className="relative shrink-0">
-      <button
-        title="View settings"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="View settings">
+        <button
+          aria-label="View settings"
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -436,16 +439,18 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
   return (
     <div ref={ref} className="relative shrink-0">
-      <button
-        title="Diff settings"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="Diff settings">
+        <button
+          aria-label="Diff settings"
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -762,29 +767,32 @@ function FilePathLabel({ path }: { path: string }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded(true)}
-      title={path}
-      className="flex items-center min-w-0 text-sm cursor-pointer"
-    >
-      {dir && (
-        // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
-        // while the inner plaintext span keeps the path reading left-to-right.
-        // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
-        // so the directory clips first and the filename only clips once it alone
-        // can't fit.
-        <span
-          className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
-          style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
-        >
-          <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+    // min-w-0 also goes on the wrapper: it is the header's flex child now, and
+    // without it the clipped path could no longer shrink.
+    <Tooltip content={path} className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex items-center min-w-0 text-sm cursor-pointer"
+      >
+        {dir && (
+          // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
+          // while the inner plaintext span keeps the path reading left-to-right.
+          // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
+          // so the directory clips first and the filename only clips once it alone
+          // can't fit.
+          <span
+            className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
+            style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
+          >
+            <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+          </span>
+        )}
+        <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
+          {name}
         </span>
-      )}
-      <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
-        {name}
-      </span>
-    </button>
+      </button>
+    </Tooltip>
   )
 }
 
@@ -797,29 +805,12 @@ function loadBool(key: string, def: boolean): boolean {
   return def
 }
 
-// ── Splat <-> {ref, path} ─────────────────────────────────────────────────────
-
-// parseSplat turns the URL splat (the part after /repository/) into a ref + file
-// path. Branch names can contain slashes (e.g. hydra/my-task), so the known
-// branch list is used to find the longest branch-name prefix; anything else
-// treats the first segment as the ref (a commit SHA or single-segment branch).
-function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: string | null; path: string | null } {
-  const segs = (splat || '').split('/').filter(Boolean)
-  if (segs.length === 0) return { ref: null, path: null }
-  const names = (branches ?? []).map((b) => b.name)
-  for (let i = segs.length; i >= 1; i--) {
-    const cand = segs.slice(0, i).join('/')
-    if (names.includes(cand)) return { ref: cand, path: segs.slice(i).join('/') || null }
-  }
-  return { ref: segs[0], path: segs.slice(1).join('/') || null }
-}
-
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
   const location = useLocation()
-  // The compare-diff state that is promoted into the URL (PLAN.md #72): ?compare=
+  // The compare-diff state that is promoted into the URL: ?compare=
   // (head ref) and ?dfile= (selected file in single-file mode). strict:false reads
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
@@ -845,7 +836,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Picking a compare branch (head) diffs it against the browsed ref (base),
   // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
   // is the whole diff state - '' means "not diffing" - and lives in the URL's
-  // ?compare= search param (PLAN.md #72) so a comparison (and a line selection
+  // ?compare= search param so a comparison (and a line selection
   // within it) is shareable and survives reload. The ref/path splat parser is
   // untouched: the diff state rides query params + the hash alongside it.
   const compareRef = search.compare ?? ''
@@ -901,7 +892,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const fileContextsRef = useRef<Map<string, number>>(new Map())
   const diffFileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
+  // Settings (wrap-on-by-default, popup, icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
     wrap: loadBool(StorageKeys.repoWrap, true),
     showIcons: loadBool(StorageKeys.repoIcons, true),
@@ -909,7 +900,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.repoWrap, String(settings.wrap)) }, [settings.wrap])
   useEffect(() => { writeLocal(StorageKeys.repoIcons, String(settings.showIcons)) }, [settings.showIcons])
 
-  // Resizable sidebar (PLAN.md #41i).
+  // Resizable sidebar.
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const n = parseInt(readLocal(StorageKeys.repoSidebarWidth) ?? '', 10)
     return Number.isFinite(n) && n >= 160 && n <= 640 ? n : 256
@@ -930,7 +921,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
   }, [isResizing])
 
-  const parsed = useMemo(() => parseSplat(splat, branches), [splat, branches])
+  const parsed = useMemo(() => parseRepoSplat(splat, branches), [splat, branches])
   const tree = useMemo(() => compactTree(buildTree(files)), [files])
 
   // Inject the synthetic ".hydra/artifacts" folder (with one "file" per configured
@@ -1006,9 +997,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // bare /repository URL.
   const viewPath = parsed.path ?? defaultPath
 
-  // Wait for branches before resolving a non-empty splat (so a multi-segment
-  // branch ref isn't briefly mis-parsed and fetched at the wrong ref).
-  const ready = !splat || branches !== null
+  // Only a LEGACY sentinel-free multi-segment splat needs the branch list to
+  // resolve; wait for it there (so a slashed branch ref isn't briefly mis-parsed
+  // and fetched at the wrong ref). Sentinel splats parse exactly on their own, so
+  // they render immediately.
+  const ready = !splatNeedsBranchList(splat) || branches !== null
 
   // Load branches once per project. The list is cleared during render (not in the
   // effect) when the project changes, so the fetch effect below just does the
@@ -1051,7 +1044,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         if (cancelled) return
         setFiles(resp.files)
         setDefaultPath(resp.default_path ?? null)
-        // Collapse all folders by default (PLAN.md #41c); auto-expand only the
+        // Collapse all folders by default; auto-expand only the
         // ancestors of the file shown by the URL so a deep link is visible.
         const next = new Set<string>()
         const target = parsed.path
@@ -1180,7 +1173,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Position the content when the displayed file (or selection) changes: scroll
   // the selection's first row into view if it isn't already visible, otherwise
-  // reset to the top (PLAN.md #41g). Clicking an already-visible line thus
+  // reset to the top. Clicking an already-visible line thus
   // doesn't jump the view; a deep link to an off-screen line does. Runs after
   // FileContent renders, so the data-line row exists; markdown/binary/image
   // files have no such row and fall back to the top.
@@ -1361,7 +1354,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Keeps ?compare= (so switching the base branch re-diffs against the new base)
   // but drops the file/line selection, which belonged to the old comparison.
   const goTo = (ref: string, path: string | null) => {
-    const sp = path ? `${ref}/${path}` : ref
+    const sp = buildRepoSplat(ref, path)
     navigate({
       to: '/project/$projectId/repository/$',
       params: { projectId, _splat: sp },
@@ -1373,7 +1366,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // are real anchors (middle-click / Ctrl-click open them in a new tab).
   const fileLinkProps = (path: string): LinkProps => linkOptions({
     to: '/project/$projectId/repository/$',
-    params: { projectId, _splat: `${refStr}/${path}` },
+    params: { projectId, _splat: buildRepoSplat(refStr, path) },
   })
 
   // Small-screen "back": pop the full-screen content view back to the list. In
@@ -1522,7 +1515,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) - md+ only; the sidebar is full-width on
+        {/* Resize handle - md+ only; the sidebar is full-width on
             phones. */}
         <div
           onMouseDown={startResizing}

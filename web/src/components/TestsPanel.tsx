@@ -13,11 +13,13 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
+import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
+import { buildRepoSplat } from '../lib/repoSplat'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import {
@@ -284,7 +286,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     if (!repoRef) return undefined
     return (path: string, line?: number | null) => linkOptions({
       to: '/project/$projectId/repository/$',
-      params: { projectId, _splat: `${repoRef}/${path}` },
+      params: { projectId, _splat: buildRepoSplat(repoRef, path) },
       hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
     })
   }, [projectId, repoRef])
@@ -317,17 +319,20 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
       >
         <FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Tests</h3>
+        {/* Info trigger before the status chip: the chip comes and goes (and
+            rewidths as runners finish), which would otherwise shift the `i`
+            sideways out from under a stationary cursor. */}
+        <InfoTooltip title="Tests" width={520}>
+          <p>Per-runner pass/fail verdicts for the selected commit - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
+          <p>Each runner is a project-defined <code className="text-blue-300">[tests.&lt;name&gt;]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
+          <p>Expand a card for its cases as a location tree - <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
+        </InfoTooltip>
         {runningCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             Running {runners.length - runningCount}/{runners.length}
           </span>
         )}
-        <InfoTooltip title="Tests" width={520}>
-          <p>Per-runner pass/fail verdicts for the selected commit - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
-          <p>Each runner is a project-defined <code className="text-blue-300">[tests.&lt;name&gt;]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
-          <p>Expand a card for its cases as a location tree - <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
-        </InfoTooltip>
         {/* Filter cluster, right-floated - the tests analog of ArtifactFilterBar:
             search + reset + the status scope dropdown (passing hidden by default). */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -342,25 +347,29 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
               className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             />
             {search && (
-              <button
-                onClick={() => setSearch('')}
-                title="Clear search"
-                aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
-              >
-                <X className="w-3 h-3" />
-              </button>
+              // The absolute placement is relative to the search box, so it moves
+              // to the wrapper - which is what the box now positions.
+              <Tooltip content="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                <button
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Tooltip>
             )}
           </div>
           {customFilter !== null && (
-            <button
-              onClick={() => updateFilter(defaultTestFilter(!!groupResult))}
-              title="Reset filters"
-              className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
-            >
-              <FunnelX className="w-3 h-3" />
-              <span className="lowercase">reset</span>
-            </button>
+            <Tooltip content="Reset filters">
+              <button
+                onClick={() => updateFilter(defaultTestFilter(!!groupResult))}
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <FunnelX className="w-3 h-3" />
+                <span className="lowercase">reset</span>
+              </button>
+            </Tooltip>
           )}
           <TagScopeFilter
             label="status"
@@ -538,31 +547,33 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           suppressed while running, where it streams live and there's nothing to
           toggle. Tinted blue while open. */}
       {hasLog && !running && (
-        <button
-          onClick={toggleBuildLog}
-          title={buildLogOpen ? 'Hide build log' : 'Show build log'}
-          aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
-          className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-            buildLogOpen ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300' : MELT_BTN
-          }`}
-        >
-          <ScrollText className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={buildLogOpen ? 'Hide build log' : 'Show build log'}>
+          <button
+            onClick={toggleBuildLog}
+            aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+            className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+              buildLogOpen ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300' : MELT_BTN
+            }`}
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       )}
       {/* Re-run this runner: busts the cached verdict and runs it again. Styled
           like the artifact regenerate button (single - tests are single-sided, so
           there's no before/after side to re-run separately). */}
-      <button
-        onClick={onRefresh}
-        disabled={running}
-        title="Re-run this test runner"
-        aria-label="Re-run this test runner"
-        className={`h-7 px-2 inline-flex items-center justify-center rounded-md disabled:opacity-50 ${MELT_BTN}`}
-      >
-        {/* Spins while the run is in flight (a fresh re-run flips the card to
-            running immediately via the optimistic update). */}
-        <RefreshCw className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
-      </button>
+      <Tooltip content="Re-run this test runner">
+        <button
+          onClick={onRefresh}
+          disabled={running}
+          aria-label="Re-run this test runner"
+          className={`h-7 px-2 inline-flex items-center justify-center rounded-md disabled:opacity-50 ${MELT_BTN}`}
+        >
+          {/* Spins while the run is in flight (a fresh re-run flips the card to
+              running immediately via the optimistic update). */}
+          <RefreshCw className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
+        </button>
+      </Tooltip>
     </>
   )
 
@@ -769,12 +780,13 @@ function Summary({ runner }: { runner: TestRunResult }) {
           {denom > 0 ? (
             // A "~" marks an estimated denominator carried over from a prior run
             // (the runner declared no ::hydra:test:total::).
-            <span
-              className="text-gray-400 dark:text-gray-500"
-              title={runner.total_estimated ? 'Estimated total from a previous run - this run declared no test total' : undefined}
-            >
-              /{runner.total_estimated ? '~' : ''}{denom}
-            </span>
+            // Runners are a short list (one card each), so a Tooltip here is not
+            // the per-row cost the native-title carve-out exists to avoid.
+            <Tooltip content={runner.total_estimated ? 'Estimated total from a previous run - this run declared no test total' : undefined}>
+              <span className="text-gray-400 dark:text-gray-500">
+                /{runner.total_estimated ? '~' : ''}{denom}
+              </span>
+            </Tooltip>
           ) : null}
         </span>
       </span>

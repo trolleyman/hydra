@@ -136,6 +136,17 @@ func resolveAsk(toolName string, result gate.Result) gate.Decision {
 		fmt.Fprintf(os.Stderr, "hydra gate: write request: %v\n", err)
 		return gate.Deny
 	}
+	// However this resolves - allowed, denied, or timed out - the head has stopped
+	// waiting on the user, so clear the policy-approval status on the way out
+	// instead of leaving it for the agent's next hook to overwrite. That hook is
+	// not guaranteed to come: when the gated call belongs to a sub-agent (Claude's
+	// Task tool) its PostToolUse carries an agent_id, and trigger-hook drops those
+	// so a sub-agent can't drive the parent's status. Nothing then re-stamps
+	// status.json until the MAIN agent next runs a tool or ends its turn, so the
+	// head sat at needs_input long after the user had answered - with no card left
+	// to answer. The gate writes the parent's wait, so the gate must clear it.
+	defer writeRunningStatus("")
+
 	deadline := time.Now().Add(askTimeout)
 	for {
 		// Re-assert the policy-approval wait each iteration: the status hook also
@@ -197,8 +208,11 @@ func writeApprovalStatus(summary string) {
 }
 
 // writeRunningStatus flips the head's status.json back to plain running. Used
-// after an approval wait resolves inside a long-blocking CLI (hydra host-run),
-// where no Claude hook fires to re-stamp the status until the tool call ends.
+// wherever an approval wait resolves and no Claude hook is guaranteed to
+// re-stamp the status afterwards: inside a long-blocking CLI (hydra host-run),
+// and on every exit from the gate's own ask loop (see resolveAsk). An empty
+// message leaves last_message unset, so gate bookkeeping never overwrites the
+// agent's real last message.
 func writeRunningStatus(message string) {
 	writeStatus(string(api.Running), "", message, "")
 }

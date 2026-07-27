@@ -18,6 +18,7 @@ import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { computeVisibleFiles } from '../lib/artifactFilter'
 import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { useArtifactSpans } from '../lib/artifactColumns'
+import { Tooltip } from './Tooltip'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
 // ref, single-sided (the repository browser shows one ref at a time, so there is
@@ -59,18 +60,22 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
         ) : isDownloadArtifact(file.name) ? (
           // Download-class file (an .apk, a .zip): no media to render, just a
           // save link. The blob endpoint serves it as an attachment.
-          <a
-            href={url}
-            download
-            title="Download"
-            className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
-            <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
-              {file.size != null ? formatBytes(file.size) : 'download'}
-            </span>
-            <Download className="w-4 h-4 shrink-0" />
-          </a>
+          // w-full on both the wrapper and the link: the inline-flex wrapper would
+          // otherwise shrink the tile to its content width instead of filling the
+          // column the way the block-level link did.
+          <Tooltip content="Download" className="w-full">
+            <a
+              href={url}
+              download
+              className="w-full flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
+              <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
+                {file.size != null ? formatBytes(file.size) : 'download'}
+              </span>
+              <Download className="w-4 h-4 shrink-0" />
+            </a>
+          </Tooltip>
         ) : isVideoArtifact(file.name) ? (
           <video
             src={url}
@@ -285,14 +290,16 @@ export function RepositoryArtifactsView({
               onSearchChange={setSearch}
             />
           )}
-          <button
-            onClick={onRefresh}
-            disabled={loading || generating}
-            title="Regenerate"
-            className="flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
-          </button>
+          <Tooltip content="Regenerate">
+            <button
+              onClick={onRefresh}
+              disabled={loading || generating}
+              aria-label="Regenerate"
+              className="flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 

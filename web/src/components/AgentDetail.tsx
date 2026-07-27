@@ -321,7 +321,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
   )
 }
 
-// NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3):
+// NetworkEnforcementBadge shows a live head's egress posture (docs/security-audit.md rec 3):
 // the green "locked" hard boundary, the amber advisory (proxy-respecting) mode,
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
@@ -363,15 +363,16 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
           <span className="text-[13px] font-semibold whitespace-nowrap">Merge queued</span>
         </span>
       </Tooltip>
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={disabled}
-        title="Cancel the queued merge"
-        className="h-6 px-2.5 rounded-md text-[12px] font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Cancel
-      </button>
+      <Tooltip content="Cancel the queued merge" side="bottom">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={disabled}
+          className="h-6 px-2.5 rounded-md text-[12px] font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Cancel
+        </button>
+      </Tooltip>
     </div>
   )
 }
@@ -604,42 +605,44 @@ const AgentMetaRow = memo(function AgentMetaRow({
       {/* Terminal/chat mode toggle for agents with structured chat transports.
           A confirmation prevents an accidental process restart. */}
       {(agent.agent_type === 'claude' || agent.agent_type === 'codex') && !agent.archived && (
-        <span
-          className="shrink-0 inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono"
-          title="How this head is driven: a terminal or a chat view. Switching restarts the agent process; the conversation is preserved."
+        <Tooltip
+          content="How this head is driven: a terminal or a chat view. Switching restarts the agent process; the conversation is preserved."
+          className="shrink-0"
         >
-          {savingChatMode ? (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
-              <LoaderCircle className="w-3 h-3 animate-spin" />
-              switching
-            </span>
-          ) : (
-            <>
-              <button
-                onClick={() => confirmChatMode(false)}
-                className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-                  agent.chat_mode
-                    ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                    : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                }`}
-              >
-                <TerminalSquare className="w-3 h-3" />
-                terminal
-              </button>
-              <button
-                onClick={() => confirmChatMode(true)}
-                className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
-                  agent.chat_mode
-                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                }`}
-              >
-                <MessageSquare className="w-3 h-3" />
-                chat
-              </button>
-            </>
-          )}
-        </span>
+          <span className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono">
+            {savingChatMode ? (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
+                <LoaderCircle className="w-3 h-3 animate-spin" />
+                switching
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => confirmChatMode(false)}
+                  className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                    agent.chat_mode
+                      ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                      : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                  }`}
+                >
+                  <TerminalSquare className="w-3 h-3" />
+                  terminal
+                </button>
+                <button
+                  onClick={() => confirmChatMode(true)}
+                  className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
+                    agent.chat_mode
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
+                  }`}
+                >
+                  <MessageSquare className="w-3 h-3" />
+                  chat
+                </button>
+              </>
+            )}
+          </span>
+        </Tooltip>
       )}
       {agent.created_at !== 0 && agent.created_at !== undefined && (
         <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">

@@ -7,7 +7,7 @@ import "strings"
 // Each head has a public, user-facing branch named `hydra/<id>`. The
 // `hydra-wt/<id>` namespace is reserved for the internal branch a head's
 // worktree checks out once the branch-split/mirror design lands (see
-// USER_BRANCH_PLAN.md); it is deliberately outside the `hydra/` namespace so
+// docs/user-branch-mirror.md); it is deliberately outside the `hydra/` namespace so
 // that every `hydra/*` glob and prefix check keeps meaning "one public branch
 // per head" and does not double-match the internal branch.
 const (

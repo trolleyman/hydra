@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType 
 import { createPortal } from 'react-dom'
 import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
+import { Tooltip } from './Tooltip'
 
 // shortSha collapses a full/long commit SHA to a readable prefix, leaving
 // branch names (and anything that isn't a hex SHA) untouched.
@@ -18,7 +19,7 @@ function shortSha(ref: string): string {
 // header (re-renders per live status tick); its props are stable across both.
 export const BranchSelector = memo(function BranchSelector({
   branches, activeRef, isKnownBranch, onSelect, title = 'Switch branch',
-  triggerIcon: TriggerIcon, triggerActive = false, flexible = false,
+  triggerIcon: TriggerIcon, triggerActive = false, flexible = false, fitContent = false,
   onOpen,
 }: {
   branches: RepositoryBranch[]
@@ -40,6 +41,10 @@ export const BranchSelector = memo(function BranchSelector({
   // (instead of sizing to its content) - used for the diff view's base → head
   // selector pair in the narrow repository sidebar.
   flexible?: boolean
+  // When true the trigger sizes to its branch name (compact for short names
+  // like "main") but still caps at its container's width and truncates longer
+  // names - used inside the narrow spawn-options popover.
+  fitContent?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -130,41 +135,56 @@ export const BranchSelector = memo(function BranchSelector({
     </button>
   )
 
+  // Width behaviour of the labelled trigger: `flexible` fills its row and clips;
+  // `fitContent` sizes to the branch name but caps at the container and clips;
+  // otherwise it sizes to content up to a fixed cap.
+  const wrapperSize = flexible ? 'min-w-0 flex-1' : fitContent ? 'w-fit max-w-full min-w-0' : 'shrink-0'
+  const triggerSize = flexible ? 'w-full min-w-0' : fitContent ? 'w-fit max-w-full min-w-0' : 'max-w-[14rem]'
+
   return (
-    <div ref={ref} className={`relative ${flexible ? 'min-w-0 flex-1' : 'shrink-0'}`}>
+    // `flex` so the Tooltip's inline-flex wrapper around the trigger is a flex
+    // item rather than an inline box - an inline box would sit on this line's
+    // baseline and add a few px of descender space under the control.
+    <div ref={ref} className={`relative flex ${wrapperSize}`}>
       {TriggerIcon ? (
-        <button
-          type="button"
-          title={title}
-          onClick={() => setOpen((o) => !o)}
-          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          <TriggerIcon className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={title} className="shrink-0">
+          <button
+            type="button"
+            aria-label={title}
+            onClick={() => setOpen((o) => !o)}
+            className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
+              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+              : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+          >
+            <TriggerIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       ) : (
-        <button
-          type="button"
-          title={title}
-          onClick={() => setOpen((o) => !o)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${flexible ? 'w-full min-w-0' : 'max-w-[14rem]'} ${open
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-            }`}
-        >
-          {activeIsAgent
-            ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
-            : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
-          <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
-          <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
-        </button>
+        // The width constraints are on the wrapper too: the button's `w-full` /
+        // `max-w-[14rem]` now resolve against the wrapper, not this box.
+        <Tooltip content={title} className={triggerSize}>
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
+              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+              : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }`}
+          >
+            {activeIsAgent
+              ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+              : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
+            <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+            <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+          </button>
+        </Tooltip>
       )}
 
       {open && coords && createPortal(
         <div
           ref={menuRef}
+          data-portal-menu
           className="fixed w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
         >

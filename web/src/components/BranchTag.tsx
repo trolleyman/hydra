@@ -1,6 +1,7 @@
 import { Check, Copy, GitBranch } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { copyBranchName } from '../lib/branch'
+import { Tooltip } from './Tooltip'
 
 // BranchTag renders an agent's branch as a mono tag with a branch icon, plus a
 // copy button just after the name (the "B" keyboard shortcut copies the same
@@ -27,20 +28,28 @@ export function BranchTag({ branch }: { branch: string }) {
     >
       <GitBranch className="w-3.5 h-3.5" />
       {branch}
-      <button
-        type="button"
-        title="Copy branch name"
-        aria-label="Copy branch name"
-        className="cursor-pointer text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
-        onClick={() => {
-          copyBranchName(branch)
-          setCopied(true)
-          clearTimeout(timer.current)
-          timer.current = setTimeout(() => setCopied(false), 1200)
-        }}
+      <Tooltip
+        content={
+          <>
+            <div>Copy branch name</div>
+            <div className="text-gray-500 dark:text-gray-400">{branch}</div>
+          </>
+        }
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
+        <button
+          type="button"
+          aria-label="Copy branch name"
+          className="cursor-pointer text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
+          onClick={() => {
+            copyBranchName(branch)
+            setCopied(true)
+            clearTimeout(timer.current)
+            timer.current = setTimeout(() => setCopied(false), 1200)
+          }}
+        >
+          {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+      </Tooltip>
     </span>
   )
 }
