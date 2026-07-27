@@ -17,11 +17,18 @@ import { Tooltip } from './Tooltip'
 export function SettingsPopover({
   label = 'Settings',
   width = 208,
+  align = 'right',
   children,
 }: {
   label?: string
   // Dropdown width in px.
   width?: number
+  // Which of the panel's edges meets the button. 'right' (default) anchors the
+  // panel's right edge to the button and opens leftward - right for a cog near
+  // the right of a wide section header. 'left' anchors the panel's left edge to
+  // the button and opens rightward - right for a cog near the right of a narrow
+  // container (the compact spawn box), where opening left would cramp it.
+  align?: 'left' | 'right'
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -33,14 +40,18 @@ export function SettingsPopover({
     const el = anchorRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    // Right-align the dropdown under the button (its right edge meets the
-    // button's). In a narrow container (e.g. the compact spawn box near the left
-    // of the sidebar) the full width won't fit anchored to the button, so shrink
-    // it to the space between the left margin and the button's right edge rather
-    // than letting it balloon to the left and detach from the cog. A small floor
-    // keeps the option rows readable.
-    const w = Math.min(width, Math.max(168, r.right - 8))
-    const left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)
+    // Fit the panel to the room on its opening side (from the button's anchored
+    // edge to the far viewport margin), shrinking below the requested width only
+    // when there isn't space. A small floor keeps the option rows readable.
+    let w: number
+    let left: number
+    if (align === 'left') {
+      w = Math.min(width, Math.max(168, window.innerWidth - r.left - 8))
+      left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
+    } else {
+      w = Math.min(width, Math.max(168, r.right - 8))
+      left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)
+    }
     // Open below by default, but flip above when there isn't room below and
     // there is above - the compact spawn box anchors this cog near the bottom of
     // the sidebar. popRef is null on the first open (the panel isn't mounted
@@ -52,7 +63,7 @@ export function SettingsPopover({
     } else {
       setPos({ top: r.bottom + 4, left, width: w })
     }
-  }, [width])
+  }, [width, align])
 
   useLayoutEffect(() => {
     if (!open) return
