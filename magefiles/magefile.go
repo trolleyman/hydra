@@ -761,24 +761,35 @@ func (Deploy) Tailscale() error {
 		fmt.Println("Nothing applied. Run the commands above when ready.")
 		return nil
 	}
-	if err := sh.RunV("tailscale", uiArgs...); err != nil {
+	if out, err := runTailscale(uiArgs...); err != nil {
+		if s := strings.TrimSpace(out); s != "" {
+			fmt.Println(s)
+		}
+		printTailscaleServeHint(out)
 		return errtrace.Wrap(fmt.Errorf("tailscale serve (web UI): %w", err))
 	}
 	fmt.Printf("%s✓ Web UI served at https://%s/%s\n", colorGreen, host, colorReset)
 
 	if promptYesNo(reader, fmt.Sprintf("Also serve the %d preview ports (%d-%d)?", previewCount, plo, phi), false) {
 		fmt.Printf("Serving %d preview ports (this takes a moment)...\n", previewCount)
-		failed := 0
+		failed, permErr := 0, false
 		for p := plo; p <= phi; p++ {
 			ps := fmt.Sprintf("%d", p)
-			// Quiet per-port (sh.Run, not RunV): --bg serve is silent on success,
-			// so only the tally below is worth showing across the whole range.
-			if err := sh.Run("tailscale", "serve", "--bg", "--https="+ps, "http://127.0.0.1:"+ps); err != nil {
+			// Quiet per-port (output captured, not streamed): --bg serve is silent
+			// on success, so only the tally below is worth showing across the range.
+			out, err := runTailscale("serve", "--bg", "--https="+ps, "http://127.0.0.1:"+ps)
+			if err != nil {
 				failed++
+				if looksLikePermissionError(out) {
+					permErr = true
+				}
 			}
 		}
 		if failed > 0 {
 			fmt.Printf("%s! %d of %d preview ports failed to serve (see `tailscale serve status`).%s\n", colorYellow, failed, previewCount, colorReset)
+			if permErr {
+				printTailscaleServeHint("operator")
+			}
 		} else {
 			fmt.Printf("%s✓ Served %d preview ports.%s\n", colorGreen, previewCount, colorReset)
 		}
@@ -786,6 +797,37 @@ func (Deploy) Tailscale() error {
 
 	fmt.Printf("\nDone. %stailscale serve status%s shows the live mappings.\n", colorBold, colorReset)
 	return nil
+}
+
+// runTailscale runs a tailscale subcommand and returns its combined output, so
+// callers can both show what it said and inspect the text (e.g. for the operator
+// permission hint below).
+func runTailscale(args ...string) (string, error) {
+	out, err := exec.Command("tailscale", args...).CombinedOutput()
+	return string(out), err
+}
+
+// looksLikePermissionError reports whether a failed `tailscale serve` looks like
+// the common "needs operator access / run as root" refusal, so the hint only
+// fires for that case and not for an unrelated error.
+func looksLikePermissionError(out string) bool {
+	s := strings.ToLower(out)
+	return strings.Contains(s, "operator") ||
+		strings.Contains(s, "permission") ||
+		strings.Contains(s, "access denied") ||
+		strings.Contains(s, "must be run as root") ||
+		strings.Contains(s, "sudo")
+}
+
+// printTailscaleServeHint prints the fix for the operator/permission refusal when
+// the failure output looks like it (out=="operator" forces it, for the callers
+// that already classified the failure).
+func printTailscaleServeHint(out string) {
+	if !looksLikePermissionError(out) {
+		return
+	}
+	fmt.Printf("%s  Tip: `tailscale serve` needs operator access. Let your user run it without%s\n", colorYellow, colorReset)
+	fmt.Printf("%s       sudo once, then re-run this target:  tailscale set --operator=$USER%s\n", colorYellow, colorReset)
 }
 
 // promptYesNo asks a yes/no question on stdin, returning def on an empty line or
