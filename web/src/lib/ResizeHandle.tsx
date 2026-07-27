@@ -25,10 +25,17 @@ export function ResizeHandle({
     const startHeight = el.offsetHeight
     document.body.style.cursor = 'ns-resize'
     document.body.style.userSelect = 'none'
+    // A CSS transition covering `height` (e.g. a `transition-all` on the target
+    // for its focus ring) would animate every step of the drag, so the box lags
+    // the pointer and then catches up in a jump. Pin transitions off for the
+    // duration of the drag and restore whatever the element had after.
+    const prevTransition = el.style.transition
+    el.style.transition = 'none'
     const onMove = (ev: globalThis.PointerEvent) => {
       el.style.height = `${Math.max(minHeight, startHeight + ev.clientY - startY)}px`
     }
     const onUp = () => {
+      el.style.transition = prevTransition
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       document.removeEventListener('pointermove', onMove)

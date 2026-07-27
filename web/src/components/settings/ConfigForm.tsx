@@ -326,10 +326,13 @@ export function ConfigForm({
         <div>
           {/* The box carries the border/background/focus ring; the inner
               HighlightedTextarea is transparent and live-highlights markdown.
-              The box height is what the grip drags (the textarea fills it). */}
+              The box height is what the grip drags (the textarea fills it), so
+              the transition must name only the focus-ring properties - a blanket
+              `transition-all` also animates `height` and makes the drag lag
+              behind the pointer and then jump. */}
           <div
             ref={prePromptBoxRef}
-            className="relative h-28 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all"
+            className="relative h-28 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-[border-color,box-shadow]"
           >
             <HighlightedTextarea
               value={value.pre_prompt || ''}
