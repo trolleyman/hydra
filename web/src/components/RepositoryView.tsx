@@ -14,10 +14,12 @@ import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
   GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
-  Images, Camera, Copy, Check, X, ExternalLink,
+  Images, Camera, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
-import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
+import { canCopyImages, copyImageToClipboard, copyText } from '../lib/clipboard'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { CopyStateIcon } from './CopyStateIcon'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
@@ -193,17 +195,6 @@ const HEADER_BTN_CLASS =
 const MENU_ROW_CLASS =
   'w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer rounded-md'
 
-// useCopyFlash drives the transient Copy → Check/X feedback shared by the copy
-// buttons: call flash(ok) after an attempt and read state/err to pick the icon.
-function useCopyFlash() {
-  const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
-  const flash = (ok: boolean) => {
-    setState(ok ? 'ok' : 'err')
-    setTimeout(() => setState('idle'), 1500)
-  }
-  return { state, flash }
-}
-
 // useFileActions centralises the copy/raw behaviour so the inline header buttons
 // (FileActions) and the small-screen overflow menu (FileActionMenuRows) share one
 // implementation. `available` is false for an unresolved symlink (no blob).
@@ -219,24 +210,18 @@ function useFileActions(file: RepositoryFileResponse, projectId: string, refStr:
   const copyLabel = state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'
   const handleCopy = async () => {
     try {
-      if (file.content != null) await navigator.clipboard.writeText(file.content)
-      else if (isImg) await copyImageToClipboard(rawUrl)
+      // copyText handles insecure LAN origins (undefined navigator.clipboard);
+      // it reports success as a boolean rather than throwing, so honour it.
+      let ok: boolean
+      if (file.content != null) ok = await copyText(file.content)
+      else if (isImg) { await copyImageToClipboard(rawUrl); ok = true }
       else return
-      flash(true)
+      flash(ok)
     } catch {
       flash(false)
     }
   }
   return { available, state, canCopy, copyLabel, rawUrl, handleCopy }
-}
-
-// CopyStateIcon picks the copy button's icon from the transient flash state. The
-// idle copy icon takes idleColor (the header button inherits its own colour, the
-// menu row passes a muted grey); the ok/err icons are always green/red.
-function CopyStateIcon({ state, size = 'w-3.5 h-3.5', idleColor = '' }: { state: 'idle' | 'ok' | 'err'; size?: string; idleColor?: string }) {
-  if (state === 'ok') return <Check className={`${size} text-green-500`} />
-  if (state === 'err') return <X className={`${size} text-red-500`} />
-  return <Copy className={`${size} ${idleColor}`} />
 }
 
 function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse; projectId: string; refStr: string }) {

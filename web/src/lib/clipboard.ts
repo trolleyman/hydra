@@ -1,7 +1,62 @@
-// Clipboard helpers for copying images. Text copy is a one-liner
-// (navigator.clipboard.writeText) and doesn't need wrapping, but images do: the
-// async Clipboard API only reliably accepts image/png, so other formats have to
-// be rasterized first, and support varies by browser/context.
+// Clipboard helpers. Text goes through copyText (below) because a plain
+// navigator.clipboard.writeText does NOT work everywhere Hydra runs; images go
+// through copyImageToClipboard because the async Clipboard API only reliably
+// accepts image/png, so other formats have to be rasterized first and support
+// varies by browser/context.
+
+// copyText writes plain text to the clipboard and reports whether it landed.
+//
+// navigator.clipboard only exists in a *secure context* (https, or a localhost
+// origin). Hydra is routinely reached over plain http via a LAN hostname (e.g.
+// http://hades:26600), where navigator.clipboard is undefined entirely - so a
+// bare navigator.clipboard.writeText throws, and an optional-chained
+// navigator.clipboard?.writeText silently no-ops. Both present as "copy does
+// nothing" (the macOS-over-LAN report), so callers must not use writeText
+// directly. Fall back to the legacy execCommand('copy') over a hidden textarea,
+// which still works in an insecure context. Callers await the boolean to drive
+// their own success/failure UI (tick, toast, ...).
+export async function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Permission denied, or a transient failure - fall through and try the
+      // legacy path before giving up.
+    }
+  }
+  return legacyCopy(text)
+}
+
+// legacyCopy is the insecure-context / old-browser fallback: drop a hidden,
+// off-screen textarea, select it, and let the synchronous execCommand('copy')
+// lift the selection onto the clipboard. It must run inside a user gesture (a
+// click / keydown), which every copyText caller is. Returns false rather than
+// throwing so copyText's contract stays boolean-only.
+function legacyCopy(text: string): boolean {
+  if (typeof document === 'undefined') return false
+  const ta = document.createElement('textarea')
+  ta.value = text
+  // readonly stops the mobile keyboard popping up; the fixed off-screen, zero-
+  // opacity placement keeps it out of layout and invisible while still
+  // selectable. It's removed again before we return, so it never reflows content.
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.top = '0'
+  ta.style.left = '0'
+  ta.style.opacity = '0'
+  ta.style.pointerEvents = 'none'
+  document.body.appendChild(ta)
+  try {
+    ta.select()
+    ta.setSelectionRange(0, text.length)
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    ta.remove()
+  }
+}
 
 // canCopyImages reports whether this browser/context can write images to the
 // clipboard. The async Clipboard API needs a secure context (https or localhost)

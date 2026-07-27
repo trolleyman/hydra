@@ -13,7 +13,7 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
@@ -54,24 +54,23 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, type PendingReviewComment } from './lib/reviewDrafts'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
+import { useCopyFlash } from './lib/useCopyFlash'
+import { CopyStateIcon } from './components/CopyStateIcon'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(text).catch(() => { })
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
+  const { state, copy } = useCopyFlash()
+  // Reuse the same hint tooltip rather than adding a second one: swap its label
+  // to reflect the copy outcome while the icon flashes, then revert to "Copy path".
+  const label = state === 'ok' ? 'Copied to clipboard' : state === 'err' ? 'Copy failed' : 'Copy path'
   return (
-    <Tooltip content="Copy path">
+    <Tooltip content={label}>
       <button
-        onClick={handleCopy}
+        onClick={(e) => { e.stopPropagation(); void copy(text) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+        <CopyStateIcon state={state} idleColor="text-gray-400" />
       </button>
     </Tooltip>
   )
