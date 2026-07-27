@@ -176,6 +176,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+// ReorderProjects accepts and discards the new order: simulation serves a fixed
+// project list, so persisting it would have nothing to persist into. Answering
+// 204 still lets the dropdown's drag-to-reorder be exercised end to end (the
+// client keeps its own optimistic order until the server disagrees).
+func (s *SimulationServer) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
