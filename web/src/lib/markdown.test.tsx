@@ -61,6 +61,33 @@ describe('renderMarkdown', () => {
     expect(container.textContent).toBe('see #123 and #foo')
   })
 
+  it('singleLine: bolds only the heading line, not the body after it', () => {
+    // The sidebar preview flattens the message onto one line. The heading must
+    // still end at its own line break - collapsing the newlines first made the
+    // heading swallow the body and render the whole message bold.
+    const { container } = render(<span>{renderMarkdown('# Some heading\nAnd some text', { singleLine: true })}</span>)
+    expect(container.querySelector('strong')?.textContent).toBe('Some heading')
+    expect(container.textContent).toBe('Some heading And some text')
+  })
+
+  it('singleLine: collapses blank lines and keeps later emphasis intact', () => {
+    const { container } = render(
+      <span>{renderMarkdown('## Title  \n\n  body with **bold**\nmore', { singleLine: true })}</span>,
+    )
+    expect(container.textContent).toBe('Title body with bold more')
+    const strong = [...container.querySelectorAll('strong')].map((e) => e.textContent)
+    expect(strong).toEqual(['Title', 'bold'])
+  })
+
+  it('singleLine: renders a fenced block as an inline code chip on one line', () => {
+    const { container } = render(<span>{renderMarkdown('done:\n```js\nconst a = 1\n```', { singleLine: true })}</span>)
+    expect(container.textContent).toBe('done: const a = 1')
+    const code = container.querySelector('code')
+    expect(code?.textContent).toBe('const a = 1')
+    // An inline chip, not the block-level one (which would blow the row height).
+    expect(code?.className).not.toContain('block')
+  })
+
   it('leaves an escaped tilde literal, opening no strikethrough', () => {
     const { container } = render(<span>{renderMarkdown('cd \\~/foo then \\~/bar')}</span>)
     expect(container.querySelector('del')).toBeNull()

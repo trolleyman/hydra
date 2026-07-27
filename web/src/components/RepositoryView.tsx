@@ -688,7 +688,9 @@ function FileContent({
 
   return (
     <>
-      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} highlightRange={highlightRange} onSelectLine={onSelectLine} />
+      {/* The content head lets getLanguage fall back to a `#!` shebang for
+          extension-less scripts; one line is all it reads. */}
+      <CodeView content={file.content} lang={getLanguage(contentPath, file.content.slice(0, 200))} wrap={wrap} highlightRange={highlightRange} onSelectLine={onSelectLine} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
           File truncated - showing the first part only.

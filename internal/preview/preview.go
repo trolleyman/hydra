@@ -23,6 +23,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -158,6 +159,10 @@ type Manager struct {
 	// sweptRoots tracks which projects have had their orphaned preview
 	// checkouts (from a previous daemon run) swept already.
 	sweptRoots map[string]bool
+
+	// warnFallback logs the wildcard-bind -> loopback fallback once per daemon
+	// run (see allocListener), rather than once per slot.
+	warnFallback sync.Once
 }
 
 // NewManager builds a Manager whose proxy listeners bind bindHost (the web
@@ -333,16 +338,63 @@ func (m *Manager) ensureSlot(root string, spec config.ArtifactScript, version Ve
 // allocListener binds the first free port in the project's configured preview
 // range on the manager's bind host. Busy ports (other daemons, dev servers,
 // our own slots) are skipped.
+//
+// A WILDCARD bind host (0.0.0.0 - an exposed deploy, `mage prod` /
+// HYDRA_API_ADDR=0.0.0.0:...) has a failure mode a loopback bind does not: it
+// collides with anything already holding that port on a *specific* address,
+// even though nothing holds the wildcard. `tailscale serve --https=$p
+// http://127.0.0.1:$p` - what `mage deploy:tailscale` offers to run across the
+// whole preview range - does exactly that on the tailnet addresses, so an
+// exposed Hydra behind Tailscale finds every port in the range unbindable and
+// previews die with "no free preview port". Falling back to loopback keeps them
+// working: the TLS front proxies to 127.0.0.1:$p, which is what we then bind.
+// The wildcard is still tried first, port by port, so nothing changes when it
+// is available.
 func (m *Manager) allocListener(root string) (net.Listener, int, error) {
 	cfg, _ := config.Load(root)
 	lo, hi := cfg.ResolvePreviewPortRange()
-	for port := lo; port <= hi; port++ {
-		ln, err := net.Listen("tcp", net.JoinHostPort(m.bindHost, fmt.Sprintf("%d", port)))
-		if err == nil {
-			return ln, port, nil
+	var lastErr error
+	for _, host := range m.bindCandidates() {
+		for port := lo; port <= hi; port++ {
+			ln, err := net.Listen("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+			if err == nil {
+				if host != m.bindHost {
+					m.warnFallback.Do(func() {
+						log.Printf("previews: ports %d-%d are all taken on %s (another process holds them on a specific address); "+
+							"binding previews on %s instead - remote browsers reach them only through a TLS front or proxy (see docs/remote-access.md)",
+							lo, hi, m.bindHost, host)
+					})
+				}
+				return ln, port, nil
+			}
+			lastErr = err
 		}
 	}
-	return nil, 0, errtrace.Errorf("no free preview port in %d-%d", lo, hi)
+	if lastErr != nil {
+		return nil, 0, errtrace.Errorf("no free preview port in %d-%d on %s: %w", lo, hi, m.bindHost, lastErr)
+	}
+	return nil, 0, errtrace.Errorf("no free preview port in %d-%d on %s", lo, hi, m.bindHost)
+}
+
+// bindCandidates is the ordered list of hosts allocListener tries: the
+// configured bind host, plus loopback as a fallback when that host is the
+// wildcard (see allocListener for why).
+func (m *Manager) bindCandidates() []string {
+	if isWildcardHost(m.bindHost) {
+		return []string{m.bindHost, "127.0.0.1"}
+	}
+	return []string{m.bindHost}
+}
+
+// isWildcardHost reports whether host means "every interface" (0.0.0.0, ::,
+// or an empty host), the case where a specific-address listener elsewhere
+// blocks our bind.
+func isWildcardHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 // sweepOrphans removes preview checkouts left behind by a previous daemon run

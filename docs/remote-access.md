@@ -124,6 +124,27 @@ make them work behind a TLS front:
 
    Inspect or undo with `tailscale serve status` / `tailscale serve reset`.
 
+3. **Serving the range + an exposed Hydra: previews drop to loopback.**
+   `tailscale serve --https=$p` binds port `$p` on this node's *tailnet
+   addresses* (`100.x.y.z` and the `fd7a:` IPv6), for all 99 ports. A
+   loopback-bound Hydra never notices. But an exposed one (`mage prod`,
+   `HYDRA_API_ADDR=0.0.0.0:26600`) binds the **wildcard**, and a wildcard bind
+   collides with a specific-address listener on the same port even though
+   nothing holds the wildcard itself - so every port in the range comes back
+   `address already in use`.
+
+   `allocListener` (`internal/preview`) handles this: it tries the wildcard
+   port by port first, and only if the whole range is taken does it fall back to
+   `127.0.0.1` (logging once). That is the right answer here - the serve
+   mappings proxy to `http://127.0.0.1:$p`, which is exactly what Hydra then
+   binds - but it does mean previews are reachable *through Tailscale only*, not
+   directly over plain HTTP from the LAN. Run `tailscale serve reset` if you
+   want the ports back.
+
+   Before that fallback existed this was a hard failure: every preview start
+   returned `no free preview port in 26601-26699`, which the UI surfaced as an
+   Open tab that closed itself immediately.
+
 If serving 99 ports feels heavy, a future improvement is to mount previews under a
 path on the main port (`/preview/<slot>/`) so a single TLS mapping covers
 everything; that needs a preview-proxy + frontend URL change and is not built yet.
