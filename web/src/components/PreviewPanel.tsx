@@ -15,10 +15,17 @@ import { useToastStore } from '../stores/toastStore'
 // state it can see. There is no WebSocket for previews (deliberately - the
 // interesting live feedback is on the preview port's own loading page); a
 // spawning instance is polled fast enough to stream its build log here too.
-function pollDelay(previews: PreviewStatus[]): number {
+//
+// null = stop polling. With nothing starting or running there is no live state
+// to track: the list only changes through this panel (which refetches via
+// `nonce`), so a timer here is pure background traffic - and since the panel
+// renders nothing when no preview is configured, it was an invisible request
+// every 30s for the whole life of the page. Becoming visible again refetches
+// once, which covers a preview started from another tab.
+function pollDelay(previews: PreviewStatus[]): number | null {
   if (previews.some((p) => p.state === 'starting')) return 1500
   if (previews.some((p) => p.state === 'running')) return 10000
-  return 30000
+  return null
 }
 
 // previewFailed reports a start/restart failure. Both actions are fire-and-
@@ -89,28 +96,45 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
 
   useEffect(() => {
     let cancelled = false
+    const clear = () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    // Arm the next poll, or leave the panel idle (no pending timer) when there
+    // is nothing live to follow or the tab is hidden. A backgrounded agent page
+    // has no reason to keep asking; onVisibility resyncs on the way back in.
+    const schedule = (ms: number | null) => {
+      clear()
+      if (ms === null || document.hidden) return
+      timerRef.current = setTimeout(() => void tick(), ms)
+    }
     const tick = async () => {
       try {
         const resp = await api.default.getAgentPreviews(projectId, agentId, headRef, includeUncommitted)
         if (cancelled) return
         setPreviews(resp.previews ?? [])
         setError(null)
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(tick, pollDelay(resp.previews ?? []))
+        schedule(pollDelay(resp.previews ?? []))
       } catch (err) {
         if (cancelled) return
         // A structured server error (e.g. a config that won't parse) is a real,
         // persistent failure - surface it instead of silently rendering nothing.
         // A bare network blip (no body: daemon restarting) stays quiet.
         setError(apiErrorBody(err) ? formatError(err) : null)
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(tick, 15000)
+        schedule(15000)
       }
     }
+    // Only when no poll is pending: a live instance already has its own timer,
+    // and re-arming on every visibility flip would fetch twice in a row.
+    const onVisibility = () => {
+      if (!document.hidden && timerRef.current === null) void tick()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     void tick()
     return () => {
       cancelled = true
-      if (timerRef.current) clearTimeout(timerRef.current)
+      clear()
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [projectId, agentId, headRef, includeUncommitted, refreshKey, nonce])
 
