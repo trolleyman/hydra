@@ -10,6 +10,7 @@ import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
+import { buildRepoSplat } from '../lib/repoSplat'
 import { useDialogStore } from '../stores/dialogStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -293,7 +294,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
           if (target && branchName && projectId) {
             navigate({
               to: '/project/$projectId/repository/$',
-              params: { projectId, _splat: `${branchName}/${target.path}` },
+              params: { projectId, _splat: buildRepoSplat(branchName, target.path) },
               // Carry a line reference as an #L<n> hash the repository view
               // scrolls to and highlights.
               hash: target.line != null ? `L${target.line}` : undefined,

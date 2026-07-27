@@ -30,6 +30,7 @@ import { scrollCardToTop } from '../lib/diffScroll'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
+import { buildRepoSplat, parseRepoSplat, splatNeedsBranchList } from '../lib/repoSplat'
 import {
   parseLineRange, formatLineHash, inRange, type LineRange,
   parseDiffLineRange, formatDiffLineHash,
@@ -804,23 +805,6 @@ function loadBool(key: string, def: boolean): boolean {
   return def
 }
 
-// ── Splat <-> {ref, path} ─────────────────────────────────────────────────────
-
-// parseSplat turns the URL splat (the part after /repository/) into a ref + file
-// path. Branch names can contain slashes (e.g. hydra/my-task), so the known
-// branch list is used to find the longest branch-name prefix; anything else
-// treats the first segment as the ref (a commit SHA or single-segment branch).
-function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: string | null; path: string | null } {
-  const segs = (splat || '').split('/').filter(Boolean)
-  if (segs.length === 0) return { ref: null, path: null }
-  const names = (branches ?? []).map((b) => b.name)
-  for (let i = segs.length; i >= 1; i--) {
-    const cand = segs.slice(0, i).join('/')
-    if (names.includes(cand)) return { ref: cand, path: segs.slice(i).join('/') || null }
-  }
-  return { ref: segs[0], path: segs.slice(1).join('/') || null }
-}
-
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
@@ -937,7 +921,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
   }, [isResizing])
 
-  const parsed = useMemo(() => parseSplat(splat, branches), [splat, branches])
+  const parsed = useMemo(() => parseRepoSplat(splat, branches), [splat, branches])
   const tree = useMemo(() => compactTree(buildTree(files)), [files])
 
   // Inject the synthetic ".hydra/artifacts" folder (with one "file" per configured
@@ -1013,9 +997,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // bare /repository URL.
   const viewPath = parsed.path ?? defaultPath
 
-  // Wait for branches before resolving a non-empty splat (so a multi-segment
-  // branch ref isn't briefly mis-parsed and fetched at the wrong ref).
-  const ready = !splat || branches !== null
+  // Only a LEGACY sentinel-free multi-segment splat needs the branch list to
+  // resolve; wait for it there (so a slashed branch ref isn't briefly mis-parsed
+  // and fetched at the wrong ref). Sentinel splats parse exactly on their own, so
+  // they render immediately.
+  const ready = !splatNeedsBranchList(splat) || branches !== null
 
   // Load branches once per project. The list is cleared during render (not in the
   // effect) when the project changes, so the fetch effect below just does the
@@ -1368,7 +1354,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Keeps ?compare= (so switching the base branch re-diffs against the new base)
   // but drops the file/line selection, which belonged to the old comparison.
   const goTo = (ref: string, path: string | null) => {
-    const sp = path ? `${ref}/${path}` : ref
+    const sp = buildRepoSplat(ref, path)
     navigate({
       to: '/project/$projectId/repository/$',
       params: { projectId, _splat: sp },
@@ -1380,7 +1366,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // are real anchors (middle-click / Ctrl-click open them in a new tab).
   const fileLinkProps = (path: string): LinkProps => linkOptions({
     to: '/project/$projectId/repository/$',
-    params: { projectId, _splat: `${refStr}/${path}` },
+    params: { projectId, _splat: buildRepoSplat(refStr, path) },
   })
 
   // Small-screen "back": pop the full-screen content view back to the list. In

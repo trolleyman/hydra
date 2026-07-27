@@ -22,6 +22,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
+import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
@@ -2082,7 +2083,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (!ref || !projectId) return undefined
     return (path: string) => linkOptions({
       to: '/project/$projectId/repository/$',
-      params: { projectId, _splat: `${ref}/${path}` },
+      params: { projectId, _splat: buildRepoSplat(ref, path) },
     })
   }, [projectId, agent.branch_name])
 
