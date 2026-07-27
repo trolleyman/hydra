@@ -150,6 +150,58 @@ function snapToSubwords(ranges: WordRange[], str: string): WordRange[] {
   })
 }
 
+// scoreBoundary rates how natural a split between str[i-1] and str[i] is - higher
+// is better. A line edge beats a whitespace edge beats a punctuation edge beats a
+// split inside an identifier. This is diff-match-patch's diff_cleanupSemanticScore_
+// idea, trimmed to what matters inside a single line.
+function scoreBoundary(str: string, i: number): number {
+  if (i <= 0 || i >= str.length) return 4 // start/end of line
+  const before = str[i - 1]
+  const after = str[i]
+  if (/\s/.test(before) || /\s/.test(after)) return 3
+  if (!isWord(before) || !isWord(after)) return 2 // a punctuation/identifier edge
+  return 0 // mid-identifier
+}
+
+// slideRange shifts one changed range along the line to the best-scoring position
+// it can reach losslessly - moving a boundary is valid exactly when the character
+// leaving one end equals the one entering the other (str[s-1] === str[e-1] to
+// slide left, str[e] === str[s] to slide right), which is the same condition
+// diff-match-patch's cleanupSemanticLossless uses. This turns e.g. "foo(a)" ->
+// "foo(|b, |a)" into "foo(|b, a|)"-free clean edges. Whitespace-only ranges are
+// left alone: for a re-indent the highlight is deliberately pinned to the columns
+// next to the code (see the tokenizer note), which sliding would undo.
+function slideRange(str: string, s: number, e: number): WordRange {
+  if (str.slice(s, e).trim() === '') return [s, e]
+  let bestS = s
+  let bestE = e
+  let best = scoreBoundary(str, s) + scoreBoundary(str, e)
+  let ls = s
+  let le = e
+  while (ls > 0 && str[ls - 1] === str[le - 1]) {
+    ls--
+    le--
+    const sc = scoreBoundary(str, ls) + scoreBoundary(str, le)
+    if (sc > best) { best = sc; bestS = ls; bestE = le }
+  }
+  let rs = s
+  let re = e
+  while (re < str.length && str[re] === str[rs]) {
+    rs++
+    re++
+    const sc = scoreBoundary(str, rs) + scoreBoundary(str, re)
+    if (sc > best) { best = sc; bestS = rs; bestE = re }
+  }
+  return [bestS, bestE]
+}
+
+function slideRanges(ranges: WordRange[], str: string): WordRange[] {
+  if (ranges.length === 0) return ranges
+  const out = ranges.map(([s, e]) => slideRange(str, s, e))
+  out.sort((a, b) => a[0] - b[0])
+  return out
+}
+
 // changedFraction is the share of a line's characters that fall inside a changed
 // range. When *both* sides are mostly changed the pair is really a rewrite, and a
 // character diff would just scatter highlights across whatever stray characters
@@ -225,10 +277,11 @@ export function computeWordDiff(oldStr: string, newStr: string): { old: WordRang
     while (j < bn) { newChanged[lo + j] = true; j++ }
   }
 
-  // contiguousRanges -> coalesce stray char-diff confetti -> snap to camelCase /
-  // snake_case boundaries -> coalesce again in case snapping merged neighbours.
+  // contiguousRanges -> coalesce stray char-diff confetti -> slide each range to
+  // its cleanest lossless boundary -> snap to camelCase / snake_case boundaries ->
+  // coalesce again in case snapping merged neighbours.
   const refine = (changed: boolean[], tokens: string[], str: string) =>
-    coalesceRanges(snapToSubwords(coalesceRanges(contiguousRanges(tokens, changed)), str))
+    coalesceRanges(snapToSubwords(slideRanges(coalesceRanges(contiguousRanges(tokens, changed)), str), str))
   const oldRanges = refine(oldChanged, a, oldStr)
   const newRanges = refine(newChanged, b, newStr)
   if (
@@ -321,15 +374,34 @@ export function pairLines(dels: string[], adds: string[]): Array<[number, number
   return out
 }
 
+// isWhitespaceOnlyChange reports whether two lines differ only in whitespace -
+// same characters once every space/tab is stripped, but not byte-identical. That
+// covers a re-indent, an internal realignment, and a trailing-space edit alike.
+export function isWhitespaceOnlyChange(a: string, b: string): boolean {
+  return a !== b && a.replace(/\s+/g, '') === b.replace(/\s+/g, '')
+}
+
+export interface WordRangeMaps {
+  old: Map<number, WordRange[]>
+  new: Map<number, WordRange[]>
+  // Line numbers (old_line_num / new_line_num) whose paired change is only
+  // whitespace, so the viewer can dim them - a "nothing of substance here" cue
+  // that survives even with ignore-whitespace off.
+  wsOld: Set<number>
+  wsNew: Set<number>
+}
+
 // buildWordRangeMaps walks a flat run of diff lines and, for each block of
 // consecutive deletions followed by consecutive additions, aligns the removed
 // and added lines by similarity (see pairLines) and computes the word diff of
 // each matched pair. Returns per-line-number range maps keyed by old_line_num
 // (deletions) and new_line_num (additions), matching how the highlight maps are
-// keyed.
-export function buildWordRangeMaps(lines: DiffLine[]): { old: Map<number, WordRange[]>; new: Map<number, WordRange[]> } {
+// keyed, plus the set of lines whose change is whitespace-only.
+export function buildWordRangeMaps(lines: DiffLine[]): WordRangeMaps {
   const oldMap = new Map<number, WordRange[]>()
   const newMap = new Map<number, WordRange[]>()
+  const wsOld = new Set<number>()
+  const wsNew = new Set<number>()
   let i = 0
   while (i < lines.length) {
     if (lines[i].type === 'deletion') {
@@ -343,12 +415,16 @@ export function buildWordRangeMaps(lines: DiffLine[]): { old: Map<number, WordRa
         const { old: oldR, new: newR } = computeWordDiff(d.content, a.content)
         if (oldR.length && d.old_line_num != null) oldMap.set(d.old_line_num, oldR)
         if (newR.length && a.new_line_num != null) newMap.set(a.new_line_num, newR)
+        if (isWhitespaceOnlyChange(d.content, a.content)) {
+          if (d.old_line_num != null) wsOld.add(d.old_line_num)
+          if (a.new_line_num != null) wsNew.add(a.new_line_num)
+        }
       }
     } else {
       i++
     }
   }
-  return { old: oldMap, new: newMap }
+  return { old: oldMap, new: newMap, wsOld, wsNew }
 }
 
 function escapeHtml(s: string): string {

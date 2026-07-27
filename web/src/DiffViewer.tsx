@@ -250,6 +250,13 @@ const WORD_ADD_CLASS = 'rounded-[2px] bg-green-300/45 dark:bg-green-400/25'
 // keep a stable prop identity when word highlighting is off or a file has none.
 const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
 
+// Lines whose change is only whitespace (see isWhitespaceOnlyChange) are dimmed -
+// a "nothing of substance here" cue. Shared empty default keeps hunk prop
+// identity stable when a file has none.
+type DimLines = { old: Set<number>; new: Set<number> }
+const EMPTY_DIM: DimLines = { old: new Set(), new: new Set() }
+const DIM_ROW = 'opacity-50'
+
 // Moved code reads neither red nor green - it's the same code, relocated. Paint
 // it a distinct zebra colour (two shades alternating between adjacent blocks, so
 // you can tell where one moved block ends and the next begins) on both the
@@ -275,13 +282,14 @@ function codeCellHtml(highlighted: string | undefined, content: string, ranges: 
   return highlighted ?? null
 }
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, moves, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, moves, dim, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   wordRangesOld: Map<number, WordRange[]>
   wordRangesNew: Map<number, WordRange[]>
   moves: FileMoves
+  dim: DimLines
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
@@ -308,12 +316,13 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
           : isDel ? (line.old_line_num != null ? moves.del.get(line.old_line_num) : undefined) : undefined
         const bgClass = move ? MOVED_BG[move.parity] : isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const markerClass = move ? MOVED_MARKER[move.parity] : isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+        const dimmed = !move && (isAdd ? (line.new_line_num != null && dim.new.has(line.new_line_num)) : isDel ? (line.old_line_num != null && dim.old.has(line.old_line_num)) : false)
         const selOld = selectionHas(selection, 'old', line.old_line_num)
         const selNew = selectionHas(selection, 'new', line.new_line_num)
         const rowSel = selOld || selNew
         return (
           <Fragment key={idx}>
-            <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined} title={move ? movedTitle(move, isAdd) : undefined}>
+            <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass} ${dimmed ? DIM_ROW : ''}`} style={rowSel ? SELECTED_ROW_STYLE : undefined} title={move ? movedTitle(move, isAdd) : dimmed ? 'Whitespace-only change' : undefined}>
               <div className={UNIFIED_GUTTER}>
                 <LineNumCell num={line.old_line_num} side="old" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selOld} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" baseClass={UNIFIED_LINE_NUM_CLASS} selected={selNew} onSelectLine={onSelectLine} />
@@ -357,13 +366,14 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 })
 
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, moves, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, moves, dim, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   wordRangesOld: Map<number, WordRange[]>
   wordRangesNew: Map<number, WordRange[]>
   moves: FileMoves
+  dim: DimLines
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   readOnly?: boolean
@@ -388,12 +398,14 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
         const newMove = line.newType === 'addition' && line.newLineNum != null ? moves.add.get(line.newLineNum) : undefined
         const oldBg = oldMove ? MOVED_BG[oldMove.parity] : line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = newMove ? MOVED_BG[newMove.parity] : line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
+        const oldDim = !oldMove && line.oldType === 'deletion' && line.oldLineNum != null && dim.old.has(line.oldLineNum)
+        const newDim = !newMove && line.newType === 'addition' && line.newLineNum != null && dim.new.has(line.newLineNum)
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
         const selNew = selectionHas(selection, 'new', line.newLineNum)
         return (
           <Fragment key={idx}>
             <div className={SBS_ROW}>
-              <div className={`${SBS_HALF} ${oldBg}`} style={selOld ? SELECTED_ROW_STYLE : undefined} title={oldMove ? movedTitle(oldMove, false) : undefined}>
+              <div className={`${SBS_HALF} ${oldBg} ${oldDim ? DIM_ROW : ''}`} style={selOld ? SELECTED_ROW_STYLE : undefined} title={oldMove ? movedTitle(oldMove, false) : oldDim ? 'Whitespace-only change' : undefined}>
                 <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.oldLineNum} side="old" baseClass={SBS_LINE_NUM} selected={selOld} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
@@ -408,7 +420,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
-              <div className={`${SBS_HALF} ${newBg}`} style={selNew ? SELECTED_ROW_STYLE : undefined} title={newMove ? movedTitle(newMove, true) : undefined}>
+              <div className={`${SBS_HALF} ${newBg} ${newDim ? DIM_ROW : ''}`} style={selNew ? SELECTED_ROW_STYLE : undefined} title={newMove ? movedTitle(newMove, true) : newDim ? 'Whitespace-only change' : undefined}>
                 <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.newLineNum} side="new" baseClass={SBS_LINE_NUM} selected={selNew} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
@@ -892,10 +904,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // words). Computed from the same line list as the highlighting and keyed the
   // same way (old_line_num / new_line_num), memoised off hunksSig so a no-op
   // background refresh doesn't recompute it. Empty maps when the toggle is off.
-  const { wordRangesOld, wordRangesNew } = useMemo(() => {
-    if (!wordHighlight || !highlightSource) return { wordRangesOld: EMPTY_WORD_RANGES, wordRangesNew: EMPTY_WORD_RANGES }
+  // Word ranges honour the wordHighlight toggle; the whitespace-only dim set does
+  // not (dimming is orthogonal - it still helps with word highlighting off). Both
+  // come from one pass over the file's paired lines.
+  const { wordRangesOld, wordRangesNew, dim } = useMemo(() => {
+    if (!highlightSource) return { wordRangesOld: EMPTY_WORD_RANGES, wordRangesNew: EMPTY_WORD_RANGES, dim: EMPTY_DIM }
     const maps = buildWordRangeMaps(highlightSource)
-    return { wordRangesOld: maps.old, wordRangesNew: maps.new }
+    return {
+      wordRangesOld: wordHighlight ? maps.old : EMPTY_WORD_RANGES,
+      wordRangesNew: wordHighlight ? maps.new : EMPTY_WORD_RANGES,
+      dim: (maps.wsOld.size || maps.wsNew.size) ? { old: maps.wsOld, new: maps.wsNew } : EMPTY_DIM,
+    }
   }, [highlightSource, wordHighlight])
 
   // Placeholder height while the body is lazy-unmounted. Also used directly as
@@ -995,10 +1014,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves} dim={dim}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves} dim={dim}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
@@ -1204,10 +1223,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves} dim={dim}
                         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} moves={moves} dim={dim}
                         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (

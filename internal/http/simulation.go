@@ -1445,6 +1445,32 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					},
 				},
 				{
+					Path:       "internal/config/defaults.go",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  3,
+					Deletions:  3,
+					Hunks: []api.DiffHunk{
+						{
+							// Internal realignment: only the spacing around "=" changed. Not a move
+							// (leading indent is unchanged, inner spaces differ), so these rows dim
+							// as whitespace-only rather than reading as real edits.
+							Header:   "@@ -8,5 +8,5 @@ var Defaults = Config{",
+							OldStart: 8,
+							NewStart: 8,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "var Defaults = Config{", OldLineNum: ptr(8), NewLineNum: ptr(8)},
+								{Type: api.Deletion, Content: "	Host        = \"localhost\"", OldLineNum: ptr(9)},
+								{Type: api.Deletion, Content: "	Port = 8080", OldLineNum: ptr(10)},
+								{Type: api.Deletion, Content: "	ReadTimeout   = 30", OldLineNum: ptr(11)},
+								{Type: api.Addition, Content: "	Host = \"localhost\"", NewLineNum: ptr(9)},
+								{Type: api.Addition, Content: "	Port        = 8080", NewLineNum: ptr(10)},
+								{Type: api.Addition, Content: "	ReadTimeout = 30", NewLineNum: ptr(11)},
+								{Type: api.Context, Content: "}", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+							},
+						},
+					},
+				},
+				{
 					Path:       "internal/http/server.go",
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  12,

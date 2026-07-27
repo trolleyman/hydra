@@ -93,6 +93,26 @@ describe('computeWordDiff', () => {
     expect(r.new).toEqual([[3, 5]])
   })
 
+  it('slides an inserted range to a clean boundary', () => {
+    // Inserting an argument: the changed range should read "b, " (aligned to the
+    // token boundaries) rather than a ragged ", b" straddling the comma.
+    const oldS = 'call(a)'
+    const newS = 'call(b, a)'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    expect(slices(newS, r.new)).toEqual(['b, '])
+  })
+
+  it('does not slide a whitespace-only indent range off the code', () => {
+    // Sliding prefers whitespace boundaries, which for a re-indent would drag the
+    // highlight away from the code; the guard keeps it on the added columns.
+    const oldS = '    x = 1'
+    const newS = '        x = 1'
+    const r = computeWordDiff(oldS, newS)
+    expect(r.old).toEqual([])
+    expect(r.new).toEqual([[4, 8]])
+  })
+
   it('handles a change at the end of line', () => {
     const oldS = 'return ok'
     const newS = 'return okay'
@@ -199,6 +219,26 @@ describe('buildWordRangeMaps', () => {
     const maps = buildWordRangeMaps(lines)
     expect(maps.old.size).toBe(0)
     expect(maps.new.size).toBe(0)
+  })
+
+  it('flags a whitespace-only (re-indent) pair for dimming', () => {
+    const lines: DiffLine[] = [
+      line(DiffLine.type.DELETION, '  doThing()', 2, null),
+      line(DiffLine.type.ADDITION, '      doThing()', null, 2),
+    ]
+    const maps = buildWordRangeMaps(lines)
+    expect(maps.wsOld.has(2)).toBe(true)
+    expect(maps.wsNew.has(2)).toBe(true)
+  })
+
+  it('does not flag a real code change as whitespace-only', () => {
+    const lines: DiffLine[] = [
+      line(DiffLine.type.DELETION, 'const x = 1', 2, null),
+      line(DiffLine.type.ADDITION, 'const x = 2', null, 2),
+    ]
+    const maps = buildWordRangeMaps(lines)
+    expect(maps.wsOld.size).toBe(0)
+    expect(maps.wsNew.size).toBe(0)
   })
 
   it('aligns the edited line when an addition is inserted ahead of the block', () => {
