@@ -20,12 +20,12 @@ pre_prompt = '''
 - Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
 - Check using mage build before committing
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
-- After changing web code, run `cd web && npm run lint` (eslint) and fix the errors AND warnings you introduced
+- After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced
 - After changing Go code, run `go test ./...` and make sure it passes
 - Verify web UI changes end-to-end (real rendered app, console + DOM, not just tests) by booting the simulation server and driving it with Playwright:
-  - `cd web && npm run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
+  - `cd web && aube run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
   - Useful pages: /project/sim-project/agent/agent-1 (8-file diff, largest, incl. a >1000-changed-lines hidden "Load diff" file), agent-2 (small diff incl. a plaintext .txt file, tests panel data), agent-md (markdown / running-tests states).
-  - Playwright scripts MUST live under web/ (node resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers from web/ with `cd web && npx playwright install chromium` (playwright is a devDependency, so this runs the pinned local version).
+  - Playwright scripts MUST live under web/ (node resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers from web/ with `cd web && aubx playwright install chromium` (playwright is a devDependency, so this runs the pinned local version).
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available.
 '''
@@ -358,9 +358,36 @@ type = "stdout"
 # eslint-report.ts emits fail markers for errors (which gate the merge like a
 # failing test) and ⚠ warn markers for warnings (informational only). Lint runs
 # only once the specs pass (the merge is already blocked when they don't).
-command = "cd web && npm install && npx vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts"
+command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PX vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts"
 timeout_sec = 600
 type = "stdout"
+
+[tests.e2e]
+# Playwright smoke suite (web/e2e), which drives the REAL built UI against the
+# simulation server - the only coverage that catches a selector or flow breaking
+# in the rendered app rather than in jsdom. It was left out when this gate was
+# first written, so 13 of its specs rotted unnoticed for weeks against UI changes
+# that were themselves correct.
+#
+# Its webServer step (web/e2e/serve.ts) builds a hydra binary from the checkout
+# and runs it with --simulation, so web/dist must exist first - hence the
+# `npm run build`. `playwright install chromium` is a no-op once the browser is
+# in ~/.cache/ms-playwright (writable and shared); a cold machine downloads it
+# from cdn.playwright.dev, which is allow-listed above.
+#
+# Two things make it safe to run on a shared machine:
+#   E2E_PORT   picked free at run time. The config's default is a FIXED port, and
+#              two heads testing at once would collide on it.
+#   CI=1       turns off playwright's reuseExistingServer, so a stale or
+#              concurrent server on that port can never be adopted - that would
+#              silently test someone else's build. (It also enables one retry,
+#              which is the right call for browser-driven specs.)
+#
+# type is the default "junit": playwright's junit reporter writes the per-spec
+# detail into $HYDRA_TEST_OUTPUT, so failures land in the panel with their
+# assertion rather than as a bare red exit code.
+command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PM run build && $PX playwright install chromium && E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})\") CI=1 PLAYWRIGHT_JUNIT_OUTPUT_NAME=\"$HYDRA_TEST_OUTPUT/e2e.xml\" $PX playwright test --reporter=junit"
+timeout_sec = 900
 
 ## [review] configures how Hydra talks to a forge (GitHub/GitLab) and the
 ## defaults for the Create MR dialog. There is no mode switch - the head<->MR
