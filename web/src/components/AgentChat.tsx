@@ -1193,15 +1193,19 @@ function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null]
   return [ref, w]
 }
 
-// `stacked`: anchor to a second row below the sub-agent selector - on a
-// narrow pane even the two COLLAPSED chips overlap side by side (the plan
-// chip sat over the selector and swallowed its clicks). Static, so nothing
-// relocates when either card expands.
+// `paired`: the sub-agent selector is on screen too, so the two cards split
+// the row - half the pane each, the longer label truncating - instead of
+// growing across it. Without that they overlap on a narrow pane and whichever
+// is on top swallows the other's clicks; the plan used to drop to a second row
+// for that, which cost it its fixed top-right corner. Halving applies open as
+// well as collapsed: exempting an open card just moves the swallowed clicks to
+// the other card's chip. The cap only bites below ~544px of pane - wider than
+// that, both cards get their full designed width.
 // memo: this sits next to the composer, whose `input` state re-renders ChatPane
 // on every keystroke. The plan only changes on a TodoWrite (stable `todos`
 // identity between those), and the layout flags are stable while typing, so the
 // panel - and its chip-width measurement - skips the per-keystroke churn.
-const PlanPanel = memo(function PlanPanel({ todos, narrow, stacked, fadeIn }: { todos: TodoItem[]; narrow: boolean; stacked: boolean; fadeIn: boolean }) {
+const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { todos: TodoItem[]; narrow: boolean; paired: boolean; fadeIn: boolean }) {
   // Frozen at mount: fade in only when the plan APPEARS live (a first
   // TodoWrite mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
@@ -1234,15 +1238,15 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, stacked, fadeIn }: { 
   return (
     // Collapsed, the card is its fit-content header chip ("Plan 1/3 >");
     // opening glides the width (the measured chip px -> w-64, see useChipWidth)
-    // alongside the Expandable height. Corner-anchored; while open it takes
-    // the higher z so it layers over the selector's chip on a narrow pane
-    // instead of anything relocating.
+    // alongside the Expandable height. Always the top-right corner; sharing the
+    // row with the selector caps it at half the pane (see `paired`) rather than
+    // moving it.
     <div
       // See the selector's data-chat-overlay: both float over the transcript's
       // top edge and alignToLastMessage clears whichever is on screen.
       data-chat-overlay=""
       style={{ width: open ? 256 : chipW ?? undefined }}
-      className={`absolute ${stacked ? 'top-12' : 'top-2'} right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute top-2 right-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
       {/* Invisible clone of the header at natural width - the collapsed chip
           width the open/close transition animates from/to (border included so
@@ -3150,6 +3154,7 @@ function ChatViewSelector({
   awaitingChildren,
   onSelect,
   fadeIn,
+  paired,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
@@ -3157,6 +3162,10 @@ function ChatViewSelector({
   awaitingChildren: Set<string>
   onSelect: (key: string) => void
   fadeIn: boolean
+  // The plan panel is on screen too: split the row in half rather than let this
+  // card's chip - as wide as its current row's label - grow under the plan's
+  // corner. See PlanPanel's `paired`.
+  paired: boolean
 }) {
   const [open, setOpen] = useState(false)
   // Frozen at mount: fade in only when the selector APPEARS live (the first
@@ -3278,7 +3287,7 @@ function ChatViewSelector({
       // scroll a message clear of it rather than flush to the pane's top.
       data-chat-overlay=""
       style={{ width: open ? 288 : chipW ?? undefined }}
-      className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute top-2 left-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
       {/* Invisible clone of the CURRENT row at natural width - the collapsed
           width the open/close transition animates from/to. Mirrors the row's
@@ -7883,6 +7892,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const viewSub = chatView !== 'main' ? subagents[chatView] : undefined
   const viewSubTool = viewSub?.toolUseId ? taskToolByUse[viewSub.toolUseId] : undefined
   const hasSubagents = Object.keys(subagents).length > 0
+  // Whether the plan card is on screen - it and the sub-agent selector each
+  // take half the row when both are (see their `paired` prop).
+  const planVisible = todos.length > 0 && replayDone && !viewSub
 
   // A stable wrapper around renderChatItem (a per-render closure) so it never
   // trips SettledMessages' memo. It always calls the latest closure via a ref, so
@@ -7920,9 +7932,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         {/* Floating cards over the transcript: the current-agents selector
             (top-left, once any sub-agent exists) and the plan panel
             (top-right). Both are corner-anchored so expanding one never
-            relocates the other (no pushing/jumping); when they'd overlap on a
-            narrow pane, the OPEN card takes the higher z and simply layers
-            over the other's chip. */}
+            relocates the other (no pushing/jumping): with both on screen they
+            split the row in half (`paired`) so neither can reach the other's
+            corner - and so neither can cover the other's clicks. */}
         {hasSubagents && (
           <ChatViewSelector
             chatView={viewSub ? chatView : 'main'}
@@ -7931,15 +7943,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             awaitingChildren={subsAwaitingChildren}
             onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
             fadeIn={liveUiRef.current}
+            paired={planVisible}
           />
         )}
         {/* Current plan (item 17): the agent's latest TodoWrite. Main view
             only - it is the main agent's plan. */}
-        {todos.length > 0 && replayDone && !viewSub && (
+        {planVisible && (
           <PlanPanel
             todos={todos}
             narrow={paneWidth > 0 && paneWidth < 560}
-            stacked={hasSubagents && paneWidth > 0 && paneWidth < 560}
+            paired={hasSubagents}
             fadeIn={liveUiRef.current}
           />
         )}
