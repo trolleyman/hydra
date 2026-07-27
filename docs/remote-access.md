@@ -51,8 +51,10 @@ public endpoint. See `internal/config/ngrok.go`.
 
 ### 3. Tailscale serve (private, trusted cert) - recommended
 
-`mage deploy:tailscale` prints the exact commands. The gist, run on the machine
-hosting Hydra:
+`mage deploy:tailscale` prints the exact commands and, when tailscale is
+installed and logged in, offers to run them for you - first the web UI, then
+(separately) the previews. Both prompts default to no. The web UI command it
+runs is:
 
 ```
 tailscale serve --bg http://127.0.0.1:26600
@@ -106,8 +108,9 @@ make them work behind a TLS front:
    an HTTPS Hydra page the preview link is HTTPS too. (A hardcoded `http://`
    would be blocked as mixed content on an HTTPS page.)
 2. **Each preview port needs its own TLS mapping.** Because previews use distinct
-   ports, one `tailscale serve` for the main port doesn't cover them. Serve the
-   range (once; narrow it if you only use a few):
+   ports, one `tailscale serve` for the main port doesn't cover them. `mage
+   deploy:tailscale` offers to serve the whole range for you (the second prompt);
+   the equivalent by hand is:
 
    ```
    for p in $(seq 26601 26699); do tailscale serve --bg --https=$p http://127.0.0.1:$p; done
@@ -115,7 +118,9 @@ make them work behind a TLS front:
 
    A preview on `26601` then opens at `https://<machine>.<tailnet>.ts.net:26601/`.
    The same idea applies to a reverse proxy (one `:port` vhost per preview port);
-   the tailnet cert is per-hostname, so it covers every port for free.
+   the tailnet cert is per-hostname, so it covers every port for free. Narrow the
+   range in `config.toml` (`preview_ports`) if serving all of it is more than you
+   need.
 
    Inspect or undo with `tailscale serve status` / `tailscale serve reset`.
 

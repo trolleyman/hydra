@@ -689,15 +689,18 @@ func (Deploy) Ngrok() error {
 	return nil
 }
 
-// Tailscale prints the `tailscale serve` commands that expose the Hydra web UI
-// (and, optionally, its live server previews) privately over your tailnet with
-// a real trusted HTTPS cert. Unlike ngrok this creates NO public URL: Hydra
-// stays bound to localhost, Tailscale is the only door, and tailnet membership
-// is the auth - so the UI runs in a secure context (clipboard, crypto) and is
-// reachable only from your own devices. See docs/remote-access.md.
+// Tailscale exposes the Hydra web UI (and, on request, its live server
+// previews) privately over your tailnet with a real trusted HTTPS cert. Unlike
+// ngrok this creates NO public URL: Hydra stays bound to localhost, Tailscale is
+// the only door, and tailnet membership is the auth - so the UI runs in a secure
+// context (clipboard, crypto) and is reachable only from your own devices. See
+// docs/remote-access.md.
 //
-// It changes nothing itself: it detects your tailnet name and the configured
-// ports and prints the exact commands to run on the machine hosting Hydra.
+// It prints the exact `tailscale serve` commands and then, when tailscale is
+// installed and logged in, offers to run them for you: first the web UI mapping,
+// then (separately, since it's the whole port range) the previews. Both prompts
+// default to no - applying changes what's reachable over your tailnet. With
+// tailscale absent it only prints, so you can run the commands once it's up.
 //
 //	mage deploy:tailscale
 func (Deploy) Tailscale() error {
@@ -713,36 +716,92 @@ func (Deploy) Tailscale() error {
 	if cfg, err := config.Load(projectRoot); err == nil {
 		plo, phi = cfg.ResolvePreviewPortRange()
 	}
+	previewCount := phi - plo + 1
 
 	// Best-effort: resolve this machine's MagicDNS name so the printed URLs are
 	// real. Falls back to a placeholder when tailscale isn't installed / up.
 	host := tailscaleDNSName()
-	if host == "" {
+	haveTailscale := host != ""
+	if !haveTailscale {
 		host = "<machine>.<tailnet>.ts.net"
-		fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
-		fmt.Printf("%s! tailscale not detected on PATH (or not logged in).%s\n", colorYellow, colorReset)
-		fmt.Println("  Install it and run `tailscale up` on this machine, then re-run this")
-		fmt.Println("  target to fill in your real *.ts.net name. Commands below use a placeholder.")
-		fmt.Println("  Also enable HTTPS certs for your tailnet in the admin console (DNS -> HTTPS).")
-		fmt.Println()
-	} else {
-		fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
-		fmt.Printf("Detected tailnet name: %s%s%s\n\n", colorCyan, host, colorReset)
 	}
 
-	fmt.Printf("%sExpose the web UI privately over your tailnet (run on this machine):%s\n", colorBold, colorReset)
-	fmt.Printf("     %stailscale serve --bg http://127.0.0.1:%s%s\n", colorBold, port, colorReset)
+	// Build the web UI mapping once, so what we print is exactly what we run.
+	uiArgs := []string{"serve", "--bg", "http://127.0.0.1:" + port}
+
+	fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
+	if haveTailscale {
+		fmt.Printf("Detected tailnet name: %s%s%s\n\n", colorCyan, host, colorReset)
+	} else {
+		fmt.Printf("%s! tailscale not detected on PATH (or not logged in).%s\n", colorYellow, colorReset)
+		fmt.Println("  Install it and run `tailscale up` on this machine, then re-run this")
+		fmt.Println("  target to apply the mappings and fill in your real *.ts.net name.")
+		fmt.Println("  Also enable HTTPS certs for your tailnet in the admin console (DNS -> HTTPS).")
+		fmt.Println()
+	}
+
+	fmt.Printf("%sExpose the web UI privately over your tailnet:%s\n", colorBold, colorReset)
+	fmt.Printf("     %stailscale %s%s\n", colorBold, strings.Join(uiArgs, " "), colorReset)
 	fmt.Printf("   -> %shttps://%s/%s  (trusted cert, secure context, tailnet-only)\n\n", colorCyan, host, colorReset)
 
-	fmt.Printf("%sOptional - also expose live server previews (ports %d-%d):%s\n", colorBold, plo, phi, colorReset)
-	fmt.Println("   Previews run on their own ports, so each needs its own TLS mapping. Serve")
-	fmt.Println("   the whole range once (narrow it if you only use a few):")
+	fmt.Printf("%sExpose live server previews (ports %d-%d, one TLS mapping each):%s\n", colorBold, plo, phi, colorReset)
 	fmt.Printf("     %sfor p in $(seq %d %d); do tailscale serve --bg --https=$p http://127.0.0.1:$p; done%s\n", colorBold, plo, phi, colorReset)
 	fmt.Printf("   -> a preview on port %d becomes %shttps://%s:%d/%s\n\n", plo, colorCyan, host, plo, colorReset)
 
 	fmt.Printf("%sHydra needs no changes:%s it stays on localhost:%s (no auth key, no 0.0.0.0 bind).\n", colorBold, colorReset, port)
-	fmt.Printf("Inspect or undo the mappings with %stailscale serve status%s / %stailscale serve reset%s.\n", colorBold, colorReset, colorBold, colorReset)
+	fmt.Printf("Inspect or undo with %stailscale serve status%s / %stailscale serve reset%s.\n\n", colorBold, colorReset, colorBold, colorReset)
+
+	if !haveTailscale {
+		fmt.Println("Nothing applied (tailscale not available). Run the commands above once it's up.")
+		return nil
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	if !promptYesNo(reader, "Apply the web UI mapping now?", false) {
+		fmt.Println("Nothing applied. Run the commands above when ready.")
+		return nil
+	}
+	if err := sh.RunV("tailscale", uiArgs...); err != nil {
+		return errtrace.Wrap(fmt.Errorf("tailscale serve (web UI): %w", err))
+	}
+	fmt.Printf("%s✓ Web UI served at https://%s/%s\n", colorGreen, host, colorReset)
+
+	if promptYesNo(reader, fmt.Sprintf("Also serve the %d preview ports (%d-%d)?", previewCount, plo, phi), false) {
+		fmt.Printf("Serving %d preview ports (this takes a moment)...\n", previewCount)
+		failed := 0
+		for p := plo; p <= phi; p++ {
+			ps := fmt.Sprintf("%d", p)
+			// Quiet per-port (sh.Run, not RunV): --bg serve is silent on success,
+			// so only the tally below is worth showing across the whole range.
+			if err := sh.Run("tailscale", "serve", "--bg", "--https="+ps, "http://127.0.0.1:"+ps); err != nil {
+				failed++
+			}
+		}
+		if failed > 0 {
+			fmt.Printf("%s! %d of %d preview ports failed to serve (see `tailscale serve status`).%s\n", colorYellow, failed, previewCount, colorReset)
+		} else {
+			fmt.Printf("%s✓ Served %d preview ports.%s\n", colorGreen, previewCount, colorReset)
+		}
+	}
+
+	fmt.Printf("\nDone. %stailscale serve status%s shows the live mappings.\n", colorBold, colorReset)
 	return nil
+}
+
+// promptYesNo asks a yes/no question on stdin, returning def on an empty line or
+// EOF (so a non-interactive `mage` run takes the default rather than blocking).
+func promptYesNo(reader *bufio.Reader, question string, def bool) bool {
+	suffix := "[y/N]"
+	if def {
+		suffix = "[Y/n]"
+	}
+	fmt.Printf("%s %s: ", question, suffix)
+	line, _ := reader.ReadString('\n')
+	line = strings.ToLower(strings.TrimSpace(line))
+	if line == "" {
+		return def
+	}
+	return line == "y" || line == "yes"
 }
 
 // tailscaleDNSName returns this machine's MagicDNS name (e.g. "hades.tail-scale.ts.net"),
