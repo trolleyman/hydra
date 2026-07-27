@@ -174,6 +174,7 @@ export const BranchSelector = memo(function BranchSelector({
       {open && coords && createPortal(
         <div
           ref={menuRef}
+          data-portal-menu
           className="fixed w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
         >

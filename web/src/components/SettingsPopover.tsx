@@ -27,16 +27,29 @@ export function SettingsPopover({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
 
   const reposition = useCallback(() => {
     const el = anchorRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    // Anchor the dropdown's right edge to the button's right edge, just below it,
-    // clamped a few px off the viewport edges.
-    setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
-  }, [])
+    // Right-align the dropdown under the button (its right edge meets the
+    // button's), but clamp within the viewport so it never runs off an edge -
+    // the compact spawn box anchors this cog near the left of a narrow sidebar,
+    // where a pure right-anchor would push the panel off-screen.
+    const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8)
+    // Open below by default, but flip above when there isn't room below and
+    // there is above - the compact spawn box anchors this cog near the bottom of
+    // the sidebar. popRef is null on the first open (the panel isn't mounted
+    // yet), so fall back to a rough height for that first placement decision.
+    const estHeight = popRef.current?.offsetHeight ?? 260
+    const spaceBelow = window.innerHeight - r.bottom
+    if (spaceBelow < estHeight + 8 && r.top > spaceBelow) {
+      setPos({ bottom: window.innerHeight - r.top + 4, left })
+    } else {
+      setPos({ top: r.bottom + 4, left })
+    }
+  }, [width])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -57,6 +70,12 @@ export function SettingsPopover({
     function onDown(e: MouseEvent) {
       const t = e.target as Node
       if (anchorRef.current?.contains(t) || popRef.current?.contains(t)) return
+      // A nested portalled dropdown (e.g. a BranchSelector menu opened from
+      // inside this popover) renders outside our DOM subtree, so a plain
+      // contains() check would treat picking an option as an outside click and
+      // dismiss us before the click lands. Marked menus count as inside.
+      const el = t instanceof Element ? t : t.parentElement
+      if (el?.closest('[data-portal-menu]')) return
       setOpen(false)
     }
     function onEsc(e: KeyboardEvent) {
@@ -89,7 +108,7 @@ export function SettingsPopover({
       {open && pos && createPortal(
         <div
           ref={popRef}
-          style={{ position: 'fixed', top: pos.top, right: pos.right, width }}
+          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width }}
           className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >
           {children}

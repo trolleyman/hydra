@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
+import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
@@ -801,6 +802,47 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
+  // The compact spawn box is tight, so its chat-mode toggle and base-branch
+  // picker collapse into a single settings cog (styled like the per-section
+  // options popovers elsewhere), sitting where the branch selector button used
+  // to be. Returns null when neither control applies (e.g. a non-chat agent in
+  // a built-in project), so no empty cog is shown.
+  function renderSpawnSettings() {
+    const showChat = agentType === 'claude' || agentType === 'codex'
+    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject
+    if (!showChat && !showBranch) return null
+    return (
+      <SettingsPopover label="Spawn options" width={240}>
+        {showChat && (
+          <SettingsOptionRow
+            type="checkbox"
+            checked={chatMode}
+            onChange={setChatMode}
+            label="Chat mode"
+            title="Spawn a chat view instead of a terminal (Claude and Codex only)"
+          />
+        )}
+        {showChat && showBranch && (
+          <div className="my-2 border-t border-gray-100 dark:border-gray-700" />
+        )}
+        {showBranch && branches && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Base branch</SettingsGroupLabel>
+            <BranchSelector
+              branches={branches}
+              activeRef={baseBranch}
+              isKnownBranch={branches.some((b) => b.name === baseBranch)}
+              onSelect={setBaseBranch}
+              onOpen={handleBranchOpen}
+              title="Base branch to create the agent from (pick an agent branch to stack on it)"
+              flexible
+            />
+          </>
+        )}
+      </SettingsPopover>
+    )
+  }
+
   // Restore a snapshot returned by undo/redo: re-mirror the draft and put the
   // caret back where it was when that snapshot was current (after the controlled
   // value commits to the DOM, hence the rAF).
@@ -901,9 +943,8 @@ export const SpawnForm = memo(function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
-                {renderChatToggle(true)}
               </div>
-              {renderBranchSelector(true)}
+              {renderSpawnSettings()}
               <button
                 type="submit"
                 disabled={!canSubmit || loading || disabled}
