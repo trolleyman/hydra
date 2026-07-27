@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBashForDisplay, unwrapBashLoginCommand } from './bashFormat'
+import { formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from './bashFormat'
 
 describe('Codex bash display', () => {
   it('unwraps a login-shell command and formats its chains', () => {
@@ -85,5 +85,28 @@ describe('Codex bash display', () => {
   it('keeps nohup and nested sh scripts readable after removing only the outer bash', () => {
     const command = `/usr/bin/bash -lc "nohup sh -c 'sleep 2; date -Is > .feature-demo-background.txt' >/dev/null 2>&1 & echo "'$!'`
     expect(unwrapBashLoginCommand(command)).toBe(`nohup sh -c 'sleep 2; date -Is > .feature-demo-background.txt' >/dev/null 2>&1 & echo $!`)
+  })
+})
+
+describe('parseHostRunScript', () => {
+  it('returns null for a command that is not a host run', () => {
+    expect(parseHostRunScript('ls -la')).toBeNull()
+    expect(parseHostRunScript('echo hydra host-run')).toBeNull()
+  })
+
+  it('unwraps the bash -c wrapper agents habitually add', () => {
+    expect(parseHostRunScript(`/tmp/hydra-internal host-run -- bash -c "echo one; echo two"`)).toBe('echo one; echo two')
+  })
+
+  it('accepts the bare binary name and a missing --', () => {
+    expect(parseHostRunScript('hydra host-run ss -Hltn')).toBe('ss -Hltn')
+  })
+
+  it('unquotes a whole script passed as one argument', () => {
+    expect(parseHostRunScript(`./hydra host-run -- 'ss -Hltn | grep 266'`)).toBe('ss -Hltn | grep 266')
+  })
+
+  it('keeps a plain multi-word command as written', () => {
+    expect(parseHostRunScript('/tmp/hydra-internal host-run -- git count-objects -vH')).toBe('git count-objects -vH')
   })
 })

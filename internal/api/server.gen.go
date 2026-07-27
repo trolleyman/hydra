@@ -921,6 +921,12 @@ type ProjectInfo struct {
 	WaitingCount *int `json:"waiting_count,omitempty"`
 }
 
+// ReorderProjectsRequest defines model for ReorderProjectsRequest.
+type ReorderProjectsRequest struct {
+	// ProjectIds Project IDs in the order they should be listed. Projects the caller omitted (e.g. added by another window since its list was fetched) keep their relative order after these; unknown IDs are ignored.
+	ProjectIds []string `json:"project_ids"`
+}
+
 // RepositoryArtifactFile defines model for RepositoryArtifactFile.
 type RepositoryArtifactFile struct {
 	// Dpi Pixel density (device-scale factor) the media was captured at, from its sidecar ({"dpi": 2}); the grid sizes tiles by logical width (width / dpi). Null/absent → 1.
@@ -1826,6 +1832,9 @@ type GetClaudeUsageParams struct {
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
+// ReorderProjectsJSONRequestBody defines body for ReorderProjects for application/json ContentType.
+type ReorderProjectsJSONRequestBody = ReorderProjectsRequest
+
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
@@ -1870,6 +1879,9 @@ type ServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(w http.ResponseWriter, r *http.Request)
+	// Reorder the project list (the order the project selector shows)
+	// (PUT /api/projects/order)
+	ReorderProjects(w http.ResponseWriter, r *http.Request)
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
 	RemoveProject(w http.ResponseWriter, r *http.Request, projectId string)
@@ -2127,6 +2139,20 @@ func (siw *ServerInterfaceWrapper) AddProject(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AddProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReorderProjects operation middleware
+func (siw *ServerInterfaceWrapper) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReorderProjects(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4405,6 +4431,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/order", wrapper.ReorderProjects)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
@@ -4607,6 +4634,40 @@ func (response AddProject400JSONResponse) VisitAddProjectResponse(w http.Respons
 type AddProject500JSONResponse ErrorResponse
 
 func (response AddProject500JSONResponse) VisitAddProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReorderProjectsRequestObject struct {
+	Body *ReorderProjectsJSONRequestBody
+}
+
+type ReorderProjectsResponseObject interface {
+	VisitReorderProjectsResponse(w http.ResponseWriter) error
+}
+
+type ReorderProjects204Response struct {
+}
+
+func (response ReorderProjects204Response) VisitReorderProjectsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReorderProjects400JSONResponse ErrorResponse
+
+func (response ReorderProjects400JSONResponse) VisitReorderProjectsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReorderProjects500JSONResponse ErrorResponse
+
+func (response ReorderProjects500JSONResponse) VisitReorderProjectsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -6725,6 +6786,9 @@ type StrictServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(ctx context.Context, request AddProjectRequestObject) (AddProjectResponseObject, error)
+	// Reorder the project list (the order the project selector shows)
+	// (PUT /api/projects/order)
+	ReorderProjects(ctx context.Context, request ReorderProjectsRequestObject) (ReorderProjectsResponseObject, error)
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
 	RemoveProject(ctx context.Context, request RemoveProjectRequestObject) (RemoveProjectResponseObject, error)
@@ -7043,6 +7107,37 @@ func (sh *strictHandler) AddProject(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AddProjectResponseObject); ok {
 		if err := validResponse.VisitAddProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReorderProjects operation middleware
+func (sh *strictHandler) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	var request ReorderProjectsRequestObject
+
+	var body ReorderProjectsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReorderProjects(ctx, request.(ReorderProjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReorderProjects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReorderProjectsResponseObject); ok {
+		if err := validResponse.VisitReorderProjectsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

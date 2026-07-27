@@ -152,6 +152,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/order:
+    put:
+      summary: Reorder the project list (the order the project selector shows)
+      operationId: reorderProjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderProjectsRequest'
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}:
     delete:
       summary: Remove a project from Hydra (does not delete files on disk)
@@ -2707,6 +2733,19 @@ components:
             The new icon value: an emoji, a lucide-react icon name, or an image
             path/URL. An empty string clears the icon, restoring the default folder
             icon.
+
+    ReorderProjectsRequest:
+      type: object
+      required: [project_ids]
+      properties:
+        project_ids:
+          type: array
+          items:
+            type: string
+          description: >-
+            Project IDs in the order they should be listed. Projects the caller
+            omitted (e.g. added by another window since its list was fetched)
+            keep their relative order after these; unknown IDs are ignored.
 
     AddProjectRequest:
       type: object

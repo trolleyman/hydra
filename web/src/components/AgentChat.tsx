@@ -25,6 +25,7 @@ import {
   Plus,
   Search,
   Send,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   SquareDot,
@@ -40,7 +41,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
-import { formatBashForDisplay } from '../lib/bashFormat'
+import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
 import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -54,6 +55,7 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
+import { ToolApproval } from './ToolApproval'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
@@ -62,8 +64,10 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
+import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
+import { selectionToMarkdown } from '../lib/copyMarkdown'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -548,6 +552,12 @@ const WORKING_VERBS = [
 // exponentially up to this cap.
 const RECONNECT_HEALTHY_MS = 15_000
 const RECONNECT_MAX_DELAY_MS = 15_000
+
+// Time constant of the pinned auto-scroll glide (see followBottom): the gap to
+// the bottom shrinks by 1/e every this-many ms, so a jump is ~95% closed in
+// 3x this. Short enough that live streaming stays glued to the bottom, long
+// enough that a tool card landing reads as a slide rather than a jump.
+const FOLLOW_TAU_MS = 70
 
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
@@ -1435,8 +1445,16 @@ function Expandable({ open, children, className }: { open: boolean; children: Re
 
 // CodePanel renders a block of code (a Bash command, JSON input) syntax
 // highlighted on the shared quiet panel.
+//
+// Multi-line code gets a line-number gutter (the "Code line numbers" browser
+// preference, on by default): these panels wrap rather than scroll sideways, so
+// without numbers a long shell line that wraps looks exactly like the next step
+// of the script. A single line has nothing to disambiguate, so it stays bare.
 function CodePanel({ code, lang }: { code: string; lang: string }) {
+  const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
+  if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
+
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (html != null) {
     return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
@@ -2050,8 +2068,17 @@ const ToolCard = memo(function ToolCard({
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
-  const displayedCommand = isBash ? formatBashForDisplay(command, commandCwd === worktree ? '' : commandCwd) : ''
-  const executableCommand = isBash ? formatBashForDisplay(command, '') : ''
+  // `hydra host-run` is the sandbox escape hatch: the agent is not running this
+  // itself, it is asking the USER to run it on the host. Show the command it is
+  // asking for rather than the CLI wrapper it typed, and give the card its own
+  // host identity (see the header) so it never reads as an ordinary Bash step.
+  const hostRunScript = isBash ? parseHostRunScript(command) : null
+  const isHostRun = hostRunScript !== null
+  // The host command runs in the head's worktree whatever the agent's own cwd
+  // was, so a `cd` preamble would be a lie - drop it for a host run.
+  const bashSource = hostRunScript ?? command
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd) : ''
+  const executableCommand = isBash ? formatBashForDisplay(bashSource, '') : ''
   const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult
@@ -2130,7 +2157,26 @@ const ToolCard = memo(function ToolCard({
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
-  const Icon = TOOL_ICONS[item.name] ?? Wrench
+  const Icon = isHostRun ? ShieldAlert : TOOL_ICONS[item.name] ?? Wrench
+
+  // The security gate may have parked THIS call for the user (a host-run, an
+  // unvetted MCP tool, ...). When it has, the card answers for itself instead of
+  // making you find the toast - and opens itself, since a question you cannot see
+  // is not a question.
+  const approval = usePendingToolApproval(item.name, input, item.result === undefined)
+  const awaitingApproval = approval !== null
+  // Adjusted during render rather than in an effect (React's "adjust state when a
+  // prop changes" pattern): no cascading second render, and the card can still be
+  // collapsed again afterwards - a plain `open || awaitingApproval` would nail it
+  // open for as long as the request is parked.
+  // Starts false even when the request is already parked on first render (the
+  // page was opened DURING the wait) - the mismatch on that first pass is what
+  // opens the card.
+  const [sawApproval, setSawApproval] = useState(false)
+  if (awaitingApproval !== sawApproval) {
+    setSawApproval(awaitingApproval)
+    if (awaitingApproval) setOpen(true)
+  }
 
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
@@ -2150,7 +2196,9 @@ const ToolCard = memo(function ToolCard({
       className={`rounded-lg border text-xs overflow-hidden ${
         item.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+          : awaitingApproval
+            ? 'border-amber-300/80 bg-amber-50/50 dark:border-amber-500/40 dark:bg-amber-500/[0.06]'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
       {/* Header row: the WHOLE row toggles open (so when collapsed the entire
@@ -2168,8 +2216,15 @@ const ToolCard = memo(function ToolCard({
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : displayToolName(item.name)}</span>
+          {/* A host run leaves the sandbox - say so in the collapsed header, where
+              it can't be missed, not only in the body. */}
+          {isHostRun && (
+            <span className="shrink-0 self-center rounded px-1 py-px text-[10px] font-semibold bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+              outside sandbox
+            </span>
+          )}
           {/* Who a message went to belongs in the collapsed header - it is the
               first thing you want to know about a SendMessage. */}
           {isSendMessage && messageTo && (
@@ -2190,8 +2245,10 @@ const ToolCard = memo(function ToolCard({
           )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
-        {pending && (
-          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+        {(pending || awaitingApproval) && (
+          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+            {awaitingApproval ? 'needs approval' : 'running'}
+          </span>
         )}
         {open && (
           <button
@@ -2209,6 +2266,9 @@ const ToolCard = memo(function ToolCard({
       </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
+          {/* The parked-approval row sits ABOVE the command, so the buttons are
+              never below a long script you'd have to scroll past. */}
+          {approval && <ToolApproval approval={approval} />}
           {showRaw ? (
             <CodePanel code={rawJson} lang="json" />
           ) : (
@@ -2218,6 +2278,11 @@ const ToolCard = memo(function ToolCard({
                   {interactiveTranscript && (
                     <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Terminal input (inferred from echo)
+                    </div>
+                  )}
+                  {isHostRun && !interactiveTranscript && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Command to run on the host
                     </div>
                   )}
                   <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
@@ -3609,15 +3674,12 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
-  const copyWithoutBlockPadding = (event: ClipboardEvent<HTMLDivElement>) => {
-    const selected = window.getSelection()?.toString() ?? ''
-    if (!selected || !/\n+$/.test(selected)) return
-    event.preventDefault()
-    event.clipboardData.setData('text/plain', selected.replace(/\n+$/, ''))
-  }
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`} onCopy={copyWithoutBlockPadding}>
+      {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
+          handler (copyTranscriptAsMarkdown), which also trims the trailing
+          newlines the browser adds for the bubble's block padding. */}
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -4377,6 +4439,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // jump-to-bottom button.
   const pinnedRef = useRef(true)
   const [pinned, setPinned] = useState(true)
+  // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
+  const followRafRef = useRef<number | null>(null)
+  const followPrevTimeRef = useRef(0)
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -4392,6 +4457,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
+  // Which head the tool cards below can answer parked approvals for. Null with no
+  // project (nothing to POST a decision to), which just leaves the toast.
+  const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
@@ -6374,14 +6442,86 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return out
   }, [subagents, taskToolByUse])
 
+  // --- Following the bottom --------------------------------------------------
+
+  // stopFollow cancels an in-flight glide, for the writes that place the
+  // viewport outright (a view switch, a restored offset) rather than follow it.
+  function stopFollow() {
+    if (followRafRef.current != null) {
+      cancelAnimationFrame(followRafRef.current)
+      followRafRef.current = null
+    }
+  }
+
+  // followBottom keeps a pinned view at the bottom as content arrives. This
+  // used to be a bare `scrollTop = scrollHeight`, so every new message, thought
+  // or tool card teleported the viewport and you lost your place in the text.
+  // Instead ease towards the bottom on a rAF loop that RE-READS the target
+  // every frame: streamed growth becomes one continuous glide (rather than a
+  // per-token tween restarting and fighting itself), and a card animating open
+  // is tracked as it grows. The loop exits the moment the pin is dropped, so a
+  // scroll-up mid-glide hands control straight back to the user.
+  function followBottom(instant = false) {
+    const el = scrollRef.current
+    if (!el) return
+    const gap = el.scrollHeight - el.clientHeight - el.scrollTop
+    // Jump outright when asked, while the replayed history is still landing
+    // (opening a conversation should show its end, not scroll down to it), when
+    // the user opted out of motion, and when the gap is more than a couple of
+    // viewports - that size of jump is a bulk render, not "a new thing
+    // arrived", and gliding it would just fling unreadable text past.
+    if (
+      instant ||
+      !liveUiRef.current ||
+      gap > el.clientHeight * 2 ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      stopFollow()
+      el.scrollTop = el.scrollHeight
+      return
+    }
+    if (followRafRef.current != null) return // already chasing; the loop re-aims itself
+    followPrevTimeRef.current = performance.now()
+    const step = (now: number) => {
+      followRafRef.current = null
+      const node = scrollRef.current
+      if (!node || !pinnedRef.current) return
+      // Clamp dt so returning to a backgrounded tab (one enormous frame)
+      // resumes with a normal step instead of a teleport.
+      const dt = Math.min(Math.max(now - followPrevTimeRef.current, 0), 50)
+      followPrevTimeRef.current = now
+      const dist = node.scrollHeight - node.clientHeight - node.scrollTop
+      if (dist <= 0.5) {
+        node.scrollTop = node.scrollHeight
+        return
+      }
+      // Exponential ease-out: frame-rate independent, and it converges on a
+      // target that is still moving while tokens stream in. The floor keeps the
+      // tail from crawling sub-pixel forever.
+      node.scrollTop += Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5))
+      followRafRef.current = requestAnimationFrame(step)
+    }
+    followRafRef.current = requestAnimationFrame(step)
+  }
+
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
     if (!el) return
     pinnedRef.current = true
     setPinned(true)
+    stopFollow()
+    // An explicit "take me to the bottom" glides however far it has to, so the
+    // long-gap cutoff in followBottom doesn't apply - hand it to the browser.
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  useEffect(
+    () => () => {
+      if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current)
+    },
+    [],
+  )
 
   // --- Sub-agent chat views --------------------------------------------------
 
@@ -6440,6 +6580,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     prevChatViewRef.current = chatView
     const el = scrollRef.current
     if (!el) return
+    // Placing the viewport outright - never glide the old view's leftover
+    // follow into the new one's content.
+    stopFollow()
     if (chatView === 'main') {
       const saved = mainScrollRef.current
       const pin = saved?.pinned ?? true
@@ -6503,10 +6646,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }, [isTurnRunning])
 
   // Auto-scroll to the bottom on new content while pinned. `subagents` is a
-  // dep so a sub-agent view follows its own live growth too.
+  // dep so a sub-agent view follows its own live growth too. followBottom
+  // glides rather than teleports; the first render of a replayed history is
+  // far enough from the bottom to fall into its instant path.
   useEffect(() => {
-    const el = scrollRef.current
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
+    if (pinnedRef.current) followBottom()
+    // followBottom only touches refs, so it isn't a meaningful dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, stream, replayDone, pendingSends, subagents])
 
   // Follow the bottom continuously while pinned as the geometry changes
@@ -6523,11 +6669,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const content = contentRef.current
     if (!el || !content) return
     const ro = new ResizeObserver(() => {
-      if (pinnedRef.current) el.scrollTop = el.scrollHeight
+      if (pinnedRef.current) followBottom()
     })
     ro.observe(content)
     ro.observe(el)
     return () => ro.disconnect()
+    // followBottom only touches refs, so it isn't a meaningful dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Track the pane width so the plan panel (item 17) can collapse when there's
@@ -7214,6 +7362,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // copyTranscriptAsMarkdown puts markdown source on the clipboard when a
+  // selection inside the transcript is copied: chat messages are RENDERED
+  // markdown, so a default copy drops the asterisks, fences, bullets and table
+  // pipes the agent (or the user) actually wrote. selectionToMarkdown walks the
+  // selected DOM and re-serializes it; the chat's non-markdown chrome (tool
+  // cards, diffs) still comes out as plain text, as before. Selecting inside a
+  // single code block yields the raw code, not a fenced block.
+  function copyTranscriptAsMarkdown(event: ClipboardEvent<HTMLDivElement>) {
+    const md = selectionToMarkdown(window.getSelection())
+    if (!md) return
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', md)
+  }
+
   // --- Rendering ----------------------------------------------------------------
 
   // renderAssistantText renders assistant prose, lifting any fenced
@@ -7608,6 +7770,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
 
   return (
+    // Every tool card below can pick up a parked security-gate approval for THIS
+    // head and grow its own Allow/Deny row (see ToolApproval).
+    <ChatApprovalContext.Provider value={approvalCtx}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
@@ -7661,7 +7826,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             outside the near-bottom threshold and un-pins the follow - whether it
             happened depended on which node got picked as the anchor. Our own
             pin/follow logic owns bottom-following instead. */}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          onCopy={copyTranscriptAsMarkdown}
+          className="h-full overflow-y-auto [overflow-anchor:none]"
+        >
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
@@ -7990,5 +8160,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         />
       )}
     </div>
+    </ChatApprovalContext.Provider>
   )
 }
