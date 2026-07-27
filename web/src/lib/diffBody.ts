@@ -139,9 +139,19 @@ export interface RenderSeg {
   top?: number     // resolved context lines shown at the region's top
   bot?: number     // resolved context lines shown at the region's bottom
   length?: number  // total lines in the region
+  context?: string // enclosing function/section of the change just below the gap
 }
 
 export const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
+
+// hunkContext returns the function-context trailer git appends after the second
+// `@@` of a hunk header (`@@ -a,b +c,d @@ <context>`) - the enclosing function or
+// section git worked out via its per-language xfuncname driver - or '' when the
+// header carries none.
+export function hunkContext(header: string): string {
+  const close = header.indexOf('@@', 2)
+  return close < 0 ? '' : header.slice(close + 2).trim()
+}
 
 // buildSegments turns a fully-fetched file (every line as a diff line) plus the
 // user's per-region reveal state into a flat list of render segments: runs of
@@ -151,7 +161,7 @@ export const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line
 // (short gaps, the file's true top/bottom once fully revealed) are omitted, so
 // e.g. a 1-line gap simply renders the line and the top expander vanishes at
 // line 1 / the bottom expander at EOF.
-export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
+export function buildSegments(fullLines: DiffLine[], reveal: RevealMap, funcByKey?: Map<string, string>): RenderSeg[] {
   const n = fullLines.length
   const runs: { change: boolean; s: number; e: number }[] = []
   let i = 0
@@ -182,9 +192,14 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
       return
     }
     if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })
+    // The change directly below this gap starts the next (change) run; label the
+    // gap with that change's enclosing function, so revealing it is unnecessary
+    // to know what you're looking at. The trailing edge has no change below it.
+    const below = isTrail ? undefined : runs[ri + 1]
+    const context = below ? funcByKey?.get(regionKey(fullLines[below.s])) : undefined
     segs.push({
       kind: isLead ? 'topedge' : isTrail ? 'botedge' : 'gap',
-      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L,
+      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L, context,
     })
     if (bot > 0) segs.push({ kind: 'lines', key: `cb${run.s}`, lines: fullLines.slice(run.e - bot, run.e) })
   })

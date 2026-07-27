@@ -14,10 +14,12 @@ import {
   ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
   GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
-  Images, Camera, Copy, Check, X, ExternalLink,
+  Images, Camera, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
-import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
+import { canCopyImages, copyImageToClipboard, copyText } from '../lib/clipboard'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { CopyStateIcon } from './CopyStateIcon'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
@@ -30,6 +32,7 @@ import { scrollCardToTop } from '../lib/diffScroll'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
+import { buildRepoSplat, parseRepoSplat, splatNeedsBranchList } from '../lib/repoSplat'
 import {
   parseLineRange, formatLineHash, inRange, type LineRange,
   parseDiffLineRange, formatDiffLineHash,
@@ -114,7 +117,7 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
 
 // ancestorsOf returns every directory path containing the given file path, so we
 // can auto-expand the tree down to a deep-linked file even though folders start
-// collapsed (PLAN.md #41c).
+// collapsed.
 function ancestorsOf(filePath: string): string[] {
   const parts = filePath.split('/')
   const acc: string[] = []
@@ -144,7 +147,7 @@ function escapeHtml(s: string): string {
 // per-line HTML strings, re-opening any <span> left open across a newline so
 // each line is independently valid HTML. Rendering each logical line as its own
 // element is what lets line numbers stay aligned even when wrapping is on
-// (PLAN.md #41a/#41d).
+//.
 function splitHighlightedLines(html: string): string[] {
   const lines: string[] = []
   const stack: string[] = [] // currently-open tag strings
@@ -173,7 +176,7 @@ function splitHighlightedLines(html: string): string[] {
 // formatBytes now lives in ../lib/formatBytes, shared with the artifact
 // download tiles.
 
-// File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
+// File icons now live in ../lib/fileIcons (getFileIcon), shared
 // with the diff viewer so both render files identically.
 
 // ── File header actions (copy contents + raw) ─────────────────────────────────
@@ -192,17 +195,6 @@ const HEADER_BTN_CLASS =
 const MENU_ROW_CLASS =
   'w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer rounded-md'
 
-// useCopyFlash drives the transient Copy → Check/X feedback shared by the copy
-// buttons: call flash(ok) after an attempt and read state/err to pick the icon.
-function useCopyFlash() {
-  const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
-  const flash = (ok: boolean) => {
-    setState(ok ? 'ok' : 'err')
-    setTimeout(() => setState('idle'), 1500)
-  }
-  return { state, flash }
-}
-
 // useFileActions centralises the copy/raw behaviour so the inline header buttons
 // (FileActions) and the small-screen overflow menu (FileActionMenuRows) share one
 // implementation. `available` is false for an unresolved symlink (no blob).
@@ -218,24 +210,18 @@ function useFileActions(file: RepositoryFileResponse, projectId: string, refStr:
   const copyLabel = state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'
   const handleCopy = async () => {
     try {
-      if (file.content != null) await navigator.clipboard.writeText(file.content)
-      else if (isImg) await copyImageToClipboard(rawUrl)
+      // copyText handles insecure LAN origins (undefined navigator.clipboard);
+      // it reports success as a boolean rather than throwing, so honour it.
+      let ok: boolean
+      if (file.content != null) ok = await copyText(file.content)
+      else if (isImg) { await copyImageToClipboard(rawUrl); ok = true }
       else return
-      flash(true)
+      flash(ok)
     } catch {
       flash(false)
     }
   }
   return { available, state, canCopy, copyLabel, rawUrl, handleCopy }
-}
-
-// CopyStateIcon picks the copy button's icon from the transient flash state. The
-// idle copy icon takes idleColor (the header button inherits its own colour, the
-// menu row passes a muted grey); the ok/err icons are always green/red.
-function CopyStateIcon({ state, size = 'w-3.5 h-3.5', idleColor = '' }: { state: 'idle' | 'ok' | 'err'; size?: string; idleColor?: string }) {
-  if (state === 'ok') return <Check className={`${size} text-green-500`} />
-  if (state === 'err') return <X className={`${size} text-red-500`} />
-  return <Copy className={`${size} ${idleColor}`} />
 }
 
 function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse; projectId: string; refStr: string }) {
@@ -281,7 +267,7 @@ function FileActionMenuRows({ file, projectId, refStr, onAction }: { file: Repos
   )
 }
 
-// ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
+// ── Settings popup ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
 
 type RepoSettings = { wrap: boolean; showIcons: boolean }
@@ -804,29 +790,12 @@ function loadBool(key: string, def: boolean): boolean {
   return def
 }
 
-// ── Splat <-> {ref, path} ─────────────────────────────────────────────────────
-
-// parseSplat turns the URL splat (the part after /repository/) into a ref + file
-// path. Branch names can contain slashes (e.g. hydra/my-task), so the known
-// branch list is used to find the longest branch-name prefix; anything else
-// treats the first segment as the ref (a commit SHA or single-segment branch).
-function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: string | null; path: string | null } {
-  const segs = (splat || '').split('/').filter(Boolean)
-  if (segs.length === 0) return { ref: null, path: null }
-  const names = (branches ?? []).map((b) => b.name)
-  for (let i = segs.length; i >= 1; i--) {
-    const cand = segs.slice(0, i).join('/')
-    if (names.includes(cand)) return { ref: cand, path: segs.slice(i).join('/') || null }
-  }
-  return { ref: segs[0], path: segs.slice(1).join('/') || null }
-}
-
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
   const location = useLocation()
-  // The compare-diff state that is promoted into the URL (PLAN.md #72): ?compare=
+  // The compare-diff state that is promoted into the URL: ?compare=
   // (head ref) and ?dfile= (selected file in single-file mode). strict:false reads
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
@@ -852,7 +821,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Picking a compare branch (head) diffs it against the browsed ref (base),
   // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
   // is the whole diff state - '' means "not diffing" - and lives in the URL's
-  // ?compare= search param (PLAN.md #72) so a comparison (and a line selection
+  // ?compare= search param so a comparison (and a line selection
   // within it) is shareable and survives reload. The ref/path splat parser is
   // untouched: the diff state rides query params + the hash alongside it.
   const compareRef = search.compare ?? ''
@@ -908,7 +877,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const fileContextsRef = useRef<Map<string, number>>(new Map())
   const diffFileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
+  // Settings (wrap-on-by-default, popup, icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
     wrap: loadBool(StorageKeys.repoWrap, true),
     showIcons: loadBool(StorageKeys.repoIcons, true),
@@ -916,7 +885,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.repoWrap, String(settings.wrap)) }, [settings.wrap])
   useEffect(() => { writeLocal(StorageKeys.repoIcons, String(settings.showIcons)) }, [settings.showIcons])
 
-  // Resizable sidebar (PLAN.md #41i).
+  // Resizable sidebar.
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const n = parseInt(readLocal(StorageKeys.repoSidebarWidth) ?? '', 10)
     return Number.isFinite(n) && n >= 160 && n <= 640 ? n : 256
@@ -937,7 +906,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
   }, [isResizing])
 
-  const parsed = useMemo(() => parseSplat(splat, branches), [splat, branches])
+  const parsed = useMemo(() => parseRepoSplat(splat, branches), [splat, branches])
   const tree = useMemo(() => compactTree(buildTree(files)), [files])
 
   // Inject the synthetic ".hydra/artifacts" folder (with one "file" per configured
@@ -1013,9 +982,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // bare /repository URL.
   const viewPath = parsed.path ?? defaultPath
 
-  // Wait for branches before resolving a non-empty splat (so a multi-segment
-  // branch ref isn't briefly mis-parsed and fetched at the wrong ref).
-  const ready = !splat || branches !== null
+  // Only a LEGACY sentinel-free multi-segment splat needs the branch list to
+  // resolve; wait for it there (so a slashed branch ref isn't briefly mis-parsed
+  // and fetched at the wrong ref). Sentinel splats parse exactly on their own, so
+  // they render immediately.
+  const ready = !splatNeedsBranchList(splat) || branches !== null
 
   // Load branches once per project. The list is cleared during render (not in the
   // effect) when the project changes, so the fetch effect below just does the
@@ -1058,7 +1029,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         if (cancelled) return
         setFiles(resp.files)
         setDefaultPath(resp.default_path ?? null)
-        // Collapse all folders by default (PLAN.md #41c); auto-expand only the
+        // Collapse all folders by default; auto-expand only the
         // ancestors of the file shown by the URL so a deep link is visible.
         const next = new Set<string>()
         const target = parsed.path
@@ -1187,7 +1158,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Position the content when the displayed file (or selection) changes: scroll
   // the selection's first row into view if it isn't already visible, otherwise
-  // reset to the top (PLAN.md #41g). Clicking an already-visible line thus
+  // reset to the top. Clicking an already-visible line thus
   // doesn't jump the view; a deep link to an off-screen line does. Runs after
   // FileContent renders, so the data-line row exists; markdown/binary/image
   // files have no such row and fall back to the top.
@@ -1368,7 +1339,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Keeps ?compare= (so switching the base branch re-diffs against the new base)
   // but drops the file/line selection, which belonged to the old comparison.
   const goTo = (ref: string, path: string | null) => {
-    const sp = path ? `${ref}/${path}` : ref
+    const sp = buildRepoSplat(ref, path)
     navigate({
       to: '/project/$projectId/repository/$',
       params: { projectId, _splat: sp },
@@ -1380,7 +1351,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // are real anchors (middle-click / Ctrl-click open them in a new tab).
   const fileLinkProps = (path: string): LinkProps => linkOptions({
     to: '/project/$projectId/repository/$',
-    params: { projectId, _splat: `${refStr}/${path}` },
+    params: { projectId, _splat: buildRepoSplat(refStr, path) },
   })
 
   // Small-screen "back": pop the full-screen content view back to the list. In
@@ -1529,7 +1500,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) - md+ only; the sidebar is full-width on
+        {/* Resize handle - md+ only; the sidebar is full-width on
             phones. */}
         <div
           onMouseDown={startResizing}

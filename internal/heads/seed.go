@@ -169,7 +169,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// (which a read-only ~/.claude/settings.json bind could NOT prevent, since the
 		// agent can still create a project-scope .claude/settings.json). We therefore
 		// do NOT seed ~/.claude/settings.json at all - the user's own settings apply
-		// normally and our policy layers on top authoritatively. (AUDIT.md F4.)
+		// normally and our policy layers on top authoritatively. (docs/security-audit.md F4.)
 		// The set of MCP servers KEPT in the seeded config: whole-server grants plus
 		// any server referenced by a per-tool grant (so a partially-allowed server
 		// still spawns and the runtime gate enforces the per-tool subset), minus any

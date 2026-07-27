@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"os"
 	"path"
@@ -1219,6 +1220,29 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Context, Content: "\t}", OldLineNum: ptr(67), NewLineNum: ptr(71)},
 							},
 						},
+						{
+							// Pure re-indent: the body moved one tab deeper when it was
+							// wrapped in a loop. Exercises the word diff's whitespace
+							// handling - only the added tab should light up, not the
+							// whole indent.
+							Header:   "@@ -92,6 +96,7 @@ func (s *SimulationServer) simDiff(...) {",
+							OldStart: 92,
+							NewStart: 96,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "\tfiles := make([]api.DiffFile, 0, 8)", OldLineNum: ptr(92), NewLineNum: ptr(96)},
+								{Type: api.Addition, Content: "\tfor _, hunk := range hunks {", NewLineNum: ptr(97)},
+								{Type: api.Deletion, Content: "\tstat := statFor(hunk)", OldLineNum: ptr(93)},
+								{Type: api.Deletion, Content: "\tif stat.Additions > 0 {", OldLineNum: ptr(94)},
+								{Type: api.Deletion, Content: "\t\tfiles = append(files, fileFor(hunk, stat))", OldLineNum: ptr(95)},
+								{Type: api.Deletion, Content: "\t}", OldLineNum: ptr(96)},
+								{Type: api.Addition, Content: "\t\tstat := statFor(hunk)", NewLineNum: ptr(98)},
+								{Type: api.Addition, Content: "\t\tif stat.Additions > 0 {", NewLineNum: ptr(99)},
+								{Type: api.Addition, Content: "\t\t\tfiles = append(files, fileFor(hunk, stat))", NewLineNum: ptr(100)},
+								{Type: api.Addition, Content: "\t\t}", NewLineNum: ptr(101)},
+								{Type: api.Addition, Content: "\t}", NewLineNum: ptr(102)},
+								{Type: api.Context, Content: "\treturn files", OldLineNum: ptr(97), NewLineNum: ptr(103)},
+							},
+						},
 					},
 				},
 				{
@@ -1342,6 +1366,111 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Addition, Content: "var ErrOperationInProgress = errors.New(\"operation already in progress\")", NewLineNum: ptr(100)},
 								{Type: api.Context, Content: "", OldLineNum: ptr(85), NewLineNum: ptr(101)},
 								{Type: api.Context, Content: "// ClearHeadStatus resets head_status back to idle.", OldLineNum: ptr(86), NewLineNum: ptr(102)},
+							},
+						},
+					},
+				},
+				{
+					Path:       "web/src/lib/handlers.ts",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  4,
+					Deletions:  4,
+					Hunks: []api.DiffHunk{
+						{
+							// Intra-line word diff: character granularity + camelCase/snake_case
+							// boundary snapping. getUserName->getUserId lights only the changed
+							// subword; handleClick->handleClose snaps to "Click"/"Close" (not
+							// "lick"/"lose"); counter->pointer stays the precise "cou"/"poi".
+							Header:   "@@ -12,6 +12,6 @@ export function wire(el: HTMLElement) {",
+							OldStart: 12,
+							NewStart: 12,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "export function wire(el: HTMLElement) {", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+								{Type: api.Deletion, Content: "  const id = getUserName()", OldLineNum: ptr(13)},
+								{Type: api.Addition, Content: "  const id = getUserId()", NewLineNum: ptr(13)},
+								{Type: api.Deletion, Content: "  el.addEventListener(\"click\", handleClick)", OldLineNum: ptr(14)},
+								{Type: api.Addition, Content: "  el.addEventListener(\"click\", handleClose)", NewLineNum: ptr(14)},
+								{Type: api.Deletion, Content: "  register(handle_click)", OldLineNum: ptr(15)},
+								{Type: api.Addition, Content: "  register(handle_close)", NewLineNum: ptr(15)},
+								{Type: api.Deletion, Content: "  let counter = MAX_CELLS", OldLineNum: ptr(16)},
+								{Type: api.Addition, Content: "  let pointer = MAX_LINES", NewLineNum: ptr(16)},
+								{Type: api.Context, Content: "}", OldLineNum: ptr(17), NewLineNum: ptr(17)},
+							},
+						},
+					},
+				},
+				{
+					Path:       "internal/config/defaults.go",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  3,
+					Deletions:  3,
+					Hunks: []api.DiffHunk{
+						{
+							// Internal realignment: only the spacing around "=" changed. Not a move
+							// (leading indent is unchanged, inner spaces differ), so these rows dim
+							// as whitespace-only rather than reading as real edits.
+							Header:   "@@ -8,5 +8,5 @@ var Defaults = Config{",
+							OldStart: 8,
+							NewStart: 8,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "var Defaults = Config{", OldLineNum: ptr(8), NewLineNum: ptr(8)},
+								{Type: api.Deletion, Content: "	Host        = \"localhost\"", OldLineNum: ptr(9)},
+								{Type: api.Deletion, Content: "	Port = 8080", OldLineNum: ptr(10)},
+								{Type: api.Deletion, Content: "	ReadTimeout   = 30", OldLineNum: ptr(11)},
+								{Type: api.Addition, Content: "	Host = \"localhost\"", NewLineNum: ptr(9)},
+								{Type: api.Addition, Content: "	Port        = 8080", NewLineNum: ptr(10)},
+								{Type: api.Addition, Content: "	ReadTimeout = 30", NewLineNum: ptr(11)},
+								{Type: api.Context, Content: "}", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+							},
+						},
+					},
+				},
+				{
+					Path:       "web/src/components/AgentChat.tsx",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  19,
+					Deletions:  9,
+					Hunks: []api.DiffHunk{
+						{
+							// A realistic modify deep in a large file (a scroll-pin rewrite ~line
+							// 6644): high line numbers, a comment-heavy block replacement, and lots
+							// of intra-line word highlights (40 -> 4, < -> <=, nearBottom -> atBottom).
+							Header:   "@@ -6644,13 +6647,23 @@ const onScroll = useCallback((el: HTMLElement) => {",
+							OldStart: 6644,
+							NewStart: 6647,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "		if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()", OldLineNum: ptr(6644), NewLineNum: ptr(6647)},
+								{Type: api.Deletion, Content: "		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40", OldLineNum: ptr(6645)},
+								{Type: api.Deletion, Content: "		// While pinned, content can grow FASTER than the follow effects re-pin (a", OldLineNum: ptr(6646)},
+								{Type: api.Deletion, Content: "		// card expanding a tall clamped panel adds >40px between frames), so a", OldLineNum: ptr(6647)},
+								{Type: api.Deletion, Content: "		// momentarily large gap must not read as \"the user scrolled away\" - that", OldLineNum: ptr(6648)},
+								{Type: api.Deletion, Content: "		// froze the follow mid-expansion. Only an UPWARD move unpins; any", OldLineNum: ptr(6649)},
+								{Type: api.Deletion, Content: "		// downward/stationary scroll keeps the pin, and reaching the bottom", OldLineNum: ptr(6650)},
+								{Type: api.Deletion, Content: "		// (re)pins regardless.", OldLineNum: ptr(6651)},
+								{Type: api.Deletion, Content: "		const scrolledUp = el.scrollTop < prevScrollTopRef.current - 1", OldLineNum: ptr(6652)},
+								{Type: api.Addition, Content: "		// Re-ACQUIRING the pin needs the view actually AT the bottom (a few px of", NewLineNum: ptr(6648)},
+								{Type: api.Addition, Content: "		// sub-pixel slack), not merely \"within 40px\". The old 40px band re-pinned on", NewLineNum: ptr(6649)},
+								{Type: api.Addition, Content: "		// any non-upward scroll event while near the bottom, so a small macOS", NewLineNum: ptr(6650)},
+								{Type: api.Addition, Content: "		// trackpad nudge unpinned on its own event but the very next settling event", NewLineNum: ptr(6651)},
+								{Type: api.Addition, Content: "		// (still inside the band, no further upward move) slammed the pin straight", NewLineNum: ptr(6652)},
+								{Type: api.Addition, Content: "		// back on - the reported \"stuck at the bottom\" bug.", NewLineNum: ptr(6653)},
+								{Type: api.Addition, Content: "		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4", NewLineNum: ptr(6654)},
+								{Type: api.Addition, Content: "		// Only a genuine UPWARD user move unpins. A content SHRINK (a card", NewLineNum: ptr(6655)},
+								{Type: api.Addition, Content: "		// collapsing, a streamed block replaced by something shorter) clamps", NewLineNum: ptr(6656)},
+								{Type: api.Addition, Content: "		// scrollTop down on its own, so don't misread that as a scroll-up.", NewLineNum: ptr(6657)},
+								{Type: api.Addition, Content: "		const shrank = el.scrollHeight < prevScrollHeightRef.current - 1", NewLineNum: ptr(6658)},
+								{Type: api.Addition, Content: "		const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1", NewLineNum: ptr(6659)},
+								{Type: api.Context, Content: "		prevScrollTopRef.current = el.scrollTop", OldLineNum: ptr(6653), NewLineNum: ptr(6660)},
+								{Type: api.Deletion, Content: "		const pin = nearBottom || (pinnedRef.current && !scrolledUp)", OldLineNum: ptr(6654)},
+								{Type: api.Addition, Content: "		prevScrollHeightRef.current = el.scrollHeight", NewLineNum: ptr(6661)},
+								{Type: api.Addition, Content: "		// Unpin on an upward move; otherwise HOLD the pin if we already had it, and", NewLineNum: ptr(6662)},
+								{Type: api.Addition, Content: "		// (re)acquire it only on reaching the bottom. Holding via pinnedRef is what", NewLineNum: ptr(6663)},
+								{Type: api.Addition, Content: "		// keeps content growing faster than the follow effects re-pin (a card", NewLineNum: ptr(6664)},
+								{Type: api.Addition, Content: "		// mid-expansion opening a >40px gap for a frame) from reading as \"scrolled\",", NewLineNum: ptr(6665)},
+								{Type: api.Addition, Content: "		// away\" - scrolledUp is false there, so the pin holds.", NewLineNum: ptr(6666)},
+								{Type: api.Addition, Content: "		const pin = scrolledUp ? false : (pinnedRef.current || atBottom)", NewLineNum: ptr(6667)},
+								{Type: api.Context, Content: "		pinnedRef.current = pin", OldLineNum: ptr(6655), NewLineNum: ptr(6668)},
+								{Type: api.Context, Content: "		setPinned(pin)", OldLineNum: ptr(6656), NewLineNum: ptr(6669)},
 							},
 						},
 					},
@@ -1612,9 +1741,25 @@ func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.
 		for i, f := range files {
 			out[i] = simReconstructFull(f)
 		}
-		return out
+		return simStampBlobSHAs(out)
 	}
-	return expandDiffContext(files, simContext(params))
+	return simStampBlobSHAs(expandDiffContext(files, simContext(params)))
+}
+
+// simStampBlobSHAs gives each non-deleted fixture file a deterministic fake
+// head-side blob sha (derived from its path + line counts) so the real server's
+// per-file "viewed" state has something to key on in the simulation.
+func simStampBlobSHAs(files []api.DiffFile) []api.DiffFile {
+	for i := range files {
+		if files[i].ChangeType == api.DiffFileChangeTypeDeleted {
+			continue
+		}
+		h := fnv.New64a()
+		fmt.Fprintf(h, "%s:%d:%d", files[i].Path, files[i].Additions, files[i].Deletions)
+		sha := fmt.Sprintf("%016x%016x%08x", h.Sum64(), h.Sum64()*0x9e3779b1, files[i].Additions&0xffffffff)
+		files[i].HeadBlobSha = &sha
+	}
+	return files
 }
 
 // simReconstructFull rebuilds a fixture file as one contiguous whole-file hunk
@@ -1634,6 +1779,13 @@ func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.
 // contiguous diff.
 func simReconstructFull(f api.DiffFile) api.DiffFile {
 	if f.Binary || len(f.Hunks) == 0 {
+		return f
+	}
+	// A change deep in a large file can't be sensibly reconstructed as a
+	// whole-file hunk - it would be thousands of synthetic context lines, past the
+	// client's FULL_MAX_LINES cap anyway - so leave it windowed, mirroring the real
+	// server's max_full_lines behaviour.
+	if last := f.Hunks[len(f.Hunks)-1]; last.OldStart > 3000 || last.NewStart > 3000 {
 		return f
 	}
 	ext := ""
@@ -2113,7 +2265,7 @@ var simRepoSymlinks = map[string]string{
 
 // simRepoImage is the path of the one binary (image) file in the simulated repo,
 // served as raw PNG bytes by the simulation blob handler so the repository
-// browser's image preview (PLAN.md #41k) has something to render.
+// browser's image preview has something to render.
 const simRepoImage = "web/public/logo.png"
 
 // simLogoPNG is a small, deterministic PNG used as the simulated repo's binary
@@ -2160,7 +2312,7 @@ var simRepoFiles = map[string]string{
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
-	// tree compacts config/env/staging/region/eu onto one row (PLAN.md #41 compact
+	// tree compacts config/env/staging/region/eu onto one row (compact
 	// folders, like the diff viewer).
 	"config/env/staging/region/eu/settings.toml": "[region]\nname = \"eu\"\nenv = \"staging\"\n\n[limits]\nmax_requests = 1000\ntimeout_sec = 30\n",
 	"README.md": "# Hydra Demo\n\nA simulated repository powering the **Repository** view.\n\n" +
@@ -2770,7 +2922,9 @@ func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version st
 	st.Pid = ptr(40321)
 	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
 	st.Connections = ptr(1)
-	st.Url = ptr("http://" + r.Host + "/")
+	// Protocol-relative, mirroring the real previewURL: the link follows the
+	// page's scheme (http on the LAN, https behind a TLS front).
+	st.Url = ptr("//" + r.Host + "/")
 	// The "Latest changes" (uncommitted) channel runs in its own checkout that
 	// mirrors the live worktree; show it going stale so the restart affordance
 	// is exercised in the sim.

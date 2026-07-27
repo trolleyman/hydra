@@ -137,6 +137,14 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Improving the diff review workflow** (per-file "viewed" state, "reviewed up
   to" marker) -> [docs/diff-review-state.md](docs/diff-review-state.md) (proposed,
   unbuilt design + build order)
+- **Improving the diff viewer rendering** (word/intra-line diff, moved-block
+  detection, histogram algorithm, function-context headers, semantic/AST diff) ->
+  [docs/diff-viewer-improvements.md](docs/diff-viewer-improvements.md) (survey +
+  ranked plan; character-level word diff, histogram, funcname headers,
+  similarity pairing and edit-boundary sliding are built; moved-block detection
+  and whitespace-row dimming were tried and reverted - see the doc). A proper
+  boxes+jump redesign of moved-block viz is specced in
+  [docs/diff-moved-blocks.md](docs/diff-moved-blocks.md) (unbuilt)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
@@ -147,3 +155,20 @@ area; do not re-derive it by reading source. Skip them otherwise.
   [docs/chat-project.md](docs/chat-project.md) (BUILT;
   `projects.EnsureChatProject` + `HasUserProjects`, the reserved-ID rule, why a
   worktree-less head does not work, the project-icon traps)
+- **Working on the security gate / egress / MCP governance** (`internal/gate`,
+  `internal/egress`, MCP stripping, the `--dangerously-skip-permissions` posture)
+  -> [docs/security-audit.md](docs/security-audit.md) (the original sandbox audit;
+  its three main recommendations - gate, MCP allow-list, filtering egress proxy -
+  are now BUILT for Claude)
+- **User-checkoutable head branches** (the `hydra/<id>` vs `hydra-wt/<id>`
+  branch-split + ff-only mirror design) ->
+  [docs/user-branch-mirror.md](docs/user-branch-mirror.md) (proposed, unbuilt
+  design; only the `internal/git/branch.go` naming step is done)
+- **Remote access / HTTPS / secure context** (reaching Hydra from other devices,
+  the localhost-trust auth model, `mage deploy:tailscale` / `deploy:ngrok`,
+  serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
+  (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
+  `previewURL` protocol-relative so preview links follow the page scheme)
+
+The open backlog (ideas/gaps not yet built) lives in
+[docs/roadmap.md](docs/roadmap.md).

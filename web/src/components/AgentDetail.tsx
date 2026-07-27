@@ -321,7 +321,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
   )
 }
 
-// NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3):
+// NetworkEnforcementBadge shows a live head's egress posture (docs/security-audit.md rec 3):
 // the green "locked" hard boundary, the amber advisory (proxy-respecting) mode,
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live

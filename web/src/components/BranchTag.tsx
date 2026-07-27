@@ -1,7 +1,8 @@
-import { Check, Copy, GitBranch } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { GitBranch } from 'lucide-react'
 import { copyBranchName } from '../lib/branch'
 import { Tooltip } from './Tooltip'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { CopyStateIcon } from './CopyStateIcon'
 
 // BranchTag renders an agent's branch as a mono tag with a branch icon, plus a
 // copy button just after the name (the "B" keyboard shortcut copies the same
@@ -13,8 +14,7 @@ import { Tooltip } from './Tooltip'
 // selection ourselves (trailing whitespace trimmed) so the clipboard carries
 // just the branch name - while still honouring a partial selection.
 export function BranchTag({ branch }: { branch: string }) {
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const { state, flash } = useCopyFlash(1200)
   return (
     <span
       className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5"
@@ -40,14 +40,9 @@ export function BranchTag({ branch }: { branch: string }) {
           type="button"
           aria-label="Copy branch name"
           className="cursor-pointer text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
-          onClick={() => {
-            copyBranchName(branch)
-            setCopied(true)
-            clearTimeout(timer.current)
-            timer.current = setTimeout(() => setCopied(false), 1200)
-          }}
+          onClick={() => { void copyBranchName(branch).then(flash) }}
         >
-          {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+          <CopyStateIcon state={state} />
         </button>
       </Tooltip>
     </span>

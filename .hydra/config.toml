@@ -229,7 +229,7 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ## new names append. (The legacy [[artifacts]] array syntax still parses, but a file
 ## using it replaces the inherited list wholesale.)
 [artifacts.screenshots]
-# Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
+# Diff-viewer artifact generator: renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
 # screenshots several pages (home, the repository browser, agent diff views).

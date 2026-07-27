@@ -4380,6 +4380,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
+  // The previous scroll event's scrollHeight, so a content SHRINK that clamps
+  // scrollTop down isn't misread as the user scrolling up - see onScroll.
+  const prevScrollHeightRef = useRef(0)
   // Latest scroll offset + pin, mirrored on every scroll so deactivation (the
   // pane going display:none loses its scroll geometry) and unmount can persist
   // it (item 20).
@@ -6642,16 +6645,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Load-older pages main history; a sub-agent view fetches its whole run up
     // front when opened (requestSubagentEvents), so it never pages here.
     if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    // While pinned, content can grow FASTER than the follow effects re-pin (a
-    // card expanding a tall clamped panel adds >40px between frames), so a
-    // momentarily large gap must not read as "the user scrolled away" - that
-    // froze the follow mid-expansion. Only an UPWARD move unpins; any
-    // downward/stationary scroll keeps the pin, and reaching the bottom
-    // (re)pins regardless.
-    const scrolledUp = el.scrollTop < prevScrollTopRef.current - 1
+    // Re-ACQUIRING the pin needs the view actually AT the bottom (a few px of
+    // sub-pixel slack), not merely "within 40px". The old 40px band re-pinned on
+    // any non-upward scroll event while near the bottom, so a small macOS
+    // trackpad nudge unpinned on its own event but the very next settling event
+    // (still inside the band, no further upward move) slammed the pin straight
+    // back on - the reported "stuck at the bottom" bug.
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4
+    // Only a genuine UPWARD user move unpins. A content SHRINK (a card
+    // collapsing, a streamed block replaced by something shorter) clamps
+    // scrollTop down on its own, so don't misread that as a scroll-up.
+    const shrank = el.scrollHeight < prevScrollHeightRef.current - 1
+    const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
-    const pin = nearBottom || (pinnedRef.current && !scrolledUp)
+    prevScrollHeightRef.current = el.scrollHeight
+    // Unpin on an upward move; otherwise HOLD the pin if we already had it, and
+    // (re)acquire it only on reaching the bottom. Holding via pinnedRef is what
+    // keeps content growing faster than the follow effects re-pin (a card
+    // mid-expansion opening a >40px gap for a frame) from reading as "scrolled
+    // away" - scrolledUp is false there, so the pin holds.
+    const pin = scrolledUp ? false : (pinnedRef.current || atBottom)
     pinnedRef.current = pin
     setPinned(pin)
     // A hidden pane has no geometry; don't let a stray 0-measurement clobber
