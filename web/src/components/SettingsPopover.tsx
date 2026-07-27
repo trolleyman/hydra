@@ -27,17 +27,20 @@ export function SettingsPopover({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null)
 
   const reposition = useCallback(() => {
     const el = anchorRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
     // Right-align the dropdown under the button (its right edge meets the
-    // button's), but clamp within the viewport so it never runs off an edge -
-    // the compact spawn box anchors this cog near the left of a narrow sidebar,
-    // where a pure right-anchor would push the panel off-screen.
-    const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8)
+    // button's). In a narrow container (e.g. the compact spawn box near the left
+    // of the sidebar) the full width won't fit anchored to the button, so shrink
+    // it to the space between the left margin and the button's right edge rather
+    // than letting it balloon to the left and detach from the cog. A small floor
+    // keeps the option rows readable.
+    const w = Math.min(width, Math.max(168, r.right - 8))
+    const left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)
     // Open below by default, but flip above when there isn't room below and
     // there is above - the compact spawn box anchors this cog near the bottom of
     // the sidebar. popRef is null on the first open (the panel isn't mounted
@@ -45,9 +48,9 @@ export function SettingsPopover({
     const estHeight = popRef.current?.offsetHeight ?? 260
     const spaceBelow = window.innerHeight - r.bottom
     if (spaceBelow < estHeight + 8 && r.top > spaceBelow) {
-      setPos({ bottom: window.innerHeight - r.top + 4, left })
+      setPos({ bottom: window.innerHeight - r.top + 4, left, width: w })
     } else {
-      setPos({ top: r.bottom + 4, left })
+      setPos({ top: r.bottom + 4, left, width: w })
     }
   }, [width])
 
@@ -108,7 +111,7 @@ export function SettingsPopover({
       {open && pos && createPortal(
         <div
           ref={popRef}
-          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width }}
+          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width }}
           className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >
           {children}
