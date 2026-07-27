@@ -27,7 +27,7 @@ import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
-import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
+import { pinCardToTop, scrollCardToTop, scrollToDiffLine, anchorScrollBelow } from './lib/diffScroll'
 import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
 import {
   UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS,
@@ -1178,6 +1178,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     })
   }, [])
 
+  // Revealing context *upward* (toward the change below the gap) should keep that
+  // change visually anchored, so the new lines grow up toward it instead of
+  // shoving it down the page (which is what "expand up" felt wrong doing).
+  // Downward reveals already anchor the change above the gap for free - nothing
+  // is inserted above it - so only the upward case needs it. The body's height
+  // lands a frame or two after the reveal commits (its measured wrapper), so we
+  // capture the card's current bottom and let anchorScrollBelow re-pin it each
+  // frame until the layout settles.
+  const revealUpward = useCallback((id: string, patch: { top?: number; bot?: number }) => {
+    const card = cardRef.current
+    const targetBottom = card?.getBoundingClientRect().bottom
+    setRegion(id, patch)
+    if (card && targetBottom != null) anchorScrollBelow(card, targetBottom)
+  }, [setRegion])
+
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
 
   const synthHunk = (lines: DiffLine[]): DiffHunk => ({ header: '', old_start: 0, new_start: 0, lines })
@@ -1382,14 +1397,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 if (seg.kind === 'gap') return (
                   <GapExpander key={seg.key} seg={seg}
                     onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
-                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
+                    onUp={() => revealUpward(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
                     onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
                 )
+                // topedge reveals upward (toward line 1), so it anchors the change
+                // below the gap; botedge reveals downward and anchors the top.
+                const revealEdge = seg.kind === 'topedge' ? revealUpward : setRegion
                 return (
                   <EdgeExpander key={seg.key} seg={seg}
-                    onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                    onStep={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
                       ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
-                    onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                    onAll={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
                       ? { bot: seg.length! } : { top: seg.length! })} />
                 )
               })}
