@@ -58,7 +58,7 @@ function apiErrorCodeParts(error: unknown): ErrorCodeParts {
 
 // Run an async API action, surfacing failures as an error toast via formatError.
 // Centralizes the try/catch→toast shape so call sites stop hand-rolling it
-// (PLAN.md #61a). The caller keeps ownership of its busy flag and success path:
+// The caller keeps ownership of its busy flag and success path:
 //
 //   const res = await runWithToast(() => api.default.updateAgent(...), { errorPrefix: 'Failed to rename agent' })
 //   if (res.ok) updateAgentInStore(res.value)

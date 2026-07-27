@@ -2,7 +2,7 @@
 //
 // Diff-viewer artifact generator for Hydra's own web UI.
 //
-// The diff viewer (PLAN.md #17) runs a per-project "[[artifacts]]" command
+// The diff viewer runs a per-project "[[artifacts]]" command
 // against both sides of a comparison and surfaces the rendered images that
 // differ. This script builds the checkout's frontend + a hydra binary, boots
 // the server in --simulation mode (mock data, no daemon/project needed), and
@@ -1060,7 +1060,7 @@ try {
       // message. Expanded here to show the folded Prompt, inner timeline and
       // Report.
       { name: 'agent-chat-subagent', path: '/project/sim-project/agent/agent-chat', viewport: { width: 1920, height: 1080 }, viewportOnly: true, click: 'button:has-text("Audit upload retry tests")' },
-      // Native AskUserQuestion (PLAN.md chat item 17): agent-ask is parked on a
+      // Native AskUserQuestion: agent-ask is parked on a
       // live question card - radio + multi-select checkbox options with
       // descriptions, Other fields and the Submit all button.
       { name: 'agent-ask-question', path: '/project/sim-project/agent/agent-ask', viewportOnly: true },
@@ -1129,7 +1129,7 @@ try {
       // The repository view showing a source file: a deep-linked URL
       // (/repository/<ref>/<path>) renders the file with line numbers and the
       // tree auto-expanded down to it (folders are otherwise collapsed). Demos
-      // PLAN.md #41a (line numbers) + #41d (wrapping) + #41f (URL routing).
+      // line numbers, soft-wrapping, and URL routing.
       { name: 'repository-code', path: '/project/sim-project/repository/main/internal/server/server.go' },
       // The "raw" file view: the file header's Raw button (and the image
       // preview's copy/raw controls) open the unrendered blob in a new tab,
@@ -1139,7 +1139,7 @@ try {
       // browser's plain-text rendering, so the light/dark shots match.
       { name: 'repository-raw', path: '/repository/projects/sim-project/blob?path=internal/server/server.go&ref=main' },
       // The branch selector opened over the source-file view: Hydra agent
-      // branches (hydra/*) are listed first (PLAN.md #41b).
+      // branches (hydra/*) are listed first.
       {
         name: 'repository-branches',
         path: '/project/sim-project/repository/main/internal/server/server.go',
@@ -1231,7 +1231,7 @@ try {
           'button[title="Change or exit branch diff"]',
         ],
       },
-      // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
+      // A binary image file rendered inline via the raw blob route.
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
       // A symbolic link: opening server-link.go renders the file it points at
       // (internal/server/server.go) with a "→ target" indicator in the header,
@@ -1715,7 +1715,7 @@ try {
         imageDiffMode: 'ab',
         videoDiff: { seek: VIDEO_SEEK, highlight: true },
       },
-      // ── Mobile / small-screen layout (MOBILE_PLAN.md Phase 1) ───────────────
+      // ── Mobile / small-screen layout ───────────────────────────────────────
       // The same UI captured at phone width (390×844) to document the responsive
       // work: the sidebar collapses into a hamburger-toggled off-canvas drawer,
       // the header/metadata rows wrap, padding tightens, and the diff drops its

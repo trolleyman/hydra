@@ -114,7 +114,7 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
 
 // ancestorsOf returns every directory path containing the given file path, so we
 // can auto-expand the tree down to a deep-linked file even though folders start
-// collapsed (PLAN.md #41c).
+// collapsed.
 function ancestorsOf(filePath: string): string[] {
   const parts = filePath.split('/')
   const acc: string[] = []
@@ -144,7 +144,7 @@ function escapeHtml(s: string): string {
 // per-line HTML strings, re-opening any <span> left open across a newline so
 // each line is independently valid HTML. Rendering each logical line as its own
 // element is what lets line numbers stay aligned even when wrapping is on
-// (PLAN.md #41a/#41d).
+//.
 function splitHighlightedLines(html: string): string[] {
   const lines: string[] = []
   const stack: string[] = [] // currently-open tag strings
@@ -173,7 +173,7 @@ function splitHighlightedLines(html: string): string[] {
 // formatBytes now lives in ../lib/formatBytes, shared with the artifact
 // download tiles.
 
-// File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
+// File icons now live in ../lib/fileIcons (getFileIcon), shared
 // with the diff viewer so both render files identically.
 
 // ── File header actions (copy contents + raw) ─────────────────────────────────
@@ -284,7 +284,7 @@ function FileActionMenuRows({ file, projectId, refStr, onAction }: { file: Repos
   )
 }
 
-// ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
+// ── Settings popup ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
 
 type RepoSettings = { wrap: boolean; showIcons: boolean }
@@ -829,7 +829,7 @@ function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
   const location = useLocation()
-  // The compare-diff state that is promoted into the URL (PLAN.md #72): ?compare=
+  // The compare-diff state that is promoted into the URL: ?compare=
   // (head ref) and ?dfile= (selected file in single-file mode). strict:false reads
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
@@ -855,7 +855,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Picking a compare branch (head) diffs it against the browsed ref (base),
   // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
   // is the whole diff state - '' means "not diffing" - and lives in the URL's
-  // ?compare= search param (PLAN.md #72) so a comparison (and a line selection
+  // ?compare= search param so a comparison (and a line selection
   // within it) is shareable and survives reload. The ref/path splat parser is
   // untouched: the diff state rides query params + the hash alongside it.
   const compareRef = search.compare ?? ''
@@ -911,7 +911,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const fileContextsRef = useRef<Map<string, number>>(new Map())
   const diffFileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
+  // Settings (wrap-on-by-default, popup, icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
     wrap: loadBool(StorageKeys.repoWrap, true),
     showIcons: loadBool(StorageKeys.repoIcons, true),
@@ -919,7 +919,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.repoWrap, String(settings.wrap)) }, [settings.wrap])
   useEffect(() => { writeLocal(StorageKeys.repoIcons, String(settings.showIcons)) }, [settings.showIcons])
 
-  // Resizable sidebar (PLAN.md #41i).
+  // Resizable sidebar.
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const n = parseInt(readLocal(StorageKeys.repoSidebarWidth) ?? '', 10)
     return Number.isFinite(n) && n >= 160 && n <= 640 ? n : 256
@@ -1061,7 +1061,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         if (cancelled) return
         setFiles(resp.files)
         setDefaultPath(resp.default_path ?? null)
-        // Collapse all folders by default (PLAN.md #41c); auto-expand only the
+        // Collapse all folders by default; auto-expand only the
         // ancestors of the file shown by the URL so a deep link is visible.
         const next = new Set<string>()
         const target = parsed.path
@@ -1190,7 +1190,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Position the content when the displayed file (or selection) changes: scroll
   // the selection's first row into view if it isn't already visible, otherwise
-  // reset to the top (PLAN.md #41g). Clicking an already-visible line thus
+  // reset to the top. Clicking an already-visible line thus
   // doesn't jump the view; a deep link to an off-screen line does. Runs after
   // FileContent renders, so the data-line row exists; markdown/binary/image
   // files have no such row and fall back to the top.
@@ -1532,7 +1532,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) - md+ only; the sidebar is full-width on
+        {/* Resize handle - md+ only; the sidebar is full-width on
             phones. */}
         <div
           onMouseDown={startResizing}
