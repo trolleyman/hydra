@@ -247,13 +247,23 @@ collision.)
   (`heads.EffectiveGitIsolation`).
 - **Git tools + readonly gate redirect:** see
   [Host-mediated git path](#host-mediated-git-path-readonly).
+- **Track affordance:** a "Check out locally" icon+chevron button on the agent page
+  (`TrackBranchButton`) that opens a popover with `git checkout -t hydra-agents/<id>`
+  (+ copy). On open it calls the `ensureTrackRemote` daemon action
+  (`git.EnsureTrackRemote` -> `POST /api/projects/{id}/track-remote`), which
+  idempotently configures the local `hydra-agents` remote, so the shown command
+  stays short.
 
 ## Open questions / not yet built
 
-- **Track affordance:** a "Track branch" button on the agent page that ensures the
-  `agents` remote + refspec exist and copies `git checkout -t agents/<id>` for the
-  head in view, so nobody has to remember the incantation. A copy button also hides
-  the remote name, which is why the branch-split below isn't worth its cost.
+- **Decision gate for codex/gemini (low priority):** the git_* tools are seeded for
+  codex/gemini, but the decision gate (wrong-branch heuristic + readonly raw-git
+  redirect) is still Claude-only. Extending it needs each agent's hook block-contract
+  (gemini honours a non-zero hook exit + `systemMessage`; codex is a compiled binary
+  whose contract we can't inspect) and, crucially, a live-head test to confirm the
+  block actually enforces - which isn't reproducible in-sandbox. Low priority: the OS
+  sandbox is the real boundary, the tools carry their own own-branch guard, and the
+  gate is a bypassable heuristic anyway. Hold until it can be verified on a real head.
 - **Branch-split alternative (considered, not preferred):** move the worktree onto
   `hydra-internal/<id>` and leave `hydra/<id>` as a plain, non-worktree-locked branch
   the user checks out directly - optionally with `branch.hydra/<id>.remote = .` and
