@@ -48,6 +48,13 @@ type Policy struct {
 	// GateEnabled toggles the runtime decision gate. When false, Decide always
 	// allows (pre-launch MCP stripping still applies separately).
 	GateEnabled bool `json:"gate_enabled"`
+	// HostMediatedGit is true when git_isolation=readonly, i.e. .git is read-only in
+	// the sandbox so raw git writes fail at the OS. The gate then redirects raw git
+	// write-subcommands (add/reset/revert/rebase/cherry-pick/commit) to the
+	// mcp__hydra__git_* tools with a helpful message instead of letting them hit a
+	// cryptic read-only-filesystem error. This is UX, not a boundary (readonly is
+	// the boundary); the same string-match bypasses as the commit gate apply.
+	HostMediatedGit bool `json:"host_mediated_git,omitempty"`
 	// MCPAllowed lists the MCP server names the agent may use. A call to any other
 	// server is parked for approval (ask); the same servers are also stripped from
 	// the seeded config pre-launch so they never spawn. A whole-server grant covers

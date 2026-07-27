@@ -358,3 +358,42 @@ func TestHostAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestReadonlyGitRedirect(t *testing.T) {
+	ro := basePolicy()
+	ro.HostMediatedGit = true // git_isolation=readonly
+	off := basePolicy()       // HostMediatedGit false
+
+	bash := func(cmd string) map[string]any { return map[string]any{"command": cmd} }
+
+	// In readonly mode, raw git write-subcommands are redirected to the tools.
+	for _, sub := range []string{
+		"git reset --hard HEAD~1",
+		"git add -p file.go",
+		"git revert abc123",
+		"git rebase -i HEAD~3",
+		"git cherry-pick def456",
+		"git commit -m x",
+	} {
+		if d := Decide(ro, "Bash", bash(sub)); d.Decision != Deny {
+			t.Errorf("readonly %q = %v, want Deny (redirect to tool)", sub, d.Decision)
+		}
+	}
+	// Reads still work in readonly.
+	for _, sub := range []string{"git status", "git log --oneline", "git diff", "git show HEAD"} {
+		if d := Decide(ro, "Bash", bash(sub)); d.Decision != Allow {
+			t.Errorf("readonly read %q = %v, want Allow", sub, d.Decision)
+		}
+	}
+	// In off mode the redirect doesn't fire: git reset/add run in the shell
+	// (only commit stays gate-denied everywhere).
+	if d := Decide(off, "Bash", bash("git reset --hard HEAD~1")); d.Decision != Allow {
+		t.Errorf("off-mode git reset = %v, want Allow (redirect is readonly-only)", d.Decision)
+	}
+	if d := Decide(off, "Bash", bash("git add -A")); d.Decision != Allow {
+		t.Errorf("off-mode git add = %v, want Allow", d.Decision)
+	}
+	if d := Decide(off, "Bash", bash("git commit -m x")); d.Decision != Deny {
+		t.Errorf("off-mode git commit = %v, want Deny (always)", d.Decision)
+	}
+}

@@ -229,6 +229,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// hook reads, and a per-head writable approval directory for the "ask"
 		// round-trip. Only when the gate is enabled (otherwise no hook reads them).
 		if policy.GateEnabled {
+			// In readonly mode raw git writes fail at the OS; tell the gate so it can
+			// redirect them to the git_* tools instead (see gate.Policy.HostMediatedGit).
+			policy.HostMediatedGit = gitIso.HostMediatedCommit()
 			if err := seedGatePolicy(res, cacheDir, id, projectRoot, worktreePath, home, policy); err != nil {
 				return nil, errtrace.Wrap(err)
 			}

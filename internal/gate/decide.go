@@ -2,6 +2,7 @@ package gate
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -92,6 +93,32 @@ var procKillRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*(?:sudo\s+)?(?:pkill|k
 // form can't slip a commit past the deny. Used both to scope commit-message
 // scrubbing and to route raw commits to the git_commit tool.
 var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*commit\b`)
+
+// gitToolSubcmdRe matches a raw `git <sub>` write-subcommand that has a
+// mcp__hydra__git_* equivalent, for the readonly-mode redirect. Same boundary +
+// leading-flag skipping as gitCommitRe.
+var gitToolSubcmdRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick)\b`)
+
+// gitReadonlyRedirect returns a redirect message when cmd runs a raw git
+// write-subcommand that a mcp__hydra__git_* tool covers, or "" otherwise. Used
+// only under git_isolation=readonly (HostMediatedGit), where the raw command
+// would otherwise fail at the OS with an unhelpful read-only-filesystem error.
+func gitReadonlyRedirect(cmd string) string {
+	m := gitToolSubcmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return ""
+	}
+	sub := strings.ToLower(m[1])
+	tool := map[string]string{
+		"commit":      "git_commit",
+		"add":         "git_add",
+		"reset":       "git_reset",
+		"revert":      "git_revert",
+		"rebase":      "git_rebase (or git_rebase_continue / git_rebase_abort)",
+		"cherry-pick": "git_cherry_pick",
+	}[sub]
+	return fmt.Sprintf("raw `git %s` won't work here: your .git is read-only in the sandbox (git_isolation=readonly). Use the mcp__hydra__%s tool instead - it runs the operation on your own branch, host-side. Read-only git (status/diff/log/show) still works in the shell; edit and delete files normally (git_commit's `git add -A` picks up the changes).", sub, tool)
+}
 
 // heredocStartRe matches the start of a heredoc and captures its delimiter word
 // (tolerating <<- and a quoted delimiter). RE2 has no backreferences, so the
@@ -314,6 +341,17 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			return Result{
 				Decision: Deny,
 				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
+			}
+		}
+		// In readonly mode raw git writes fail at the OS (.git is read-only), so
+		// redirect the ones with a tool to that tool with a helpful message rather
+		// than letting the agent hit a cryptic read-only-filesystem error. Fires
+		// before the commit check so commit gets the readonly-specific message. UX
+		// only - the same string-match bypasses as the commit gate apply, but they
+		// just hit the OS wall (readonly is the actual boundary).
+		if p.HostMediatedGit {
+			if reason := gitReadonlyRedirect(cmd); reason != "" {
+				return Result{Decision: Deny, Reason: reason}
 			}
 		}
 		if gitCommitRe.MatchString(cmd) {
