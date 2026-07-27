@@ -91,6 +91,15 @@ describe('selectionToMarkdown', () => {
     expect(copyAll(md)).toBe(md)
   })
 
+  it('recovers per-column table alignment on a partial selection', () => {
+    // A trailing paragraph keeps this off the whole-message verbatim path, so
+    // the alignment has to come out of the rendered cells' text-align.
+    const md = '| l | c | r | n |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |\n\ntail'
+    const { container } = render(<Markdown text={md} />)
+    const out = copyBetween(container, { text: 'l', offset: 0 }, { text: '4', offset: 1 })
+    expect(out).toBe('| l | c | r | n |\n| :--- | :---: | ---: | --- |\n| 1 | 2 | 3 | 4 |')
+  })
+
   it('restores blockquotes and rules', () => {
     expect(copyAll('> quoted\n> lines')).toBe('> quoted\n> lines')
     expect(copyAll('a\n\n---\n\nb')).toBe('a\n\n---\n\nb')

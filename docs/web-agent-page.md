@@ -65,8 +65,9 @@ and `web/src/DiffViewer.tsx`):
   renderer registers it in a `WeakMap` (`setMarkdownSource`, keyed by the root
   element, not a `data-` attribute, so a long transcript doesn't hold a second
   copy of every message). That keeps what a round-trip cannot recover: `*` vs
-  `-` bullets, setext headings, reference-link definitions, table alignment and
-  column padding, hard-wrap positions. It deliberately mirrors what the browser
+  `-` bullets, setext headings, reference-link definitions, table column
+  padding, hard-wrap positions. (Table *alignment* the serializer does recover -
+  remark-gfm leaves it on each cell as an inline `text-align`.) It deliberately mirrors what the browser
   itself would leave out - `user-select: none` subtrees and control labels
   (`<button>`), which a drag can't select in the first place - so taking over the
   copy event doesn't start pulling chrome into the clipboard. A selection that

@@ -239,6 +239,32 @@ function listItems(el: Element, ctx: Ctx): string {
   return out.join('\n')
 }
 
+// columnAligns recovers each column's GFM alignment. remark-gfm puts the
+// delimiter row's alignment on every cell as an inline `text-align`, so it
+// survives into the DOM and a partial selection can put the `:---:` markers
+// back - the column is read from whichever row declares it, including rows the
+// selection clipped away, since alignment is a property of the column.
+function columnAligns(el: Element, width: number): string[] {
+  const aligns = Array.from({ length: width }, () => '')
+  for (const tr of Array.from(el.querySelectorAll('tr'))) {
+    let i = 0
+    for (const cell of Array.from(tr.children)) {
+      if (cell.tagName !== 'TH' && cell.tagName !== 'TD') continue
+      if (i < width && !aligns[i]) aligns[i] = (cell as HTMLElement).style?.textAlign ?? ''
+      i++
+    }
+  }
+  return aligns
+}
+
+// alignBar is the delimiter cell for one column's alignment.
+function alignBar(align: string): string {
+  if (align === 'center') return ':---:'
+  if (align === 'right') return '---:'
+  if (align === 'left') return ':---'
+  return '---'
+}
+
 // tableRows renders a <table> as a GFM pipe table. A partial selection can
 // clip away the header row, in which case the rows are emitted without the
 // alignment line (a table needs a header, so this degrades to plain lines).
@@ -264,7 +290,7 @@ function tableRows(el: Element, ctx: Ctx): string {
   const line = (cells: string[]) =>
     '| ' + Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ') + ' |'
   const out = [line(rows[0].cells)]
-  if (rows[0].header) out.push('| ' + Array.from({ length: width }, () => '---').join(' | ') + ' |')
+  if (rows[0].header) out.push('| ' + columnAligns(el, width).map(alignBar).join(' | ') + ' |')
   for (const r of rows.slice(1)) out.push(line(r.cells))
   return out.join('\n')
 }
