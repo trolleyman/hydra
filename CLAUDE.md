@@ -137,6 +137,14 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Improving the diff review workflow** (per-file "viewed" state, "reviewed up
   to" marker) -> [docs/diff-review-state.md](docs/diff-review-state.md) (proposed,
   unbuilt design + build order)
+- **Improving the diff viewer rendering** (word/intra-line diff, moved-block
+  detection, histogram algorithm, function-context headers, semantic/AST diff) ->
+  [docs/diff-viewer-improvements.md](docs/diff-viewer-improvements.md) (survey +
+  ranked plan; character-level word diff, histogram, funcname headers,
+  similarity pairing and edit-boundary sliding are built; moved-block detection
+  and whitespace-row dimming were tried and reverted - see the doc). A proper
+  boxes+jump redesign of moved-block viz is specced in
+  [docs/diff-moved-blocks.md](docs/diff-moved-blocks.md) (unbuilt)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;

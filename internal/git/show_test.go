@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -167,5 +168,59 @@ func TestListBranches(t *testing.T) {
 	}
 	if len(got) < 3 {
 		t.Errorf("ListBranches = %v, want at least 3 branches", got)
+	}
+}
+
+func TestHeadBlobSHAs(t *testing.T) {
+	dir := gitInit(t)
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("beta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-qm", "first")
+
+	wantA := git("rev-parse", "HEAD:a.txt")
+	wantB := git("rev-parse", "HEAD:b.txt")
+
+	// From the head tree: shas match git's own object ids, and a missing path is
+	// simply absent.
+	got := HeadBlobSHAs(dir, "HEAD", []string{"a.txt", "b.txt", "missing.txt"})
+	if got["a.txt"] != wantA {
+		t.Errorf("a.txt = %q, want %q", got["a.txt"], wantA)
+	}
+	if got["b.txt"] != wantB {
+		t.Errorf("b.txt = %q, want %q", got["b.txt"], wantB)
+	}
+	if _, ok := got["missing.txt"]; ok {
+		t.Errorf("missing.txt should be absent, got %q", got["missing.txt"])
+	}
+
+	// Working-tree side (ref == ""): an edited-but-uncommitted file hashes to a
+	// different sha than its committed blob.
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := HeadBlobSHAs(dir, "", []string{"a.txt", "b.txt"})
+	if wt["a.txt"] == "" || wt["a.txt"] == wantA {
+		t.Errorf("working-tree a.txt = %q, want a fresh hash-object sha != %q", wt["a.txt"], wantA)
+	}
+	if wt["b.txt"] != wantB {
+		t.Errorf("working-tree b.txt (unchanged) = %q, want %q", wt["b.txt"], wantB)
 	}
 }
