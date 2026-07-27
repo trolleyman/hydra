@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ImageDiffView, SegmentedToggle, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { ZoomPan } from './ZoomPan'
+import { Tooltip } from './Tooltip'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the image
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
@@ -124,28 +125,29 @@ export function LightboxDiffControls({ mode, onModeChange, view, onViewChange, h
     <div className="dark flex flex-wrap items-center justify-center gap-2">
       {mode === 'ab' && (
         <>
-          <span title="X flips · B = Before · A = After">
+          <Tooltip content="X flips · B = Before · A = After">
             <SegmentedToggle
               value={view}
               onChange={onViewChange}
               options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
             />
-          </span>
-          <label
-            title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
-            className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-              canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={highlight && canDiff}
-              disabled={!canDiff}
-              onChange={(e) => onHighlightChange(e.target.checked)}
-              className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
-            />
-            Highlight
-          </label>
+          </Tooltip>
+          <Tooltip content={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}>
+            <label
+              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={highlight && canDiff}
+                disabled={!canDiff}
+                onChange={(e) => onHighlightChange(e.target.checked)}
+                className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+              />
+              Highlight
+            </label>
+          </Tooltip>
         </>
       )}
       {/* Switch comparison modes without leaving the lightbox. */}

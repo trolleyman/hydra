@@ -152,6 +152,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			ReviewState:        a.ReviewState,
 			PublishWhenGreen:   a.PublishWhenGreen,
 		}
+		applyPersistedActivity(h.AgentStatus, &a)
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
 		result = append(result, h)
 	}

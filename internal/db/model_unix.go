@@ -58,6 +58,18 @@ type Agent struct {
 	AgentStatus     *string // starting|running|needs_input|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
 
+	// Live activity, persisted by the JSON poller (from status_log.jsonl) so it
+	// survives a daemon restart and is served straight from the DB instead of
+	// re-tailing the log on every GET /agents. Activity is the current tool action
+	// ("Using AskUserQuestion"), shown only while running and cleared at rest;
+	// LastMessage is the agent's most recent assistant message (or the question it's
+	// waiting on), kept across turns until a newer one replaces it;
+	// LastMessageIsSuggested marks a terse instruction the user could send straight
+	// back (the UI shows a caret). Surfaced as AgentStatusInfo.activity/last_message.
+	Activity               string
+	LastMessage            string
+	LastMessageIsSuggested bool `gorm:"default:false"`
+
 	// HasUnreadChanges is set when the agent needs the user's eyes - it reaches
 	// needs_input (at once) or settles into finished (deferred) - and is cleared
 	// when the user opens the agent. The soft waiting status does not raise it

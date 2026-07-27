@@ -328,16 +328,18 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 
   return (
     <div ref={ref} className="relative shrink-0">
-      <button
-        title="View settings"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="View settings">
+        <button
+          aria-label="View settings"
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -436,16 +438,18 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
   return (
     <div ref={ref} className="relative shrink-0">
-      <button
-        title="Diff settings"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="Diff settings">
+        <button
+          aria-label="Diff settings"
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -762,29 +766,32 @@ function FilePathLabel({ path }: { path: string }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded(true)}
-      title={path}
-      className="flex items-center min-w-0 text-sm cursor-pointer"
-    >
-      {dir && (
-        // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
-        // while the inner plaintext span keeps the path reading left-to-right.
-        // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
-        // so the directory clips first and the filename only clips once it alone
-        // can't fit.
-        <span
-          className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
-          style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
-        >
-          <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+    // min-w-0 also goes on the wrapper: it is the header's flex child now, and
+    // without it the clipped path could no longer shrink.
+    <Tooltip content={path} className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex items-center min-w-0 text-sm cursor-pointer"
+      >
+        {dir && (
+          // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
+          // while the inner plaintext span keeps the path reading left-to-right.
+          // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
+          // so the directory clips first and the filename only clips once it alone
+          // can't fit.
+          <span
+            className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
+            style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
+          >
+            <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+          </span>
+        )}
+        <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
+          {name}
         </span>
-      )}
-      <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
-        {name}
-      </span>
-    </button>
+      </button>
+    </Tooltip>
   )
 }
 

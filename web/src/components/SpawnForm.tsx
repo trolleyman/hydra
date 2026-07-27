@@ -17,6 +17,7 @@ import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTe
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
+import { useProjectStore } from '../stores/projectStore'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -146,26 +147,29 @@ const AgentModelPicker = memo(function AgentModelPicker({
   }
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        title={`Agent: ${active.label}${label ? ` · ${label}` : ''}`}
-        aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
-        // Measure the trigger before opening so the fixed-position menu lands in
-        // the right spot on its first paint; scroll/resize keep it pinned after.
-        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
-          open
-            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-            : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
-        }`}
-      >
-        <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
-          <AgentTypeIcon name={active.id} className={iconCls} />
-        </span>
-        {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
-      </button>
+    // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
+    // add baseline/descender space under the trigger.
+    <div ref={ref} className="relative flex shrink-0">
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
+          // Measure the trigger before opening so the fixed-position menu lands in
+          // the right spot on its first paint; scroll/resize keep it pinned after.
+          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : size === 'sm' ? 'w-6 justify-center' : 'w-7 justify-center'} ${trigger} ${
+            open
+              ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+              : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
+          }`}
+        >
+          <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
+            <AgentTypeIcon name={active.id} className={iconCls} />
+          </span>
+          {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
+        </button>
+      </Tooltip>
       {open && coords && (
         <div
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
@@ -206,7 +210,7 @@ const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
 // above the trigger when there isn't room below (the sidebar footer sits low).
 const SpawnOptionsMenu = memo(function SpawnOptionsMenu({
   agentType, chatMode, setChatMode, gitIsolation, setGitIsolation,
-  branches, baseBranch, setBaseBranch, onBranchOpen, loading, disabled, size = 'md',
+  branches, baseBranch, setBaseBranch, onBranchOpen, isBuiltinProject, loading, disabled, size = 'md',
 }: {
   agentType: AgentTypeOption
   chatMode: boolean
@@ -217,6 +221,7 @@ const SpawnOptionsMenu = memo(function SpawnOptionsMenu({
   baseBranch: string
   setBaseBranch: (v: string) => void
   onBranchOpen: () => void
+  isBuiltinProject: boolean
   loading: boolean
   disabled?: boolean
   size?: 'sm' | 'md'
@@ -339,8 +344,9 @@ const SpawnOptionsMenu = memo(function SpawnOptionsMenu({
             </>
           )}
 
-          {/* Base branch */}
-          {branches && branches.length > 0 && (
+          {/* Base branch. Hidden for the built-in scratch project, which has no
+              work to stack on - picking a base there is just noise. */}
+          {!isBuiltinProject && branches && branches.length > 0 && (
             <>
               <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
               <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
@@ -476,6 +482,13 @@ export const SpawnForm = memo(function SpawnForm({
   // is opened (which must preserve whatever the user picked). The background
   // refresh keeps the cached list visible and just swaps in fresh branches, so a
   // newly-spawned agent branch becomes stackable without a page reload.
+  // Built-in (scratch) projects drop the git chrome that has nothing to act on.
+  // Selector, not a whole-store subscribe: this form re-renders on every
+  // keystroke.
+  const isBuiltinProject = useProjectStore(
+    (s) => !!s.projects.find((p) => p.id === projectId)?.builtin,
+  )
+
   // Guards against a slow request for an old project resolving after the user
   // switched projects: each call captures the project it was issued for and only
   // applies its result if that's still the active project.
@@ -1014,7 +1027,7 @@ export const SpawnForm = memo(function SpawnForm({
                   agentType={agentType} chatMode={chatMode} setChatMode={setChatMode}
                   gitIsolation={gitIsolation} setGitIsolation={setGitIsolation}
                   branches={branches} baseBranch={baseBranch} setBaseBranch={setBaseBranch}
-                  onBranchOpen={handleBranchOpen} loading={loading} disabled={disabled} size="sm"
+                  onBranchOpen={handleBranchOpen} isBuiltinProject={isBuiltinProject} loading={loading} disabled={disabled} size="sm"
                 />
               </div>
               <button
@@ -1098,7 +1111,7 @@ export const SpawnForm = memo(function SpawnForm({
                     agentType={agentType} chatMode={chatMode} setChatMode={setChatMode}
                     gitIsolation={gitIsolation} setGitIsolation={setGitIsolation}
                     branches={branches} baseBranch={baseBranch} setBaseBranch={setBaseBranch}
-                    onBranchOpen={handleBranchOpen} loading={loading} disabled={disabled}
+                    onBranchOpen={handleBranchOpen} isBuiltinProject={isBuiltinProject} loading={loading} disabled={disabled}
                   />
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">

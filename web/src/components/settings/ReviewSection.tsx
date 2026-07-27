@@ -175,14 +175,16 @@ function Bool({ label, value, effective, onChange }: { label: string; value: boo
         <span className={overridden ? '' : 'text-gray-500 dark:text-gray-400'}>{label}</span>
       </label>
       {overridden ? (
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          title="Reset to inherited"
-          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content="Reset to inherited">
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            aria-label="Reset to inherited"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       ) : (
         <span className="text-[11px] text-gray-400 dark:text-gray-500">inherited</span>
       )}

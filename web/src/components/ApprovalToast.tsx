@@ -4,6 +4,7 @@ import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X, Triangle
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
+import { Tooltip } from './Tooltip'
 import hljs from '../lib/hljs'
 import { splitBashChains } from '../lib/bashFormat'
 
@@ -251,22 +252,26 @@ export const ApprovalCard: React.FC<{
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconWrap}`}>
             <Icon className="w-[18px] h-[18px]" />
           </div>
-          <div className="min-w-0 flex-1">
+          {/* flex-col: the agent link is wrapped in a Tooltip, whose inline-flex
+              span would otherwise sit on a text baseline here and open a gap
+              under the name. As flex items both rows keep their old geometry. */}
+          <div className="min-w-0 flex-1 flex flex-col">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-50">{title}</h3>
               {badge && <Badge text={badge.text} tone={badge.tone} />}
             </div>
             {data.agentName && (
               agentTarget ? (
-                <Link
-                  to="/project/$projectId/agent/$agentId"
-                  params={agentTarget}
-                  title="Open this agent"
-                  className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 transition-colors cursor-pointer hover:text-gray-800 hover:underline dark:hover:text-gray-200"
-                >
-                  <Bot className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{data.agentName}</span>
-                </Link>
+                <Tooltip content="Open this agent" className="max-w-full">
+                  <Link
+                    to="/project/$projectId/agent/$agentId"
+                    params={agentTarget}
+                    className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 transition-colors cursor-pointer hover:text-gray-800 hover:underline dark:hover:text-gray-200"
+                  >
+                    <Bot className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{data.agentName}</span>
+                  </Link>
+                </Tooltip>
               ) : (
                 // No known location for the agent - render the name as plain,
                 // non-interactive text (no link, no hover affordance).

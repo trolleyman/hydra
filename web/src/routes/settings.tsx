@@ -12,6 +12,7 @@ import {
   SettingsContent,
 } from '../components/SettingsComponents'
 import { PageTopBar } from '../components/PageTopBar'
+import { Tooltip } from '../components/Tooltip'
 import { BrowserSections } from '../components/settings/BrowserSections'
 import { ScopeTabs } from '../components/settings/shared'
 
@@ -44,8 +45,10 @@ function SettingsPage() {
 
   const selectedProject = projects.find(p => p.id === selectedProjectId)
   // User config API requires a project ID in the path even though config is global.
-  // Fall back to first available project if none is selected.
-  const effectiveProjectId = selectedProjectId ?? projects[0]?.id ?? ''
+  // Fall back to first available project if none is selected - preferring a real
+  // one, since the built-in scratch project sorts first on a fresh install and
+  // shouldn't become the implicit carrier for global settings.
+  const effectiveProjectId = selectedProjectId ?? projects.find(p => !p.builtin)?.id ?? projects[0]?.id ?? ''
 
   const hasUnsavedChanges = useMemo(() => {
     if (!config || !baseConfig) return false
@@ -134,14 +137,15 @@ function SettingsPage() {
         onBack={canGoBack ? () => router.history.back() : undefined}
         right={
           tab !== 'browser' ? (
-            <button
-              onClick={handleSave}
-              aria-label="Save settings"
-              title="Save settings"
-              className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            </button>
+            <Tooltip content="Save settings">
+              <button
+                onClick={handleSave}
+                aria-label="Save settings"
+                className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              </button>
+            </Tooltip>
           ) : undefined
         }
       />

@@ -251,6 +251,7 @@ function RootLayout() {
   const addAgent = useAgentStore((s) => s.addAgent)
   const markRead = useAgentStore((s) => s.markRead)
   const patchAgentTests = useAgentStore((s) => s.patchAgentTests)
+  const patchAgentStatus = useAgentStore((s) => s.patchAgentStatus)
   const showDialog = useDialogStore((s) => s.show)
   const navigate = useNavigate()
   const location = useLocation()
@@ -502,6 +503,10 @@ function RootLayout() {
     // A streamed test run ticking: the event carries the new summary, so patch
     // the one agent's chip in place - no agent-list refetch.
     onAgentTestsChanged: (agentId, tests) => patchAgentTests(agentId, tests),
+    // A head's live status/activity/last-message changed: the event carries the
+    // bundle, so patch the one row in place - no agent-list refetch. (A real status
+    // flip also fires agents_changed above for the unread / push-status paths.)
+    onAgentStatusChanged: (agentId, patch) => patchAgentStatus(agentId, patch),
   })
 
   // When the app lands on the bare root path ("/") but a project is already
@@ -523,8 +528,18 @@ function RootLayout() {
       // project. Read up front so the persist effect below - which momentarily
       // sees the bare project route - can't overwrite it before we navigate.
       restoreProjectView(selectedProjectId, loadProjectView(selectedProjectId))
+      return
     }
-  }, [selectedProjectId, projects, restoreProjectView])
+    // Nothing to restore (first run, or the remembered project was removed):
+    // land in the built-in scratch project rather than on a dead-end page. The
+    // `scratch` guard also holds this off until the project list has loaded, so
+    // we never bounce off "/" before the remembered project arrives.
+    const scratch = projects.find((p) => p.builtin)
+    if (scratch) {
+      didAutoNavigate.current = true
+      navigate({ to: '/project/$projectId', params: { projectId: scratch.id } })
+    }
+  }, [selectedProjectId, projects, restoreProjectView, navigate])
 
   // Persist the current view per project so switching back (or reloading)
   // restores it. Keyed off the actual route params (not currentProjectId, which
@@ -885,7 +900,21 @@ function RootLayout() {
                           no remote or no https browse URL could be derived. */}
                       {reviewConfig?.browse_url && (
                         <Tooltip
-                          content={`Open on ${reviewConfig.provider === 'github' ? 'GitHub' : reviewConfig.provider === 'gitlab' ? 'GitLab' : 'the forge'}`}
+                          content={
+                            <>
+                              <div>
+                                Open on{' '}
+                                {reviewConfig.provider === 'github'
+                                  ? 'GitHub'
+                                  : reviewConfig.provider === 'gitlab'
+                                    ? 'GitLab'
+                                    : 'the forge'}
+                              </div>
+                              {/* The URL is the useful part - which remote this
+                                  actually points at. The hint wraps at 320px. */}
+                              <div className="text-gray-500 dark:text-gray-400">{reviewConfig.browse_url}</div>
+                            </>
+                          }
                           className="shrink-0"
                         >
                           <a

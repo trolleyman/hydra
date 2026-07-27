@@ -51,6 +51,8 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderMarkdownSource } from '../lib/markdown'
+import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
@@ -208,6 +210,11 @@ type ChatItem =
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
   | { kind: 'cmdout'; id: number; text: string }
+  // A "!command" the user ran from the composer: run in the head's sandbox, its
+  // output shown as a card AND delivered to the agent as a user turn. clientId is
+  // the send frame's id, used to settle the optimistic running card in place when
+  // the daemon's result event arrives. running is the optimistic in-flight state.
+  | { kind: 'shellCmd'; id: number; clientId?: string; command: string; output: string; exitCode?: number; truncated?: boolean; timedOut?: boolean; stopped?: boolean; running?: boolean; noEntrance?: boolean }
   // A harness-injected system notice (e.g. a <task-notification> when a
   // background task finishes), rendered as a compact muted line, not raw XML.
   // subagentKey links a "sub-agent finished" notice to its sub-agent view, so
@@ -465,6 +472,10 @@ interface ProviderEvent {
   // without timing it in the browser. Replayed from the head's sidecar on
   // reconnect (see internal/http emitThinkingDurations).
   message_id?: string
+  // shell rides on a synthesized 'shellcmd' event (built from a user_message
+  // whose payload carried a `shell` object): a chat "!command"'s sandboxed
+  // result, rendered as a ShellCommandCard instead of a user bubble.
+  shell?: { command: string; output: string; exit_code: number; truncated?: boolean; timed_out?: boolean; stopped?: boolean }
 }
 
 // parseEventTs reads a transcript entry's ISO `timestamp` into epoch ms, or
@@ -606,8 +617,27 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning 
   switch (ev.type) {
     case 'conversation_started':
       return [{ type: 'system', subtype: 'init', model: typeof p.model === 'string' ? p.model : undefined, slash_commands: Array.isArray(p.slash_commands) ? p.slash_commands.filter((v): v is string => typeof v === 'string') : undefined, apiKeySource: typeof p.api_key_source === 'string' ? p.api_key_source : undefined }]
-    case 'user_message':
+    case 'user_message': {
+      // A "!command" the user ran: its user_message payload carries the sandboxed
+      // result under `shell`. Render it as a shell-command card, not a user bubble
+      // (the same text is still what the agent received as its turn).
+      const sh = p.shell as { command?: unknown; output?: unknown; exit_code?: unknown; truncated?: unknown; timed_out?: unknown; stopped?: unknown } | undefined
+      if (sh && typeof sh === 'object') {
+        return [{
+          ...base,
+          type: 'shellcmd',
+          shell: {
+            command: typeof sh.command === 'string' ? sh.command : '',
+            output: typeof sh.output === 'string' ? sh.output : '',
+            exit_code: typeof sh.exit_code === 'number' ? sh.exit_code : -1,
+            truncated: sh.truncated === true,
+            timed_out: sh.timed_out === true,
+            stopped: sh.stopped === true,
+          },
+        }]
+      }
       return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+    }
     case 'context_message':
       return [{ ...base, type: 'user', isMeta: true, message: { content: p.content as ClaudeContentBlock[] | string } }]
     case 'assistant_message':
@@ -1431,6 +1461,119 @@ function OutputPanel({ text, lang }: { text: string; lang: string; isError?: boo
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
 
+// SHELL_STREAM_CAP bounds a running card's accumulated live output (chars): a
+// runaway command streams without limit, but the DOM node must not grow forever.
+// tailCap keeps the newest chars, matching the daemon's tail-capped durable copy.
+const SHELL_STREAM_CAP = 200_000
+function tailCap(s: string, max: number): string {
+  return s.length <= max ? s : '[... earlier output truncated ...]\n' + s.slice(s.length - max)
+}
+
+// ShellCommandBash renders the command line with bash highlighting and a leading
+// "$" prompt, so a "!command" card reads unmistakably as a shell command. Falls
+// back to plain mono text when highlighting fails.
+function ShellCommandBash({ command }: { command: string }) {
+  const html = useMemo(() => highlightHtml(command, 'bash'), [command])
+  return (
+    <code className="min-w-0 flex-1 truncate font-mono text-xs text-stone-700 dark:text-stone-200" title={command}>
+      <span className="mr-1 select-none text-[#c96442]">$</span>
+      {html != null ? <span dangerouslySetInnerHTML={{ __html: html }} /> : command}
+    </code>
+  )
+}
+
+// ShellCommandCard renders a chat "!command" the user ran from the composer.
+// It reuses the agent tool-card chrome (the same collapsible container, rotating
+// chevron and Expandable open/close animation) with a shell-specific header (a
+// "$" prompt + bash-highlighted command + run status), and is right-aligned like
+// a user turn so it reads as something the user did, not the agent. Output
+// streams in live while running (see the shell_output frame handler). The same
+// output is also delivered to the agent as a user turn, so this card is the
+// human-facing view of that turn rather than a plain bubble.
+function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stopped, running, onStop }: {
+  command: string
+  output: string
+  exitCode?: number
+  truncated?: boolean
+  timedOut?: boolean
+  stopped?: boolean
+  running?: boolean
+  onStop?: () => void
+}) {
+  const [open, setOpen] = useState(true)
+  const failed = !running && !timedOut && !stopped && typeof exitCode === 'number' && exitCode !== 0
+  const hasOutput = output.trim().length > 0
+  const toggle = () => setOpen((o) => !o)
+  return (
+    <div className="flex justify-end">
+      <div
+        className={`w-full max-w-[85%] overflow-hidden rounded-lg border text-xs ${
+          failed
+            ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+        }`}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={toggle}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        >
+          <ChevronRight
+            className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          />
+          <ShellCommandBash command={command} />
+          {running ? (
+            <span className="shrink-0 self-center flex items-center gap-1.5">
+              <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400/90">
+                <LoaderCircle className="w-3 h-3 animate-spin" /> running
+              </span>
+              {onStop && (
+                // Only mounted while a command is actually running, so this is not
+                // the per-transcript-row cost the native-title carve-out avoids.
+                <Tooltip content="Stop the command">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onStop() }}
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
+                  >
+                    <CircleStop className="w-3 h-3" /> stop
+                  </button>
+                </Tooltip>
+              )}
+            </span>
+          ) : timedOut ? (
+            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
+          ) : stopped ? (
+            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">stopped</span>
+          ) : (
+            <span className={`shrink-0 self-center text-[10px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
+              exit {exitCode ?? 0}
+            </span>
+          )}
+        </div>
+        <Expandable open={open}>
+          <div className="px-2.5 pb-2 space-y-1.5">
+            {hasOutput ? (
+              <OutputPanel text={output} lang="" isError={failed} />
+            ) : (
+              <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-[11px] italic text-stone-400 dark:text-stone-500`}>
+                {running ? 'Waiting for output...' : '(no output)'}
+              </div>
+            )}
+            {truncated && (
+              <div className="px-1 text-[10px] text-stone-400 dark:text-stone-500">
+                Output truncated to the last part of a longer log.
+              </div>
+            )}
+          </div>
+        </Expandable>
+      </div>
+    </div>
+  )
+}
+
 function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
   const parsed = (() => {
     const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
@@ -2031,7 +2174,7 @@ const ToolCard = memo(function ToolCard({
               first thing you want to know about a SendMessage. */}
           {isSendMessage && messageTo && (
             <span className="shrink-0 flex items-baseline gap-1 text-stone-400 dark:text-stone-500">
-              <span aria-hidden>-&gt;</span>
+              <span aria-hidden>&#8594;</span>
               <span className="max-w-40 truncate text-stone-500 dark:text-stone-400">{recipientName}</span>
             </span>
           )}
@@ -3755,6 +3898,22 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
       push({ kind: 'user', text: queuedText })
       continue
     }
+    if (ev.type === 'shellcmd' && ev.shell) {
+      // A "!command" the user ran, replayed from history: render its card (no
+      // optimistic running state on a fresh load - it already completed).
+      flushHistFooter()
+      push({
+        kind: 'shellCmd',
+        command: ev.shell.command,
+        output: ev.shell.output,
+        exitCode: ev.shell.exit_code,
+        truncated: ev.shell.truncated,
+        timedOut: ev.shell.timed_out,
+        stopped: ev.shell.stopped,
+        running: false,
+      })
+      continue
+    }
     if (ev.type === 'user') {
       const content = ev.message?.content
       if (typeof content === 'string') {
@@ -4136,6 +4295,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
   const optimisticTextsRef = useRef<{ clientId: string; text: string }[]>([])
+  // Client ids of "!command" cards shown optimistically as "running": when the
+  // daemon's result event (a user_message carrying `shell`) arrives it settles
+  // the matching card in place rather than appending a duplicate.
+  const optimisticShellRef = useRef<Set<string>>(new Set())
   // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
   // real echo can supersede it. null when none is pending.
   const optimisticModelIdRef = useRef<number | null>(null)
@@ -4320,6 +4483,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // in-flight "sending" messages) that would otherwise double them.
     setPendingSends([])
     optimisticTextsRef.current = []
+    optimisticShellRef.current = new Set()
     optimisticIdRef.current = -1
     optimisticModelIdRef.current = null
     // Reset load-older paging for the fresh backfill.
@@ -5301,6 +5465,37 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           return
         }
+        case 'shellcmd': {
+          // A "!command" result: settle the optimistic running card in place if
+          // this client sent it (matched by the frame's clientId == ev.uuid),
+          // else append a fresh settled card (e.g. a command another client ran,
+          // or a live event with no local optimistic copy).
+          const sh = ev.shell
+          if (!sh) return
+          const cid = ev.uuid
+          const settled = {
+            command: sh.command,
+            output: sh.output,
+            exitCode: sh.exit_code,
+            truncated: sh.truncated,
+            timedOut: sh.timed_out,
+            stopped: sh.stopped,
+            running: false,
+          }
+          if (cid && optimisticShellRef.current.has(cid)) {
+            optimisticShellRef.current.delete(cid)
+            setItems((prev) =>
+              prev.map((it) =>
+                it.kind === 'shellCmd' && it.clientId === cid && it.running
+                  ? { ...it, ...settled, noEntrance: true }
+                  : it,
+              ),
+            )
+            return
+          }
+          push({ kind: 'shellCmd', clientId: cid, ...settled })
+          return
+        }
         case 'user': {
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
@@ -5731,6 +5926,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         state?: ChatProjectionSnapshot
         next_cursor?: string
         normalizedEvents?: NormalizedChatEvent[]
+        id?: string
+        chunk?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -5752,6 +5949,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // sequenced backend event stream instead.
           if (!normalizedAvailableRef.current && msg.event) handleProviderEvent(msg.event)
           return
+        case 'shell_output': {
+          // A live chunk of a running "!command"'s output: append it to the
+          // matching running card (keyed by the send frame's id). Ephemeral - the
+          // durable copy arrives as the command's settle event. The tail is capped
+          // so a runaway command can't grow the DOM node without bound.
+          const cid = msg.id
+          const chunk = msg.chunk
+          if (!cid || typeof chunk !== 'string') return
+          setItems((prev) =>
+            prev.map((it) =>
+              it.kind === 'shellCmd' && it.clientId === cid && it.running
+                ? { ...it, output: tailCap(it.output + chunk, SHELL_STREAM_CAP) }
+                : it,
+            ),
+          )
+          return
+        }
         case 'state_snapshot': {
           if (!usesNormalizedEvents) return
           normalizedAvailableRef.current = true
@@ -6672,7 +6886,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
     // not RUNNING/STARTING), so a running turn means the daemon should queue it.
     const queued = isTurnRunning
-    const clientId = crypto.randomUUID()
+    const clientId = randomId()
     ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
     if (queued) {
       // A held message shows as a queued bubble pinned under the transcript
@@ -6694,9 +6908,66 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return true
   }
 
+  // sendShellCommand runs a composer "!command" (the text after the leading "!"):
+  // it asks the daemon to run the command in the head's sandbox, shows an
+  // optimistic "running" card straight away, and settles it when the result
+  // event arrives (the same result is delivered to the agent as a user turn).
+  // Returns false when the socket isn't usable.
+  function sendShellCommand(command: string): boolean {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+    pinnedRef.current = true
+    setPinned(true)
+    const clientId = randomId()
+    ws.send(JSON.stringify({ type: 'shell_command', id: clientId, command }))
+    optimisticShellRef.current.add(clientId)
+    setItems((prev) => [...prev, { kind: 'shellCmd', id: optimisticIdRef.current--, clientId, command, output: '', running: true }])
+    return true
+  }
+
+  // stopShellCommand asks the daemon to kill a running "!command" (the card's
+  // Stop button). The card stays "running" until the command's settle event
+  // arrives marked stopped - the same path a natural finish takes.
+  function stopShellCommand(clientId: string) {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: 'shell_stop', id: clientId }))
+  }
+
+  // renderComposerBackdrop highlights the composer's transparent-text backdrop:
+  // a "!command" gets a terracotta "!" and bash syntax highlighting (so shell
+  // mode is unmistakable as you type), everything else the usual inline markdown.
+  // MUST preserve the value's exact characters so the backdrop stays aligned.
+  const renderComposerBackdrop = useCallback((value: string): ReactNode => {
+    if (value.startsWith('!')) {
+      const command = value.slice(1)
+      const html = highlightHtml(command, 'bash')
+      return (
+        <>
+          <span className="font-semibold text-[#c96442]">!</span>
+          {html != null ? <span dangerouslySetInnerHTML={{ __html: html }} /> : command}
+        </>
+      )
+    }
+    return renderMarkdownSource(value)
+  }, [])
+
   function send() {
     if (uploading) return
     const text = input.trim()
+    // A leading "!" runs the rest as a shell command in the head's sandbox (a
+    // bare "!" is left alone as literal text). Attachments don't apply.
+    if (text.startsWith('!') && text.length > 1) {
+      const command = text.slice(1).trim()
+      if (command && sendShellCommand(command)) {
+        setSlashDismissed(false)
+        objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+        objectUrlsRef.current.clear()
+        resetHistory(makeSnapshot('', [], 0, 0))
+        setLightboxIndex(null)
+      }
+      return
+    }
     const paths = readyAttachments.map((a) => a.path as string)
     // Attachment paths ride below the typed text, same as the spawn box - the
     // agent reads the uploaded files from inside its sandbox.
@@ -6994,6 +7265,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               <span className="truncate">{item.text}</span>
             </div>
           </div>
+        )
+      case 'shellCmd':
+        return (
+          <ShellCommandCard
+            command={item.command}
+            output={item.output}
+            exitCode={item.exitCode}
+            truncated={item.truncated}
+            timedOut={item.timedOut}
+            stopped={item.stopped}
+            running={item.running}
+            onStop={item.running && item.clientId ? () => stopShellCommand(item.clientId as string) : undefined}
+          />
         )
       case 'notice': {
         // Completion is a compact link back to the canonical launch card/chat;
@@ -7469,14 +7753,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         {/* Jump to bottom (item 14): floats above the composer while the user
             is scrolled up, claude.ai style. */}
         {!pinned && replayDone && (
-          <button
-            onClick={() => scrollToBottom(true)}
-            title="Jump to bottom (Ctrl+End)"
-            aria-label="Jump to bottom"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 rounded-full border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] p-1.5 text-stone-500 dark:text-stone-300 shadow-md hover:text-stone-700 dark:hover:text-stone-100 hover:shadow-lg transition-all cursor-pointer animate-chat-item-in"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
+          // The float (absolute + centring translate) moves to the wrapper, which
+          // is now what sits in the transcript pane.
+          <Tooltip content="Jump to bottom (Ctrl+End)" side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+            <button
+              onClick={() => scrollToBottom(true)}
+              aria-label="Jump to bottom"
+              className="rounded-full border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] p-1.5 text-stone-500 dark:text-stone-300 shadow-md hover:text-stone-700 dark:hover:text-stone-100 hover:shadow-lg transition-all cursor-pointer animate-chat-item-in"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -7551,6 +7838,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
+              renderContent={renderComposerBackdrop}
               placeholder={connected ? 'Write a message...' : 'Connecting...'}
               disabled={!connected}
               rows={1}
@@ -7605,19 +7893,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   </Tooltip>
                 )}
                 <div className="relative">
-                  <button
-                    onClick={() => setModelMenuOpen((o) => !o)}
-                    disabled={!connected}
-                    className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
-                      modelMenuOpen
-                        ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
-                        : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
-                    }`}
-                    title="Model"
-                  >
-                    {modelLabel}
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
+                  <Tooltip content="Model" side="top">
+                    <button
+                      onClick={() => setModelMenuOpen((o) => !o)}
+                      disabled={!connected}
+                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
+                        modelMenuOpen
+                          ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
+                          : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
+                      }`}
+                    >
+                      {modelLabel}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                  </Tooltip>
                   {modelMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setModelMenuOpen(false)} />

@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,6 +57,9 @@ type chatClientMsg struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	// Model is the set_model target (a CLI alias like "sonnet").
 	Model string `json:"model,omitempty"`
+	// Command is the shell command of a shell_command frame (the text after the
+	// composer's leading "!"), run in the head's sandbox and fed to the agent.
+	Command string `json:"command,omitempty"`
 	// Response is a control_response payload (e.g. AskUserQuestion answers),
 	// forwarded verbatim like Content.
 	Response json.RawMessage `json:"response,omitempty"`
@@ -226,6 +230,27 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		if err := s.Sessions.SendChatUser(sessionID, msg.Content); err != nil {
 			log.Printf("chat ws: write user message to %q: %v", sessionID, err)
 		}
+	case "shell_command":
+		// The user typed "!<command>" in the composer: run it in the head's
+		// sandbox, show its output as a card, and feed the output to the agent as a
+		// user turn. Runs on its own goroutine so a slow command never blocks the
+		// socket read loop, and against context.Background so it (and its delivery)
+		// completes even if the browser disconnects mid-run.
+		if strings.TrimSpace(msg.Command) == "" {
+			return
+		}
+		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, msg.ID, msg.Command)
+	case "shell_stop":
+		// Stop button on a running "!command" card: cancel its context, which
+		// kills the sandboxed process. The run then settles as "stopped" with
+		// whatever output it produced (see runChatShellCommand).
+		if msg.ID != "" {
+			if v, ok := s.shellCancels.Load(msg.ID); ok {
+				if cancel, ok := v.(context.CancelFunc); ok {
+					cancel()
+				}
+			}
+		}
 	case "dequeue":
 		// Recall a still-queued message (Up-arrow edit): drop it from the queue.
 		if s.ChatQueues != nil && msg.ID != "" {
@@ -264,6 +289,99 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	default:
 		log.Printf("chat ws: unknown client frame type %q for %q", msg.Type, sessionID)
 	}
+}
+
+// shellOutputFrame streams one chunk of a running "!command"'s combined output
+// to the client so the card fills in live (ephemeral - the durable record is the
+// user_message the command settles into). Keyed by the send frame's id so the
+// client appends it to the right running card.
+type shellOutputFrame struct {
+	terminalEvent
+	ID    string `json:"id"`
+	Chunk string `json:"chunk"`
+}
+
+// runChatShellCommand executes a composer "!command" in the head's sandbox and
+// delivers the result both to the UI (a shell-command card, streamed live) and
+// to the agent (a user turn carrying the command + output). Runs on its own
+// goroutine. conn streams the live output; a closed socket just drops the live
+// frames (the durable settle still persists).
+func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID, msgID, command string) {
+	// Make the run cancellable so a shell_stop frame can kill it mid-flight. Keyed
+	// by the send id; registered for its whole lifetime and cleaned up on exit.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if msgID != "" {
+		s.shellCancels.Store(msgID, cancel)
+		defer s.shellCancels.Delete(msgID)
+	}
+	onChunk := func(chunk string) {
+		frame, err := json.Marshal(shellOutputFrame{
+			terminalEvent: terminalEvent{Type: "shell_output"}, ID: msgID, Chunk: chunk,
+		})
+		if err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
+	}
+	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, command, onChunk)
+	if err != nil {
+		// A launch/spec failure (e.g. no worktree): surface it in the card's output
+		// so the user isn't left with a silently-hung "running" card.
+		if res.Output == "" {
+			res.Output = "hydra: could not run command: " + err.Error()
+		}
+		if res.ExitCode == 0 {
+			res.ExitCode = -1
+		}
+	}
+	content := shellCommandUserContent(res)
+	if s.ChatQueues != nil {
+		s.ChatQueues.SubmitShellResult(projectRoot, sessionID, msgID, content, res)
+		return
+	}
+	// No queue manager (queueing disabled): deliver to the CLI directly. Without
+	// the event sink there is no durable card, but the agent still gets the output.
+	if err := s.Sessions.SendChatUser(sessionID, content); err != nil {
+		log.Printf("chat ws: deliver shell command to %q: %v", sessionID, err)
+	}
+}
+
+// shellCommandUserContent renders a shell-command result as the user-turn
+// content the agent reads: the command, its exit status, and the (capped)
+// output in a fenced block. It is also what the CLI echoes back, so it must be
+// stable text (the card itself renders from the structured `shell` payload).
+func shellCommandUserContent(res heads.ShellCommandResult) json.RawMessage {
+	var b strings.Builder
+	b.WriteString("I ran a shell command from the chat.\n\n")
+	b.WriteString("Command:\n```\n")
+	b.WriteString(res.Command)
+	b.WriteString("\n```\n\n")
+	if res.TimedOut {
+		fmt.Fprintf(&b, "The command timed out after %s and was killed.\n\n", heads.ShellCommandTimeout)
+	} else if res.Stopped {
+		b.WriteString("The command was stopped before it finished.\n\n")
+	} else {
+		fmt.Fprintf(&b, "Exit code: %d\n\n", res.ExitCode)
+	}
+	output := strings.TrimRight(res.Output, "\n")
+	if res.Truncated {
+		b.WriteString("Output (truncated to the last part of a longer log):\n")
+	} else {
+		b.WriteString("Output:\n")
+	}
+	b.WriteString("```\n")
+	if output == "" {
+		b.WriteString("(no output)")
+	} else {
+		b.WriteString(output)
+	}
+	b.WriteString("\n```")
+	blocks := []map[string]any{{"type": "text", "text": b.String()}}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		return json.RawMessage(`[{"type":"text","text":"(shell command output unavailable)"}]`)
+	}
+	return raw
 }
 
 func (s *Server) sendNormalizedHistory(conn *safeConn, agentID, cursor string, limit int) {

@@ -95,26 +95,33 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
               const stale = staleIds.has(c.id)
               return (
                 <div key={c.id} className="group flex items-start gap-2 px-1 hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                  <button
-                    onClick={() => { onJump(c); setOpen(false) }}
-                    title="Jump to this line in the diff"
-                    className="min-w-0 flex-1 text-left px-2 py-2 rounded cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      <span className="truncate" title={c.path}>{c.path}</span>
-                      <span className="shrink-0 text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
-                      {stale && (
-                        <Tooltip content="The diff around this line changed after the comment was queued" side="top">
-                          <span className="shrink-0 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-                            <TriangleAlert className="w-3 h-3" />
-                          </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-words line-clamp-3">
-                      {c.text}
-                    </div>
-                  </button>
+                  {/* No hover tip on the row itself: it wraps the stale-diff
+                      warning below, so hovering that icon would stack two
+                      bubbles. The row is self-evidently clickable (hover
+                      highlight, pointer cursor, path:line), so the hint lives on
+                      aria-label where it still reaches assistive tech. */}
+                  <div className="min-w-0 flex-1">
+                    <button
+                      onClick={() => { onJump(c); setOpen(false) }}
+                      aria-label="Jump to this line in the diff"
+                      className="min-w-0 w-full text-left px-2 py-2 rounded cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        <span className="truncate" title={c.path}>{c.path}</span>
+                        <span className="shrink-0 text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
+                        {stale && (
+                          <Tooltip content="The diff around this line changed after the comment was queued" side="top">
+                            <span className="shrink-0 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                              <TriangleAlert className="w-3 h-3" />
+                            </span>
+                          </Tooltip>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-words line-clamp-3">
+                        {c.text}
+                      </div>
+                    </button>
+                  </div>
                   <Tooltip content="Remove" side="top">
                     <button
                       onClick={() => onRemove(c.id)}

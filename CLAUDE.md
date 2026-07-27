@@ -55,6 +55,52 @@ Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
 CONTROLS"). This covers both capitalised string literals *and* CSS - do not reach
 for `text-transform: uppercase` to get the uppercase look either.
 
+### Tooltips: two variants, one engine
+
+All tooltips go through `web/src/components/Tooltip.tsx`. There are exactly two
+variants, and the choice is about the *job*, not the look:
+
+- `variant="hint"` (default) - a short label for a control that has no visible
+  text. Compact, 600ms delay, non-interactive.
+- `variant="card"` - an explainer you are meant to read. Roomy, opens instantly,
+  you can put the pointer inside it, click pins it open. Reach for it via the
+  `InfoTooltip` preset (the `i` trigger next to a section heading).
+
+Both share one surface (light in light mode, dark in dark mode) so they read as
+one family.
+
+Do **not** add a native `title=` to an interactive control (`<button>`, `<a>`,
+a control `<label>`, a clickable `<div>`/`<span>`) - use `<Tooltip>`. Native
+`title` renders unstyled OS chrome with an uncontrollable delay and no dark
+mode, and mixing it with `Tooltip` next to it is what made the UI look like it
+had three tooltip systems.
+
+Native `title=` is still correct for three cases:
+
+1. **Revealing text that is visually truncated** on a plain, non-interactive
+   `<span>`/`<div>` (file paths, branch names, messages). Those live in long
+   lists, and a portal-mounting React component per row is a real perf
+   regression - see the per-row memoisation work in `AgentChat.tsx` /
+   `CaseTree.tsx`.
+2. **Anything rendered once per row** of a long list, interactive or not - the
+   same perf reason. The line-number gutter in `RepositoryView.tsx` renders per
+   source line; `CaseTree`'s copy/open buttons render per case.
+3. **Drag handles** (`lib/ResizeHandle.tsx` and its callers). `Tooltip` anchors
+   the box when it opens and only recomputes on scroll / window-resize / box
+   resize - none of which a drag fires - so a tip opened during the pre-drag
+   hover detaches and hangs stranded over the content being resized. The browser
+   suppresses a native `title` once a drag starts.
+
+A native `title` is not only the `title=` attribute: an SVG `<title>` child is
+the same OS tooltip. `@icons-pack/react-simple-icons` marks (`SiGithub`,
+`SiGitlab`, via `ProviderIcon`) render one by DEFAULT, so an icon dropped inside
+a `<Tooltip>` double-tips - pass `title=""` to suppress it (see `ProviderIcon`).
+Grep for `title=` alone will miss these; check for brand-icon components too.
+
+Keep a card's body short enough to fit a phone screen. The card caps its height
+against the viewport and scrolls, but a card you have to scroll is a sign the
+content belongs in `docs/` with a pointer from the tooltip.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL
@@ -96,3 +142,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
   `sandbox.ScopeLimits` + `WrapScope(unit, spec, limits)`, per-controller
   delegation probe, `config.ResolveResourceLimits`)
+- **The built-in chat project** (the always-present "just chatting" project,
+  `_chat`, project selection on boot, `ProjectInfo.Builtin`) ->
+  [docs/chat-project.md](docs/chat-project.md) (BUILT;
+  `projects.EnsureChatProject` + `HasUserProjects`, the reserved-ID rule, why a
+  worktree-less head does not work, the project-icon traps)

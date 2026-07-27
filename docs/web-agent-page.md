@@ -33,6 +33,24 @@ and `web/src/DiffViewer.tsx`):
   `z-40` in `__root.tsx`. The bar is styled to match the global top bar (same
   bg/border; `py-2.5` lands a single-line bar at h-12) but stays sticky inside
   the scroll container - its ref selectors must remain reachable deep in a diff.
+- Lazy file bodies + **measured placeholders**: a file card's body stays an empty
+  placeholder until the card first scrolls near the viewport (`near`, a one-way
+  IntersectionObserver latch in `FileDiff`). The placeholder's height is not
+  guessed - `bodyShape()` (`web/src/lib/diffBody.ts`, which also owns the pure
+  segment/pair model `DiffViewer` renders from) says exactly which lines and
+  expander rows the body will render, and `measureBodyHeight()`
+  (`web/src/lib/diffMetrics.ts`) lays that text out in a hidden replica of a real
+  row at the real width, letting the browser wrap it. Unified is one write+read
+  per file ('\n'-joined lines in one `pre-wrap` cell wrap exactly as one row
+  each); side-by-side needs a read per pair, because a row is as tall as its
+  taller half. Runs through `queueMeasure`'s idle queue, so it lands shortly
+  after load rather than during a scroll. The row classes live in `diffMetrics`
+  so the replica and the real rows can't drift; `DiffViewer.test.tsx` renders a
+  body and asserts `bodyShape` predicted its row/expander counts. In-tree images
+  are the one body that can't be predicted (`estimateVisibleRows` is the crude
+  fallback). Get this wrong and the document grows as you scroll - the scrollbar
+  thumb visibly shrinks - which is what `diffScroll.ts`'s re-correcting rAF loops
+  used to exist for.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles).

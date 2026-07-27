@@ -27,7 +27,9 @@ function DefaultProjectIcon({ projectId, size, className }: { projectId: string;
         backgroundColor: `hsl(${hashHue(projectId)} 55% 45%)`,
       }}
     >
-      {projectId.charAt(0)}
+      {/* Built-in IDs are underscore-prefixed (`_chat`), and a box containing a
+          bare "_" reads as a glitch - use the first real character instead. */}
+      {projectId.replace(/^_+/, '').charAt(0) || projectId.charAt(0)}
     </span>
   )
 }

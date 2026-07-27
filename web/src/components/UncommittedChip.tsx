@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import type { RepositoryUncommittedChanges } from '../api'
+import { Tooltip } from './Tooltip'
 
 // ── Uncommitted-changes warning chip ───────────────────────────────────────────
 // Sits next to the sidebar's Repository button when the project root's working
@@ -110,21 +111,28 @@ export function UncommittedChip({
   const label = `${uncommitted.total} uncommitted change${uncommitted.total === 1 ? '' : 's'}`
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        data-testid="uncommitted-chip"
-        aria-label={label}
-        title={open ? undefined : `${label} in the project checkout - click to review and commit`}
-        onClick={() => {
-          setMessage(suggestedMessage(uncommitted))
-          setOpen((o) => !o)
-        }}
-        className="shrink-0 flex items-center gap-0.5 px-1 py-1 rounded-md text-xs font-medium tabular-nums text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
+      {/* Tooltip renders nothing for falsy content, so passing undefined while the
+          popover is open keeps the old "no tip once it is open" behaviour.
+          shrink-0 moves to the wrapper, which is the row's flex child now. */}
+      <Tooltip
+        content={open ? undefined : `${label} in the project checkout - click to review and commit`}
+        className="shrink-0"
       >
-        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-        {uncommitted.total}
-      </button>
+        <button
+          ref={triggerRef}
+          type="button"
+          data-testid="uncommitted-chip"
+          aria-label={label}
+          onClick={() => {
+            setMessage(suggestedMessage(uncommitted))
+            setOpen((o) => !o)
+          }}
+          className="flex items-center gap-0.5 px-1 py-1 rounded-md text-xs font-medium tabular-nums text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {uncommitted.total}
+        </button>
+      </Tooltip>
 
       {open && coords && createPortal(
         <div

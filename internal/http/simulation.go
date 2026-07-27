@@ -16,6 +16,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 // simAgentByID returns a minimal fixture AgentResponse for the given id, used by
@@ -121,6 +122,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	otherTotal, otherRunning, otherWaiting, otherFinished := 4, 1, 1, 1
 	simDisplayPath := "~/code/simulated/project"
 	mobileDisplayPath := "~/code/some/quite/deeply/nested/dir/mobile-app"
+	// The built-in chat project (docs/chat-project.md). Deliberately listed
+	// *last* so the dropdown's pin-to-top sort is actually exercised rather than
+	// accidentally satisfied by server order.
+	chatBuiltin := true
+	chatIcon := "MessageSquare"
+	chatDisplayPath := "~/.local/share/hydra/chat"
+	chatTotal, chatRunning, chatWaiting, chatFinished := 2, 0, 1, 1
+	chatUnread, chatNeedsInput := 0, 0
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:              "sim-project",
@@ -147,6 +156,20 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			RunningCount:    &otherRunning,
 			WaitingCount:    &otherWaiting,
 			FinishedCount:   &otherFinished,
+		},
+		{
+			Id:              projects.ChatProjectID,
+			Path:            "/home/sim/.local/share/hydra/chat",
+			DisplayPath:     &chatDisplayPath,
+			Name:            projects.ChatProjectName,
+			Builtin:         &chatBuiltin,
+			Icon:            &chatIcon,
+			UnreadCount:     &chatUnread,
+			NeedsInputCount: &chatNeedsInput,
+			AgentCount:      &chatTotal,
+			RunningCount:    &chatRunning,
+			WaitingCount:    &chatWaiting,
+			FinishedCount:   &chatFinished,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -3407,12 +3430,85 @@ func handleSimChatWS(conn *safeConn) {
 		streamSimReply(conn, "sim-chat", fmt.Sprintf("msg_sim_reply_%d", turn), replyText)
 	}
 
+	// Per-"!command" stop channels, so a shell_stop frame can cut a streaming run
+	// short (mirrors the daemon cancelling the sandboxed process).
+	shellStops := map[string]chan struct{}{}
+	var shellStopsMu sync.Mutex
+
 	for {
 		msg, ok := readSimChatClientMsg(conn)
 		if !ok {
 			return
 		}
 		switch msg.Type {
+		case "shell_command":
+			// A composer "!command": mimic the daemon by running it (here, a canned
+			// result) - streaming the output live via shell_output frames, then
+			// settling into a normalized user_message whose payload carries the
+			// `shell` object the client renders as a card. "!big ..." streams a long
+			// log so the scrollable output can be eyeballed.
+			cmd := msg.Command
+			id := msg.ID
+			stop := make(chan struct{})
+			shellStopsMu.Lock()
+			shellStops[id] = stop
+			shellStopsMu.Unlock()
+			go func() {
+				defer func() {
+					shellStopsMu.Lock()
+					delete(shellStops, id)
+					shellStopsMu.Unlock()
+				}()
+				time.Sleep(500 * time.Millisecond)
+				var lines []string
+				exit := 0
+				switch {
+				case strings.Contains(cmd, "fail"):
+					lines = []string{"go: running tests...", "--- FAIL: TestThing (0.00s)", "    thing_test.go:12: expected 3, got 4", "FAIL", "exit status 1"}
+					exit = 1
+				case strings.Contains(cmd, "big") || strings.Contains(cmd, "large"):
+					lines = append(lines, "\x1b[1mRunning full suite...\x1b[0m")
+					for i := 1; i <= 120; i++ {
+						lines = append(lines, fmt.Sprintf("ok  \tgithub.com/trolleyman/hydra/internal/pkg%03d\t%d.%02ds", i, i%5, i%100))
+					}
+					lines = append(lines, "\x1b[32mPASS\x1b[0m", "ok  \tall packages\t42.7s")
+				default:
+					lines = []string{"\x1b[1mrunning...\x1b[0m", "PASS", "ok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s", "ok  \tgithub.com/trolleyman/hydra/internal/http\t0.19s"}
+				}
+				var full strings.Builder
+				stopped := false
+				for _, ln := range lines {
+					select {
+					case <-stop:
+						stopped = true
+					default:
+					}
+					if stopped {
+						break
+					}
+					chunk := ln + "\n"
+					full.WriteString(chunk)
+					frame, _ := json.Marshal(map[string]any{"type": "shell_output", "id": id, "chunk": chunk})
+					_ = conn.WriteMessage(websocket.TextMessage, frame)
+					time.Sleep(35 * time.Millisecond)
+				}
+				shell := map[string]any{"command": cmd, "output": full.String(), "exit_code": exit, "truncated": false}
+				if stopped {
+					shell["stopped"] = true
+				}
+				sendSimNormalizedChatEvent(conn, time.Now().UnixMilli(), "user_message", map[string]any{
+					"id":      id,
+					"content": []map[string]any{{"type": "text", "text": "I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"}},
+					"shell":   shell,
+				})
+			}()
+		case "shell_stop":
+			shellStopsMu.Lock()
+			if ch, ok := shellStops[msg.ID]; ok {
+				close(ch)
+				delete(shellStops, msg.ID)
+			}
+			shellStopsMu.Unlock()
 		case "set_model":
 			// The real CLI confirms a set_model control_request with a
 			// local-command echo (wrapped in a caveat, which the chat hides) -
@@ -3467,6 +3563,7 @@ type simChatClientMsg struct {
 	Model    string          `json:"model"`
 	Response json.RawMessage `json:"response"`
 	File     string          `json:"file"`
+	Command  string          `json:"command"`
 }
 
 // simOlderHistory is a canned run of older conversation (oldest-first, uuids

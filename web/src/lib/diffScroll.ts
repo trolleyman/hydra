@@ -1,10 +1,11 @@
 // Scroll helpers shared by the diff viewer. Both exist for the same reason: a
-// diff's layout is not stable while you scroll through it. Cards below the
-// viewport hold an ESTIMATED placeholder height until they mount their real
-// rows, so any scroll that moves other cards into the lazy-mount margin also
-// changes how much content sits above the thing you were aiming at. A single
-// measurement is therefore always stale by the time the scroll lands - each
-// helper re-measures every frame instead.
+// diff's layout can still move under a scroll in flight. Off-screen cards hold a
+// placeholder whose height diffMetrics measures up front, so mounting a card no
+// longer resizes it - but a collapse glide is still tweening, an in-tree image
+// still has an unknowable height until it loads, and a card can still mount
+// before its measurement has come out of the idle queue. A single measurement
+// can therefore be stale by the time the scroll lands - each helper re-measures
+// every frame instead.
 
 function scrollerFor(el: HTMLElement): HTMLElement | null {
   return el.closest<HTMLElement>('[data-inspector-scroll], [data-main-scroll]')
@@ -12,12 +13,10 @@ function scrollerFor(el: HTMLElement): HTMLElement | null {
 
 // pinCardToTop keeps a just-collapsed card docked at the top of its scroll
 // container while the collapse settles. A one-shot scrollIntoView is not
-// enough: the upward jump brings lazy diff-card placeholders into view, which
-// then mount and swap their ESTIMATED heights for measured ones - shifting
-// everything below (the deeper the scroll, the more estimated content above,
-// the bigger the drift). So instead of trusting one measurement, this runs a
-// short rAF loop that re-corrects the scroll each frame (through the 200ms
-// collapse glide and the est->real swaps) until the layout is stable.
+// enough: the card it is docking is itself mid-tween (the 200ms collapse glide),
+// so the destination moves after the scroll is issued. Instead of trusting one
+// measurement, this runs a short rAF loop that re-corrects the scroll each frame
+// until the layout is stable.
 //
 // The element's scroll-margin-top is honored as the dock offset (it accounts
 // for the sticky Changes/section bars). No-op when the card top is already
@@ -61,12 +60,10 @@ let cancelActive: (() => void) | null = null
 // and keeps correcting until the layout settles.
 //
 // The native scrollIntoView({behavior:'smooth'}) this replaces picked its
-// destination once, up front, from a layout full of estimated placeholder
-// heights - and then invalidated that very estimate on the way there, by
-// scrolling cards into the lazy-mount margin so they swapped estimates for real
-// (taller, wrapped) rows. The further the jump, the more it undershot. Here the
-// card's live position is re-read every frame, so mid-flight reflow just moves
-// the target and the glide follows it.
+// destination once, up front, and any reflow on the way there (a card mounting
+// an image, a placeholder still waiting on its measurement) left it short. Here
+// the card's live position is re-read every frame, so mid-flight reflow just
+// moves the target and the glide follows it.
 //
 // Long jumps are taken instantly rather than glided: gliding across a big diff
 // would drag every card in between into the mount margin, which is both slow

@@ -9,6 +9,7 @@
 // touching layout prefs, and the two prune independently.
 
 import { reviewDraftKey, REVIEW_DRAFT_PREFIX, createShardedStore } from './storage'
+import { randomId } from './uuid'
 
 // One queued comment. `path` + `lineNum` + `isNew` anchor it to a diff line the
 // same way DiffViewer's live-comment path does (isNew picks new-side vs old-side
@@ -41,15 +42,10 @@ const REVIEW_DRAFT_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
 const store = createShardedStore<ReviewDraft>(REVIEW_DRAFT_PREFIX, REVIEW_DRAFT_TTL_MS)
 
-// A collision-resistant id for a queued comment. crypto.randomUUID is available
-// in every browser Hydra targets; the timestamp+random fallback only guards
-// exotic/insecure contexts where it's absent.
+// A collision-resistant id for a queued comment. randomId handles the insecure
+// (plain-http LAN) context where crypto.randomUUID is absent.
 function newId(): string {
-  try {
-    return crypto.randomUUID()
-  } catch {
-    return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-  }
+  return randomId()
 }
 
 // Load the queued comments for an agent. Returns [] when nothing is stored or the

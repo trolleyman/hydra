@@ -23,6 +23,7 @@ import {
   Sun, Moon, Coffee, Rss, Radio, Signal, Wifi, Smartphone, Tablet, Laptop, Monitor,
   HardDrive, Compass, Map, MapPin, Bird, Cat, Dog, Ghost,
   Anchor, Atom, Feather, Gem, Crown, Trophy, Target, Wand2, Music2, Headphones,
+  MessageSquare, MessagesSquare,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -57,6 +58,11 @@ export const LUCIDE_ICONS: Record<string, LucideIcon> = {
   ghost: Ghost, anchor: Anchor, atom: Atom, feather: Feather, gem: Gem,
   crown: Crown, trophy: Trophy, target: Target, wand: Wand2, wand2: Wand2,
   headphones: Headphones,
+  // An unregistered name falls through to the "render the string itself" branch
+  // in ProjectIcon, which spills the literal text into the row - so any icon we
+  // ship a default for must be listed here.
+  messagesquare: MessageSquare, message: MessageSquare, chat: MessageSquare,
+  messagessquare: MessagesSquare, messages: MessagesSquare,
 }
 
 // The set of extensions that mark an icon value as an image. Kept in sync with
