@@ -5,7 +5,7 @@ import { useAgentStore } from '../../stores/agentStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
-import { saveProjectView } from '../../lib/projectView'
+import { resetProjectView } from '../../lib/projectView'
 
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
@@ -71,7 +71,7 @@ function AgentPage() {
   useEffect(() => {
     if (liveAgent || !agentsLoaded || !wasLiveArmedRef.current) return
     if (!isMounted.current || agentId !== agentIdRef.current) return
-    saveProjectView(projectId, { kind: 'project' })
+    resetProjectView(projectId)
     navigate({ to: '/project/$projectId', params: { projectId } })
   }, [liveAgent, agentsLoaded, projectId, agentId, navigate])
 
@@ -105,7 +105,7 @@ function AgentPage() {
   useEffect(() => {
     if (agent || !agentsLoaded || archivedFetch !== 'missing') return
     if (!isMounted.current || agentId !== agentIdRef.current) return
-    saveProjectView(projectId, { kind: 'project' })
+    resetProjectView(projectId)
     navigate({ to: '/project/$projectId', params: { projectId } })
   }, [agent, agentsLoaded, archivedFetch, projectId, agentId, navigate])
 
