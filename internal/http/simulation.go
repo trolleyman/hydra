@@ -1424,6 +1424,56 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					},
 				},
 				{
+					Path:       "web/src/components/AgentChat.tsx",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  19,
+					Deletions:  9,
+					Hunks: []api.DiffHunk{
+						{
+							// A realistic modify deep in a large file (a scroll-pin rewrite ~line
+							// 6644): high line numbers, a comment-heavy block replacement, and lots
+							// of intra-line word highlights (40 -> 4, < -> <=, nearBottom -> atBottom).
+							Header:   "@@ -6644,13 +6647,23 @@ const onScroll = useCallback((el: HTMLElement) => {",
+							OldStart: 6644,
+							NewStart: 6647,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "		if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()", OldLineNum: ptr(6644), NewLineNum: ptr(6647)},
+								{Type: api.Deletion, Content: "		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40", OldLineNum: ptr(6645)},
+								{Type: api.Deletion, Content: "		// While pinned, content can grow FASTER than the follow effects re-pin (a", OldLineNum: ptr(6646)},
+								{Type: api.Deletion, Content: "		// card expanding a tall clamped panel adds >40px between frames), so a", OldLineNum: ptr(6647)},
+								{Type: api.Deletion, Content: "		// momentarily large gap must not read as \"the user scrolled away\" - that", OldLineNum: ptr(6648)},
+								{Type: api.Deletion, Content: "		// froze the follow mid-expansion. Only an UPWARD move unpins; any", OldLineNum: ptr(6649)},
+								{Type: api.Deletion, Content: "		// downward/stationary scroll keeps the pin, and reaching the bottom", OldLineNum: ptr(6650)},
+								{Type: api.Deletion, Content: "		// (re)pins regardless.", OldLineNum: ptr(6651)},
+								{Type: api.Deletion, Content: "		const scrolledUp = el.scrollTop < prevScrollTopRef.current - 1", OldLineNum: ptr(6652)},
+								{Type: api.Addition, Content: "		// Re-ACQUIRING the pin needs the view actually AT the bottom (a few px of", NewLineNum: ptr(6648)},
+								{Type: api.Addition, Content: "		// sub-pixel slack), not merely \"within 40px\". The old 40px band re-pinned on", NewLineNum: ptr(6649)},
+								{Type: api.Addition, Content: "		// any non-upward scroll event while near the bottom, so a small macOS", NewLineNum: ptr(6650)},
+								{Type: api.Addition, Content: "		// trackpad nudge unpinned on its own event but the very next settling event", NewLineNum: ptr(6651)},
+								{Type: api.Addition, Content: "		// (still inside the band, no further upward move) slammed the pin straight", NewLineNum: ptr(6652)},
+								{Type: api.Addition, Content: "		// back on - the reported \"stuck at the bottom\" bug.", NewLineNum: ptr(6653)},
+								{Type: api.Addition, Content: "		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4", NewLineNum: ptr(6654)},
+								{Type: api.Addition, Content: "		// Only a genuine UPWARD user move unpins. A content SHRINK (a card", NewLineNum: ptr(6655)},
+								{Type: api.Addition, Content: "		// collapsing, a streamed block replaced by something shorter) clamps", NewLineNum: ptr(6656)},
+								{Type: api.Addition, Content: "		// scrollTop down on its own, so don't misread that as a scroll-up.", NewLineNum: ptr(6657)},
+								{Type: api.Addition, Content: "		const shrank = el.scrollHeight < prevScrollHeightRef.current - 1", NewLineNum: ptr(6658)},
+								{Type: api.Addition, Content: "		const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1", NewLineNum: ptr(6659)},
+								{Type: api.Context, Content: "		prevScrollTopRef.current = el.scrollTop", OldLineNum: ptr(6653), NewLineNum: ptr(6660)},
+								{Type: api.Deletion, Content: "		const pin = nearBottom || (pinnedRef.current && !scrolledUp)", OldLineNum: ptr(6654)},
+								{Type: api.Addition, Content: "		prevScrollHeightRef.current = el.scrollHeight", NewLineNum: ptr(6661)},
+								{Type: api.Addition, Content: "		// Unpin on an upward move; otherwise HOLD the pin if we already had it, and", NewLineNum: ptr(6662)},
+								{Type: api.Addition, Content: "		// (re)acquire it only on reaching the bottom. Holding via pinnedRef is what", NewLineNum: ptr(6663)},
+								{Type: api.Addition, Content: "		// keeps content growing faster than the follow effects re-pin (a card", NewLineNum: ptr(6664)},
+								{Type: api.Addition, Content: "		// mid-expansion opening a >40px gap for a frame) from reading as \"scrolled\",", NewLineNum: ptr(6665)},
+								{Type: api.Addition, Content: "		// away\" - scrolledUp is false there, so the pin holds.", NewLineNum: ptr(6666)},
+								{Type: api.Addition, Content: "		const pin = scrolledUp ? false : (pinnedRef.current || atBottom)", NewLineNum: ptr(6667)},
+								{Type: api.Context, Content: "		pinnedRef.current = pin", OldLineNum: ptr(6655), NewLineNum: ptr(6668)},
+								{Type: api.Context, Content: "		setPinned(pin)", OldLineNum: ptr(6656), NewLineNum: ptr(6669)},
+							},
+						},
+					},
+				},
+				{
 					Path:       "internal/http/server.go",
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  12,
@@ -1727,6 +1777,13 @@ func simStampBlobSHAs(files []api.DiffFile) []api.DiffFile {
 // contiguous diff.
 func simReconstructFull(f api.DiffFile) api.DiffFile {
 	if f.Binary || len(f.Hunks) == 0 {
+		return f
+	}
+	// A change deep in a large file can't be sensibly reconstructed as a
+	// whole-file hunk - it would be thousands of synthetic context lines, past the
+	// client's FULL_MAX_LINES cap anyway - so leave it windowed, mirroring the real
+	// server's max_full_lines behaviour.
+	if last := f.Hunks[len(f.Hunks)-1]; last.OldStart > 3000 || last.NewStart > 3000 {
 		return f
 	}
 	ext := ""
