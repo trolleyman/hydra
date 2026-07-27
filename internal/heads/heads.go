@@ -51,8 +51,8 @@ type Head struct {
 	Ephemeral     bool
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	ChatMode bool
-	// GitIsolation is the head's per-head git-isolation override (off/refs/readonly/
-	// clone; "" = agent-type policy default). See GIT_ISOLATION.md.
+	// GitIsolation is the head's per-head git-isolation override (off/readonly;
+	// "" = agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
@@ -357,8 +357,8 @@ type SpawnHeadOptions struct {
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
 	// GitIsolation overrides the agent-type policy's git_isolation default for this
-	// head (off/refs/readonly/clone; empty = use the policy default). See
-	// GIT_ISOLATION.md. Persisted on the agent so resume applies the same mode.
+	// head (off/readonly; empty = use the policy default). See
+	// docs/git-isolation.md. Persisted on the agent so resume applies the same mode.
 	GitIsolation string
 	Resume       bool // if true, resume the agent's prior conversation
 	// Replace allows an explicit ID to take over an ARCHIVED head with the same
@@ -710,7 +710,7 @@ func commonDirForSandbox(projectRoot string, _ sandbox.GitIsolationMode) string 
 
 // resolveGitIsolation picks the effective git-isolation mode for a head: the
 // per-head override (from the spawn request, persisted on the agent) when set,
-// else the agent-type policy default from config. See GIT_ISOLATION.md.
+// else the agent-type policy default from config. See docs/git-isolation.md.
 func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.GitIsolationMode {
 	if override != "" {
 		if m := sandbox.NormalizeGitIsolation(override); sandbox.ValidGitIsolation(string(m)) && m != "" {

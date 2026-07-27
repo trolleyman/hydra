@@ -285,7 +285,7 @@ func GetCommitsDirFromProjectRoot(projectRoot string) string {
 }
 
 // GetCommitDirFromProjectRoot returns the per-head directory used for the
-// host-mediated commit round-trip (git_isolation refs/readonly): the in-sandbox
+// host-mediated commit round-trip (git_isolation readonly): the in-sandbox
 // git_commit tool writes a commit request here (the dir is made writable at its
 // real host path, like the approvals dir) and the daemon's commit watcher writes
 // back the result. Lives under .hydra/local/commits/<id>.

@@ -17,8 +17,9 @@ import (
 const commitPollInterval = 1 * time.Second
 
 // RunCommitWatcher performs commits on behalf of sandboxed heads whose
-// git_isolation locks refs (refs/readonly), where an in-sandbox commit can't
-// update a ref. The in-sandbox git_commit tool drops a request into the head's
+// git_isolation is readonly, where .git is read-only in the sandbox and an
+// in-sandbox commit can't write it. The in-sandbox git_commit tool drops a
+// request into the head's
 // commitq dir (.hydra/local/commits/<id>); this loop runs the commit host-side
 // against the real writable .git and writes the result back. Heads that aren't
 // host-mediated have no commit dir, so they cost nothing here. Iterates all

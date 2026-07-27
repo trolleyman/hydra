@@ -157,15 +157,10 @@ func TestBuildSpecLinuxGitIsolation(t *testing.T) {
 	home := t.TempDir()
 	work := filepath.Join(home, "work")
 	gitdir := filepath.Join(home, "repo", ".git")
-	refs := filepath.Join(gitdir, "refs")
-	packed := filepath.Join(gitdir, "packed-refs")
-	for _, d := range []string{work, refs} {
+	for _, d := range []string{work, gitdir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.WriteFile(packed, []byte(""), 0o644); err != nil {
-		t.Fatal(err)
 	}
 
 	build := func(mode GitIsolationMode) []string {
@@ -196,22 +191,6 @@ func TestBuildSpecLinuxGitIsolation(t *testing.T) {
 	}
 	if hasPair(ro, "--bind", gitdir, gitdir) {
 		t.Error("readonly: common dir should not be writable")
-	}
-
-	// refs: common dir writable, but refs/ + packed-refs re-bound read-only on top.
-	rf := build(GitIsolationRefs)
-	if !hasPair(rf, "--bind", gitdir, gitdir) {
-		t.Error("refs: common dir not bound writable")
-	}
-	if !hasPair(rf, "--ro-bind", refs, refs) {
-		t.Error("refs: refs/ not re-bound read-only")
-	}
-	if !hasPair(rf, "--ro-bind", packed, packed) {
-		t.Error("refs: packed-refs not re-bound read-only")
-	}
-	// The read-only refs bind must come AFTER the writable parent bind to win.
-	if argIndex(rf, refs) < argIndex(rf, gitdir) {
-		t.Error("refs: refs/ ro-bind must follow the writable common-dir bind")
 	}
 }
 

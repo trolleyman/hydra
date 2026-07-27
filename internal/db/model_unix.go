@@ -16,9 +16,9 @@ type Agent struct {
 	// Git
 	BranchName string
 	BaseBranch string
-	// GitIsolation is the per-head git-isolation mode override (off/refs/readonly/
-	// clone; "" = use the agent-type policy default). Chosen at spawn and persisted
-	// so resume re-applies the same .git lockdown. See GIT_ISOLATION.md.
+	// GitIsolation is the per-head git-isolation mode override (off/readonly; "" =
+	// use the agent-type policy default). Chosen at spawn and persisted so resume
+	// re-applies the same .git lockdown. See docs/git-isolation.md.
 	GitIsolation string
 
 	// Identity

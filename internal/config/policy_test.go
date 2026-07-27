@@ -56,8 +56,8 @@ func TestResolveGitIsolation(t *testing.T) {
 	}
 	// Valid values pass through; an unrecognized one falls back to off.
 	for in, want := range map[string]string{
-		"refs": "refs", "readonly": "readonly", "off": "off",
-		"clone": "off", "bogus": "off", "": "off",
+		"readonly": "readonly", "off": "off",
+		"refs": "off", "clone": "off", "bogus": "off", "": "off",
 	} {
 		s := in
 		if got := string((PolicyConfig{GitIsolation: &s}).ResolveGitIsolation()); got != want {

@@ -194,11 +194,10 @@ const AgentModelPicker = memo(function AgentModelPicker({
 
 // The git-isolation choices offered in the spawn Options menu. '' means "use the
 // project's configured policy default" (the request omits git_isolation). The
-// rest are explicit per-head overrides. See GIT_ISOLATION.md.
+// rest are explicit per-head overrides. See docs/git-isolation.md.
 const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
   { id: '', label: 'Default', desc: "Project's policy default." },
   { id: 'off', label: 'Off', desc: 'Full .git access.' },
-  { id: 'refs', label: 'Refs read-only', desc: "No branch switch; commit via tool." },
   { id: 'readonly', label: 'Read-only .git', desc: 'No .git writes; commit host-side.' },
 ]
 
@@ -402,7 +401,7 @@ export const SpawnForm = memo(function SpawnForm({
   // show a chat view instead of a terminal. Remembered like the agent/model.
   const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
   // Per-head git-isolation override ('' = use the project's policy default, so the
-  // request omits git_isolation). See GIT_ISOLATION.md. Not persisted: a locked
+  // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
   const [gitIsolation, setGitIsolation] = useState('')
   const [loading, setLoading] = useState(false)

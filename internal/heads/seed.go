@@ -132,10 +132,10 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	res.WritablePaths = append(res.WritablePaths, subagentsDirHost)
 	res.Env = append(res.Env, "HYDRA_SUBAGENTS_DIR="+subagentsDirHost)
 
-	// Host-mediated commit channel: when git_isolation locks .git refs, an
-	// in-sandbox commit can't update a ref, so the git_commit tool hands the commit
-	// to the daemon's commit watcher via this writable per-head dir (see
-	// GIT_ISOLATION.md). HYDRA_COMMIT_DIR both points the tool at the channel AND
+	// Host-mediated commit channel: when git_isolation is readonly, .git is
+	// read-only in the sandbox, so the git_commit tool hands the commit to the
+	// daemon's commit watcher via this writable per-head dir (see
+	// docs/git-isolation.md). HYDRA_COMMIT_DIR both points the tool at the channel AND
 	// signals that host-mediated mode is active; absent => commit in-sandbox.
 	if gitIso.HostMediatedCommit() {
 		commitDirHost := paths.GetCommitDirFromProjectRoot(projectRoot, id)

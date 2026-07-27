@@ -31,17 +31,19 @@ func TestNetworkModeSynonyms(t *testing.T) {
 }
 
 func TestGitIsolationMode(t *testing.T) {
-	for _, ok := range []string{"", "off", "refs", "readonly"} {
+	for _, ok := range []string{"", "off", "readonly"} {
 		if !ValidGitIsolation(ok) {
 			t.Errorf("ValidGitIsolation(%q) = false, want true", ok)
 		}
 	}
-	if ValidGitIsolation("bogus") {
-		t.Error(`ValidGitIsolation("bogus") = true, want false`)
+	for _, bad := range []string{"refs", "clone", "bogus"} {
+		if ValidGitIsolation(bad) {
+			t.Errorf("ValidGitIsolation(%q) = true, want false", bad)
+		}
 	}
-	// Only the refs-locked modes require host-mediated commits.
+	// Only readonly locks .git in the sandbox, so only it needs host-mediated commits.
 	for m, want := range map[GitIsolationMode]bool{
-		GitIsolationOff: false, GitIsolationRefs: true, GitIsolationReadonly: true,
+		GitIsolationOff: false, GitIsolationReadonly: true,
 	} {
 		if got := m.HostMediatedCommit(); got != want {
 			t.Errorf("%q.HostMediatedCommit() = %v, want %v", m, got, want)

@@ -16,7 +16,7 @@ import (
 //
 // This is the single guardrail behind the mcp__hydra__git_commit tool, used both
 // in-sandbox (git_isolation off) and host-side by the daemon's commit watcher
-// (git_isolation refs/readonly, where .git is read-only in the sandbox). It
+// (git_isolation readonly, where .git is read-only in the sandbox). It
 // returns ok plus an agent-readable summary or error explanation.
 func GuardedCommit(worktree, expectedBranch, message string, paths []string, amend bool) (ok bool, summary string) {
 	if worktree == "" {

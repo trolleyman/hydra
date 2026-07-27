@@ -221,7 +221,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	}
 	addRWDir(opts.WorktreePath)
 	// The worktree's git metadata lives in the main repo's common dir. How much of
-	// it is writable depends on the head's git-isolation mode (see GIT_ISOLATION.md).
+	// it is writable depends on the head's git-isolation mode (see docs/git-isolation.md).
 	addROPath := func(p string) {
 		if p == "" {
 			return
@@ -235,16 +235,6 @@ func BuildSpec(opts Options) (*Spec, error) {
 		// Whole common dir read-only: the agent cannot write .git at all (no commit,
 		// add, stash, or object destruction). Staging + commit are host-mediated.
 		addROPath(opts.GitCommonDir)
-	case GitIsolationRefs:
-		// Common dir writable (objects + the per-worktree gitdir stay writable so
-		// git add / status work), then refs/ + packed-refs re-bound read-only ON TOP
-		// so no ref can be updated in-sandbox: a commit can't land on main or a
-		// sibling, and the head can't leave its branch. Commits are host-mediated.
-		addRWDir(opts.GitCommonDir)
-		if opts.GitCommonDir != "" {
-			addROPath(filepath.Join(opts.GitCommonDir, "refs"))
-			addROPath(filepath.Join(opts.GitCommonDir, "packed-refs"))
-		}
 	default:
 		// off (and empty): bind it writable so the agent can commit in-sandbox
 		// (index.lock, refs, objects, logs) - today's behaviour.

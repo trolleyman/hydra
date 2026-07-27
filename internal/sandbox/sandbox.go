@@ -74,7 +74,7 @@ func ValidNetworkMode(s string) bool {
 }
 
 // GitIsolationMode is how much of the repo's shared .git a head may write, chosen
-// per head in config (see GIT_ISOLATION.md). It bounds the blast radius of the
+// per head in config (see docs/git-isolation.md). It bounds the blast radius of the
 // agent's git activity, from "accidentally commits to the wrong branch" up to "a
 // rogue agent physically cannot damage the real repo".
 type GitIsolationMode string
@@ -83,12 +83,6 @@ const (
 	// GitIsolationOff is today's behaviour: the whole shared common dir is bound
 	// writable, guarded only by the decision gate (heuristic, not a boundary).
 	GitIsolationOff GitIsolationMode = "off"
-	// GitIsolationRefs binds refs/ + packed-refs read-only (objects + the
-	// per-worktree gitdir stay writable): no ref can be updated in-sandbox, so a
-	// commit can't land on main or a sibling and the head can't leave its branch.
-	// An anti-accident guard only - the writable objects/ still lets a rogue agent
-	// destroy the shared object store. Commits are host-mediated.
-	GitIsolationRefs GitIsolationMode = "refs"
 	// GitIsolationReadonly binds the whole common dir read-only: the agent cannot
 	// write .git at all (no commit, add, stash, or object destruction). Staging and
 	// commit are host-mediated. Anti-rogue; costs in-sandbox git add / history edit.
@@ -106,16 +100,16 @@ func NormalizeGitIsolation(s string) GitIsolationMode {
 // default", which is off).
 func ValidGitIsolation(s string) bool {
 	switch NormalizeGitIsolation(s) {
-	case "", GitIsolationOff, GitIsolationRefs, GitIsolationReadonly:
+	case "", GitIsolationOff, GitIsolationReadonly:
 		return true
 	}
 	return false
 }
 
 // HostMediatedCommit reports whether commits for this mode must run on the host
-// (refs are read-only in the sandbox, so an in-sandbox commit can't update a ref).
+// (.git is read-only in the sandbox, so an in-sandbox commit can't write it).
 func (m GitIsolationMode) HostMediatedCommit() bool {
-	return m == GitIsolationRefs || m == GitIsolationReadonly
+	return m == GitIsolationReadonly
 }
 
 // NetworkPolicy controls the sandbox's network access.
@@ -286,9 +280,8 @@ type Options struct {
 	// skip. See git.GetCommonDir.
 	GitCommonDir string
 	// GitIsolation controls how much of GitCommonDir is writable in the sandbox
-	// (see docs/git-isolation.md): off (default) = whole dir writable; refs = refs/ +
-	// packed-refs re-bound read-only on top; readonly = the whole common dir bound
-	// read-only. Empty == off.
+	// (see docs/git-isolation.md): off (default) = whole dir writable; readonly = the
+	// whole common dir bound read-only. Empty == off.
 	GitIsolation GitIsolationMode
 	// Home is the HOME directory the agent should see.
 	Home string
