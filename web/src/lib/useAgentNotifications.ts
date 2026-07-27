@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
+import { useApprovalStore } from '../stores/approvalStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
 import { fireNotification, dismissNotification } from './notifyPrefs'
@@ -255,6 +256,9 @@ export function useAgentNotifications(
       remember: boolean,
       command?: string,
     ) => {
+      // Drop it from the shared pending set first, so the in-chat card's buttons
+      // disappear the instant you click rather than on the next poll.
+      useApprovalStore.getState().resolve(agentId, reqid)
       await runWithToast(
         () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember, command }),
         { errorPrefix: decision === ApprovalDecisionRequest.decision.ALLOW ? 'Failed to allow request' : 'Failed to deny request' },
@@ -290,6 +294,7 @@ export function useAgentNotifications(
       }
       approvalToasts.current.delete(agentId)
       approvalStamp.current.delete(agentId)
+      useApprovalStore.getState().clear(agentId)
     }
 
     // Reconcile approvals for every head that is parked now OR still shows a card
@@ -321,6 +326,9 @@ export function useAgentNotifications(
         } finally {
           approvalFetching.current.delete(agentId)
         }
+        // Publish what's parked for the in-chat surface (the tool card the head
+        // is blocked in grows its own Allow/Deny row from this).
+        useApprovalStore.getState().setPending(agentId, approvals)
         let reqMap = approvalToasts.current.get(agentId)
         if (!reqMap) {
           reqMap = new Map()

@@ -62,6 +62,11 @@ export const StorageKeys = {
   // ~quarter-second chunks (the claude CLI flushes deltas ~5x/sec). Client-only,
   // global (localStorage, like Theme). See lib/chatPrefs.
   chatSmoothStreaming: 'hydra-chat-smooth-streaming',
+  // 'off' when the user has turned OFF the line-number gutter on multi-line code
+  // blocks in the chat transcript (a Bash command, a tool's JSON input). Default
+  // (absent) = on: the numbers tell a wrapped long line apart from a genuinely
+  // new one. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
+  chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an

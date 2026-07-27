@@ -25,6 +25,7 @@ import {
   Plus,
   Search,
   Send,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   SquareDot,
@@ -40,7 +41,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import hljs from '../lib/hljs'
-import { formatBashForDisplay } from '../lib/bashFormat'
+import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
 import { highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
@@ -54,6 +55,7 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
+import { ToolApproval } from './ToolApproval'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
@@ -62,8 +64,9 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
+import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -1435,8 +1438,16 @@ function Expandable({ open, children, className }: { open: boolean; children: Re
 
 // CodePanel renders a block of code (a Bash command, JSON input) syntax
 // highlighted on the shared quiet panel.
+//
+// Multi-line code gets a line-number gutter (the "Code line numbers" browser
+// preference, on by default): these panels wrap rather than scroll sideways, so
+// without numbers a long shell line that wraps looks exactly like the next step
+// of the script. A single line has nothing to disambiguate, so it stays bare.
 function CodePanel({ code, lang }: { code: string; lang: string }) {
+  const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
+  if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
+
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (html != null) {
     return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
@@ -2050,8 +2061,17 @@ const ToolCard = memo(function ToolCard({
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   const isBash = item.name === 'Bash' && command !== ''
-  const displayedCommand = isBash ? formatBashForDisplay(command, commandCwd === worktree ? '' : commandCwd) : ''
-  const executableCommand = isBash ? formatBashForDisplay(command, '') : ''
+  // `hydra host-run` is the sandbox escape hatch: the agent is not running this
+  // itself, it is asking the USER to run it on the host. Show the command it is
+  // asking for rather than the CLI wrapper it typed, and give the card its own
+  // host identity (see the header) so it never reads as an ordinary Bash step.
+  const hostRunScript = isBash ? parseHostRunScript(command) : null
+  const isHostRun = hostRunScript !== null
+  // The host command runs in the head's worktree whatever the agent's own cwd
+  // was, so a `cd` preamble would be a lie - drop it for a host run.
+  const bashSource = hostRunScript ?? command
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd) : ''
+  const executableCommand = isBash ? formatBashForDisplay(bashSource, '') : ''
   const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult
@@ -2130,7 +2150,26 @@ const ToolCard = memo(function ToolCard({
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
-  const Icon = TOOL_ICONS[item.name] ?? Wrench
+  const Icon = isHostRun ? ShieldAlert : TOOL_ICONS[item.name] ?? Wrench
+
+  // The security gate may have parked THIS call for the user (a host-run, an
+  // unvetted MCP tool, ...). When it has, the card answers for itself instead of
+  // making you find the toast - and opens itself, since a question you cannot see
+  // is not a question.
+  const approval = usePendingToolApproval(item.name, input, item.result === undefined)
+  const awaitingApproval = approval !== null
+  // Adjusted during render rather than in an effect (React's "adjust state when a
+  // prop changes" pattern): no cascading second render, and the card can still be
+  // collapsed again afterwards - a plain `open || awaitingApproval` would nail it
+  // open for as long as the request is parked.
+  // Starts false even when the request is already parked on first render (the
+  // page was opened DURING the wait) - the mismatch on that first pass is what
+  // opens the card.
+  const [sawApproval, setSawApproval] = useState(false)
+  if (awaitingApproval !== sawApproval) {
+    setSawApproval(awaitingApproval)
+    if (awaitingApproval) setOpen(true)
+  }
 
   const rawJson = useMemo(() => {
     if (!showRaw) return ''
@@ -2150,7 +2189,9 @@ const ToolCard = memo(function ToolCard({
       className={`rounded-lg border text-xs overflow-hidden ${
         item.isError
           ? 'border-red-300/70 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20'
-          : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
+          : awaitingApproval
+            ? 'border-amber-300/80 bg-amber-50/50 dark:border-amber-500/40 dark:bg-amber-500/[0.06]'
+            : 'border-stone-200/90 bg-white/55 dark:border-white/[0.07] dark:bg-white/[0.03]'
       }`}
     >
       {/* Header row: the WHOLE row toggles open (so when collapsed the entire
@@ -2168,8 +2209,15 @@ const ToolCard = memo(function ToolCard({
           <ChevronRight
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
-          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{displayToolName(item.name)}</span>
+          <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : displayToolName(item.name)}</span>
+          {/* A host run leaves the sandbox - say so in the collapsed header, where
+              it can't be missed, not only in the body. */}
+          {isHostRun && (
+            <span className="shrink-0 self-center rounded px-1 py-px text-[10px] font-semibold bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+              outside sandbox
+            </span>
+          )}
           {/* Who a message went to belongs in the collapsed header - it is the
               first thing you want to know about a SendMessage. */}
           {isSendMessage && messageTo && (
@@ -2190,8 +2238,10 @@ const ToolCard = memo(function ToolCard({
           )}
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
-        {pending && (
-          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">running</span>
+        {(pending || awaitingApproval) && (
+          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+            {awaitingApproval ? 'needs approval' : 'running'}
+          </span>
         )}
         {open && (
           <button
@@ -2209,6 +2259,9 @@ const ToolCard = memo(function ToolCard({
       </div>
       <Expandable open={open}>
         <div className="px-2.5 pb-2 space-y-1.5">
+          {/* The parked-approval row sits ABOVE the command, so the buttons are
+              never below a long script you'd have to scroll past. */}
+          {approval && <ToolApproval approval={approval} />}
           {showRaw ? (
             <CodePanel code={rawJson} lang="json" />
           ) : (
@@ -2218,6 +2271,11 @@ const ToolCard = memo(function ToolCard({
                   {interactiveTranscript && (
                     <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Terminal input (inferred from echo)
+                    </div>
+                  )}
+                  {isHostRun && !interactiveTranscript && (
+                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                      Command to run on the host
                     </div>
                   )}
                   <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
@@ -4392,6 +4450,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
+  // Which head the tool cards below can answer parked approvals for. Null with no
+  // project (nothing to POST a decision to), which just leaves the toast.
+  const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
@@ -7608,6 +7669,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
 
   return (
+    // Every tool card below can pick up a parked security-gate approval for THIS
+    // head and grow its own Allow/Deny row (see ToolApproval).
+    <ChatApprovalContext.Provider value={approvalCtx}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
@@ -7990,5 +8054,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         />
       )}
     </div>
+    </ChatApprovalContext.Provider>
   )
 }
