@@ -549,6 +549,17 @@ const WORKING_VERBS = [
 const RECONNECT_HEALTHY_MS = 15_000
 const RECONNECT_MAX_DELAY_MS = 15_000
 
+// Opening an agent with unread changes on the top of its last message (see
+// alignToLastMessage): the breathing room left above that message (and below
+// any card floating over the transcript's top edge); how close to the bottom
+// still counts as "at the bottom" (also the slack that tells our own scroll
+// write apart from the user moving); and how long re-aligning keeps up with
+// content settling in - markdown, highlighting and images all land over the
+// frames after the replay.
+const ALIGN_GAP_PX = 8
+const BOTTOM_SLACK_PX = 4
+const ALIGN_SETTLE_MS = 1_000
+
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
 function formatDuration(ms: number): string {
@@ -1217,6 +1228,9 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, stacked, fadeIn }: { 
     // the higher z so it layers over the selector's chip on a narrow pane
     // instead of anything relocating.
     <div
+      // See the selector's data-chat-overlay: both float over the transcript's
+      // top edge and alignToLastMessage clears whichever is on screen.
+      data-chat-overlay=""
       style={{ width: open ? 256 : chipW ?? undefined }}
       className={`absolute ${stacked ? 'top-12' : 'top-2'} right-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
@@ -3195,6 +3209,9 @@ function ChatViewSelector({
     // clone below (see useChipWidth).
     <div
       ref={cardRef}
+      // Floats over the top of the transcript, so alignToLastMessage has to
+      // scroll a message clear of it rather than flush to the pane's top.
+      data-chat-overlay=""
       style={{ width: open ? 288 : chipW ?? undefined }}
       className={`absolute top-2 left-3 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#30302e]/90 shadow-lg backdrop-blur text-xs ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
@@ -4039,9 +4056,26 @@ interface SettledRowProps {
   subByToolUse: Record<string, SubagentView>
   subagents: Record<string, SubagentView>
 }
+// Which items count as "a message" for the open-on-the-last-message scroll
+// (see alignToLastMessage): what the agent last said to the user, or asked. Tool
+// cards, commit chips, notices and the like are the machinery around that, not
+// the thing you came back to read.
+function isChatMessage(item: ChatItem): boolean {
+  return item.kind === 'assistant' || item.kind === 'question'
+}
+
 const SettledRow = memo(
   function SettledRow({ item, animate, renderItem }: SettledRowProps) {
-    return <div className={animate ? 'animate-chat-item-in' : undefined}>{renderItem(item)}</div>
+    return (
+      <div
+        // Marks the row as a scroll target for alignToLastMessage; absent on
+        // rows it should skip, so a plain querySelectorAll finds the candidates.
+        data-chat-message={isChatMessage(item) ? '' : undefined}
+        className={animate ? 'animate-chat-item-in' : undefined}
+      >
+        {renderItem(item)}
+      </div>
+    )
   },
   (a, b) =>
     a.item === b.item &&
@@ -4390,6 +4424,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const status = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
+  // Whether this agent still had unread changes when it was opened - the cue to
+  // land on the top of its last message instead of pinned to the bottom (see
+  // alignToLastMessage). null until the agent shows up in the list at all (on a
+  // cold load the page can render before the list lands), so the first render
+  // that KNOWS is the one that decides.
+  //
+  // Captured during render on purpose: opening an agent clears its unread flag
+  // (__root's auto-clear effect), and effects run after render, so by the time
+  // any effect of ours could read the store the answer would always be "read".
+  const unreadNow = useAgentStore((s) => {
+    const a = s.agents.find((x) => x.id === agentId)
+    return a ? !!a.has_unread_changes : null
+  })
+  const [openedUnread, setOpenedUnread] = useState<{ key: string; unread: boolean | null }>(
+    { key: `${agentId}\0${projectId}`, unread: unreadNow },
+  )
+  const unreadKey = `${agentId}\0${projectId}`
+  if (openedUnread.key !== unreadKey) setOpenedUnread({ key: unreadKey, unread: unreadNow })
+  else if (openedUnread.unread == null && unreadNow != null) setOpenedUnread({ key: unreadKey, unread: unreadNow })
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
   // Whether pasting an attachment also inserts its "[filename]" marker into the
@@ -6560,6 +6613,72 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     })
     return () => cancelAnimationFrame(raf)
   }, [replayDone, projectId, agentId])
+
+  // Opening an agent that has unread changes: land on the TOP of its last
+  // message rather than pinned to the bottom, so a long reply is read from its
+  // first line instead of its last. Runs once per agent, after the replayed
+  // history has laid out, and only when the agent isn't mid-turn (a running
+  // agent is better followed at the bottom, where its output is arriving).
+  //
+  // The scroll is written directly (no smooth behaviour) inside the same
+  // pre-paint frame the restore effect uses, so the pane is simply *at* the
+  // right place on first paint - there is no visible jump to animate away.
+  // Declared after the saved-offset restore so its rAF runs last: for an agent
+  // with unread changes the new content wins over where you were reading before.
+  const alignedForRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!replayDone || openedUnread.unread !== true || isTurnRunning) return
+    if (alignedForRef.current === unreadKey) return
+    const el = scrollRef.current
+    if (!el) return
+    alignedForRef.current = unreadKey
+
+    // Scroll the last message's top just below the cards floating over the top
+    // of the transcript (the sub-agent selector, the plan panel), so the first
+    // line isn't tucked under one. Nothing floating means a small breathing gap.
+    // The offset we last wrote, so a re-align can tell its own work from the
+    // user having scrolled in the meantime (at which point it stops).
+    let appliedTop: number | null = null
+    const alignToLastMessage = () => {
+      if (appliedTop != null && Math.abs(el.scrollTop - appliedTop) > BOTTOM_SLACK_PX) {
+        ro.disconnect()
+        return
+      }
+      const rows = el.querySelectorAll<HTMLElement>('[data-chat-message]')
+      const last = rows[rows.length - 1]
+      if (!last) return
+      const paneTop = el.getBoundingClientRect().top
+      let clear = paneTop + ALIGN_GAP_PX
+      for (const card of el.parentElement?.querySelectorAll<HTMLElement>('[data-chat-overlay]') ?? []) {
+        clear = Math.max(clear, card.getBoundingClientRect().bottom + ALIGN_GAP_PX)
+      }
+      const top = el.scrollTop + last.getBoundingClientRect().top - clear
+      const maxTop = el.scrollHeight - el.clientHeight
+      const applied = Math.max(0, Math.min(top, maxTop))
+      el.scrollTop = applied
+      appliedTop = applied
+      // A short last message can leave the pane at its bottom anyway - stay
+      // pinned then, so live output keeps following as usual.
+      const atBottom = maxTop - applied <= BOTTOM_SLACK_PX
+      pinnedRef.current = atBottom
+      setPinned(atBottom)
+      lastScrollRef.current = { top: applied, pinned: atBottom }
+    }
+
+    // Markdown, code highlighting and images settle over the frames after the
+    // replay, each nudging the message down. Re-align while that happens, then
+    // hand the pane back to the user.
+    const ro = new ResizeObserver(() => alignToLastMessage())
+    const raf = requestAnimationFrame(alignToLastMessage)
+    const content = contentRef.current
+    if (content) ro.observe(content)
+    const stop = setTimeout(() => ro.disconnect(), ALIGN_SETTLE_MS)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(stop)
+      ro.disconnect()
+    }
+  }, [replayDone, openedUnread.unread, isTurnRunning, unreadKey])
 
   // The pane going display:none loses its scroll geometry; on re-activation
   // re-apply the last known offset (or re-pin to the bottom).
