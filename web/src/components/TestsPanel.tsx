@@ -19,6 +19,7 @@ import { TagScopeFilter } from './ArtifactFilterBar'
 import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
+import { buildRepoSplat } from '../lib/repoSplat'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import {
@@ -285,7 +286,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     if (!repoRef) return undefined
     return (path: string, line?: number | null) => linkOptions({
       to: '/project/$projectId/repository/$',
-      params: { projectId, _splat: `${repoRef}/${path}` },
+      params: { projectId, _splat: buildRepoSplat(repoRef, path) },
       hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
     })
   }, [projectId, repoRef])
