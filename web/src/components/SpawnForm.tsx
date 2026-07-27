@@ -219,8 +219,9 @@ export const SpawnForm = memo(function SpawnForm({
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
   // Chat mode: drive Claude or Codex via its structured protocol and
-  // show a chat view instead of a terminal. Remembered like the agent/model.
-  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
+  // show a chat view instead of a terminal. Remembered like the agent/model;
+  // defaults ON when the user has never touched the toggle (only 'false' opts out).
+  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) !== 'false')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the project's
@@ -695,9 +696,10 @@ export const SpawnForm = memo(function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
-        // Structured chat is available for Claude and Codex; a remembered value
-        // must not leak into another agent type's spawn.
-        ...((agentType === 'claude' || agentType === 'codex') && chatMode ? { chat_mode: true } : {}),
+        // Structured chat is available for Claude and Codex; send the choice
+        // explicitly so turning the toggle off wins over the server-side
+        // default-on, and a remembered value never leaks into another agent type.
+        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: chatMode } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,

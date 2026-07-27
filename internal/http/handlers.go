@@ -1448,7 +1448,13 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		model = strings.TrimSpace(*request.Body.Model)
 	}
 
-	chatMode := request.Body.ChatMode != nil && *request.Body.ChatMode
+	// Chat mode defaults on for the agent types that support it (claude, codex);
+	// an explicit chat_mode in the request always wins. Callers that omit it for
+	// other agent types stay in terminal mode.
+	chatMode := agentType == sandbox.AgentTypeClaude || agentType == sandbox.AgentTypeCodex
+	if request.Body.ChatMode != nil {
+		chatMode = *request.Body.ChatMode
+	}
 	if chatMode && agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
