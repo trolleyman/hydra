@@ -2868,6 +2868,12 @@ components:
             nft lock - an inescapable boundary), "filtered-advisory" (allow-list
             enforced by the proxy via HTTP(S)_PROXY only; a determined process can
             bypass it), or absent/empty (the head isn't live).
+        git_isolation:
+          type: string
+          description: >-
+            Effective git-isolation mode for this head: "off" (the shared .git is
+            writable in the sandbox) or "readonly" (the whole .git is bound
+            read-only, so commits are host-mediated). See docs/git-isolation.md.
         agent_status:
           $ref: '#/components/schemas/AgentStatusInfo'
         has_unread_changes:

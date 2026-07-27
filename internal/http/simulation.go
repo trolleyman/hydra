@@ -438,6 +438,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:          &createdAt0,
 			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
 			NetworkEnforcement: ptr("filtered-advisory"),
+			GitIsolation:       ptr("readonly"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      needsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
@@ -620,6 +621,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			CreatedAt:          &createdAt,
 			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
 			NetworkEnforcement: ptr("filtered-advisory"),
+			GitIsolation:       ptr("readonly"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      api.NeedsInput,
 				Timestamp:   simNow().Format(time.RFC3339),

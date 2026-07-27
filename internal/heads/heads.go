@@ -720,6 +720,14 @@ func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.
 	return cfg.ResolvePolicy(agentType).ResolveGitIsolation()
 }
 
+// EffectiveGitIsolation resolves the git-isolation mode actually applied to a
+// head (its per-head override, else the agent-type policy default), for display
+// on the API response. Config load is cached, so this is cheap per call.
+func EffectiveGitIsolation(h Head) sandbox.GitIsolationMode {
+	cfg, _ := config.Load(h.ProjectPath)
+	return resolveGitIsolation(cfg, string(h.AgentType), h.GitIsolation)
+}
+
 // ShellSessionID derives the registry session ID for a head's web bash shell
 // from its head ID, sandbox mode and per-tab token. The same inputs always yield
 // the same ID, so a tab's reconnect reattaches and an explicit close can target

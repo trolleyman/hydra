@@ -262,6 +262,9 @@ type AgentResponse struct {
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
+	// GitIsolation Effective git-isolation mode for this head: "off" (the shared .git is writable in the sandbox) or "readonly" (the whole .git is bound read-only, so commits are host-mediated). See docs/git-isolation.md.
+	GitIsolation *string `json:"git_isolation,omitempty"`
+
 	// HasUnreadChanges True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
 	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
 	Id               string `json:"id"`

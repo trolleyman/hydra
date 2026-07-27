@@ -19,7 +19,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -467,6 +467,27 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   )
 }
 
+// GitIsolationBadge sits just right of the network badge and marks a head whose
+// .git is locked down. Only shown for readonly (off is the default and needs no
+// signal), mirroring the network badge's icon-only chip + card tooltip.
+function GitIsolationBadge({ mode }: { mode?: string }) {
+  if (mode !== 'readonly') return null
+  return (
+    <Tooltip
+      variant="card"
+      title="Git access - .git read-only"
+      content="This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."
+      className="shrink-0"
+    >
+      <Badge
+        className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+        containerClassName="min-h-5"
+        icon={<Lock className="w-3 h-3 shrink-0" />}
+      >{null}</Badge>
+    </Tooltip>
+  )
+}
+
 // The fields of `agent` the metadata row (AgentMetaRow) actually renders. The
 // row is memoized on a deep comparison of just these, so the near-constant agent
 // refreshes while a head works (activity text, timestamps, token counts - none
@@ -483,6 +504,7 @@ function metaRowSignature(a: AgentResponse) {
     agent_status: a.agent_status,
     tests: a.tests,
     network_enforcement: a.network_enforcement,
+    git_isolation: a.git_isolation,
     branch_name: a.branch_name,
     base_branch: a.base_branch,
     chat_mode: a.chat_mode,
@@ -568,6 +590,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
         </span>
       )}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
+      {agent.git_isolation && <GitIsolationBadge mode={agent.git_isolation} />}
       {/* Branch -> base as one compact control: the head's branch, an arrow
           (it merges into / diffs against), then the editable base. Editing the
           base is metadata-only: it changes what update-from-base merges in and

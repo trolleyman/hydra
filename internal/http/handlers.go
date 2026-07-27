@@ -581,6 +581,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 	if m := string(heads.EgressModeFor(h.ID)); m != "" {
 		netEnf = &m
 	}
+	gitIso := string(heads.EffectiveGitIsolation(h))
 	resp := api.AgentResponse{
 		Id:                 h.ID,
 		Title:              &title,
@@ -598,6 +599,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		CreatedAt:          createdAt,
 		AgentStatus:        h.AgentStatus,
 		NetworkEnforcement: netEnf,
+		GitIsolation:       &gitIso,
 		HasUnreadChanges:   &h.HasUnreadChanges,
 		Archived:           &archived,
 		EndState:           endState,
