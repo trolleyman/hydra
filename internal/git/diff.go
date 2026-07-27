@@ -187,7 +187,11 @@ func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTri
 		}
 	}
 
-	args := []string{"diff", fmt.Sprintf("-U%d", context)}
+	// Histogram anchors on the rarest matching line (a generalisation of patience)
+	// rather than plain Myers, so highly non-unique lines like a bare "}" or a
+	// blank line can't mis-anchor. It gives noticeably better hunk shapes on
+	// brace-heavy code - which is most agent-generated code - at comparable speed.
+	args := []string{"diff", fmt.Sprintf("-U%d", context), "--diff-algorithm=histogram"}
 	if ignoreWhitespace {
 		args = append(args, "--ignore-space-change")
 	}

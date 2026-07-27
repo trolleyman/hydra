@@ -38,9 +38,9 @@ benefit from it. No action needed there.
 |---|---|---|---|---|
 | 0a | **Indent word diff: highlight only the changed columns** | done | - | `wordDiff.ts` (built) |
 | 0b | **Character-level diff + confetti coalesce + subword-boundary snap** | done | - | `wordDiff.ts` (built; char granularity so a highlight lands inside an identifier - `getUserName`->`getUserId` lights `Name`/`Id`; snapping pulls a mid-camelCase edit out to the hump so `handleClick`->`handleClose` shows `Click`/`Close` not `lick`/`lose`, while monocase `counter`->`pointer` stays the precise `cou`/`poi`) |
-| 1 | `--diff-algorithm=histogram` | trivial | medium | `internal/git/diff.go:190` |
-| 2 | Render git's existing funcname in hunk separators | low | med-high | `parseHunkHeader` (`diff.go:579`) + `DiffViewer.tsx` (~line 1094) |
-| 3 | Similarity-based del/add line pairing | low-med | **high** | `wordDiff.ts` `buildWordRangeMaps` (~line 148) |
+| 1 | `--diff-algorithm=histogram` | done | medium | `internal/git/diff.go` (built) |
+| 2 | Render git's existing funcname in hunk separators | done | med-high | `diffBody.ts` `hunkContext` + `DiffViewer.tsx` `HunkContextLabel` (built; muted right-aligned label on each collapsed-gap / expander row, in both the segments and windowed-hunk render paths - same row so it adds no height) |
+| 3 | Similarity-based del/add line pairing | done | **high** | `wordDiff.ts` `pairLines` + `buildWordRangeMaps` (built; order-preserving Needleman-Wunsch over the del/add block scored by token-multiset similarity, `MIN_PAIR_SIM=0.4`, `MAX_PAIR_CELLS=2500` index-pairing fallback. Note: `buildSideBySide` row layout still uses index pairing; word highlights are keyed per line number so they are correct regardless, but the side-by-side *row* pairing is a separate follow-up) |
 | 4 | Whitespace-only / indent-only classification + dimming | low | med-high | new `wordDiff.ts` helper + row CSS |
 | 5 | Edit-boundary sliding (token-space `cleanupSemanticLossless`) | low | medium | `wordDiff.ts` after `contiguousRanges` |
 | 6 | Per-file viewed state (blob-sha keyed) | medium | high | per [docs/diff-review-state.md](diff-review-state.md) |

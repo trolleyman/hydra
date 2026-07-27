@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeWordDiff, applyWordRanges, buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './wordDiff'
+import { computeWordDiff, applyWordRanges, buildWordRangeMaps, pairLines, renderWordDiffHtml, type WordRange } from './wordDiff'
 import { DiffLine } from '../api/models/DiffLine'
 
 // Substring helper: assert each range picks out the expected slice of the line.
@@ -199,5 +199,52 @@ describe('buildWordRangeMaps', () => {
     const maps = buildWordRangeMaps(lines)
     expect(maps.old.size).toBe(0)
     expect(maps.new.size).toBe(0)
+  })
+
+  it('aligns the edited line when an addition is inserted ahead of the block', () => {
+    // A comment is inserted, then the two originals reappear with one edited.
+    // Index pairing would diff "const a = 1" against the comment; similarity
+    // pairing lines them up with their real counterparts.
+    const lines: DiffLine[] = [
+      line(DiffLine.type.DELETION, '  const a = 1', 2, null),
+      line(DiffLine.type.DELETION, '  const b = 2', 3, null),
+      line(DiffLine.type.ADDITION, '  // a new note', null, 2),
+      line(DiffLine.type.ADDITION, '  const a = 1', null, 3),
+      line(DiffLine.type.ADDITION, '  const b = 3', null, 4),
+    ]
+    const maps = buildWordRangeMaps(lines)
+    // "const a = 1" is unchanged on both sides -> no highlight at all.
+    expect(maps.old.has(2)).toBe(false)
+    expect(maps.new.has(3)).toBe(false)
+    // The inserted comment has no partner -> no highlight.
+    expect(maps.new.has(2)).toBe(false)
+    // Only "2" -> "3" is highlighted, on its real pair.
+    expect(slices('  const b = 2', maps.old.get(3)!)).toEqual(['2'])
+    expect(slices('  const b = 3', maps.new.get(4)!)).toEqual(['3'])
+  })
+})
+
+describe('pairLines', () => {
+  it('pairs one-to-one similar lines in order', () => {
+    expect(pairLines(['const x = 1', 'const y = 2'], ['const x = 9', 'const y = 8']))
+      .toEqual([[0, 0], [1, 1]])
+  })
+
+  it('leaves an unbalanced block partly unpaired', () => {
+    // Two removed, one added: only the best match pairs; the other is dropped.
+    const pairs = pairLines(['foo(a, b)', 'wildly different line'], ['foo(a, b, c)'])
+    expect(pairs).toEqual([[0, 0]])
+  })
+
+  it('refuses to pair unrelated lines', () => {
+    expect(pairLines(['the quick brown fox'], ['SELECT * FROM users'])).toEqual([])
+  })
+
+  it('skips a mid-block insertion to keep later lines aligned', () => {
+    const pairs = pairLines(
+      ['alpha = 1', 'beta = 2'],
+      ['inserted = 0', 'alpha = 1', 'beta = 20'],
+    )
+    expect(pairs).toEqual([[0, 1], [1, 2]])
   })
 })

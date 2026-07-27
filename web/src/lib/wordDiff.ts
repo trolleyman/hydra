@@ -240,11 +240,93 @@ export function computeWordDiff(oldStr: string, newStr: string): { old: WordRang
   return { old: oldRanges, new: newRanges }
 }
 
+// lineSimilarity is a cheap 0..1 score of how alike two lines are, used only to
+// decide which deletion pairs with which addition (not to produce the highlight
+// itself). It is the multiset Jaccard of their word tokens, ignoring
+// whitespace-only tokens so indentation noise doesn't inflate or deflate the
+// score. O(len), so it is far cheaper than the per-pair char LCS.
+function lineSimilarity(a: string, b: string): number {
+  if (a === b) return 1
+  const counts = new Map<string, number>()
+  let aTotal = 0
+  for (const tok of tokenize(a, 1)) {
+    if (!tok.trim()) continue
+    counts.set(tok, (counts.get(tok) ?? 0) + 1)
+    aTotal++
+  }
+  let bTotal = 0
+  let inter = 0
+  for (const tok of tokenize(b, 1)) {
+    if (!tok.trim()) continue
+    bTotal++
+    const left = counts.get(tok) ?? 0
+    if (left > 0) { counts.set(tok, left - 1); inter++ }
+  }
+  const union = aTotal + bTotal - inter
+  return union === 0 ? 0 : inter / union
+}
+
+// Below this similarity two lines are treated as unrelated: pairing them would
+// diff a removed line against an unrelated added one and highlight most of both,
+// so they are left unpaired (the row tint alone). Mirrors git-delta's
+// --max-line-distance.
+const MIN_PAIR_SIM = 0.4
+// Above this many del*add candidates the alignment DP isn't worth it (and the
+// block is almost certainly machine-generated churn); fall back to index pairing.
+const MAX_PAIR_CELLS = 2500
+
+// pairLines aligns a run of deleted lines with a run of added lines by content
+// similarity, preserving order, so each word diff compares the two lines a human
+// reads as "the same line, edited" even when the block is unbalanced (5 removed /
+// 2 added) or a line was inserted mid-block and shifts the alignment. Returns
+// [deletionIndex, additionIndex] pairs; lines with no good match are omitted.
+export function pairLines(dels: string[], adds: string[]): Array<[number, number]> {
+  const m = dels.length
+  const n = adds.length
+  if (m === 0 || n === 0) return []
+  if (m === 1 && n === 1) return lineSimilarity(dels[0], adds[0]) >= MIN_PAIR_SIM ? [[0, 0]] : []
+  if (m * n > MAX_PAIR_CELLS) {
+    const out: Array<[number, number]> = []
+    for (let k = 0; k < Math.min(m, n); k++) out.push([k, k])
+    return out
+  }
+
+  // sim[i*n+j] cached so the backtrack doesn't recompute. Needleman-Wunsch that
+  // maximises the total similarity of chosen pairs; a gap (leaving a line
+  // unpaired) scores 0, and a below-threshold pair is disallowed so it is never
+  // chosen over leaving both lines unpaired.
+  const sim = new Float64Array(m * n)
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) sim[i * n + j] = lineSimilarity(dels[i], adds[j])
+  }
+  const w = n + 1
+  const dp = new Float64Array((m + 1) * w)
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      const s = sim[i * n + j]
+      const match = s >= MIN_PAIR_SIM ? s + dp[(i + 1) * w + (j + 1)] : -Infinity
+      dp[i * w + j] = Math.max(match, dp[(i + 1) * w + j], dp[i * w + (j + 1)])
+    }
+  }
+  const out: Array<[number, number]> = []
+  let i = 0
+  let j = 0
+  while (i < m && j < n) {
+    const s = sim[i * n + j]
+    const match = s >= MIN_PAIR_SIM ? s + dp[(i + 1) * w + (j + 1)] : -Infinity
+    if (match >= dp[(i + 1) * w + j] && match >= dp[i * w + (j + 1)]) { out.push([i, j]); i++; j++ }
+    else if (dp[(i + 1) * w + j] >= dp[i * w + (j + 1)]) i++
+    else j++
+  }
+  return out
+}
+
 // buildWordRangeMaps walks a flat run of diff lines and, for each block of
-// consecutive deletions followed by consecutive additions, pairs del[j] with
-// add[j] (the same index pairing buildSideBySide uses) and computes their word
-// diff. Returns per-line-number range maps keyed by old_line_num (deletions) and
-// new_line_num (additions), matching how the highlight maps are keyed.
+// consecutive deletions followed by consecutive additions, aligns the removed
+// and added lines by similarity (see pairLines) and computes the word diff of
+// each matched pair. Returns per-line-number range maps keyed by old_line_num
+// (deletions) and new_line_num (additions), matching how the highlight maps are
+// keyed.
 export function buildWordRangeMaps(lines: DiffLine[]): { old: Map<number, WordRange[]>; new: Map<number, WordRange[]> } {
   const oldMap = new Map<number, WordRange[]>()
   const newMap = new Map<number, WordRange[]>()
@@ -255,10 +337,9 @@ export function buildWordRangeMaps(lines: DiffLine[]): { old: Map<number, WordRa
       const adds: DiffLine[] = []
       while (i < lines.length && lines[i].type === 'deletion') dels.push(lines[i++])
       while (i < lines.length && lines[i].type === 'addition') adds.push(lines[i++])
-      const pairs = Math.min(dels.length, adds.length)
-      for (let j = 0; j < pairs; j++) {
-        const d = dels[j]
-        const a = adds[j]
+      for (const [di, ai] of pairLines(dels.map((d) => d.content), adds.map((a) => a.content))) {
+        const d = dels[di]
+        const a = adds[ai]
         const { old: oldR, new: newR } = computeWordDiff(d.content, a.content)
         if (oldR.length && d.old_line_num != null) oldMap.set(d.old_line_num, oldR)
         if (newR.length && a.new_line_num != null) newMap.set(a.new_line_num, newR)

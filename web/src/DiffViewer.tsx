@@ -35,7 +35,7 @@ import {
 } from './lib/diffMetrics'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
-  CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
+  hunkContext, regionKey, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
 } from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
@@ -593,6 +593,21 @@ function estimateVisibleRows(file: DiffFile): number {
 }
 
 
+// The enclosing function/section git computed for the hunk below an expander,
+// shown muted at the row's right edge (same row, so it adds no height). Truncates
+// from the left tail rather than wrapping, keeping the expander one line tall.
+function HunkContextLabel({ text }: { text: string | undefined }) {
+  if (!text) return null
+  return (
+    <span
+      className="ml-auto pl-3 min-w-0 shrink truncate text-right text-xs font-mono text-gray-400 dark:text-gray-500 select-none"
+      title={text}
+    >
+      {text}
+    </span>
+  )
+}
+
 function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
   return (
     <button
@@ -621,6 +636,7 @@ function GapExpander({ seg, onDown, onUp, onAll }: {
         </Tooltip>
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
+      <HunkContextLabel text={seg.context} />
     </div>
   )
 }
@@ -640,6 +656,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
         </button>
       </Tooltip>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
+      <HunkContextLabel text={seg.context} />
     </div>
   )
 }
@@ -878,7 +895,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // rename) has nothing to collapse - render its lines plainly rather than
   // folding the entire body behind one expander.
   const noChanges = file.additions === 0 && file.deletions === 0
-  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
+  // git already worked out each hunk's enclosing function (the `@@ ... @@ <ctx>`
+  // trailer); key it by the hunk's first changed line so buildSegments can label
+  // the matching collapsed gap with it. Cheap and derived from hunksSig only.
+  const hunkFuncByKey = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const h of file.hunks ?? []) {
+      const ctx = hunkContext(h.header)
+      if (!ctx) continue
+      const first = h.lines.find(isChangeLine)
+      if (first) m.set(regionKey(first), ctx)
+    }
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hunksSig])
+  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal, hunkFuncByKey) : null), [fullLines, reveal, noChanges, hunkFuncByKey])
 
   const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
     setReveal((prev) => {
@@ -1099,6 +1130,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                             <ChevronUp className="w-3 h-3" />
                           </button>
                         </Tooltip>
+                        <HunkContextLabel text={hunkContext(hunk.header)} />
                       </div>
                     )}
                     {!isFirst && gapSize > 0 && (
@@ -1116,6 +1148,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                           </Tooltip>
                         </div>
                         <GapCount hidden={gapSize} onClick={() => expand(currentContext + Math.max(gapSize, EXPAND_STEP))} />
+                        <HunkContextLabel text={hunkContext(hunk.header)} />
                       </div>
                     )}
                     {sideBySide
