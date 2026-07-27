@@ -16,10 +16,12 @@
 // favicon), which is why the miss path is a silent undefined rather than a wait.
 
 import { createElement } from 'react'
+import { loadLucideIcons, looksLikeIconName, lucideIcon, type LucideIcon } from './lucideIcons'
 import {
-  LUCIDE_ICONS,
   IMAGE_ICON_RE,
+  firstGlyph,
   hashHue,
+  isGlyphIcon,
   projectImageIconSrc,
 } from './projectIconValue'
 
@@ -74,14 +76,24 @@ async function renderIconUrl(v: string, projectId: string): Promise<string> {
   // project, and http(s)/data URIs are used verbatim.
   if (IMAGE_ICON_RE.test(v)) return projectImageIconSrc(v, projectId)
 
-  const lucide = LUCIDE_ICONS[v.toLowerCase()]
+  // Unlike the JSX renderer this path is already async, so a name outside the
+  // eagerly-bundled set just waits for the full icon set to load.
+  let lucide = lucideIcon(v)
+  if (!lucide && looksLikeIconName(v)) {
+    await loadLucideIcons()
+    lucide = lucideIcon(v)
+  }
   if (lucide) return await rasterizeLucide(lucide, projectId)
 
-  // Emoji or a short text label: the glyph is self-colored, so it's drawn bare
-  // on transparency and reads on both light and dark notification trays.
-  if (v) return drawGlyph(v, null)
+  // An emoji is self-colored, so it's drawn bare on transparency and reads on
+  // both light and dark notification trays.
+  if (isGlyphIcon(v)) return drawGlyph(firstGlyph(v), null)
 
-  // No custom icon: mirror DefaultProjectIcon - the project id's first character
+  // A text label (or a name that matched no icon) falls back to its initial on
+  // the hashed tile, matching ProjectIcon.
+  if (v) return drawGlyph(firstGlyph(v).toUpperCase(), hashHue(projectId))
+
+  // No custom icon: mirror the default icon - the project id's first character
   // on a box colored by a hash of the id, so projects stay distinguishable.
   return drawGlyph(projectId.charAt(0).toUpperCase(), hashHue(projectId))
 }
@@ -111,7 +123,7 @@ function fillBox(ctx: CanvasRenderingContext2D, hue: number): void {
 
 // Draws one glyph centered on the canvas. `hue` null = transparent background
 // (emoji, which carry their own color); otherwise the glyph is drawn in white on
-// the hashed box, matching DefaultProjectIcon.
+// the hashed box, matching ProjectIcon's letter tile.
 function drawGlyph(text: string, hue: number | null): string {
   const made = newCanvas()
   if (!made) return DEFAULT_ICON_URL
@@ -123,10 +135,8 @@ function drawGlyph(text: string, hue: number | null): string {
   ctx.font = `600 ${Math.round(ICON_PX * (hue === null ? 0.86 : 0.58))}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  // Only the first glyph: an emoji is one, and a longer label would not be
-  // legible at tray size anyway. Uses the iterator so a surrogate pair or a
-  // multi-codepoint emoji is not sliced in half.
-  const first = [...text][0] ?? '?'
+  // Callers already pass a single glyph; the guard is for an empty string.
+  const first = firstGlyph(text) || '?'
   ctx.fillText(first, ICON_PX / 2, ICON_PX * 0.54)
   return canvas.toDataURL('image/png')
 }
@@ -134,7 +144,7 @@ function drawGlyph(text: string, hue: number | null): string {
 // Renders a lucide icon component to SVG markup, then rasterizes it white-on-box
 // so it has a solid backdrop in the tray. react-dom/server is imported lazily so
 // its weight lands in a chunk only projects with a lucide icon ever fetch.
-async function rasterizeLucide(icon: (typeof LUCIDE_ICONS)[string], projectId: string): Promise<string> {
+async function rasterizeLucide(icon: LucideIcon, projectId: string): Promise<string> {
   const made = newCanvas()
   if (!made) return DEFAULT_ICON_URL
   const { canvas, ctx } = made
