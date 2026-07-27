@@ -1,0 +1,191 @@
+# Roadmap - open items
+
+The open backlog, extracted from the former root-level `PLAN.md` when its 82
+completed items were retired. These are ideas and gaps, not commitments, and some
+may have been partly addressed since they were written - check the current code
+before starting. Grouped by area.
+
+## Sandbox
+
+- [ ] **Network: enforce `allowed_hosts` at the OS layer.** The config field was
+  originally reserved but unenforced (full network on/off only). A filtering
+  HTTPS-CONNECT proxy the sandbox is forced through gives host-level egress
+  control without root. (Largely delivered by `internal/egress`; see
+  [security-audit.md](security-audit.md) rec 3 - retained here for the pieces not
+  yet covered.)
+
+- [ ] **Windows: implement the Windows Sandbox backend and ConPTY attach.**
+  Currently stubbed with a clear "not supported" error. See
+  [windows-support.md](windows-support.md).
+
+- [ ] **Per-agent network namespace + rootless userspace NAT for true port
+  isolation.** Today the Linux sandbox network is binary
+  (`internal/sandbox/linux.go`): the default **shares the host network
+  namespace**, so every agent sees the host's `127.0.0.1` and the same port space
+  - two agents both grabbing `:5173`/`:8080` collide, and an agent's dev server is
+  reachable from (and clashes with) everything else on the box. The only
+  alternative, `network.enabled=false` -> `--unshare-net`, gives a fresh netns
+  with its own loopback (real port isolation) but **kills outbound entirely**,
+  which most agents need (bun/git/API). macOS (`darwin.go`) is even coarser:
+  `(deny network*)` is all-or-nothing (Seatbelt _can_ express
+  `network-bind`/`network-outbound` port filters, but we don't use them; and macOS
+  has no netns, so it can't give per-agent localhost isolation anyway).
+
+  _Stop-gap already shipped:_ the pre-prompt tells agents to bind servers to
+  custom/non-default localhost ports (ideally OS-assigned) and never assume
+  well-known ports are free. That's convention, not enforcement.
+
+  _Proposed fix:_ give each agent its **own** network namespace (own loopback =>
+  full per-agent port isolation - its `:5173` is invisible to other agents and the
+  host) **while keeping outbound** via a rootless userspace NAT: `pasta` (from
+  passt; preferred - fast, no extra caps) or `slirp4netns`, the same approach
+  Podman uses for rootless containers. Work involved: (a) add `pasta`/`slirp4netns`
+  as a host dependency (neither is installed today); (b) wire bwrap to run under
+  the NAT - either run `pasta` against the sandbox PID's netns, or launch the bwrap
+  tree inside the NAT's namespace; (c) decide inbound policy - host services agents
+  may need to reach (web UI `:8080`, the `--simulation` artifact server) would
+  require explicit port mapping through the NAT; (d) keep the current shared-net
+  path as a fallback when the NAT helper is absent. Moderate effort + a new host
+  dependency; do it once cross-agent port collisions become real pain. (The egress
+  work has since built on pasta - this item is the port-isolation half.)
+
+## Agent UX
+
+- [ ] **Go language server alongside sandboxed agents** so the agent can query LSP
+  information (definitions, references, diagnostics) instead of only reading files.
+
+- [ ] **`hydra attach <id> [command]`:** run an arbitrary command (e.g. `bash`) in
+  the head's sandbox instead of attaching to the agent. If the head's session has
+  stopped but its worktree/branch still exist, resume the agent first.
+
+- [ ] **Transitional state on merge/kill.** When merging or killing a head, move it
+  into a transitional state and return an HTTP status indicating work-in-progress,
+  so the UI button stays disabled only until the operation completes.
+
+- [ ] **Stream command stdout/stderr live** and prefix log lines (e.g.
+  `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and
+  printing everything at once.
+
+## Diff viewer
+
+- [ ] **Auto-load diffs for short changes (< 1000 lines)** via the diff-files
+  endpoint instead of defaulting to "No changes loaded" - currently each file must
+  be loaded manually.
+
+- [ ] **Diff-viewer selector logic.** Let the left selector pick "Latest commit"
+  when the right is on "Latest changes" (and auto-select this combo when the
+  uncommitted-changes button is pressed); order the left selector with the latest
+  commit at the top and `main` at the bottom; forbid selecting a left state
+  at/after the right (and a right state at/before the left).
+
+- [ ] **Fix the uncommitted-changes button breaking the diff-header layout** - it
+  adds a new line that splits the left buttons from the settings button (likely the
+  tooltip).
+
+- [ ] **Make the expand-lines buttons work in demo mode** (may need a new API
+  endpoint).
+
+- [ ] **Fix diff-viewer comments:** the add-comment button is half-clipped
+  (overflow / z-index), the comment dialog flickers in and out, and Ctrl/Cmd+Enter
+  doesn't submit. Render the comment inline by splitting the diff (GitLab-style) so
+  the diff and the comment box are visible at the same time.
+
+- [ ] **Image diffs between branches.** Use the artifacts image diff viewer code to
+  also let the user diff regular image files between branches.
+
+## Artifacts
+
+- [ ] **Render ANSI in artifact logs/errors in colour** instead of stripping it.
+  Artifact generation output (the error box + the live/persisted build-log panes in
+  `web/src/components/ArtifactsPanel.tsx`) is raw terminal output that carries ANSI
+  SGR escape sequences (e.g. Playwright's dim `ESC[2m ... ESC[22m`). Right now
+  `web/src/lib/ansi.ts` `stripAnsi` removes them so the text reads cleanly. Replace
+  this with a proper renderer that maps SGR codes to spans/styles (colour, bold,
+  dim, underline) - likely a small parser or a lib like `ansi-to-html`/`anser` - so
+  the logs show the original colouring. The stderr-in-red distinction in `LogView`
+  is currently a per-line stream flag, not from ANSI; reconcile the two when
+  rendering.
+
+## Web
+
+- [ ] **Async markdown renderer so fenced code blocks pick up on-demand syntax
+  highlighting.** The syntax-highlighting refactor split highlight.js into a small
+  eager set (~43 common languages, `web/src/lib/hljs.ts`) plus ~149 grammars loaded
+  on demand (`web/src/lib/hljsLazy.ts` `ensureLanguage` + generated
+  `hljsLazyRegistry.ts`). The three *code* surfaces were wired to lazy-load a
+  missing grammar and re-highlight once it lands: the diff worker
+  (`highlight.worker.ts`, async already), the diff small-file fast path
+  (`DiffViewer.tsx`), and the repo file viewer (`RepositoryView.tsx` `CodeView`).
+  **Markdown code fences were deliberately left on the eager set** - a fenced block
+  in a language outside the eager ~43 (e.g. ` ```ocaml `/` ```clojure `) renders as
+  plain text instead of highlighted. The reason: `renderMarkdown`
+  (`web/src/lib/markdown.tsx`, and the parallel inline renderer in
+  `RepositoryView.tsx`) is a **synchronous, pure `string -> ReactNode` function**
+  that calls `hljs.getLanguage(lang)` and skips highlighting when the grammar isn't
+  registered; it has no way to `await ensureLanguage(lang)` and re-render, and it's
+  consumed in many places (`AgentDetail`, `RepositoryView`, `settings/ConfigForm`).
+  Fix: give markdown the same lazy-load-then-re-highlight treatment the code
+  surfaces got - e.g. have `renderMarkdown` collect the set of fence languages it
+  saw and expose it, and a thin wrapper component (or hook) call `ensureLanguage`
+  for each unregistered one and bump a nonce to re-render; or move markdown
+  rendering into a small component that memoizes on `[text, grammarsReady]`. Keep
+  it a pure function for the callers that just want a one-shot string. Low priority
+  / cosmetic: only affects exotic languages in agent-authored markdown; common
+  fence languages (bash, json, ts, js, go, python, yaml, diff, ...) are already
+  eager.
+
+## Git
+
+- [ ] **Interactive credential prompts for daemon-side git - revisit the blanket
+  `GIT_TERMINAL_PROMPT=0`.** Daemon-side pushes/fetches (`internal/git/push.go`,
+  and the publish flow in [publish](../internal/http/publish.go)) run strictly
+  non-interactively: `GIT_TERMINAL_PROMPT=0` + `GIT_SSH_COMMAND="ssh
+  -oBatchMode=yes"`, mapping auth failures to an actionable UI error ("add your key
+  to ssh-agent, or switch to HTTPS + a credential helper"). That is the safe
+  default, but it means a fixable prompt (HTTPS password, ssh key passphrase after
+  reboot) is a hard failure. Follow-up: forward the prompt to the user instead -
+  git supports this cleanly via `GIT_ASKPASS`/`core.askPass`, ssh via `SSH_ASKPASS`
+  (+ `SSH_ASKPASS_REQUIRE=force`; needs the process detached from a tty, e.g.
+  setsid): point both at a small `hydra __askpass` helper that relays the prompt
+  text over the daemon socket to the web UI as a modal (same parked-approval UX as
+  the security gate) and writes the answer to stdout. Design constraints: the
+  secret is never logged, never persisted by Hydra (at most offered onward to `git
+  credential approve` on explicit opt-in); timeout/cancel fails the push cleanly
+  with the current actionable error as fallback; ssh-agent remains the
+  *recommended* path for passphrase keys - the modal is a rescue hatch, not the
+  story.
+
+## Notifications
+
+- [ ] **Action buttons on the OS notifications (Allow / Always allow / Deny inline;
+  open-from-closed-tab).** The out-of-tab desktop notifications
+  (`web/src/lib/notifyPrefs.ts` `fireNotification`) are fired via the
+  non-persistent `new Notification(...)` constructor, which **ignores the `actions`
+  field entirely** - so they are click-the-whole-thing-to-open only. The
+  security-gate approval notifications in particular would benefit from inline
+  **Allow once / Always allow / Deny** buttons, since they already carry a `reqid`
+  + a decide endpoint (`decideAgentApproval`, wired in `useAgentNotifications.ts`).
+  Buttons require the *persistent* path:
+  **`ServiceWorkerRegistration.showNotification(title, { actions: [...] })`**, whose
+  clicks arrive as a `notificationclick` event (with `event.action`) **inside a
+  service worker**, not on the page. Hydra deliberately has no service worker today
+  (`notifyPrefs.ts:8-9` scopes it out). Scope: (1) register a minimal SW and switch
+  firing to `registration.showNotification` with an `actions` array; (2) handle
+  `notificationclick` in the SW - either `fetch` the decide endpoint directly from
+  the SW (it can carry the ALLOW/DENY + remember decision) or `postMessage` an open
+  client so the existing `decide()` runs; (3) map the retraction work
+  (`dismissNotification` on state-clear + `autoDismissMs`) onto the SW
+  notifications too. Constraints / gotchas: `actions` are capped at ~2 buttons on
+  most platforms and are **unsupported on Firefox/Safari desktop** (they silently
+  drop to no buttons - the whole-notification click must stay a working fallback);
+  a decide-from-SW path must handle the tab being fully closed. Bonus: a service
+  worker also unlocks notifications for a **fully closed** tab via Web Push, though
+  that is a larger follow-on (push subscription + a daemon-side push sender) and can
+  be deferred. Start with the approval notifications (clearest button semantics);
+  the needs_input / finished ones can stay click-to-open.
+
+## Chat mode
+
+- [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
+</content>
+</invoke>

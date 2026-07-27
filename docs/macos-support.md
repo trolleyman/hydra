@@ -62,7 +62,7 @@ What is broken or missing:
   case-insensitive by default.
 - Stale comments in `darwin.go` and `defaults.go` reference a `sandbox-demo/`
   directory that is not in the repo or its history.
-- Never validated on real hardware (see PLAN.md item 1).
+- Never validated on real hardware.
 
 ## Feasibility summary
 
