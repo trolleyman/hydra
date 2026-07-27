@@ -819,7 +819,7 @@ export const SpawnForm = memo(function SpawnForm({
         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
         : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
-      <SettingsPopover label="Spawn options" width={224} align="left">
+      <SettingsPopover label="Spawn options" width={260} align="left" fitContent>
         {showChat && (
           <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
             <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>

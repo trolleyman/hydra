@@ -18,10 +18,11 @@ export function SettingsPopover({
   label = 'Settings',
   width = 208,
   align = 'right',
+  fitContent = false,
   children,
 }: {
   label?: string
-  // Dropdown width in px.
+  // Panel width in px. With fitContent it acts as the max width instead.
   width?: number
   // Which of the panel's edges meets the button. 'right' (default) anchors the
   // panel's right edge to the button and opens leftward - right for a cog near
@@ -29,6 +30,10 @@ export function SettingsPopover({
   // the button and opens rightward - right for a cog near the right of a narrow
   // container (the compact spawn box), where opening left would cramp it.
   align?: 'left' | 'right'
+  // When true the panel sizes to its content (capped at `width`) instead of
+  // always filling `width`, so it doesn't leave dead space to the right of
+  // narrower controls. Not for panels with full-width children like a slider.
+  fitContent?: boolean
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -122,7 +127,7 @@ export function SettingsPopover({
       {open && pos && createPortal(
         <div
           ref={popRef}
-          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width }}
+          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: fitContent ? 'max-content' : pos.width, maxWidth: pos.width }}
           className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >
           {children}
