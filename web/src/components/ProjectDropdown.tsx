@@ -60,8 +60,8 @@ interface RowReorder {
 // The reorder control sits *in the project icon's place* rather than in a gutter
 // of its own: a handle column would push every row's icon across, including the
 // rows that can't be reordered, which is a permanent cost for an occasional job.
-// On a fine pointer the grip fades in over the icon on hover (and is pinned in
-// edit mode); the icon is what identifies a row you're not pointing at anyway.
+// Only edit mode shows it - the plain list stays a plain list - though a mouse
+// can still drag a row without entering the mode.
 function ReorderControl({ project: p, reorder }: { project: ProjectInfo; reorder: RowReorder }) {
   const stop = (e: React.MouseEvent) => e.stopPropagation() // never switch project
   if (!reorder.finePointer) {
@@ -131,9 +131,9 @@ function ProjectRow({
   reorder?: RowReorder
   onRemove?: () => void
 }) {
-  // A hover-swapped grip only exists on a fine pointer; in edit mode it (or the
-  // touch up/down pair) is pinned, which is what makes the mode discoverable.
-  const swapIcon = reorder != null && (editing || reorder.finePointer)
+  // Handles belong to edit mode: outside it the row still drags (a mouse can
+  // always just pick a project up), but the list stays a plain list.
+  const swapIcon = reorder != null && editing
   return (
     <div
       // mx-1 + rounded: the highlight/hover is an inset pill, so the selected
@@ -154,11 +154,7 @@ function ProjectRow({
           icon={p.icon}
           projectId={p.id}
           size={14}
-          className={
-            !swapIcon ? ''
-              : editing ? 'opacity-0'
-                : 'group-hover:opacity-0 transition-opacity'
-          }
+          className={swapIcon ? 'opacity-0' : ''}
         />
         {swapIcon && <ReorderControl project={p} reorder={reorder} />}
       </span>
