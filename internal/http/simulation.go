@@ -1176,10 +1176,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 			HeadRef:            "hydra/feat-2",
 			BehindCount:        &behind,
 			UncommittedChanges: &uncommitted,
-			UncommittedSummary: &api.UncommittedSummary{
-				TrackedCount:   2,
-				UntrackedCount: 1,
-			},
+			UncommittedSummary: simUncommittedSummary(),
 			Files: []api.DiffFile{
 				{
 					Path:       "README.md",
@@ -2036,11 +2033,8 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 		uncommitted := true
 		resp := api.DiffResponse{
 			UncommittedChanges: &uncommitted,
-			UncommittedSummary: &api.UncommittedSummary{
-				TrackedCount:   2,
-				UntrackedCount: 1,
-			},
-			Files: []api.DiffFile{},
+			UncommittedSummary: simUncommittedSummary(),
+			Files:              []api.DiffFile{},
 		}
 		if params.IncludeUncommitted != nil && *params.IncludeUncommitted {
 			resp.Files = []api.DiffFile{
@@ -2725,6 +2719,20 @@ func (s *SimulationServer) GetRepositoryPushStatus(w http.ResponseWriter, r *htt
 		// (and its commit popover) shows in screenshots.
 		Uncommitted: simUncommitted(),
 	})
+}
+
+// simUncommittedSummary is the mock diff-endpoint working-tree summary, sized so
+// the uncommitted-changes badge's tooltip shows both groups and a long path that
+// has to wrap.
+func simUncommittedSummary() *api.UncommittedSummary {
+	tracked := []string{"README.md", "web/src/components/agent/UncommittedChangesPanel.tsx"}
+	untracked := []string{"new_file.txt"}
+	return &api.UncommittedSummary{
+		TrackedCount:   len(tracked),
+		UntrackedCount: len(untracked),
+		TrackedFiles:   &tracked,
+		UntrackedFiles: &untracked,
+	}
 }
 
 // simUncommitted is the mock working-tree state: the one dirty file a config

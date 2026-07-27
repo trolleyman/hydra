@@ -3712,6 +3712,16 @@ components:
         untracked_count:
           type: integer
           description: Number of untracked (new, never-added) files
+        tracked_files:
+          type: array
+          description: Paths of the tracked files with staged or unstaged changes (capped; may be shorter than tracked_count)
+          items:
+            type: string
+        untracked_files:
+          type: array
+          description: Paths of the untracked files (capped; may be shorter than untracked_count)
+          items:
+            type: string
 
     AgentInputRequest:
       type: object

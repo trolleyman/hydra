@@ -1947,6 +1947,24 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 
 // ── Uncommitted changes button ────────────────────────────────────────────────
 
+// How many paths per group the tooltip lists before collapsing the rest into a
+// "+N more" line. The server caps what it sends separately (and higher); this is
+// purely about keeping the hover box a readable size.
+const UNCOMMITTED_TOOLTIP_FILES = 10
+
+// A path too long for the tooltip has to wrap somewhere. Left to itself the
+// browser breaks mid-filename ("UncommittedChangesPane / l.tsx"); a <wbr> after
+// each separator gives it directory boundaries to prefer instead, and the
+// break-words on the row still catches a single segment that is too long on its
+// own. Split on "/" and " -> " so a rename breaks between its two paths.
+function wrappablePath(path: string) {
+  const parts = path.split(/(\/| -> )/)
+  return parts.map((p, i) => (
+    // Static list: the parts of one path never reorder, so the index is a stable key.
+    <Fragment key={i}>{p}{/\/| -> /.test(p) && i < parts.length - 1 ? <wbr /> : null}</Fragment>
+  ))
+}
+
 function UncommittedButton({ diff, onJumpToUncommitted }: {
   diff: DiffResponse | null
   onJumpToUncommitted: () => void
@@ -1954,16 +1972,44 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   const summary = diff?.uncommitted_summary
   if (!summary || (summary.tracked_count === 0 && summary.untracked_count === 0)) return null
 
-  const lines: string[] = []
-  if (summary.tracked_count > 0) lines.push(`${summary.tracked_count} tracked file${summary.tracked_count !== 1 ? 's' : ''} modified`)
-  if (summary.untracked_count > 0) lines.push(`${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`)
+  const groups: { heading: string; count: number; files: string[] }[] = []
+  if (summary.tracked_count > 0) {
+    groups.push({
+      heading: `${summary.tracked_count} tracked file${summary.tracked_count !== 1 ? 's' : ''} modified`,
+      count: summary.tracked_count,
+      files: summary.tracked_files ?? [],
+    })
+  }
+  if (summary.untracked_count > 0) {
+    groups.push({
+      heading: `${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`,
+      count: summary.untracked_count,
+      files: summary.untracked_files ?? [],
+    })
+  }
 
   return (
+    // text-left because the hint tooltip centres its content by default - fine for
+    // a one-line label, but it makes a file list ragged on both sides.
     <Tooltip className="shrink-0" content={
-      <div>
+      <div className="text-left">
         <p className="font-semibold mb-1">Uncommitted changes</p>
-        {lines.map((l) => <p key={l} className="text-gray-300">{l}</p>)}
-        <p className="text-gray-400 mt-1 text-[10px]">Click to view uncommitted changes</p>
+        {groups.map((g) => (
+          <div key={g.heading} className="mt-1 first:mt-0">
+            <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
+            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => (
+              // The indent keeps a wrapped remainder distinguishable from the
+              // next path in the list.
+              <p key={f} className="font-mono text-[10px] text-gray-500 dark:text-gray-400 pl-2 break-words">{wrappablePath(f)}</p>
+            ))}
+            {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 pl-2">
+                +{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more
+              </p>
+            )}
+          </div>
+        ))}
+        <p className="text-gray-400 dark:text-gray-500 mt-1 text-[10px]">Click to view uncommitted changes</p>
       </div>
     }>
       <button

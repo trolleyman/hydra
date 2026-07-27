@@ -77,10 +77,14 @@ type DiffFile struct {
 	HeadBlobSHA string
 }
 
-// UncommittedSummary holds counts of uncommitted changes.
+// UncommittedSummary holds counts of uncommitted changes, plus the paths behind
+// those counts (worktree-relative, in git's own order). The counts stay exact;
+// callers that surface the paths in a UI are expected to cap the lists.
 type UncommittedSummary struct {
 	TrackedCount   int
 	UntrackedCount int
+	TrackedFiles   []string
+	UntrackedFiles []string
 }
 
 // gitLogFormat uses ASCII control characters as separators to avoid collisions
@@ -526,22 +530,42 @@ func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error)
 	return conflicts, nil
 }
 
-// GetUncommittedSummary returns counts of tracked and untracked changes.
+// GetUncommittedSummary returns counts of tracked and untracked changes, along
+// with the paths.
+//
+// Parsed from `-z` output rather than plain porcelain: without it git quotes and
+// C-escapes any path with a space or a non-ASCII byte, which we'd have to unescape
+// to show a usable path. With -z each entry is a NUL-terminated `XY <path>`, and a
+// rename/copy appends its source path as a second NUL-terminated field.
 func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
-	out, err := gitOutput(projectRoot, "status", "--porcelain=v1")
+	out, err := gitOutput(projectRoot, "status", "--porcelain=v1", "-z")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	s := &UncommittedSummary{}
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 2 {
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		// "XY " prefix plus at least one path byte.
+		if len(e) < 4 {
 			continue
 		}
-		if line[0] == '?' && line[1] == '?' {
+		x, y, path := e[0], e[1], e[3:]
+		if x == '?' && y == '?' {
 			s.UntrackedCount++
-		} else {
-			s.TrackedCount++
+			s.UntrackedFiles = append(s.UntrackedFiles, path)
+			continue
 		}
+		s.TrackedCount++
+		if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+			// The source path rides along in the next field; show it as
+			// "old -> new" and skip it so it isn't counted as its own entry.
+			if i+1 < len(entries) && entries[i+1] != "" {
+				path = entries[i+1] + " -> " + path
+				i++
+			}
+		}
+		s.TrackedFiles = append(s.TrackedFiles, path)
 	}
 	return s, nil
 }
