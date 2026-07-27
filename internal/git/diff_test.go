@@ -183,3 +183,58 @@ func TestGetDiffScopedRenameKeepsRename(t *testing.T) {
 		t.Errorf("+%d -%d, want +2 -1", f.Additions, f.Deletions)
 	}
 }
+
+// A path with a space in it, a rename, and an untracked file - the three shapes
+// that broke when the summary was parsed from plain (non -z) porcelain output:
+// git quotes and C-escapes the spaced path, and a rename's source path shares
+// the entry with its destination.
+func TestGetUncommittedSummaryPaths(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("a file.txt", "one\n")
+	write("old.txt", "keep\n")
+	run("add", ".")
+	run("commit", "-qm", "first")
+
+	write("a file.txt", "two\n")
+	run("mv", "old.txt", "new.txt")
+	write("untracked one.txt", "hi\n")
+
+	s, err := GetUncommittedSummary(dir)
+	if err != nil {
+		t.Fatalf("GetUncommittedSummary: %v", err)
+	}
+	if s.TrackedCount != 2 || s.UntrackedCount != 1 {
+		t.Fatalf("counts = %d tracked / %d untracked, want 2/1 (files: %v, %v)",
+			s.TrackedCount, s.UntrackedCount, s.TrackedFiles, s.UntrackedFiles)
+	}
+	want := map[string]bool{"a file.txt": true, "old.txt -> new.txt": true}
+	for _, f := range s.TrackedFiles {
+		if !want[f] {
+			t.Errorf("unexpected tracked path %q, want one of %v", f, want)
+		}
+		delete(want, f)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing tracked paths %v", want)
+	}
+	if len(s.UntrackedFiles) != 1 || s.UntrackedFiles[0] != "untracked one.txt" {
+		t.Errorf("untracked = %v, want [untracked one.txt]", s.UntrackedFiles)
+	}
+}

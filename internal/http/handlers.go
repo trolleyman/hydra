@@ -2737,10 +2737,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
 			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
-			uncommittedSummary = &api.UncommittedSummary{
-				TrackedCount:   summary.TrackedCount,
-				UntrackedCount: summary.UntrackedCount,
-			}
+			uncommittedSummary = apiUncommittedSummary(summary)
 		}
 	}
 
@@ -2773,6 +2770,30 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		BehindCount:        &behindCount,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
+}
+
+// uncommittedFilesLimit caps how many paths each side of an UncommittedSummary
+// carries over the wire. The diff endpoint is polled, and a worktree with a
+// thousand untracked files would otherwise ship a thousand paths every time; the
+// counts stay exact, so the UI can still say how many it isn't showing.
+const uncommittedFilesLimit = 50
+
+func apiUncommittedSummary(s *git.UncommittedSummary) *api.UncommittedSummary {
+	tracked := capPaths(s.TrackedFiles)
+	untracked := capPaths(s.UntrackedFiles)
+	return &api.UncommittedSummary{
+		TrackedCount:   s.TrackedCount,
+		UntrackedCount: s.UntrackedCount,
+		TrackedFiles:   &tracked,
+		UntrackedFiles: &untracked,
+	}
+}
+
+func capPaths(paths []string) []string {
+	if len(paths) > uncommittedFilesLimit {
+		return paths[:uncommittedFilesLimit]
+	}
+	return paths
 }
 
 func resolveDefaultAgentHead(projectRoot string, worktree *string, headRef string) (string, bool) {
@@ -2883,10 +2904,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
 			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
-			uncommittedSummary = &api.UncommittedSummary{
-				TrackedCount:   summary.TrackedCount,
-				UntrackedCount: summary.UntrackedCount,
-			}
+			uncommittedSummary = apiUncommittedSummary(summary)
 		}
 	}
 

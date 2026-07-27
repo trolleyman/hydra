@@ -1582,8 +1582,14 @@ type UncommittedSummary struct {
 	// TrackedCount Number of tracked files with staged or unstaged changes
 	TrackedCount int `json:"tracked_count"`
 
+	// TrackedFiles Paths of the tracked files with staged or unstaged changes (capped; may be shorter than tracked_count)
+	TrackedFiles *[]string `json:"tracked_files,omitempty"`
+
 	// UntrackedCount Number of untracked (new, never-added) files
 	UntrackedCount int `json:"untracked_count"`
+
+	// UntrackedFiles Paths of the untracked files (capped; may be shorter than untracked_count)
+	UntrackedFiles *[]string `json:"untracked_files,omitempty"`
 }
 
 // UpdateAgentRequest Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
