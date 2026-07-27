@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -303,6 +304,21 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			return nil, errtrace.Wrap(err)
 		}
 		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json")})
+
+		// Seed the Hydra control MCP server into ~/.codex/config.toml (git_* tools +
+		// MCP discovery), merged over the host's config so model/auth are preserved.
+		// A malformed host config would error - skip seeding then (codex keeps its
+		// real config, just without the hydra tools) rather than clobber it.
+		codexCfg, cfgErr := sandbox.BuildCodexConfig(readHostFile(filepath.Join(home, ".codex", "config.toml")), stableHydraBin)
+		if cfgErr != nil {
+			log.Printf("warn: not seeding hydra MCP into codex config for %s: %v", id, cfgErr)
+		} else {
+			codexCfgHost := filepath.Join(cacheDir, "codex-config.toml")
+			if err := os.WriteFile(codexCfgHost, codexCfg, 0o644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			res.Binds = append(res.Binds, sandbox.Bind{Source: codexCfgHost, Target: path.Join(home, ".codex", "config.toml")})
+		}
 	}
 
 	return res, nil

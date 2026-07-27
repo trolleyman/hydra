@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"braces.dev/errtrace"
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/trolleyman/hydra/internal/gate"
 )
 
@@ -150,11 +151,8 @@ func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string
 		if servers == nil {
 			servers = make(map[string]interface{})
 		}
-		servers[gate.HydraControlServer] = map[string]interface{}{
-			"type":    "stdio",
-			"command": hydraBin,
-			"args":    []string{"mcp", agentType},
-		}
+		name, command, args := HydraMCPServer(hydraBin, agentType)
+		servers[name] = map[string]interface{}{"type": "stdio", "command": command, "args": args}
 		cfg["mcpServers"] = servers
 	}
 
@@ -370,11 +368,33 @@ func BuildGeminiSettings(existing []byte, hydraBin string) ([]byte, error) {
 
 	settings["hooks"] = hooks
 
+	// The Hydra control MCP server (git_* tools + MCP discovery), so Gemini heads
+	// get the same tools as Claude. Gemini's settings.json uses the same mcpServers
+	// shape (name -> {command, args}); merge into any existing map.
+	if hydraBin != "" {
+		servers, _ := settings["mcpServers"].(map[string]interface{})
+		if servers == nil {
+			servers = make(map[string]interface{})
+		}
+		name, command, args := HydraMCPServer(hydraBin, "gemini")
+		servers[name] = map[string]interface{}{"command": command, "args": args}
+		settings["mcpServers"] = servers
+	}
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
 	}
 	return data, nil
+}
+
+// HydraMCPServer returns the name and stdio launch spec (command + args) of the
+// in-sandbox Hydra control MCP server - the single source of truth every agent's
+// config seeds, so the git_* tools and MCP discovery/request tools are available
+// regardless of agent type. Each agent's builder renders this into its own config
+// format (Claude/Gemini JSON mcpServers, Codex TOML [mcp_servers]).
+func HydraMCPServer(hydraBin, agentType string) (name, command string, args []string) {
+	return gate.HydraControlServer, hydraBin, []string{"mcp", agentType}
 }
 
 // BuildCopilotHooks generates a hooks JSON file for GitHub Copilot CLI.
@@ -439,6 +459,32 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal codex hooks: %w", err))
+	}
+	return data, nil
+}
+
+// BuildCodexConfig merges the Hydra control MCP server into the user's Codex
+// config.toml (`[mcp_servers.hydra]`), preserving everything else (model, auth,
+// etc.). Codex reads MCP servers from ~/.codex/config.toml. A malformed host
+// config is a hard error so the caller can skip seeding rather than clobber it.
+func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
+	cfg := map[string]interface{}{}
+	if len(existing) > 0 {
+		if err := toml.Unmarshal(existing, &cfg); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("unmarshal codex config: %w", err))
+		}
+	}
+	servers, _ := cfg["mcp_servers"].(map[string]interface{})
+	if servers == nil {
+		servers = map[string]interface{}{}
+	}
+	name, command, args := HydraMCPServer(hydraBin, "codex")
+	servers[name] = map[string]interface{}{"command": command, "args": args}
+	cfg["mcp_servers"] = servers
+
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal codex config: %w", err))
 	}
 	return data, nil
 }
