@@ -156,6 +156,11 @@ area; do not re-derive it by reading source. Skip them otherwise.
   branch-split + ff-only mirror design) ->
   [docs/user-branch-mirror.md](docs/user-branch-mirror.md) (proposed, unbuilt
   design; only the `internal/git/branch.go` naming step is done)
+- **Remote access / HTTPS / secure context** (reaching Hydra from other devices,
+  the localhost-trust auth model, `mage deploy:tailscale` / `deploy:ngrok`,
+  serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
+  (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
+  `previewURL` protocol-relative so preview links follow the page scheme)
 
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

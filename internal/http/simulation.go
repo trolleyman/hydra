@@ -2768,7 +2768,9 @@ func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version st
 	st.Pid = ptr(40321)
 	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
 	st.Connections = ptr(1)
-	st.Url = ptr("http://" + r.Host + "/")
+	// Protocol-relative, mirroring the real previewURL: the link follows the
+	// page's scheme (http on the LAN, https behind a TLS front).
+	st.Url = ptr("//" + r.Host + "/")
 	// The "Latest changes" (uncommitted) channel runs in its own checkout that
 	// mirrors the live worktree; show it going stale so the restart affordance
 	// is exercised in the sim.

@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -686,6 +687,85 @@ func (Deploy) Ngrok() error {
 	fmt.Println("\n   Or run it as a persistent background service, like the reference host:")
 	fmt.Printf("     %sngrok service install --config %s && ngrok service start%s\n", colorBold, ngrokPath, colorReset)
 	return nil
+}
+
+// Tailscale prints the `tailscale serve` commands that expose the Hydra web UI
+// (and, optionally, its live server previews) privately over your tailnet with
+// a real trusted HTTPS cert. Unlike ngrok this creates NO public URL: Hydra
+// stays bound to localhost, Tailscale is the only door, and tailnet membership
+// is the auth - so the UI runs in a secure context (clipboard, crypto) and is
+// reachable only from your own devices. See docs/remote-access.md.
+//
+// It changes nothing itself: it detects your tailnet name and the configured
+// ports and prints the exact commands to run on the machine hosting Hydra.
+//
+//	mage deploy:tailscale
+func (Deploy) Tailscale() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	port := hydraPort()
+
+	// The preview port range from the project config (defaults 26601-26699). A
+	// load error is non-fatal here - fall back to the built-in default range.
+	plo, phi := (config.Config{}).ResolvePreviewPortRange()
+	if cfg, err := config.Load(projectRoot); err == nil {
+		plo, phi = cfg.ResolvePreviewPortRange()
+	}
+
+	// Best-effort: resolve this machine's MagicDNS name so the printed URLs are
+	// real. Falls back to a placeholder when tailscale isn't installed / up.
+	host := tailscaleDNSName()
+	if host == "" {
+		host = "<machine>.<tailnet>.ts.net"
+		fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
+		fmt.Printf("%s! tailscale not detected on PATH (or not logged in).%s\n", colorYellow, colorReset)
+		fmt.Println("  Install it and run `tailscale up` on this machine, then re-run this")
+		fmt.Println("  target to fill in your real *.ts.net name. Commands below use a placeholder.")
+		fmt.Println("  Also enable HTTPS certs for your tailnet in the admin console (DNS -> HTTPS).")
+		fmt.Println()
+	} else {
+		fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
+		fmt.Printf("Detected tailnet name: %s%s%s\n\n", colorCyan, host, colorReset)
+	}
+
+	fmt.Printf("%sExpose the web UI privately over your tailnet (run on this machine):%s\n", colorBold, colorReset)
+	fmt.Printf("     %stailscale serve --bg http://127.0.0.1:%s%s\n", colorBold, port, colorReset)
+	fmt.Printf("   -> %shttps://%s/%s  (trusted cert, secure context, tailnet-only)\n\n", colorCyan, host, colorReset)
+
+	fmt.Printf("%sOptional - also expose live server previews (ports %d-%d):%s\n", colorBold, plo, phi, colorReset)
+	fmt.Println("   Previews run on their own ports, so each needs its own TLS mapping. Serve")
+	fmt.Println("   the whole range once (narrow it if you only use a few):")
+	fmt.Printf("     %sfor p in $(seq %d %d); do tailscale serve --bg --https=$p http://127.0.0.1:$p; done%s\n", colorBold, plo, phi, colorReset)
+	fmt.Printf("   -> a preview on port %d becomes %shttps://%s:%d/%s\n\n", plo, colorCyan, host, plo, colorReset)
+
+	fmt.Printf("%sHydra needs no changes:%s it stays on localhost:%s (no auth key, no 0.0.0.0 bind).\n", colorBold, colorReset, port)
+	fmt.Printf("Inspect or undo the mappings with %stailscale serve status%s / %stailscale serve reset%s.\n", colorBold, colorReset, colorBold, colorReset)
+	return nil
+}
+
+// tailscaleDNSName returns this machine's MagicDNS name (e.g. "hades.tail-scale.ts.net"),
+// or "" when tailscale is not installed, not logged in, or its status can't be
+// read - callers fall back to a placeholder rather than failing.
+func tailscaleDNSName() string {
+	if _, err := exec.LookPath("tailscale"); err != nil {
+		return ""
+	}
+	out, err := sh.Output("tailscale", "status", "--json")
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Self struct {
+			DNSName string `json:"DNSName"`
+		} `json:"Self"`
+	}
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		return ""
+	}
+	// MagicDNS names come back fully-qualified with a trailing dot.
+	return strings.TrimSuffix(strings.TrimSpace(st.Self.DNSName), ".")
 }
 
 // Service installs Hydra as a systemd --user service that serves the web UI on
