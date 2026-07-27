@@ -24,12 +24,18 @@ import (
 // system prompt (not as part of the user's task prompt). The placeholders
 // <branch> and <base-branch> are substituted at spawn time; <network-info> is
 // substituted by BuildFinalPrePrompt with the agent's resolved egress posture.
+// <run-mode> is deliberately NOT resolved here: unlike the others it can change
+// across a resume (the head's chat/terminal mode is mutable), so it is left in
+// the stored pre-prompt and resolved per-launch (spawn and resume) via
+// RunModeLine, keeping it a session-constant fact that never busts the prompt
+// cache mid-conversation.
 const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestration platform.\n" +
 	"\n" +
 	"## Environment\n" +
 	"- You are running inside a locked-down OS sandbox on a dedicated git worktree, as the host user.\n" +
 	"- You MUST work in this worktree, not the main repository.\n" +
 	"- You have read access to the host, write access to your worktree and the developer caches; credential locations are masked.\n" +
+	"<run-mode>" +
 	"<network-info>" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"\n" +
@@ -845,6 +851,23 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	}
 	final := strings.Join(parts, "\n") + "\n\nTask:\n"
 	return strings.ReplaceAll(final, "<network-info>", networkInfoLine(cfg, agentType))
+}
+
+// RunModeLine renders the head's run mode as a pre-prompt bullet, substituted
+// into the <run-mode> placeholder. It states a neutral fact - chat/stream-json
+// vs interactive terminal - that standing instructions (e.g. CLAUDE.md) can
+// branch on, rather than baking mode-specific behaviour into the pre-prompt
+// itself. Resolved per-launch from the live chatMode (see SpawnHead/ResumeHead),
+// so a chat<->terminal toggle is reflected on the next launch. The mode is fixed
+// for a session, so this never changes the system prompt mid-conversation.
+func RunModeLine(chatMode bool) string {
+	if chatMode {
+		return "- Run mode: chat (stream-json). You are driven through a structured " +
+			"JSON protocol and your replies are rendered as Markdown in Hydra's web " +
+			"chat UI, not written to a terminal.\n"
+	}
+	return "- Run mode: terminal. You are attached to an interactive terminal (PTY) " +
+		"session.\n"
 }
 
 // networkInfoLine renders the agent's resolved egress posture as a pre-prompt

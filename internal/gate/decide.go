@@ -163,7 +163,7 @@ var settingsInPlaceRe = regexp.MustCompile(`(?i)(\bsed\s+-i|\bperl\s+-i|\b(cp|mv
 
 // Decide returns the gate's verdict for one tool call. It is a pure function of
 // the policy and the hook payload so it is exhaustively unit-testable. The
-// guiding principle (see AUDIT.md): recognized built-in tools are allowed (the OS
+// guiding principle (see docs/security-audit.md): recognized built-in tools are allowed (the OS
 // sandbox is the boundary), while MCP calls AND tools the gate doesn't recognize
 // fail closed (parked for approval) - an un-vetted MCP/connector tool must not
 // slip through under a name the mcp__ check misses, even with permissions skipped.

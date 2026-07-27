@@ -191,6 +191,15 @@ export const REVIEW_DRAFT_PREFIX = 'hydra-review-draft-'
 export const reviewDraftKey = (projectId: string | null, agentId: string): string =>
   `${REVIEW_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
 
+// In-progress (not yet "Add to review"ed) line-comment drafts, one entry per
+// project + agent holding a map of line-key -> the half-written text. Kept apart
+// from REVIEW_DRAFT so submitting/clearing a review batch never wipes a comment
+// the user is mid-way through typing on another line, and the two prune on their
+// own timers. See lib/reviewDrafts.ts. projectId may be null -> '_'.
+export const LINE_DRAFT_PREFIX = 'hydra-line-draft-'
+export const lineDraftKey = (projectId: string | null, agentId: string): string =>
+  `${LINE_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
 // collapsed (the default - archived history is rarely wanted, so it stays out of
 // the way); '0' = the user explicitly expanded it. (Legacy '1' values from when

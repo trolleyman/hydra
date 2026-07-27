@@ -13,8 +13,8 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
-  ArrowRightLeft, MessageSquarePlus, FolderSync,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
+  ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
@@ -22,6 +22,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
+import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
@@ -50,25 +51,26 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
-import { addReviewComment, removeReviewComment, clearReviewDraft, loadReviewDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { HighlightedTextarea } from './components/HighlightedTextarea'
+import { Markdown } from './lib/MarkdownRenderer'
+import { useCopyFlash } from './lib/useCopyFlash'
+import { CopyStateIcon } from './components/CopyStateIcon'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(text).catch(() => { })
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
+  const { state, copy } = useCopyFlash()
+  // Reuse the same hint tooltip rather than adding a second one: swap its label
+  // to reflect the copy outcome while the icon flashes, then revert to "Copy path".
+  const label = state === 'ok' ? 'Copied to clipboard' : state === 'err' ? 'Copy failed' : 'Copy path'
   return (
-    <Tooltip content="Copy path">
+    <Tooltip content={label}>
       <button
-        onClick={handleCopy}
+        onClick={(e) => { e.stopPropagation(); void copy(text) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+        <CopyStateIcon state={state} idleColor="text-gray-400" />
       </button>
     </Tooltip>
   )
@@ -101,72 +103,249 @@ function RepoOpenButton({ target }: { target: LinkProps }) {
 // view) instead queues it into the per-agent review batch for a later single
 // submit. onAddToReview is synchronous (a localStorage write), so it just closes
 // the row via the parent's onCancel after queuing.
-function CommentRow({ onSubmit, onAddToReview, onCancel }: {
-  onSubmit: (text: string) => Promise<void>
-  onAddToReview?: (text: string) => void
-  onCancel: () => void
+// Stable per-agent handle for the in-progress (un-queued) text of a line's comment
+// box, so CommentRow can restore a half-written comment on reopen/reload without
+// threading projectId + agentId through every memo'd hunk. Built once in
+// DiffViewerImpl (see lineDraftApi there).
+export interface LineDraftApi {
+  load: (path: string, lineNum: number, isNew: boolean) => string
+  save: (path: string, lineNum: number, isNew: boolean, text: string) => void
+  clear: (path: string, lineNum: number, isNew: boolean) => void
+}
+
+// A per-line index of queued review comments, keyed by `${side}:${lineNum}` (side
+// = 'new'|'old', matching how a comment's isNew resolves to a diff line). Each
+// entry carries a frozen `stale` flag (its anchoring hunk changed after it was
+// queued). Built in FileDiff from that file's comments; an empty file shares
+// EMPTY_LINE_COMMENTS so the memo'd hunks keep a stable prop.
+type LineCommentEntry = { comment: PendingReviewComment; stale: boolean }
+type LineCommentMap = Map<string, LineCommentEntry[]>
+const EMPTY_LINE_COMMENTS: LineCommentMap = new Map()
+// Shared empty list for files with no queued comments, so FileDiff's fileComments
+// prop keeps a stable identity and its memo isn't busted by a fresh [] each render.
+const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
+
+// One queued comment shown inline beneath its diff line: the authored text rendered
+// as markdown (matching how it lands in the agent chat), with edit + remove. A
+// stale comment (its diff moved since it was queued) gets a warning but still reads.
+function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
+  comment: PendingReviewComment
+  stale: boolean
+  onEdit: () => void
+  onRemove: () => void
 }) {
-  const [text, setText] = useState('')
+  return (
+    <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 px-4 py-2">
+      <div className="flex items-start gap-2">
+        <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
+        <div className="min-w-0 flex-1">
+          <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
+          {stale && (
+            <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
+              <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
+              <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Tooltip content="Edit comment" side="top">
+            <button
+              onClick={onEdit}
+              aria-label="Edit comment"
+              className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+          <Tooltip content="Remove comment" side="top">
+            <button
+              onClick={onRemove}
+              aria-label="Remove comment"
+              className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The inline comment editor opened under a diff line. Three modes, picked by which
+// callback is wired:
+//   - new comment: onSubmit ("Send" now) + optional onAddToReview (queue for the
+//     batch). Its text is persisted per line via onDraftChange as you type, so a
+//     half-written comment survives closing the box / reloading the page (the
+//     parent seeds `initialText` from that saved draft and clears it once the
+//     comment is sent or queued).
+//   - edit a queued comment: onSave (overwrite the stored text). No draft
+//     persistence - editing commits straight to the queued comment on save.
+// "Add to review" is synchronous (a localStorage write); the parent closes the row
+// after any action via its own state.
+function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCancel, onDraftChange }: {
+  initialText?: string
+  onSubmit?: (text: string) => Promise<void>
+  onAddToReview?: (text: string) => void
+  onSave?: (text: string) => void
+  onCancel: () => void
+  onDraftChange?: (text: string) => void
+}) {
+  const [text, setText] = useState(initialText)
   const [sending, setSending] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { ref.current?.focus() }, [])
+  // Focus on open; when seeded (edit / restored draft) drop the caret at the end
+  // rather than selecting all, so typing appends. Runs once on mount.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    if (initialText) el.setSelectionRange(initialText.length, initialText.length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const change = (v: string) => { setText(v); onDraftChange?.(v) }
 
   const handleSubmit = async () => {
-    if (!text.trim() || sending) return
+    if (!text.trim() || sending || !onSubmit) return
     setSending(true)
     await onSubmit(text)
     setSending(false)
   }
-
   const handleAdd = () => {
     if (!text.trim() || sending || !onAddToReview) return
     onAddToReview(text)
   }
+  const handleSave = () => {
+    if (!text.trim() || sending || !onSave) return
+    onSave(text)
+  }
+  // Ctrl+Enter fires the primary action for the mode: save when editing, else
+  // queue into the review batch when that's available (the common reviewing flow),
+  // else send immediately.
+  const primary = onSave ? handleSave : onAddToReview ? handleAdd : handleSubmit
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
-      // Ctrl+Enter queues into the review batch when that's available (the common
-      // reviewing flow), else sends immediately.
-      if (onAddToReview) handleAdd(); else handleSubmit()
+      primary()
     } else if (e.key === 'Escape') onCancel()
   }
 
+  const placeholder = onSave
+    ? 'Edit comment... (Ctrl+Enter to save)'
+    : onAddToReview
+      ? 'Write a comment... (Ctrl+Enter to add to review)'
+      : 'Write a comment... (Ctrl+Enter to submit)'
+
+  const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
+
   return (
     <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10 px-4 py-3">
-      <textarea
+      <HighlightedTextarea
         ref={ref}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => change(e.target.value)}
         onKeyDown={handleKeyDown}
-        className="w-full h-20 p-2 text-xs font-sans bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
-        placeholder={onAddToReview ? 'Write a comment... (Ctrl+Enter to add to review)' : 'Write a comment... (Ctrl+Enter to submit)'}
+        wrapperClassName="w-full h-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-blue-500"
+        textClassName="p-2 text-xs leading-5"
+        placeholder={placeholder}
       />
       <div className="flex justify-end gap-2 mt-2">
-        <button
-          onClick={onCancel}
-          className="px-2 py-1 text-[10px] font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors cursor-pointer"
-        >
+        <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
           Cancel
         </button>
-        {onAddToReview && (
+        {onSave ? (
           <button
-            disabled={!text.trim() || sending}
-            onClick={handleAdd}
-            className="px-2 py-1 text-[10px] font-medium text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50 rounded transition-colors cursor-pointer"
+            disabled={!text.trim()}
+            onClick={handleSave}
+            className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
           >
-            Add to review
+            Save
           </button>
+        ) : (
+          <>
+            {onAddToReview && (
+              <button
+                disabled={!text.trim() || sending}
+                onClick={handleAdd}
+                className={`${btn} text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
+              >
+                Add to review
+              </button>
+            )}
+            <button
+              disabled={!text.trim() || sending}
+              onClick={handleSubmit}
+              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+            >
+              {sending ? 'Sending...' : 'Send'}
+            </button>
+          </>
         )}
-        <button
-          disabled={!text.trim() || sending}
-          onClick={handleSubmit}
-          className="px-2 py-1 text-[10px] font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded transition-colors cursor-pointer"
-        >
-          {sending ? 'Sending...' : 'Send'}
-        </button>
       </div>
     </div>
+  )
+}
+
+// The queued comments anchored to one diff line (side + number), plus the open
+// editor for a NEW comment on it, rendered as full-width rows beneath the line.
+// Shared by the unified and side-by-side hunks so both views show inline comments
+// identically. `openNew` drives the new-comment CommentRow; editing an existing
+// comment is tracked here by id.
+function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi }: {
+  entries: LineCommentEntry[] | undefined
+  path: string
+  lineNum: number
+  isNew: boolean
+  openNew: boolean
+  onCloseNew: () => void
+  onComment: (lineNum: number, isNew: boolean, text: string) => void
+  onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  lineDraftApi?: LineDraftApi
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  if (!openNew && (!entries || entries.length === 0)) return null
+  return (
+    <>
+      {entries?.map(({ comment, stale }) =>
+        editingId === comment.id ? (
+          <CommentRow
+            key={comment.id}
+            initialText={comment.text}
+            onSave={(t) => { onEditComment?.(comment.id, t); setEditingId(null) }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <QueuedCommentCard
+            key={comment.id}
+            comment={comment}
+            stale={stale}
+            onEdit={() => setEditingId(comment.id)}
+            onRemove={() => onRemoveComment?.(comment.id)}
+          />
+        ),
+      )}
+      {openNew && (
+        <CommentRow
+          initialText={lineDraftApi?.load(path, lineNum, isNew) ?? ''}
+          onDraftChange={(t) => lineDraftApi?.save(path, lineNum, isNew, t)}
+          onSubmit={async (text) => {
+            await onComment(lineNum, isNew, text)
+            lineDraftApi?.clear(path, lineNum, isNew)
+            onCloseNew()
+          }}
+          onAddToReview={onAddToReview ? (text) => {
+            onAddToReview(lineNum, isNew, text)
+            lineDraftApi?.clear(path, lineNum, isNew)
+            onCloseNew()
+          } : undefined}
+          onCancel={onCloseNew}
+        />
+      )}
+    </>
   )
 }
 
@@ -280,14 +459,19 @@ function codeCellHtml(highlighted: string | undefined, content: string, ranges: 
   return highlighted ?? null
 }
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
+  path: string
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   wordRangesOld: Map<number, WordRange[]>
   wordRangesNew: Map<number, WordRange[]>
+  comments?: LineCommentMap
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
@@ -312,6 +496,12 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const selOld = selectionHas(selection, 'old', line.old_line_num)
         const selNew = selectionHas(selection, 'new', line.new_line_num)
         const rowSel = selOld || selNew
+        // Which side/number a comment on this row anchors to (mirrors onComment's
+        // isNew below): additions and context comment against the new side, a pure
+        // deletion against the old. no_newline rows can't be commented.
+        const isNewSide = isAdd || line.type === 'context'
+        const commentLn = isNoNewline ? null : (isNewSide ? line.new_line_num : line.old_line_num) ?? null
+        const lineEntries = commentLn != null ? comments?.get(`${isNewSide ? 'new' : 'old'}:${commentLn}`) : undefined
         return (
           <Fragment key={idx}>
             <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
@@ -334,21 +524,19 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
                 <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
               )}
             </div>
-            {openCommentIdx === idx && (
-              <CommentRow
-                onSubmit={async (text) => {
-                  // Context lines exist on both sides; comment against the new side
-                  // (like the side-by-side view) so the line number matches isNew.
-                  const isNew = isAdd || line.type === 'context'
-                  await onComment(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
-                  setOpenCommentIdx(null)
-                }}
-                onAddToReview={onAddToReview ? (text) => {
-                  const isNew = isAdd || line.type === 'context'
-                  onAddToReview(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
-                  setOpenCommentIdx(null)
-                } : undefined}
-                onCancel={() => setOpenCommentIdx(null)}
+            {commentLn != null && (openCommentIdx === idx || (lineEntries && lineEntries.length > 0)) && (
+              <LineComments
+                entries={lineEntries}
+                path={path}
+                lineNum={commentLn}
+                isNew={isNewSide}
+                openNew={openCommentIdx === idx}
+                onCloseNew={() => setOpenCommentIdx(null)}
+                onComment={onComment}
+                onAddToReview={onAddToReview}
+                onEditComment={onEditComment}
+                onRemoveComment={onRemoveComment}
+                lineDraftApi={lineDraftApi}
               />
             )}
           </Fragment>
@@ -359,14 +547,19 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 })
 
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, onComment, onAddToReview, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
+  path: string
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   wordRangesOld: Map<number, WordRange[]>
   wordRangesNew: Map<number, WordRange[]>
+  comments?: LineCommentMap
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
@@ -389,6 +582,11 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
         const selNew = selectionHas(selection, 'new', line.newLineNum)
+        // A comment on this paired row anchors to the new side when present (matches
+        // onComment below), else the old side.
+        const isNewSide = line.newLineNum != null
+        const commentLn = line.newLineNum ?? line.oldLineNum ?? null
+        const lineEntries = commentLn != null ? comments?.get(`${isNewSide ? 'new' : 'old'}:${commentLn}`) : undefined
         return (
           <Fragment key={idx}>
             <div className={SBS_ROW}>
@@ -423,21 +621,19 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 }
               </div>
             </div>
-            {openCommentIdx === idx && (
-              <CommentRow
-                onSubmit={async (text) => {
-                  const lineNum = line.newLineNum ?? line.oldLineNum!
-                  const isNew = line.newLineNum != null
-                  await onComment(lineNum, isNew, text)
-                  setOpenCommentIdx(null)
-                }}
-                onAddToReview={onAddToReview ? (text) => {
-                  const lineNum = line.newLineNum ?? line.oldLineNum!
-                  const isNew = line.newLineNum != null
-                  onAddToReview(lineNum, isNew, text)
-                  setOpenCommentIdx(null)
-                } : undefined}
-                onCancel={() => setOpenCommentIdx(null)}
+            {commentLn != null && (openCommentIdx === idx || (lineEntries && lineEntries.length > 0)) && (
+              <LineComments
+                entries={lineEntries}
+                path={path}
+                lineNum={commentLn}
+                isNew={isNewSide}
+                openNew={openCommentIdx === idx}
+                onCloseNew={() => setOpenCommentIdx(null)}
+                onComment={onComment}
+                onAddToReview={onAddToReview}
+                onEditComment={onEditComment}
+                onRemoveComment={onRemoveComment}
+                lineDraftApi={lineDraftApi}
               />
             )}
           </Fragment>
@@ -683,7 +879,7 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -694,6 +890,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // Optional "Add to review" (queue for batch submit). Omitted in the read-only
   // repo view, where the line-level comment affordances are hidden entirely.
   onAddToReview?: (path: string, lineNum: number, isNew: boolean, text: string) => void
+  // Queued review comments anchored to this file, shown inline under their line.
+  // A stable empty array when the file has none (keeps the hunks' memo intact).
+  fileComments?: PendingReviewComment[]
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  lineDraftApi?: LineDraftApi
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
@@ -876,6 +1078,31 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     return { wordRangesOld: maps.old, wordRangesNew: maps.new }
   }, [highlightSource, wordHighlight])
 
+  // Index this file's queued comments by line (side + number) for the hunks to
+  // show inline, freezing each comment's staleness against the LIVE hunks here
+  // (findHunkForLine + hashHunks) - so a comment whose diff has moved reads with a
+  // warning but still renders. A file with no comments shares EMPTY_LINE_COMMENTS
+  // so the memo'd hunks keep a stable `comments` prop and skip re-rendering.
+  const commentsByLine = useMemo<LineCommentMap>(() => {
+    if (!fileComments || fileComments.length === 0) return EMPTY_LINE_COMMENTS
+    const m: LineCommentMap = new Map()
+    for (const c of fileComments) {
+      let stale = false
+      if (c.hunkHash) {
+        const hunk = findHunkForLine(file, c.lineNum, c.isNew)
+        stale = (hunk ? hashHunks([hunk]) : '') !== c.hunkHash
+      }
+      const key = `${c.isNew ? 'new' : 'old'}:${c.lineNum}`
+      const entry: LineCommentEntry = { comment: c, stale }
+      const arr = m.get(key)
+      if (arr) arr.push(entry); else m.set(key, [entry])
+    }
+    return m
+    // hunksSig stands in for file.hunks identity (stable across no-op refreshes),
+    // so this recomputes staleness only when the comments or the diff truly change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileComments, hunksSig])
+
   // Placeholder height while the body is lazy-unmounted. Also used directly as
   // the tween wrapper's height during that phase: bodyH is 0 until the
   // ResizeObserver's first measurement, and if every card rendered at ~0 body
@@ -958,12 +1185,14 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
 
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
-      ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-      : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+      ? <SideBySideHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+      : <UnifiedHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave
@@ -1148,12 +1377,14 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       </div>
                     )}
                     {sideBySide
-                      ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-                      : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                      ? <SideBySideHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+                        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                      : <UnifiedHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+                        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
@@ -1231,10 +1462,12 @@ function findHunkForLine(file: DiffFile | undefined, lineNum: number, isNew: boo
 }
 
 // Build the fenced ```diff context block for a commented line: three lines either
-// side. Each row is `<sign> | <old line> | <new line> | <code>` (line numbers
-// padded to align within the window), and the commented line is followed by a
-// `# ^ Comment by user` caret so the agent can see exactly which line is meant.
-// Returns '' when the hunk/line can't be located.
+// side, in standard unified-diff form so the agent gets proper red/green ```diff
+// syntax highlighting. Each row is a sign char (' '/'+'/'-') directly followed by
+// the raw line (no line-number columns), under `--- path` / `+++ path` and the
+// hunk header. The commented line is followed by a `# ^ Comment` caret so the
+// agent can see exactly which line is meant. Returns '' when the hunk/line can't
+// be located.
 function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: number, isNew: boolean): string {
   if (!hunk) return ''
   const targetIdx = hunk.lines.findIndex((l) => (isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum))
@@ -1242,17 +1475,52 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   const start = Math.max(0, targetIdx - 3)
   const end = Math.min(hunk.lines.length, targetIdx + 4)
   const ctxLines = hunk.lines.slice(start, end)
-  const oldStr = (l: DiffLine) => (l.old_line_num != null ? String(l.old_line_num) : '')
-  const newStr = (l: DiffLine) => (l.new_line_num != null ? String(l.new_line_num) : '')
-  const wOld = Math.max(1, ...ctxLines.map((l) => oldStr(l).length))
-  const wNew = Math.max(1, ...ctxLines.map((l) => newStr(l).length))
   const rows: string[] = []
   ctxLines.forEach((l, i) => {
     const sign = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
-    rows.push(`${sign} | ${oldStr(l).padStart(wOld)} | ${newStr(l).padStart(wNew)} | ${l.content}`)
-    if (start + i === targetIdx) rows.push('# ^ Comment by user')
+    rows.push(`${sign}${l.content}`)
+    if (start + i === targetIdx) rows.push('# ^ Comment')
   })
-  return `\`\`\`diff\n# ${path}\n${hunk.header}\n${rows.join('\n')}\n\`\`\`\n`
+  const header = hunk.header ? `${hunk.header}\n` : ''
+  return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
+}
+
+// One comment's worth of data needed to render the chat message: the authored
+// text, the diff comparison it was written against, and its frozen context block.
+// Both the live "Send" path and a stored PendingReviewComment satisfy this shape.
+type ReviewMessagePart = Pick<PendingReviewComment, 'text' | 'fromLabel' | 'toLabel' | 'contextBlock'>
+
+// Build the chat message sent to the agent for one or more review comments.
+// A single comment gets a "Comment on <from> -> <to> diff:" header; multiple are
+// grouped by their comparison (usually just one group) under a "Comments on
+// <from> -> <to> diff:" header, separated by a blank line. Each comment carries
+// its own ```diff context block (already fenced) followed by its text.
+function buildReviewMessage(comments: ReviewMessagePart[]): string {
+  if (comments.length === 0) return ''
+  if (comments.length === 1) {
+    const c = comments[0]
+    let s = `Comment on ${c.fromLabel} -> ${c.toLabel} diff:\n`
+    if (c.contextBlock) s += `\n${c.contextBlock}`
+    s += `\nComment:\n${c.text}`
+    return s
+  }
+  // Group by comparison, preserving first-seen order.
+  const groups: { label: string; items: ReviewMessagePart[] }[] = []
+  comments.forEach((c) => {
+    const label = `${c.fromLabel} -> ${c.toLabel}`
+    let g = groups.find((grp) => grp.label === label)
+    if (!g) { g = { label, items: [] }; groups.push(g) }
+    g.items.push(c)
+  })
+  return groups.map((g) => {
+    const parts = g.items.map((c) => {
+      let s = ''
+      if (c.contextBlock) s += `${c.contextBlock}\n`
+      s += `Comment:\n${c.text}`
+      return s
+    })
+    return `Comments on ${g.label} diff:\n\n${parts.join('\n\n')}`
+  }).join('\n\n')
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -2082,7 +2350,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (!ref || !projectId) return undefined
     return (path: string) => linkOptions({
       to: '/project/$projectId/repository/$',
-      params: { projectId, _splat: `${ref}/${path}` },
+      params: { projectId, _splat: buildRepoSplat(ref, path) },
     })
   }, [projectId, agent.branch_name])
 
@@ -2606,9 +2874,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const file = diffRef.current?.files.find(f => f.path === path)
     const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
-    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`# ^\` in the block below) (diff: ${fromLabel} -> ${toLabel})\n`
-    if (block) msg += `\n${block}`
-    msg += `\nComment:\n${text}`
+    const msg = buildReviewMessage([{ text, fromLabel, toLabel, contextBlock: block }])
 
     try {
       await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
@@ -2638,6 +2904,33 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setReviewComments(removeReviewComment(projectId, agent.id, id))
   }, [projectId, agent.id])
 
+  // Edit a queued comment in place (from its inline card). Stable so it doesn't
+  // bust the hunks' memo.
+  const handleUpdateReviewComment = useCallback((id: string, text: string) => {
+    setReviewComments(updateReviewComment(projectId, agent.id, id, text))
+  }, [projectId, agent.id])
+
+  // Queued comments grouped by file, so each FileDiff gets only its own. Files
+  // with none share EMPTY_FILE_COMMENTS (stable identity) so their hunks' memo
+  // holds. Rebuilds only when the queued set changes.
+  const commentsByPath = useMemo(() => {
+    const m = new Map<string, PendingReviewComment[]>()
+    for (const c of reviewComments) {
+      const arr = m.get(c.path)
+      if (arr) arr.push(c); else m.set(c.path, [c])
+    }
+    return m
+  }, [reviewComments])
+
+  // Stable handle the inline comment box uses to persist / restore its in-progress
+  // (un-queued) text per line. Bound once to this project + agent so it can be
+  // threaded through the memo'd hunks without churn.
+  const lineDraftApi = useMemo<LineDraftApi>(() => ({
+    load: (path, lineNum, isNew) => loadLineDraft(projectId, agent.id, path, lineNum, isNew),
+    save: (path, lineNum, isNew, text) => saveLineDraft(projectId, agent.id, path, lineNum, isNew, text),
+    clear: (path, lineNum, isNew) => clearLineDraft(projectId, agent.id, path, lineNum, isNew),
+  }), [projectId, agent.id])
+
   // Flush the whole queued batch to the agent as one message, then clear the
   // draft. Each comment carries its own frozen context, so the message is built
   // entirely from the stored data - independent of what the live diff shows now.
@@ -2645,17 +2938,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const comments = loadReviewDraft(projectId, agent.id)
     if (comments.length === 0 || submittingReview) return
     setSubmittingReview(true)
-    const header = comments.length === 1
-      ? `Please address the following review comment:`
-      : `Please address the following ${comments.length} review comments:`
-    const body = comments.map((c, i) => {
-      let s = `## ${i + 1}. \`${c.path}\` line ${c.lineNum} (diff: ${c.fromLabel} -> ${c.toLabel})\n`
-      if (c.contextBlock) s += `\n${c.contextBlock}`
-      s += `\nComment:\n${c.text}`
-      return s
-    }).join('\n\n')
+    const text = buildReviewMessage(comments)
     try {
-      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `${header}\n\n${body}` })
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text })
       clearReviewDraft(projectId, agent.id)
       setReviewComments([])
       showSentToast(comments.length === 1 ? 'Review sent to agent' : `Review of ${comments.length} comments sent to agent`)
@@ -2998,6 +3283,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
               onAddToReview={handleAddToReview}
+              fileComments={commentsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_COMMENTS}
+              onEditComment={handleUpdateReviewComment}
+              onRemoveComment={removeQueuedComment}
+              lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
               // getShowCallback/getFileRef return render-stable per-path callbacks that
@@ -3030,6 +3319,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
               onAddToReview={handleAddToReview}
+              fileComments={commentsByPath.get(f.path) ?? EMPTY_FILE_COMMENTS}
+              onEditComment={handleUpdateReviewComment}
+              onRemoveComment={removeQueuedComment}
+              lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(f.path)}
               onShow={getShowCallback(f.path)}

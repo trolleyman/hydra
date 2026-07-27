@@ -8,7 +8,7 @@
 // Keeping them apart means submitting a review can wipe the draft cleanly without
 // touching layout prefs, and the two prune independently.
 
-import { reviewDraftKey, REVIEW_DRAFT_PREFIX, createShardedStore } from './storage'
+import { reviewDraftKey, REVIEW_DRAFT_PREFIX, lineDraftKey, LINE_DRAFT_PREFIX, createShardedStore } from './storage'
 import { randomId } from './uuid'
 
 // One queued comment. `path` + `lineNum` + `isNew` anchor it to a diff line the
@@ -70,6 +70,20 @@ export function addReviewComment(
   return next
 }
 
+// Replace the text of one queued comment (in-place edit), returning the new list.
+// A no-op if the id isn't found. The comment keeps its original anchor, frozen
+// context block and hunk hash - only the authored text changes.
+export function updateReviewComment(
+  projectId: string | null,
+  agentId: string,
+  id: string,
+  text: string,
+): PendingReviewComment[] {
+  const next = loadReviewDraft(projectId, agentId).map((c) => (c.id === id ? { ...c, text } : c))
+  store.save(reviewDraftKey(projectId, agentId), { comments: next })
+  return next
+}
+
 // Remove one queued comment by id, returning the new list.
 export function removeReviewComment(
   projectId: string | null,
@@ -86,7 +100,68 @@ export function clearReviewDraft(projectId: string | null, agentId: string): voi
   store.save(reviewDraftKey(projectId, agentId), { comments: [] })
 }
 
-// Drop expired review-draft entries. Cheap to call once on app boot.
+// ── In-progress line-comment drafts ──────────────────────────────────────────
+// The text a user is part-way through typing in a line's comment box, BEFORE
+// they hit "Add to review" (which promotes it to a PendingReviewComment above)
+// or "Send". Persisted per line so closing the box, reloading the page, or
+// switching away and reopening the same line restores the half-written comment.
+// One store entry per project + agent holds a map of line-key -> text.
+
+type LineDrafts = { drafts: Record<string, string> }
+
+const lineStore = createShardedStore<LineDrafts>(LINE_DRAFT_PREFIX, REVIEW_DRAFT_TTL_MS)
+
+// A line-key uniquely identifies a diff line within a file: path + side + number.
+// The separator is a NUL, which can't appear in a path or line number, so keys
+// never collide - written as the '\u0000' escape, never a raw NUL byte (a raw
+// NUL would make grep treat this file as binary; see the "no raw control bytes"
+// rule in CLAUDE.md, and the same idiom in lib/testCases.ts).
+function lineKey(path: string, lineNum: number, isNew: boolean): string {
+  return `${path}\u0000${isNew ? 'new' : 'old'}\u0000${lineNum}`
+}
+
+// The saved in-progress text for a line, or '' when nothing is stored.
+export function loadLineDraft(
+  projectId: string | null,
+  agentId: string,
+  path: string,
+  lineNum: number,
+  isNew: boolean,
+): string {
+  const stored = lineStore.load(lineDraftKey(projectId, agentId))
+  return stored?.drafts?.[lineKey(path, lineNum, isNew)] ?? ''
+}
+
+// Persist (or, for empty text, drop) the in-progress draft for a line.
+export function saveLineDraft(
+  projectId: string | null,
+  agentId: string,
+  path: string,
+  lineNum: number,
+  isNew: boolean,
+  text: string,
+): void {
+  const key = lineDraftKey(projectId, agentId)
+  const drafts = { ...(lineStore.load(key)?.drafts ?? {}) }
+  const k = lineKey(path, lineNum, isNew)
+  if (text.trim()) drafts[k] = text
+  else delete drafts[k]
+  lineStore.save(key, { drafts })
+}
+
+// Drop the in-progress draft for a line (after it's been queued or sent).
+export function clearLineDraft(
+  projectId: string | null,
+  agentId: string,
+  path: string,
+  lineNum: number,
+  isNew: boolean,
+): void {
+  saveLineDraft(projectId, agentId, path, lineNum, isNew, '')
+}
+
+// Drop expired review-draft and line-draft entries. Cheap to call once on app boot.
 export function pruneReviewDrafts(): void {
   store.prune()
+  lineStore.prune()
 }

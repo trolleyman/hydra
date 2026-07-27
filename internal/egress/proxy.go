@@ -3,7 +3,7 @@
 // a network allow-list (`[<agent>.sandbox.network] allowed_hosts`) can reach the
 // hosts it needs and nothing else.
 //
-// Enforcement model (important, and deliberately honest - see AUDIT.md rec 3):
+// Enforcement model (important, and deliberately honest - see docs/security-audit.md rec 3):
 // this proxy is reached via the standard HTTP(S)_PROXY environment variables, and
 // every well-behaved client (claude, git, npm, curl, node, bun, ...) honours those,
 // so for them the allow-list is enforced at this choke point. On its own that is

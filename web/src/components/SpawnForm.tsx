@@ -2,9 +2,10 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
+import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare, SquareTerminal } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -223,8 +224,9 @@ export const SpawnForm = memo(function SpawnForm({
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
   // Chat mode: drive Claude or Codex via its structured protocol and
-  // show a chat view instead of a terminal. Remembered like the agent/model.
-  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) === 'true')
+  // show a chat view instead of a terminal. Remembered like the agent/model;
+  // defaults ON when the user has never touched the toggle (only 'false' opts out).
+  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) !== 'false')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the project's
@@ -703,9 +705,10 @@ export const SpawnForm = memo(function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
-        // Structured chat is available for Claude and Codex; a remembered value
-        // must not leak into another agent type's spawn.
-        ...((agentType === 'claude' || agentType === 'codex') && chatMode ? { chat_mode: true } : {}),
+        // Structured chat is available for Claude and Codex; send the choice
+        // explicitly so turning the toggle off wins over the server-side
+        // default-on, and a remembered value never leaks into another agent type.
+        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: chatMode } : {}),
         // Adopting a PR takes precedence over (and ignores) the base branch: the
         // server bases the head on the PR head and its target branch.
         ...(adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {}),
@@ -845,6 +848,59 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
+  // The compact spawn box is tight, so its chat-mode toggle and base-branch
+  // picker collapse into a single settings cog (styled like the per-section
+  // options popovers elsewhere), sitting where the branch selector button used
+  // to be. Returns null when neither control applies (e.g. a non-chat agent in
+  // a built-in project), so no empty cog is shown.
+  function renderSpawnSettings() {
+    const showChat = agentType === 'claude' || agentType === 'codex'
+    // While adopting a PR the base branch is the PR's target, chosen server-side,
+    // so the base-branch picker is suppressed (mirrors renderBranchSelector).
+    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt
+    if (!showChat && !showBranch) return null
+    // A two-option segmented control: a chat-mode head opens the web chat view,
+    // otherwise the head runs in a terminal. `chatMode === false` selects the
+    // terminal segment.
+    const modeSegment = (active: boolean) =>
+      `flex items-center gap-1.5 px-2.5 py-1 font-medium transition-colors cursor-pointer ${active
+        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
+    return (
+      <SettingsPopover label="Spawn options" width={260} align="left" fitContent>
+        {showChat && (
+          <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
+            <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
+              <SquareTerminal className="w-3.5 h-3.5" />
+              terminal
+            </button>
+            <button type="button" aria-pressed={chatMode} onClick={() => setChatMode(true)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(chatMode)}`}>
+              <MessageSquare className="w-3.5 h-3.5" />
+              chat
+            </button>
+          </div>
+        )}
+        {showChat && showBranch && (
+          <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
+        )}
+        {showBranch && branches && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Base branch</SettingsGroupLabel>
+            <BranchSelector
+              branches={branches}
+              activeRef={baseBranch}
+              isKnownBranch={branches.some((b) => b.name === baseBranch)}
+              onSelect={setBaseBranch}
+              onOpen={handleBranchOpen}
+              title="Base branch to create the agent from (pick an agent branch to stack on it)"
+              fitContent
+            />
+          </>
+        )}
+      </SettingsPopover>
+    )
+  }
+
   // Restore a snapshot returned by undo/redo: re-mirror the draft and put the
   // caret back where it was when that snapshot was current (after the controlled
   // value commits to the DOM, hence the rAF).
@@ -945,10 +1001,12 @@ export const SpawnForm = memo(function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
-                {renderChatToggle(true)}
+                {/* The PR-adopt control stays inline (not in the Spawn options
+                    popover) so the "Adopting PR #n" chip is visible in the
+                    collapsed footer; chat mode + base branch live in the popover. */}
                 {renderAdoptControl(true)}
               </div>
-              {renderBranchSelector(true)}
+              {renderSpawnSettings()}
               <button
                 type="submit"
                 disabled={!canSubmit || loading || disabled}

@@ -93,9 +93,19 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 	return &previewResolution{projectRoot: projectRoot, specs: specs, version: pv}, nil
 }
 
-// previewURL builds the absolute URL of a preview instance from the API
-// request's Host header (so it is correct for both local and remote browsers)
-// and the instance's proxy port. Preview listeners are plain HTTP.
+// previewURL builds the URL of a preview instance from the API request's Host
+// header (so it is correct for both local and remote browsers) and the
+// instance's proxy port.
+//
+// The URL is deliberately PROTOCOL-RELATIVE ("//host:port/"): the preview
+// listener is plain HTTP, but the browser resolves the scheme from the page it
+// runs in. Served locally over http the link stays http; fronted by a TLS
+// terminator (Tailscale serve, a reverse proxy) the Hydra page is https, so the
+// link becomes https too - which both avoids the browser blocking an http
+// preview embedded in an https page as mixed content, and keeps the preview
+// inside the same secure context. It does mean the front must also expose the
+// preview port over TLS (see docs/remote-access.md); the scheme just follows
+// the page rather than lying about it.
 func previewURL(ctx context.Context, port int) *string {
 	if port == 0 {
 		return nil
@@ -107,7 +117,7 @@ func previewURL(ctx context.Context, port int) *string {
 			host = h
 		}
 	}
-	u := fmt.Sprintf("http://%s/", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+	u := fmt.Sprintf("//%s/", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
 	return &u
 }
 

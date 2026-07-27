@@ -153,3 +153,20 @@ area; do not re-derive it by reading source. Skip them otherwise.
   [docs/chat-project.md](docs/chat-project.md) (BUILT;
   `projects.EnsureChatProject` + `HasUserProjects`, the reserved-ID rule, why a
   worktree-less head does not work, the project-icon traps)
+- **Working on the security gate / egress / MCP governance** (`internal/gate`,
+  `internal/egress`, MCP stripping, the `--dangerously-skip-permissions` posture)
+  -> [docs/security-audit.md](docs/security-audit.md) (the original sandbox audit;
+  its three main recommendations - gate, MCP allow-list, filtering egress proxy -
+  are now BUILT for Claude)
+- **User-checkoutable head branches** (the `hydra/<id>` vs `hydra-wt/<id>`
+  branch-split + ff-only mirror design) ->
+  [docs/user-branch-mirror.md](docs/user-branch-mirror.md) (proposed, unbuilt
+  design; only the `internal/git/branch.go` naming step is done)
+- **Remote access / HTTPS / secure context** (reaching Hydra from other devices,
+  the localhost-trust auth model, `mage deploy:tailscale` / `deploy:ngrok`,
+  serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
+  (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
+  `previewURL` protocol-relative so preview links follow the page scheme)
+
+The open backlog (ideas/gaps not yet built) lives in
+[docs/roadmap.md](docs/roadmap.md).

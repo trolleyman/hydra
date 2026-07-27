@@ -602,13 +602,17 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// persist across resumes but never touch the real source.
 	cowMounts := buildCowMounts(projectRoot, worktreePath, home, opts.ID, cowPaths, true)
 
-	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)))
+	// Resolve <run-mode> from the live chat/terminal mode at launch (the stored
+	// PrePrompt keeps the placeholder so a mode toggle is re-resolved on resume).
+	launchPrePrompt := strings.ReplaceAll(opts.PrePrompt, "<run-mode>", config.RunModeLine(opts.ChatMode))
+
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)))
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "")
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "")
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -1107,7 +1111,10 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			_ = os.Remove(p)
 		}
 	}
-	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
+	// Resolve <run-mode> from the head's current mode: a chat<->terminal toggle
+	// made while the session was down takes effect on this relaunch.
+	launchPrePrompt := strings.ReplaceAll(head.PrePrompt, "<run-mode>", config.RunModeLine(head.ChatMode))
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1128,7 +1135,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
 		resumeSession = claudestream.LatestSessionID(dir)
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "", head.ChatMode, resumeSession)
+	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}

@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 // Search params carried by the repository compare-diff so a selection is
-// deep-linkable (PLAN.md #72): `compare` is the head ref being diffed against
+// deep-linkable: `compare` is the head ref being diffed against
 // the browsed ref (its presence turns on diff mode); `dfile` is the selected
 // file in the one-file-at-a-time view. The line selection itself rides the URL
 // hash (#L<n> old side / #R<n> new side). All optional - absent means normal

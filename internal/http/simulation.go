@@ -2140,7 +2140,7 @@ var simRepoSymlinks = map[string]string{
 
 // simRepoImage is the path of the one binary (image) file in the simulated repo,
 // served as raw PNG bytes by the simulation blob handler so the repository
-// browser's image preview (PLAN.md #41k) has something to render.
+// browser's image preview has something to render.
 const simRepoImage = "web/public/logo.png"
 
 // simLogoPNG is a small, deterministic PNG used as the simulated repo's binary
@@ -2187,7 +2187,7 @@ var simRepoFiles = map[string]string{
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
-	// tree compacts config/env/staging/region/eu onto one row (PLAN.md #41 compact
+	// tree compacts config/env/staging/region/eu onto one row (compact
 	// folders, like the diff viewer).
 	"config/env/staging/region/eu/settings.toml": "[region]\nname = \"eu\"\nenv = \"staging\"\n\n[limits]\nmax_requests = 1000\ntimeout_sec = 30\n",
 	"README.md": "# Hydra Demo\n\nA simulated repository powering the **Repository** view.\n\n" +
@@ -2797,7 +2797,9 @@ func (s *SimulationServer) simPreviewStatus(r *http.Request, agentID, version st
 	st.Pid = ptr(40321)
 	st.StartedAt = ptr(simNow().Add(-42 * time.Second))
 	st.Connections = ptr(1)
-	st.Url = ptr("http://" + r.Host + "/")
+	// Protocol-relative, mirroring the real previewURL: the link follows the
+	// page's scheme (http on the LAN, https behind a TLS front).
+	st.Url = ptr("//" + r.Host + "/")
 	// The "Latest changes" (uncommitted) channel runs in its own checkout that
 	// mirrors the live worktree; show it going stale so the restart affordance
 	// is exercised in the sim.
