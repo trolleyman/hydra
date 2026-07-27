@@ -1,11 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, FolderOpen, Plus } from 'lucide-react'
+import { ChevronDown, ChevronUp, FolderOpen, GripVertical, Plus } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useFinePointer } from '../lib/useFinePointer'
 import { ProjectIcon } from '../lib/projectIcon'
+import { reorderProjects } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 
@@ -15,12 +16,93 @@ import { ServiceHealthWarning } from './ServiceHealthWarning'
 // binding everywhere.
 const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
-// Built-ins (the scratch project) first, everything else in server order. Only
-// the dropdown pins them: the Ctrl+` switcher is deliberately left on pure
-// recency, because pinning anything to the front of an alt-tab list breaks the
-// "one tap = previous project" model it exists for.
+// Built-ins (the scratch project) first, everything else in the order the server
+// stores - which is the user's own drag-to-reorder order (see reorderProjects).
+// Only the dropdown pins built-ins: the Ctrl+` switcher is deliberately left on
+// pure recency, because pinning anything to the front of an alt-tab list breaks
+// the "one tap = previous project" model it exists for.
 function orderProjects(projects: ProjectInfo[]): ProjectInfo[] {
   return [...projects].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))
+}
+
+// moveProject returns the project IDs with `id` lifted out and re-inserted at
+// `insertAt`, an insertion index measured against the list *before* the removal
+// (which is what a drop position gives us).
+function moveProject(ordered: ProjectInfo[], id: string, insertAt: number): string[] {
+  const ids = ordered.map((p) => p.id)
+  const from = ids.indexOf(id)
+  if (from < 0) return ids
+  ids.splice(from, 1)
+  ids.splice(insertAt > from ? insertAt - 1 : insertAt, 0, id)
+  return ids
+}
+
+// What a row needs to take part in reordering. Undefined for a pinned built-in,
+// and for every row when there is nothing to reorder (fewer than two of the
+// user's own projects).
+interface RowReorder {
+  // True while this row is the one being dragged - it dims so the drop
+  // indicator, not the row under the pointer, reads as "where this lands".
+  dragging: boolean
+  // Fine pointer = drag the row. Coarse (touch) = up/down buttons, because
+  // HTML5 drag-and-drop never fires from a touchscreen.
+  finePointer: boolean
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMove: (delta: -1 | 1) => void
+  onDragStart: (e: React.DragEvent) => void
+  onDragEnd: () => void
+}
+
+// The grip / up-down control at the head of a reorderable row. The grip is only
+// an affordance and a keyboard target - the whole row is what's draggable, so
+// the drag image is the row rather than a lone icon.
+function ReorderControl({ project: p, reorder }: { project: ProjectInfo; reorder: RowReorder }) {
+  const stop = (e: React.MouseEvent) => e.stopPropagation() // never switch project
+  if (!reorder.finePointer) {
+    return (
+      <span className="shrink-0 self-center flex flex-col -my-1 text-gray-400 dark:text-gray-500">
+        <button
+          type="button"
+          aria-label={`Move ${p.name} up`}
+          disabled={!reorder.canMoveUp}
+          onClick={(e) => { stop(e); reorder.onMove(-1) }}
+          className="p-1 rounded cursor-pointer disabled:opacity-25 disabled:cursor-default hover:bg-gray-200 dark:hover:bg-gray-600"
+        >
+          <ChevronUp className="w-3 h-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Move ${p.name} down`}
+          disabled={!reorder.canMoveDown}
+          onClick={(e) => { stop(e); reorder.onMove(1) }}
+          className="p-1 rounded cursor-pointer disabled:opacity-25 disabled:cursor-default hover:bg-gray-200 dark:hover:bg-gray-600"
+        >
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      // Native title, not <Tooltip>: this is a drag handle, and a tooltip opened
+      // on the pre-drag hover would hang stranded once the drag starts (see the
+      // tooltip conventions in CLAUDE.md). The browser suppresses a native one.
+      title="Drag to reorder (or press the up/down arrows)"
+      aria-label={`Reorder ${p.name}`}
+      onClick={stop}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+        e.preventDefault() // don't scroll the menu
+        e.stopPropagation()
+        reorder.onMove(e.key === 'ArrowUp' ? -1 : 1)
+      }}
+      className="shrink-0 self-center -ml-1 text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus:outline-none focus-visible:text-blue-500 transition-opacity"
+    >
+      <GripVertical className="w-3.5 h-3.5" />
+    </button>
+  )
 }
 
 // One row of the project menu. Built-ins render without the path line - a
@@ -29,21 +111,35 @@ function ProjectRow({
   project: p,
   selected,
   onClick,
+  reorder,
+  gutter,
 }: {
   project: ProjectInfo
   selected: boolean
   onClick: () => void
+  reorder?: RowReorder
+  // A pinned built-in in an otherwise reorderable list: it gets no control, but
+  // it does get the space one takes, so every row's icon stays on one line.
+  gutter?: 'fine' | 'coarse'
 }) {
   return (
     <div
       // mx-1 + rounded: the highlight/hover is an inset pill, so the selected
       // row doesn't butt against the menu's py-1 padding (which read as a stray
       // white strip above/below edge rows).
-      className={`relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+      className={`group relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
         selected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-      }`}
+      } ${reorder?.dragging ? 'opacity-40' : ''}`}
       onClick={onClick}
+      draggable={reorder != null && reorder.finePointer}
+      onDragStart={reorder?.onDragStart}
+      onDragEnd={reorder?.onDragEnd}
     >
+      {reorder ? (
+        <ReorderControl project={p} reorder={reorder} />
+      ) : gutter ? (
+        <span aria-hidden className={`shrink-0 ${gutter === 'fine' ? '-ml-1 w-3.5' : 'w-5'}`} />
+      ) : null}
       <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
         <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
       </span>
@@ -108,8 +204,18 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   // swallow the menu whenever the sidebar is narrower than the menu). We
   // position it manually from the trigger's rect.
   const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
-  // The Ctrl+` switch hint is keyboard-only - hide it on touch devices.
+  // The Ctrl+` switch hint is keyboard-only - hide it on touch devices. It also
+  // decides the reorder affordance: drag on a mouse, up/down buttons on touch.
   const finePointer = useFinePointer()
+  // Drag-to-reorder: the project being dragged, and the index it would be
+  // inserted at (measured against the rendered list, so `ordered.length` means
+  // "after the last row").
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+  // A drag can't outlive the menu (closing it unmounts every drop target), so
+  // every path that closes the menu drops it - otherwise the next open would
+  // render a row still dimmed as "being dragged".
+  const clearDrag = () => { setDragId(null); setDropIndex(null) }
 
   const isOpen = open
 
@@ -172,12 +278,14 @@ export const ProjectDropdown = memo(function ProjectDropdown({
       setOpen(false)
       setShowAddInput(false)
       setAddError(null)
+      clearDrag()
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setOpen(false)
         setShowAddInput(false)
         setAddError(null)
+        clearDrag()
       }
     }
     document.addEventListener('mousedown', handleClick)
@@ -240,11 +348,51 @@ export const ProjectDropdown = memo(function ProjectDropdown({
     }
   }
 
+  // The rendered list, plus the span of it the user may reorder: built-ins are
+  // pinned to the top, so everything from the first non-built-in down is fair
+  // game and nothing can be dropped above that line.
+  const ordered = orderProjects(projects)
+  const firstMovable = ordered.findIndex((p) => !p.builtin)
+  const canReorder = firstMovable >= 0 && ordered.length - firstMovable > 1
+
+  // Persist a new order. No-op when the drag put everything back where it was.
+  function commitOrder(ids: string[]) {
+    if (ids.every((id, i) => ordered[i]?.id === id)) return
+    void reorderProjects(ids)
+  }
+
+  // Keyboard/touch reorder: move a project one slot up or down.
+  function nudgeProject(id: string, delta: -1 | 1) {
+    const from = ordered.findIndex((p) => p.id === id)
+    const to = from + delta
+    if (from < 0 || to < firstMovable || to >= ordered.length) return
+    const ids = ordered.map((p) => p.id)
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    commitOrder(ids)
+  }
+
+  function handleRowDragOver(e: React.DragEvent, index: number) {
+    if (dragId == null) return
+    e.preventDefault() // without this the row is not a drop target at all
+    e.dataTransfer.dropEffect = 'move'
+    // Past the middle of a row means "after it".
+    const rect = e.currentTarget.getBoundingClientRect()
+    const after = e.clientY > rect.top + rect.height / 2
+    setDropIndex(Math.max(firstMovable, Math.min(ordered.length, index + (after ? 1 : 0))))
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    if (dragId != null && dropIndex != null) commitOrder(moveProject(ordered, dragId, dropIndex))
+    setDragId(null)
+    setDropIndex(null)
+  }
+
   return (
     <div ref={triggerRef} className="relative shrink-0">
       <button
         aria-label="Select project"
-        onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
+        onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null); clearDrag() }}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
         <span className="relative shrink-0 inline-flex">
@@ -276,12 +424,33 @@ export const ProjectDropdown = memo(function ProjectDropdown({
           className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] max-h-[70vh] overflow-y-auto"
         >
           {projects.length > 0 && (
-            <div className="py-1 border-b border-gray-100 dark:border-gray-700">
+            <div
+              className="py-1 border-b border-gray-100 dark:border-gray-700"
+              // Leaving the list mid-drag drops the indicator, so a drag that
+              // ends outside doesn't look like it will land somewhere.
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropIndex(null)
+              }}
+            >
               {/* Built-ins (the scratch project) are pinned above the user's own
                   projects and kept out of any reordering, so their position is
-                  muscle-memory stable. */}
-              {orderProjects(projects).map((p, i, ordered) => (
-                <div key={p.id}>
+                  muscle-memory stable. The rest are in the user's own order -
+                  drag a row (or use the grip's up/down arrows) to change it. */}
+              {ordered.map((p, i) => (
+                <div
+                  key={p.id}
+                  className="relative"
+                  onDragOver={(e) => handleRowDragOver(e, i)}
+                  onDrop={handleDrop}
+                >
+                  {/* Insertion line. Absolutely positioned so showing it doesn't
+                      shift the rows the user is aiming at. */}
+                  {dropIndex === i && (
+                    <div className="absolute left-2 right-2 -top-px h-0.5 rounded-full bg-blue-500 z-10" />
+                  )}
+                  {dropIndex === ordered.length && i === ordered.length - 1 && (
+                    <div className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-blue-500 z-10" />
+                  )}
                   <ProjectRow
                     project={p}
                     selected={p.id === selectedId}
@@ -293,6 +462,22 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                       }
                       setOpen(false)
                     }}
+                    gutter={canReorder ? (finePointer ? 'fine' : 'coarse') : undefined}
+                    reorder={canReorder && !p.builtin ? {
+                      dragging: dragId === p.id,
+                      finePointer,
+                      canMoveUp: i > firstMovable,
+                      canMoveDown: i < ordered.length - 1,
+                      onMove: (delta) => nudgeProject(p.id, delta),
+                      onDragStart: (e) => {
+                        // Firefox refuses to start a drag with no payload.
+                        e.dataTransfer.setData('text/plain', p.id)
+                        e.dataTransfer.effectAllowed = 'move'
+                        setDragId(p.id)
+                        setDropIndex(i)
+                      },
+                      onDragEnd: () => { setDragId(null); setDropIndex(null) },
+                    } : undefined}
                   />
                   {p.builtin && !ordered[i + 1]?.builtin && ordered[i + 1] && (
                     <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
