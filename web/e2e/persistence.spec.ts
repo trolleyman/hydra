@@ -12,16 +12,14 @@ import { test, expect, type Page } from '@playwright/test'
 
 const PROJECT = '/project/sim-project/'
 const PROJECT_VIEW_KEY = 'hydra-project-view-sim-project'
-const TRUSTED_KEY = 'hydra-trusted-projects'
 
 test.describe('project-view persistence (readJSON / writeJSON round-trip)', () => {
-  // Pre-trust the project (so the Trust modal never intercepts clicks) and seed
-  // the selected-project id so landing on "/" restores into this project - both
-  // are plain localStorage seeds, exactly as the screenshot harness does.
+  // Seed the selected-project id so landing on "/" restores into this project,
+  // exactly as the screenshot harness does. (No trust seeding: trust is decided
+  // at add time now, so an already-added project never raises the gate.)
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       try {
-        window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
         window.localStorage.setItem('hydra-project-id', 'sim-project')
       } catch {
         /* ignore */
@@ -100,10 +98,12 @@ async function switchProject(page: Page, name: string): Promise<void> {
   await page.getByText(name, { exact: true }).first().click()
 }
 
-test.describe('trusted-projects persistence (readJSON / writeJSON round-trip)', () => {
-  // Seed only the selected-project id here - NOT the trust list - so the Trust
-  // modal actually appears and we can drive the trust → persist → read-back path
-  // through the real UI.
+test.describe('project trust gate (decided at add time)', () => {
+  // Trust is no longer a persisted client-side list. __root.tsx decides it ONCE,
+  // when a project is ADDED (handleAddProject reviews its .hydra/config.toml
+  // before registering it, since registering starts its [[services]]), and
+  // declining leaves nothing registered. So there is no trusted-projects entry
+  // to round-trip, and an already-added project never re-prompts.
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       try {
@@ -114,20 +114,39 @@ test.describe('trusted-projects persistence (readJSON / writeJSON round-trip)', 
     })
   })
 
-  test('trusting a project survives a reload', async ({ page }) => {
+  test('an already-added project is never re-prompted', async ({ page }) => {
     await page.goto(PROJECT)
+    await expect(page.getByRole('link', { name: /Add renameable agent titles/ })).toBeVisible()
+    await expect(page.getByText('Trust this project?')).toHaveCount(0)
 
-    // First open: the gate is up because the project isn't trusted yet.
+    // Still down after a reload - nothing is remembered because nothing is asked.
+    await page.goto(PROJECT)
+    await expect(page.getByText('Trust this project?')).toHaveCount(0)
+  })
+
+  test('adding a project raises the gate, and declining registers nothing', async ({ page }) => {
+    // Any POST would be the registration (addProject); there must be none.
+    const posts: string[] = []
+    page.on('request', (r) => {
+      if (r.method() === 'POST') posts.push(r.url())
+    })
+
+    await page.goto(PROJECT)
+    await page.getByLabel('Select project').click()
+    // The native folder dialog isn't available headless, so ProjectDropdown
+    // falls back to its manual absolute-path form.
+    await page.getByRole('button', { name: 'Open folder...', exact: true }).click()
+    const path = page.getByPlaceholder('/absolute/path/to/project')
+    await path.fill('/tmp/an-untrusted-project')
+    await path.press('Enter')
+
+    // The gate comes up for the path being added, naming both choices.
     await expect(page.getByText('Trust this project?')).toBeVisible()
-    await page.getByRole('button', { name: 'Trust project' }).click()
-    await expect(page.getByText('Trust this project?')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Trust project' })).toBeVisible()
 
-    // The decision is persisted as a JSON string array containing the project id.
-    const stored = await page.evaluate((k) => window.localStorage.getItem(k), TRUSTED_KEY)
-    expect(JSON.parse(stored!)).toContain('sim-project')
-
-    // Reload: the trust list is read back, so the gate stays down.
-    await page.goto(PROJECT)
+    // Declining closes it and registers nothing.
+    await page.getByRole('button', { name: "Don't trust" }).click()
     await expect(page.getByText('Trust this project?')).toHaveCount(0)
+    expect(posts).toEqual([])
   })
 })
