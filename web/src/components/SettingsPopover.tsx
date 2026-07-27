@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings2 } from 'lucide-react'
+import { Settings2, ChevronDown } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 // A small per-section settings popover: a cog button that opens an anchored
@@ -19,9 +19,20 @@ export function SettingsPopover({
   width = 208,
   align = 'right',
   fitContent = false,
+  icon,
+  chevron = false,
+  onOpen,
   children,
 }: {
   label?: string
+  // Glyph for the trigger button (defaults to a cog). Pair with `chevron` for a
+  // menu-style trigger (e.g. the agent page's "check out locally" button).
+  icon?: ReactNode
+  // Show a down-chevron after the icon, signalling the button opens a menu.
+  chevron?: boolean
+  // Fired when the popover transitions to open (e.g. to lazily set up state the
+  // panel shows). Not fired on close.
+  onOpen?: () => void
   // Panel width in px. With fitContent it acts as the max width instead.
   width?: number
   // Which of the panel's edges meets the button. 'right' (default) anchors the
@@ -112,16 +123,17 @@ export function SettingsPopover({
     <div ref={anchorRef} className="relative inline-flex">
       <Tooltip content={label}>
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => setOpen((o) => { const next = !o; if (next) onOpen?.(); return next })}
           aria-label={label}
           aria-haspopup="true"
           aria-expanded={open}
-          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+          className={`flex items-center justify-center h-7 rounded-md border transition-colors cursor-pointer ${chevron ? 'gap-0.5 px-1.5' : 'w-7'} ${open
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
             }`}
         >
-          <Settings2 className="w-3.5 h-3.5" />
+          {icon ?? <Settings2 className="w-3.5 h-3.5" />}
+          {chevron && <ChevronDown className="w-3 h-3 opacity-70" />}
         </button>
       </Tooltip>
       {open && pos && createPortal(

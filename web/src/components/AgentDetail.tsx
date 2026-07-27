@@ -9,6 +9,7 @@ import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon, ProviderIc
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
+import { TrackBranchButton } from './TrackBranchButton'
 import { copyBranchName } from '../lib/branch'
 import { SeparatedRow } from './SeparatedRow'
 import { AgentTopBarContent, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
@@ -522,6 +523,7 @@ function metaRowSignature(a: AgentResponse) {
 // by the caller so only real display changes get through.
 const AgentMetaRow = memo(function AgentMetaRow({
   agent,
+  projectId,
   agentTypeClass,
   branches,
   savingBase,
@@ -533,6 +535,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveDownstream,
 }: {
   agent: AgentResponse
+  projectId: string | null
   agentTypeClass: string
   branches: RepositoryBranch[] | null
   savingBase: boolean
@@ -591,6 +594,9 @@ const AgentMetaRow = memo(function AgentMetaRow({
       )}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
       {agent.git_isolation && <GitIsolationBadge mode={agent.git_isolation} />}
+      {projectId && agent.branch_name && !agent.archived && (
+        <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
+      )}
       {/* Branch -> base as one compact control: the head's branch, an arrow
           (it merges into / diffs against), then the editable base. Editing the
           base is metadata-only: it changes what update-from-base merges in and
@@ -1790,6 +1796,7 @@ export function AgentDetail({
                 <div className="flex-1 min-w-0">
                   <AgentMetaRow
                     agent={agent}
+                    projectId={projectId}
                     agentTypeClass={agentTypeClass}
                     branches={branches}
                     savingBase={savingBase}
@@ -1883,6 +1890,7 @@ export function AgentDetail({
                 <div className="flex-1 min-w-0">
                   <AgentMetaRow
                     agent={agent}
+                    projectId={projectId}
                     agentTypeClass={agentTypeClass}
                     branches={branches}
                     savingBase={savingBase}
