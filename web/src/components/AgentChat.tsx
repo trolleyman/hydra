@@ -549,6 +549,12 @@ const WORKING_VERBS = [
 const RECONNECT_HEALTHY_MS = 15_000
 const RECONNECT_MAX_DELAY_MS = 15_000
 
+// Time constant of the pinned auto-scroll glide (see followBottom): the gap to
+// the bottom shrinks by 1/e every this-many ms, so a jump is ~95% closed in
+// 3x this. Short enough that live streaming stays glued to the bottom, long
+// enough that a tool card landing reads as a slide rather than a jump.
+const FOLLOW_TAU_MS = 70
+
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
 function formatDuration(ms: number): string {
@@ -4377,6 +4383,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // jump-to-bottom button.
   const pinnedRef = useRef(true)
   const [pinned, setPinned] = useState(true)
+  // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
+  const followRafRef = useRef<number | null>(null)
+  const followPrevTimeRef = useRef(0)
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -6374,14 +6383,86 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return out
   }, [subagents, taskToolByUse])
 
+  // --- Following the bottom --------------------------------------------------
+
+  // stopFollow cancels an in-flight glide, for the writes that place the
+  // viewport outright (a view switch, a restored offset) rather than follow it.
+  function stopFollow() {
+    if (followRafRef.current != null) {
+      cancelAnimationFrame(followRafRef.current)
+      followRafRef.current = null
+    }
+  }
+
+  // followBottom keeps a pinned view at the bottom as content arrives. This
+  // used to be a bare `scrollTop = scrollHeight`, so every new message, thought
+  // or tool card teleported the viewport and you lost your place in the text.
+  // Instead ease towards the bottom on a rAF loop that RE-READS the target
+  // every frame: streamed growth becomes one continuous glide (rather than a
+  // per-token tween restarting and fighting itself), and a card animating open
+  // is tracked as it grows. The loop exits the moment the pin is dropped, so a
+  // scroll-up mid-glide hands control straight back to the user.
+  function followBottom(instant = false) {
+    const el = scrollRef.current
+    if (!el) return
+    const gap = el.scrollHeight - el.clientHeight - el.scrollTop
+    // Jump outright when asked, while the replayed history is still landing
+    // (opening a conversation should show its end, not scroll down to it), when
+    // the user opted out of motion, and when the gap is more than a couple of
+    // viewports - that size of jump is a bulk render, not "a new thing
+    // arrived", and gliding it would just fling unreadable text past.
+    if (
+      instant ||
+      !liveUiRef.current ||
+      gap > el.clientHeight * 2 ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      stopFollow()
+      el.scrollTop = el.scrollHeight
+      return
+    }
+    if (followRafRef.current != null) return // already chasing; the loop re-aims itself
+    followPrevTimeRef.current = performance.now()
+    const step = (now: number) => {
+      followRafRef.current = null
+      const node = scrollRef.current
+      if (!node || !pinnedRef.current) return
+      // Clamp dt so returning to a backgrounded tab (one enormous frame)
+      // resumes with a normal step instead of a teleport.
+      const dt = Math.min(Math.max(now - followPrevTimeRef.current, 0), 50)
+      followPrevTimeRef.current = now
+      const dist = node.scrollHeight - node.clientHeight - node.scrollTop
+      if (dist <= 0.5) {
+        node.scrollTop = node.scrollHeight
+        return
+      }
+      // Exponential ease-out: frame-rate independent, and it converges on a
+      // target that is still moving while tokens stream in. The floor keeps the
+      // tail from crawling sub-pixel forever.
+      node.scrollTop += Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5))
+      followRafRef.current = requestAnimationFrame(step)
+    }
+    followRafRef.current = requestAnimationFrame(step)
+  }
+
   function scrollToBottom(smooth = false) {
     const el = scrollRef.current
     if (!el) return
     pinnedRef.current = true
     setPinned(true)
+    stopFollow()
+    // An explicit "take me to the bottom" glides however far it has to, so the
+    // long-gap cutoff in followBottom doesn't apply - hand it to the browser.
     if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     else el.scrollTop = el.scrollHeight
   }
+
+  useEffect(
+    () => () => {
+      if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current)
+    },
+    [],
+  )
 
   // --- Sub-agent chat views --------------------------------------------------
 
@@ -6440,6 +6521,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     prevChatViewRef.current = chatView
     const el = scrollRef.current
     if (!el) return
+    // Placing the viewport outright - never glide the old view's leftover
+    // follow into the new one's content.
+    stopFollow()
     if (chatView === 'main') {
       const saved = mainScrollRef.current
       const pin = saved?.pinned ?? true
@@ -6503,10 +6587,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }, [isTurnRunning])
 
   // Auto-scroll to the bottom on new content while pinned. `subagents` is a
-  // dep so a sub-agent view follows its own live growth too.
+  // dep so a sub-agent view follows its own live growth too. followBottom
+  // glides rather than teleports; the first render of a replayed history is
+  // far enough from the bottom to fall into its instant path.
   useEffect(() => {
-    const el = scrollRef.current
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
+    if (pinnedRef.current) followBottom()
+    // followBottom only touches refs, so it isn't a meaningful dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, stream, replayDone, pendingSends, subagents])
 
   // Follow the bottom continuously while pinned as the geometry changes
@@ -6523,11 +6610,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const content = contentRef.current
     if (!el || !content) return
     const ro = new ResizeObserver(() => {
-      if (pinnedRef.current) el.scrollTop = el.scrollHeight
+      if (pinnedRef.current) followBottom()
     })
     ro.observe(content)
     ro.observe(el)
     return () => ro.disconnect()
+    // followBottom only touches refs, so it isn't a meaningful dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Track the pane width so the plan panel (item 17) can collapse when there's
