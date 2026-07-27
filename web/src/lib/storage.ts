@@ -72,8 +72,6 @@ export const StorageKeys = {
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
   // Whether to tint the exact changed words within a modified line (default on).
   diffWordHighlight: 'hydra-diff-word-highlight',
-  // Whether to detect and zebra-tint moved code blocks (default on).
-  diffHighlightMoves: 'hydra-diff-highlight-moves',
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',

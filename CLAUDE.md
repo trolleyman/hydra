@@ -94,7 +94,9 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Improving the diff viewer rendering** (word/intra-line diff, moved-block
   detection, histogram algorithm, function-context headers, semantic/AST diff) ->
   [docs/diff-viewer-improvements.md](docs/diff-viewer-improvements.md) (survey +
-  ranked plan; only the indent word-diff fix is built)
+  ranked plan; character-level word diff, histogram, funcname headers,
+  similarity pairing and edit-boundary sliding are built; moved-block detection
+  and whitespace-row dimming were tried and reverted - see the doc)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;

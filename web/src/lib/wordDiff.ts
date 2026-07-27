@@ -377,18 +377,10 @@ export function pairLines(dels: string[], adds: string[]): Array<[number, number
 // isWhitespaceOnlyChange reports whether two lines differ only in whitespace -
 // same characters once every space/tab is stripped, but not byte-identical. That
 // covers a re-indent, an internal realignment, and a trailing-space edit alike.
+// Not consumed today (a whole-row dim treatment was tried and removed as too
+// heavy); kept for a future, subtler de-emphasis of whitespace-only rows.
 export function isWhitespaceOnlyChange(a: string, b: string): boolean {
   return a !== b && a.replace(/\s+/g, '') === b.replace(/\s+/g, '')
-}
-
-export interface WordRangeMaps {
-  old: Map<number, WordRange[]>
-  new: Map<number, WordRange[]>
-  // Line numbers (old_line_num / new_line_num) whose paired change is only
-  // whitespace, so the viewer can dim them - a "nothing of substance here" cue
-  // that survives even with ignore-whitespace off.
-  wsOld: Set<number>
-  wsNew: Set<number>
 }
 
 // buildWordRangeMaps walks a flat run of diff lines and, for each block of
@@ -396,12 +388,10 @@ export interface WordRangeMaps {
 // and added lines by similarity (see pairLines) and computes the word diff of
 // each matched pair. Returns per-line-number range maps keyed by old_line_num
 // (deletions) and new_line_num (additions), matching how the highlight maps are
-// keyed, plus the set of lines whose change is whitespace-only.
-export function buildWordRangeMaps(lines: DiffLine[]): WordRangeMaps {
+// keyed.
+export function buildWordRangeMaps(lines: DiffLine[]): { old: Map<number, WordRange[]>; new: Map<number, WordRange[]> } {
   const oldMap = new Map<number, WordRange[]>()
   const newMap = new Map<number, WordRange[]>()
-  const wsOld = new Set<number>()
-  const wsNew = new Set<number>()
   let i = 0
   while (i < lines.length) {
     if (lines[i].type === 'deletion') {
@@ -415,16 +405,12 @@ export function buildWordRangeMaps(lines: DiffLine[]): WordRangeMaps {
         const { old: oldR, new: newR } = computeWordDiff(d.content, a.content)
         if (oldR.length && d.old_line_num != null) oldMap.set(d.old_line_num, oldR)
         if (newR.length && a.new_line_num != null) newMap.set(a.new_line_num, newR)
-        if (isWhitespaceOnlyChange(d.content, a.content)) {
-          if (d.old_line_num != null) wsOld.add(d.old_line_num)
-          if (a.new_line_num != null) wsNew.add(a.new_line_num)
-        }
       }
     } else {
       i++
     }
   }
-  return { old: oldMap, new: newMap, wsOld, wsNew }
+  return { old: oldMap, new: newMap }
 }
 
 function escapeHtml(s: string): string {

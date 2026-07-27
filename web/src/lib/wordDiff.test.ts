@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeWordDiff, applyWordRanges, buildWordRangeMaps, pairLines, renderWordDiffHtml, type WordRange } from './wordDiff'
+import { computeWordDiff, applyWordRanges, buildWordRangeMaps, pairLines, isWhitespaceOnlyChange, renderWordDiffHtml, type WordRange } from './wordDiff'
 import { DiffLine } from '../api/models/DiffLine'
 
 // Substring helper: assert each range picks out the expected slice of the line.
@@ -221,26 +221,6 @@ describe('buildWordRangeMaps', () => {
     expect(maps.new.size).toBe(0)
   })
 
-  it('flags a whitespace-only (re-indent) pair for dimming', () => {
-    const lines: DiffLine[] = [
-      line(DiffLine.type.DELETION, '  doThing()', 2, null),
-      line(DiffLine.type.ADDITION, '      doThing()', null, 2),
-    ]
-    const maps = buildWordRangeMaps(lines)
-    expect(maps.wsOld.has(2)).toBe(true)
-    expect(maps.wsNew.has(2)).toBe(true)
-  })
-
-  it('does not flag a real code change as whitespace-only', () => {
-    const lines: DiffLine[] = [
-      line(DiffLine.type.DELETION, 'const x = 1', 2, null),
-      line(DiffLine.type.ADDITION, 'const x = 2', null, 2),
-    ]
-    const maps = buildWordRangeMaps(lines)
-    expect(maps.wsOld.size).toBe(0)
-    expect(maps.wsNew.size).toBe(0)
-  })
-
   it('aligns the edited line when an addition is inserted ahead of the block', () => {
     // A comment is inserted, then the two originals reappear with one edited.
     // Index pairing would diff "const a = 1" against the comment; similarity
@@ -286,5 +266,17 @@ describe('pairLines', () => {
       ['inserted = 0', 'alpha = 1', 'beta = 20'],
     )
     expect(pairs).toEqual([[0, 1], [1, 2]])
+  })
+})
+
+describe('isWhitespaceOnlyChange', () => {
+  it('is true for a re-indent and an internal realignment', () => {
+    expect(isWhitespaceOnlyChange('  doThing()', '      doThing()')).toBe(true)
+    expect(isWhitespaceOnlyChange('Host   = 1', 'Host = 1')).toBe(true)
+  })
+
+  it('is false for a real code change and for identical lines', () => {
+    expect(isWhitespaceOnlyChange('const x = 1', 'const x = 2')).toBe(false)
+    expect(isWhitespaceOnlyChange('same', 'same')).toBe(false)
   })
 })
