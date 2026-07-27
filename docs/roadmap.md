@@ -187,5 +187,3 @@ before starting. Grouped by area.
 ## Chat mode
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
-</content>
-</invoke>
