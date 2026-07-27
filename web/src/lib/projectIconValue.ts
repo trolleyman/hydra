@@ -6,64 +6,14 @@
 // The interpretation matches the backend contract:
 //   - a value ending in an image extension is an image (an http(s)/data URI is
 //     used directly, any other path is served by the backend /project-icon route);
-//   - a known lucide-react icon name (case-insensitive) is that icon;
-//   - anything else is a glyph - i.e. an emoji, or a short label.
+//   - a lucide-react icon name in any spelling ("FolderDot", "folder-dot") is
+//     that icon - name matching and loading live in lucideIcons.ts;
+//   - a lone glyph (an emoji) is drawn as itself;
+//   - anything else is a text label, which only its first character survives -
+//     the icon is one glyph wide, so a whole word would spill out of it.
 //
 // This lives apart from projectIcon.tsx purely because react-refresh requires a
 // component file to export only components.
-
-import {
-  Folder, FolderGit2, FolderOpen, Rocket, Database, Server, Cloud, Cpu, Terminal,
-  Code, Code2, Braces, Binary, Box, Boxes, Package, Container, Globe, Bug, Beaker,
-  FlaskConical, Wrench, Hammer, Cog, Settings, Zap, Flame, Star, Heart, Sparkles,
-  Bookmark, Flag, Bell, Home, Building, Building2, Layers, LayoutGrid, Component,
-  Palette, Brush, Camera, Image, Film, Music, Book, BookOpen, FileText, Newspaper,
-  ShoppingCart, ShoppingBag, CreditCard, DollarSign, Briefcase, Users, User, Bot,
-  Brain, Shield, ShieldCheck, Lock, Key, Gamepad2, Puzzle, Leaf, TreePine, Sprout,
-  Sun, Moon, Coffee, Rss, Radio, Signal, Wifi, Smartphone, Tablet, Laptop, Monitor,
-  HardDrive, Compass, Map, MapPin, Bird, Cat, Dog, Ghost,
-  Anchor, Atom, Feather, Gem, Crown, Trophy, Target, Wand2, Music2, Headphones,
-  MessageSquare, MessagesSquare,
-  type LucideIcon,
-} from 'lucide-react'
-
-// Curated set of lucide icons a project can name. Keyed by lowercased icon name
-// so lookups are case-insensitive. lucide-react (this version) ships no dynamic
-// name->component loader, and importing the whole set would bloat the bundle, so
-// this is a hand-picked list of the icons most useful as project markers. An
-// unknown name falls through to being rendered as text (see ProjectIcon).
-export const LUCIDE_ICONS: Record<string, LucideIcon> = {
-  folder: Folder, foldergit2: FolderGit2, folderopen: FolderOpen,
-  rocket: Rocket, database: Database, server: Server, cloud: Cloud, cpu: Cpu,
-  terminal: Terminal, code: Code, code2: Code2, braces: Braces, binary: Binary,
-  box: Box, boxes: Boxes, package: Package, container: Container, globe: Globe,
-  bug: Bug, beaker: Beaker, flask: FlaskConical, flaskconical: FlaskConical,
-  wrench: Wrench, hammer: Hammer, cog: Cog, settings: Settings, gear: Cog,
-  zap: Zap, flame: Flame, fire: Flame, star: Star, heart: Heart, sparkles: Sparkles,
-  bookmark: Bookmark, flag: Flag, bell: Bell, home: Home, house: Home,
-  building: Building, building2: Building2, layers: Layers, grid: LayoutGrid,
-  layoutgrid: LayoutGrid, component: Component, palette: Palette, brush: Brush,
-  camera: Camera, image: Image, film: Film, music: Music, music2: Music2,
-  book: Book, bookopen: BookOpen, filetext: FileText, document: FileText,
-  newspaper: Newspaper, cart: ShoppingCart, shoppingcart: ShoppingCart,
-  shoppingbag: ShoppingBag, creditcard: CreditCard, dollar: DollarSign,
-  dollarsign: DollarSign, briefcase: Briefcase, users: Users, user: User,
-  bot: Bot, robot: Bot, brain: Brain, shield: Shield, shieldcheck: ShieldCheck,
-  lock: Lock, key: Key, game: Gamepad2, gamepad: Gamepad2, gamepad2: Gamepad2,
-  puzzle: Puzzle, leaf: Leaf, tree: TreePine, treepine: TreePine, sprout: Sprout,
-  sun: Sun, moon: Moon, coffee: Coffee, rss: Rss, radio: Radio, signal: Signal,
-  wifi: Wifi, phone: Smartphone, smartphone: Smartphone, mobile: Smartphone,
-  tablet: Tablet, laptop: Laptop, monitor: Monitor, harddrive: HardDrive,
-  compass: Compass, map: Map, mappin: MapPin, bird: Bird, cat: Cat, dog: Dog,
-  ghost: Ghost, anchor: Anchor, atom: Atom, feather: Feather, gem: Gem,
-  crown: Crown, trophy: Trophy, target: Target, wand: Wand2, wand2: Wand2,
-  headphones: Headphones,
-  // An unregistered name falls through to the "render the string itself" branch
-  // in ProjectIcon, which spills the literal text into the row - so any icon we
-  // ship a default for must be listed here.
-  messagesquare: MessageSquare, message: MessageSquare, chat: MessageSquare,
-  messagessquare: MessagesSquare, messages: MessagesSquare,
-}
 
 // The set of extensions that mark an icon value as an image. Kept in sync with
 // isImageIcon in internal/http/project_icon.go.
@@ -75,6 +25,20 @@ const DIRECT_URI_RE = /^(https?:|data:)/i
 // other value is a path the backend serves out of the project.
 export function projectImageIconSrc(icon: string, projectId: string): string {
   return DIRECT_URI_RE.test(icon) ? icon : `/project-icon/projects/${encodeURIComponent(projectId)}`
+}
+
+// Whether an icon value that is neither an image nor a lucide name should be
+// drawn as-is. True for an emoji (or any glyph carrying no ASCII letters or
+// digits), false for a word - "FolderDot", say, when the name did not resolve -
+// which renders as an initial on a tile instead of overflowing the icon box.
+export function isGlyphIcon(value: string): boolean {
+  return !/[a-z0-9]/i.test(value)
+}
+
+// The first glyph of a value, via the string iterator so a surrogate pair or a
+// multi-codepoint emoji is not sliced in half.
+export function firstGlyph(value: string): string {
+  return [...value][0] ?? ''
 }
 
 // Deterministic hue (0-359) hashed from the project id, for the default icon's

@@ -1,9 +1,10 @@
-import { memo, type ReactNode, useMemo } from 'react'
+import { memo, type ReactNode, useLayoutEffect, useMemo, useRef } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
 import { highlightCode } from './markdown'
+import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
@@ -246,12 +247,21 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
         return <code className={s.codeInline}>{children}</code>
       }
       const html = highlightCode(text, lang)
+      // data-md-code-block / data-md-lang let copy-as-markdown (lib/copyMarkdown)
+      // put the fence and its info string back when this block is copied.
       if (html != null) {
         // No `.hljs` root class: the token `.hljs-*` spans carry their own
         // colours, while `.hljs` would also pull in github.css's white bg.
-        return <code className={s.codeBlock} dangerouslySetInnerHTML={{ __html: html }} />
+        return (
+          <code
+            className={s.codeBlock}
+            data-md-code-block=""
+            data-md-lang={lang}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        )
       }
-      return <code className={s.codeBlock}>{text}</code>
+      return <code className={s.codeBlock} data-md-code-block="" data-md-lang={lang}>{text}</code>
     },
   }
 }
@@ -279,8 +289,19 @@ export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx
     () => buildComponents(STYLES[variant], linkCtx),
     [variant, linkCtx],
   )
+  // data-md-root marks the subtree as rendered markdown: copying a selection
+  // that touches it re-serializes it back to markdown source (lib/copyMarkdown).
+  // The source itself is registered against the root so a selection covering the
+  // whole thing can be copied verbatim instead of re-serialized.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    setMarkdownSource(el, text)
+    return () => setMarkdownSource(el, null)
+  }, [text])
   return (
-    <div className={className ?? ''}>
+    <div ref={rootRef} className={className ?? ''} data-md-root="">
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS[variant]}
         components={components}

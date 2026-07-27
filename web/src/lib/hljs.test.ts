@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import hljs from './hljs'
 import { ensureLanguage } from './hljsLazy'
-import { getLanguage } from './language'
+import { getLanguage, shebangLanguage } from './language'
 
 describe('getLanguage', () => {
   it('maps common extensions to highlight.js languages', () => {
@@ -22,6 +22,40 @@ describe('getLanguage', () => {
   it('falls back to plaintext for unknown extensions', () => {
     expect(getLanguage('data.unknownext')).toBe('plaintext')
     expect(getLanguage('LICENSE')).toBe('plaintext')
+  })
+
+  it('falls back to the shebang when the path says nothing', () => {
+    expect(getLanguage('scripts/deploy', '#!/usr/bin/env python3\nimport os')).toBe('python')
+    expect(getLanguage('bin/build', '#!/bin/sh -e\nset -u')).toBe('bash')
+    expect(getLanguage('hook.unknownext', '#!/usr/bin/env node')).toBe('javascript')
+    expect(getLanguage('scripts/deploy', 'no shebang here')).toBe('plaintext')
+    expect(getLanguage('scripts/deploy')).toBe('plaintext')
+  })
+
+  it('lets the path win over the shebang', () => {
+    // A .py file claiming /bin/sh is still Python; deliberate plaintext stays plain.
+    expect(getLanguage('app.py', '#!/bin/sh')).toBe('python')
+    expect(getLanguage('go.mod', '#!/bin/sh')).toBe('plaintext')
+  })
+})
+
+describe('shebangLanguage', () => {
+  it('reads the interpreter through paths, versions and env', () => {
+    expect(shebangLanguage('#!/bin/bash')).toBe('bash')
+    expect(shebangLanguage('#!/usr/local/bin/python3.12 -u')).toBe('python')
+    expect(shebangLanguage('#! /usr/bin/env  perl5')).toBe('perl')
+    expect(shebangLanguage('#!/usr/bin/env -S NODE_ENV=x node --enable-source-maps')).toBe('javascript')
+    expect(shebangLanguage('#!/usr/bin/env --split-string=ruby -w')).toBe('ruby')
+    expect(shebangLanguage('#!/usr/bin/env deno run --allow-net')).toBe('typescript')
+  })
+
+  it('returns null when there is no usable shebang', () => {
+    expect(shebangLanguage('#include <stdio.h>')).toBeNull()
+    expect(shebangLanguage('')).toBeNull()
+    expect(shebangLanguage('#!')).toBeNull()
+    expect(shebangLanguage('#!/usr/bin/env')).toBeNull()
+    expect(shebangLanguage('#!/usr/bin/somethingelse')).toBeNull()
+    expect(shebangLanguage('  #!/bin/bash')).toBeNull() // must be the very first bytes
   })
 })
 

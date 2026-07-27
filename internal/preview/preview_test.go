@@ -5,6 +5,7 @@ package preview
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,9 +18,15 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 )
 
-// testPorts is a range away from the real preview default so tests never
-// collide with a running daemon.
-const testPorts = "38710-38740"
+// testPortLo/testPortHi bound a range away from the real preview default so
+// tests never collide with a running daemon.
+const (
+	testPortLo = 38710
+	testPortHi = 38740
+)
+
+// testPorts is that range in the `preview_ports` config spelling.
+var testPorts = fmt.Sprintf("%d-%d", testPortLo, testPortHi)
 
 // newRoot writes a minimal project config (pinning the test port range) into a
 // fresh temp dir and returns it as the project root.
@@ -673,6 +680,104 @@ func TestTipFollowHotSwap(t *testing.T) {
 			t.Fatalf("expected 1 checkout after swap, got %d", len(entries))
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestIsWildcardHost(t *testing.T) {
+	for _, c := range []struct {
+		host string
+		want bool
+	}{
+		{"", true},
+		{"0.0.0.0", true},
+		{"::", true},
+		{"127.0.0.1", false},
+		{"::1", false},
+		{"192.168.1.5", false},
+		{"localhost", false}, // a name, not an address - never the wildcard
+	} {
+		if got := isWildcardHost(c.host); got != c.want {
+			t.Errorf("isWildcardHost(%q) = %v, want %v", c.host, got, c.want)
+		}
+	}
+}
+
+// blockRangeOn binds every port of the test range on host, mimicking what
+// `tailscale serve --https=$p` does on the tailnet addresses. Skips the test
+// when host isn't bindable (e.g. 127.0.0.2 is not up on macOS by default).
+func blockRangeOn(t *testing.T, host string) {
+	t.Helper()
+	for p := testPortLo; p <= testPortHi; p++ {
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", p)))
+		if err != nil {
+			t.Skipf("cannot bind %s:%d to stage the conflict: %v", host, p, err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+	}
+}
+
+// A wildcard bind host collides with those specific-address listeners even
+// though nothing holds the wildcard itself, so the whole range looks busy.
+// Previews must not die: they fall back to loopback, which is exactly what a
+// TLS front (tailscale serve, a reverse proxy) proxies to.
+func TestAllocListenerFallsBackToLoopback(t *testing.T) {
+	root := newRoot(t)
+	blockRangeOn(t, "127.0.0.2")
+
+	m := NewManager("0.0.0.0", nil)
+	ln, port, err := m.allocListener(root)
+	if err != nil {
+		t.Fatalf("allocListener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	if port < testPortLo || port > testPortHi {
+		t.Errorf("port %d outside the configured range", port)
+	}
+	host, _, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "127.0.0.1" {
+		t.Errorf("bound %s, want the 127.0.0.1 fallback", ln.Addr())
+	}
+}
+
+// A non-wildcard bind host has no fallback (loopback would silently serve a
+// different interface than asked for), so an exhausted range stays an error -
+// and the error names the host and carries the underlying bind failure.
+func TestAllocListenerExhaustedReportsCause(t *testing.T) {
+	root := newRoot(t)
+	blockRangeOn(t, "127.0.0.2")
+
+	m := NewManager("127.0.0.2", nil)
+	ln, _, err := m.allocListener(root)
+	if err == nil {
+		_ = ln.Close()
+		t.Fatal("expected an error with the whole range busy")
+	}
+	for _, want := range []string{"127.0.0.2", "in use", fmt.Sprintf("%d-%d", testPortLo, testPortHi)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// The wildcard is still preferred: with the range free, an exposed deploy binds
+// every interface rather than quietly serving loopback only.
+func TestAllocListenerPrefersWildcard(t *testing.T) {
+	root := newRoot(t)
+	m := NewManager("0.0.0.0", nil)
+	ln, _, err := m.allocListener(root)
+	if err != nil {
+		t.Fatalf("allocListener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	host, _, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsUnspecified() {
+		t.Errorf("bound %s, want the wildcard", ln.Addr())
 	}
 }
 

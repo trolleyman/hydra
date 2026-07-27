@@ -9,6 +9,7 @@ import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { PanelError } from './PanelError'
+import { useToastStore } from '../stores/toastStore'
 
 // How eagerly the panel re-polls GET /previews, by the most active instance
 // state it can see. There is no WebSocket for previews (deliberately - the
@@ -18,6 +19,15 @@ function pollDelay(previews: PreviewStatus[]): number {
   if (previews.some((p) => p.state === 'starting')) return 1500
   if (previews.some((p) => p.state === 'running')) return 10000
   return 30000
+}
+
+// previewFailed reports a start/restart failure. Both actions are fire-and-
+// forget from the panel's point of view - Open even closes the tab it just
+// opened - so without this the only feedback is a tab that blinks shut, which
+// reads as a broken button rather than "the daemon said no". A toast (not the
+// panel's error box) because the panel is still showing a perfectly good list.
+function previewFailed(name: string, reason: string) {
+  useToastStore.getState().show({ message: `Couldn't start preview "${name}": ${reason}`, type: 'error' })
 }
 
 // stateChip renders the colored dot + label for an instance state.
@@ -113,10 +123,16 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
       const st = await api.default.startAgentPreview(projectId, agentId, name, headRef, includeUncommitted)
       if (win) {
         if (st.url) win.location = st.url
-        else win.close()
+        // Started but portless: nothing to navigate to, so the blank tab would
+        // just hang. Close it and say why rather than leaving it there.
+        else { win.close(); previewFailed(name, 'the server reported no URL') }
       }
-    } catch {
+    } catch (err) {
+      // Closing the tab is right (a blank tab is worse than none), but on its
+      // own it reads as "the button did nothing" - the failure has to surface
+      // somewhere, so it goes to a toast with the server's reason.
       win?.close()
+      previewFailed(name, formatError(err))
     }
     setNonce((n) => n + 1)
   }, [projectId, agentId, headRef, includeUncommitted])
@@ -134,7 +150,11 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
     try {
       await api.default.stopAgentPreview(projectId, agentId, name, headRef, includeUncommitted)
       await api.default.startAgentPreview(projectId, agentId, name, headRef, includeUncommitted)
-    } catch { /* the poll below re-syncs state either way */ }
+    } catch (err) {
+      // The stop half is best-effort (the poll re-syncs), but a failed start
+      // leaves the row sitting at "stopped" with no explanation.
+      previewFailed(name, formatError(err))
+    }
     setNonce((n) => n + 1)
   }, [projectId, agentId, headRef, includeUncommitted])
 

@@ -18,6 +18,7 @@ import type { ListReviewsResponse } from '../models/ListReviewsResponse';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
+import type { ReorderProjectsRequest } from '../models/ReorderProjectsRequest';
 import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactResponse';
 import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
@@ -141,6 +142,26 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'POST',
             url: '/api/projects',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Reorder the project list (the order the project selector shows)
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public reorderProjects(
+        requestBody: ReorderProjectsRequest,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'PUT',
+            url: '/api/projects/order',
             body: requestBody,
             mediaType: 'application/json',
             errors: {

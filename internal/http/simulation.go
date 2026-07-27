@@ -201,6 +201,14 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+// ReorderProjects accepts and discards the new order: simulation serves a fixed
+// project list, so persisting it would have nothing to persist into. Answering
+// 204 still lets the dropdown's drag-to-reorder be exercised end to end (the
+// client keeps its own optimistic order until the server disagrees).
+func (s *SimulationServer) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
@@ -1209,6 +1217,52 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 						},
 					},
 				},
+				// Extension-less scripts: the language comes from the `#!` line,
+				// so these exercise the shebang fallback in getLanguage (python
+				// and bash respectively).
+				{
+					Path:       "scripts/release",
+					ChangeType: api.DiffFileChangeTypeAdded,
+					Additions:  6,
+					Deletions:  0,
+					Hunks: []api.DiffHunk{
+						{
+							Header:   "@@ -0,0 +1,6 @@",
+							OldStart: 0,
+							NewStart: 1,
+							Lines: []api.DiffLine{
+								{Type: api.Addition, Content: "#!/usr/bin/env python3", NewLineNum: ptr(1)},
+								{Type: api.Addition, Content: "import subprocess", NewLineNum: ptr(2)},
+								{Type: api.Addition, Content: "", NewLineNum: ptr(3)},
+								{Type: api.Addition, Content: "def main() -> None:", NewLineNum: ptr(4)},
+								{Type: api.Addition, Content: "    \"\"\"Tag and push the release.\"\"\"", NewLineNum: ptr(5)},
+								{Type: api.Addition, Content: "    subprocess.run([\"git\", \"tag\", \"v1.0\"], check=True)", NewLineNum: ptr(6)},
+							},
+						},
+					},
+				},
+				{
+					Path:       "hooks/pre-commit",
+					ChangeType: api.DiffFileChangeTypeModified,
+					Additions:  1,
+					Deletions:  1,
+					Hunks: []api.DiffHunk{
+						{
+							Header:   "@@ -1,5 +1,5 @@",
+							OldStart: 1,
+							NewStart: 1,
+							Lines: []api.DiffLine{
+								{Type: api.Context, Content: "#!/bin/sh -e", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+								{Type: api.Context, Content: "# Refuse a commit that leaves the tree dirty.", OldLineNum: ptr(2), NewLineNum: ptr(2)},
+								{Type: api.Deletion, Content: "if [ -n \"$(git status --porcelain)\" ]; then", OldLineNum: ptr(3)},
+								{Type: api.Addition, Content: "if [ -n \"$(git status --porcelain --untracked-files=no)\" ]; then", NewLineNum: ptr(3)},
+								{Type: api.Context, Content: "  echo \"tree is dirty\" >&2", OldLineNum: ptr(4), NewLineNum: ptr(4)},
+								{Type: api.Context, Content: "  exit 1", OldLineNum: ptr(5), NewLineNum: ptr(5)},
+								{Type: api.Context, Content: "fi", OldLineNum: ptr(6), NewLineNum: ptr(6)},
+							},
+						},
+					},
+				},
 			},
 		}
 		resp.Files = simApplyContext(resp.Files, params)
@@ -1992,6 +2046,8 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 			resp.Files = []api.DiffFile{
 				{Path: "README.md", ChangeType: api.DiffFileChangeTypeModified, Additions: 2, Deletions: 1},
 				{Path: "new_file.txt", ChangeType: api.DiffFileChangeTypeAdded, Additions: 1, Deletions: 0},
+				{Path: "scripts/release", ChangeType: api.DiffFileChangeTypeAdded, Additions: 6, Deletions: 0},
+				{Path: "hooks/pre-commit", ChangeType: api.DiffFileChangeTypeModified, Additions: 1, Deletions: 1},
 			}
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -2368,6 +2424,7 @@ var simRepoOrder = []string{
 	"package.json",
 	"server-link.go",
 	"config/env/staging/region/eu/settings.toml",
+	"scripts/bootstrap",
 	"internal/server/server.go",
 	"internal/store/store.go",
 	"web/public/logo.png",
@@ -2431,6 +2488,9 @@ var simRepoFiles = map[string]string{
 	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
+	// No extension, so the file viewer has to read the `#!` line to know it is a
+	// shell script (getLanguage's shebang fallback).
+	"scripts/bootstrap": "#!/usr/bin/env bash\nset -euo pipefail\n\n# Install the toolchain and seed the dev database.\nroot=\"$(cd \"$(dirname \"$0\")/..\" && pwd)\"\ncd \"$root\"\n\nif ! command -v bun >/dev/null; then\n  echo \"bun is required\" >&2\n  exit 1\nfi\n\nbun install\nbun run db:seed\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
 	// tree compacts config/env/staging/region/eu onto one row (compact
 	// folders, like the diff viewer).

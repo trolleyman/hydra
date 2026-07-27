@@ -43,8 +43,15 @@ export function SettingSection({
     <div className="mb-5">
       <div className="flex items-center justify-between gap-2">
         {collapsible ? (
-          <button type="button" onClick={toggle} className="flex items-center gap-1 -ml-1 cursor-pointer group">
-            <ChevronRight className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={!collapsed}
+            className="flex items-center gap-1 -ml-1 cursor-pointer group"
+          >
+            <ChevronRight
+              className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${collapsed ? '' : 'rotate-90'}`}
+            />
             <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-gray-700 dark:group-hover:text-gray-300">{title}</h2>
           </button>
         ) : (
@@ -52,8 +59,27 @@ export function SettingSection({
         )}
         {action}
       </div>
-      {description && !collapsed && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
-      {!collapsed && <div className="mt-2">{children}</div>}
+      {collapsible ? (
+        /* Animated open/close, matching the tests panel / file tree slide: a
+           grid tweened between 0fr and 1fr, since height:auto can't transition.
+           The body stays mounted so there is a height to tween (`inert` keeps
+           the closed copy out of tab order / a11y). A section renders at its
+           resolved row size on first paint - the stored state is read in the
+           useState initializer - so only a user toggle animates. Only the
+           collapsible path is wrapped: the clipping the slide needs would cut
+           off anything a plain section overflows. */
+        <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
+          <div className="overflow-hidden min-h-0" inert={collapsed}>
+            {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
+            <div className="mt-2">{children}</div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
+          <div className="mt-2">{children}</div>
+        </>
+      )}
     </div>
   )
 }

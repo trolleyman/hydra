@@ -59,10 +59,13 @@ export const Dialog: React.FC = () => {
   }
 
   return (
-    // z-[120] keeps confirmation dialogs (merge / kill / discard ...) ABOVE the
-    // approval toasts (z-[110]) - you're mid-decision here, so an approval toast
-    // must not cover the buttons.
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+    // Top of the stack. It keeps confirmation dialogs (merge / kill / discard
+    // ...) above the approval toasts (z-[110]) - you're mid-decision here, so an
+    // approval toast must not cover the buttons - and above the portalled
+    // popover tier (z-[9999]: dropdown menus, tooltips). A menu is what usually
+    // *opened* the dialog, and at 9999 it punched a bright hole through the
+    // modal scrim while the dialog sat behind it.
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       {variant === 'merge' ? (
         <RichConfirmPanel
           tone="emerald"
