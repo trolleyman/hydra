@@ -29,6 +29,10 @@ export type DiffFile = {
      * True when hunks contain the file's entire content as a single whole-file hunk (full_context view), so the client can drive the context reveal/collapse model without re-fetching. Absent/false means the file is shown at the requested windowed context.
      */
     expanded?: boolean;
+    /**
+     * git blob sha of the file's content on the head side of the comparison (from the head tree, or a hash-object of the working-tree file for an uncommitted diff). Absent for a deletion or when it can't be resolved. The client keys per-file "viewed" state on it, so a file re-shows as unviewed exactly when its content changes.
+     */
+    head_blob_sha?: string | null;
     hunks: Array<DiffHunk>;
 };
 export namespace DiffFile {

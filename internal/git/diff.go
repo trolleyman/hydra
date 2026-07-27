@@ -69,6 +69,12 @@ type DiffFile struct {
 	// content (a single whole-file hunk) rather than the default windowed context,
 	// so the client can render the reveal/collapse model without re-fetching.
 	Expanded bool
+	// HeadBlobSHA is the git blob sha of this file's content on the head side of
+	// the comparison (from the head tree, or a hash-object of the working-tree
+	// file for an uncommitted diff). "" for a deletion or when it can't be
+	// resolved. The client keys per-file "viewed" state on it, so a file re-shows
+	// as unviewed exactly when its content changes.
+	HeadBlobSHA string
 }
 
 // UncommittedSummary holds counts of uncommitted changes.
@@ -211,7 +217,91 @@ func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTri
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	return errtrace.Wrap2(parseDiff(out))
+	files, err := parseDiff(out)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	fillHeadBlobSHAs(projectRoot, headRef, files)
+	return files, nil
+}
+
+// fillHeadBlobSHAs sets HeadBlobSHA on each non-deleted file. headRef == "" means
+// the head side is the working tree, so the on-disk file is hashed instead of
+// read from a tree. Best-effort: files whose sha can't be resolved keep "".
+func fillHeadBlobSHAs(projectRoot, headRef string, files []DiffFile) {
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		if f.ChangeType == "deleted" {
+			continue
+		}
+		paths = append(paths, f.Path)
+	}
+	if len(paths) == 0 {
+		return
+	}
+	shas := HeadBlobSHAs(projectRoot, headRef, paths)
+	for i := range files {
+		if sha, ok := shas[files[i].Path]; ok {
+			files[i].HeadBlobSHA = sha
+		}
+	}
+}
+
+// HeadBlobSHAs returns the git blob sha of each path on the head side. When ref
+// names a real commit/tree it reads the shas from that tree (`git ls-tree`);
+// when ref is "" the head side is the working tree, so the on-disk files are
+// hashed (`git hash-object`). Paths are chunked to stay well under ARG_MAX.
+// Best-effort: a git failure just yields fewer entries, never an error.
+func HeadBlobSHAs(projectRoot, ref string, paths []string) map[string]string {
+	out := make(map[string]string, len(paths))
+	if len(paths) == 0 {
+		return out
+	}
+	const chunk = 500
+	if ref != "" {
+		if err := ValidateRef(ref); err != nil {
+			return out
+		}
+		for i := 0; i < len(paths); i += chunk {
+			end := min(i+chunk, len(paths))
+			args := append([]string{"ls-tree", "-z", ref, "--"}, paths[i:end]...)
+			res, err := gitOutput(projectRoot, args...)
+			if err != nil {
+				continue
+			}
+			// Records are NUL-separated; each is "<mode> <type> <object>\t<path>".
+			for _, rec := range strings.Split(res, "\x00") {
+				meta, path, ok := strings.Cut(rec, "\t")
+				if !ok {
+					continue
+				}
+				if fields := strings.Fields(meta); len(fields) >= 3 {
+					out[path] = fields[2]
+				}
+			}
+		}
+		return out
+	}
+	// Working-tree side: hash the on-disk files. `git hash-object` prints one sha
+	// per input path, in order, so line i maps back to paths[i].
+	for i := 0; i < len(paths); i += chunk {
+		end := min(i+chunk, len(paths))
+		args := append([]string{"hash-object", "--"}, paths[i:end]...)
+		res, err := gitOutput(projectRoot, args...)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(strings.TrimRight(res, "\n"), "\n")
+		if len(lines) != end-i {
+			continue // output didn't line up with inputs; skip this chunk
+		}
+		for j, sha := range lines {
+			if sha != "" {
+				out[paths[i+j]] = sha
+			}
+		}
+	}
+	return out
 }
 
 // renameOldPaths returns the old names of any requested paths that are the new
@@ -343,6 +433,8 @@ func GetUntrackedDiffFiles(projectRoot string) ([]DiffFile, error) {
 		}
 		files = append(files, DiffFile{Path: p, ChangeType: "added", Additions: additions})
 	}
+	// Untracked files have no committed blob; hash the working-tree content.
+	fillHeadBlobSHAs(projectRoot, "", files)
 	return files, nil
 }
 
@@ -373,6 +465,7 @@ func GetUntrackedDiff(projectRoot, path string, context int) ([]DiffFile, error)
 		}
 		files = append(files, diffs...)
 	}
+	fillHeadBlobSHAs(projectRoot, "", files)
 	return files, nil
 }
 

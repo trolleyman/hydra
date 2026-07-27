@@ -43,8 +43,8 @@ benefit from it. No action needed there.
 | 3 | Similarity-based del/add line pairing | done | **high** | `wordDiff.ts` `pairLines` + `buildWordRangeMaps` (built; order-preserving Needleman-Wunsch over the del/add block scored by token-multiset similarity, `MIN_PAIR_SIM=0.4`, `MAX_PAIR_CELLS=2500` index-pairing fallback. Note: `buildSideBySide` row layout still uses index pairing; word highlights are keyed per line number so they are correct regardless, but the side-by-side *row* pairing is a separate follow-up) |
 | 4 | Whitespace-only / indent-only classification + dimming | low | med-high | new `wordDiff.ts` helper + row CSS |
 | 5 | Edit-boundary sliding (token-space `cleanupSemanticLossless`) | low | medium | `wordDiff.ts` after `contiguousRanges` |
-| 6 | Per-file viewed state (blob-sha keyed) | medium | high | per [docs/diff-review-state.md](diff-review-state.md) |
-| 7 | Moved-block detection (zebra + allow-indentation-change) | medium | high | new `web/src/lib/movedBlocks.ts` |
+| 6 | Per-file viewed state (blob-sha keyed) | done | high | `git.HeadBlobSHAs` -> `api.DiffFile.head_blob_sha` -> `agentViewPrefs.viewedFiles` + FileDiff checkbox + Files-header count (v1 client storage per [docs/diff-review-state.md](diff-review-state.md); DB promotion + "reviewed up to" marker still open) |
+| 7 | Moved-block detection (zebra + allow-indentation-change) | done | high | `web/src/lib/movedBlocks.ts` (built) |
 | 8 | Sticky function-context header | medium | med-high | `DiffViewer.tsx` |
 | 9 | Shiki token-level decorations replacing the HTML overlay | med-high | medium | `language.ts`, `wordDiff.ts` |
 | 10 | AST / tree-sitter structural diff | high | low-medium | don't (see below) |

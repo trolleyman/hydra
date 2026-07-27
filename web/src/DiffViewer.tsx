@@ -701,7 +701,7 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, moves = EMPTY_FILE_MOVES, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, moves = EMPTY_FILE_MOVES, viewed, onToggleViewed, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -710,6 +710,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // Moved-block map for this file (from detectMoves, computed across all files).
   // Defaults to empty so callers that don't detect moves render unchanged.
   moves?: FileMoves
+  // Per-file review "viewed" state. `viewed` is the resolved flag; onToggleViewed
+  // flips it (given the head blob sha to key on). Both omitted in the read-only
+  // repo view, which has no per-agent review progress.
+  viewed?: boolean
+  onToggleViewed?: (path: string, headBlobSha: string | null | undefined) => void
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
   // Optional "Add to review" (queue for batch submit). Omitted in the read-only
@@ -1061,6 +1066,26 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
             {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{file.deletions}</span>}
           </div>
+        )}
+        {onToggleViewed && (
+          // Marking a file viewed records its current head blob sha; when the
+          // agent later changes the file the sha no longer matches and it re-shows
+          // as unviewed. Stops propagation so ticking it doesn't also collapse the
+          // card (the header row toggles collapse).
+          <label
+            className="flex items-center gap-1 shrink-0 ml-1 pl-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none"
+            title={file.head_blob_sha ? 'Mark this file as reviewed' : 'Nothing to mark viewed (file deleted)'}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              className="cursor-pointer accent-blue-500"
+              checked={!!viewed}
+              disabled={!file.head_blob_sha}
+              onChange={() => onToggleViewed(file.path, file.head_blob_sha)}
+            />
+            Viewed
+          </label>
         )}
       </div>
       )}
@@ -2086,6 +2111,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
     () => new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []),
   )
+  // Per-file "viewed" review state: path -> the head blob sha the file had when
+  // marked viewed. A file is viewed iff this equals its current head_blob_sha, so
+  // it auto-reverts to unviewed the instant the agent changes it.
+  const [viewedFiles, setViewedFiles] = useState<Record<string, string>>(
+    () => loadAgentViewPrefs(projectId, agent.id).viewedFiles ?? {},
+  )
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -2115,6 +2146,36 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])
+
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agent.id, { viewedFiles })
+  }, [projectId, agent.id, viewedFiles])
+
+  // Toggle a file's viewed state. Marking viewed records the file's current head
+  // blob sha; unmarking (or a missing sha) clears it. A file with no head blob
+  // sha (a deletion) can't be marked - there is nothing to key on.
+  const toggleFileViewed = useCallback((path: string, headBlobSha: string | null | undefined) => {
+    setViewedFiles((prev) => {
+      const isViewed = !!headBlobSha && prev[path] === headBlobSha
+      if (isViewed) {
+        const next = { ...prev }
+        delete next[path]
+        return next
+      }
+      if (!headBlobSha) return prev
+      return { ...prev, [path]: headBlobSha }
+    })
+  }, [])
+
+  // A file is viewed iff the sha we stored equals its current head blob sha.
+  const isFileViewed = useCallback(
+    (f: DiffFile) => !!f.head_blob_sha && viewedFiles[f.path] === f.head_blob_sha,
+    [viewedFiles],
+  )
+  const viewedCount = useMemo(
+    () => (diff ? diff.files.reduce((n, f) => n + (isFileViewed(f) ? 1 : 0), 0) : 0),
+    [diff, isFileViewed],
+  )
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
@@ -3026,6 +3087,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               sideBySide={sideBySide}
               wordHighlight={wordHighlight}
               moves={moveMap.get(diff.files[singleFileIdx].path)}
+              viewed={isFileViewed(diff.files[singleFileIdx])}
+              onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
@@ -3058,6 +3121,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             return (
             <FileDiff key={f.path} file={f} sideBySide={sideBySide} wordHighlight={wordHighlight}
               moves={moveMap.get(f.path)}
+              viewed={isFileViewed(f)}
+              onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(f.path)}
               onToggleCollapse={toggleFileCollapse}
               onComment={handleComment}
@@ -3099,6 +3164,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
       <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      {viewedCount > 0 && (
+        <span className="text-[11px] font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
+          {viewedCount}/{diff.files.length} viewed
+        </span>
+      )}
       <InfoTooltip title="Files" width={460}>
         <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>

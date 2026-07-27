@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"os"
 	"path"
@@ -1709,9 +1710,25 @@ func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.
 		for i, f := range files {
 			out[i] = simReconstructFull(f)
 		}
-		return out
+		return simStampBlobSHAs(out)
 	}
-	return expandDiffContext(files, simContext(params))
+	return simStampBlobSHAs(expandDiffContext(files, simContext(params)))
+}
+
+// simStampBlobSHAs gives each non-deleted fixture file a deterministic fake
+// head-side blob sha (derived from its path + line counts) so the real server's
+// per-file "viewed" state has something to key on in the simulation.
+func simStampBlobSHAs(files []api.DiffFile) []api.DiffFile {
+	for i := range files {
+		if files[i].ChangeType == api.DiffFileChangeTypeDeleted {
+			continue
+		}
+		h := fnv.New64a()
+		fmt.Fprintf(h, "%s:%d:%d", files[i].Path, files[i].Additions, files[i].Deletions)
+		sha := fmt.Sprintf("%016x%016x%08x", h.Sum64(), h.Sum64()*0x9e3779b1, files[i].Additions&0xffffffff)
+		files[i].HeadBlobSha = &sha
+	}
+	return files
 }
 
 // simReconstructFull rebuilds a fixture file as one contiguous whole-file hunk

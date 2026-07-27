@@ -49,6 +49,11 @@ export type AgentViewPrefs = {
   chatDraft?: string
   // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
+  // Per-file "viewed" review state: path → the head blob sha the file had when it
+  // was last marked viewed. A file counts as viewed iff this equals its current
+  // head_blob_sha, so it auto-reverts to unviewed the moment the agent changes it
+  // (and back to viewed on an exact revert) with no invalidation logic.
+  viewedFiles?: Record<string, string>
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -75,6 +80,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
     promptCollapsed: stored.promptCollapsed,
+    viewedFiles: stored.viewedFiles,
   }
 }
 
