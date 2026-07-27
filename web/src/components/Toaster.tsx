@@ -6,6 +6,7 @@ import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
+import { highlightCode } from '../lib/markdown'
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
@@ -29,6 +30,10 @@ const actionClass = (variant?: 'primary' | 'danger') => {
       return `${base} bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200`
   }
 }
+
+// Shared body styling for a toast's code block, used by both the highlighted and
+// the plain-text render so the two are pixel-identical apart from token colour.
+const codeClass = 'max-h-40 overflow-auto px-2.5 pb-2 text-[11px] leading-relaxed font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words'
 
 const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, onDismiss }) => {
   // Only auto-expiring toasts (duration > 0) get a countdown bar, and it's hidden
@@ -66,6 +71,11 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   // a rich node (e.g. the two-line agent-transition row) tops out with the tile.
   const isStringMessage = typeof toast.message === 'string'
   const hasActions = toast.actions && toast.actions.length > 0
+  // A tagged code block (e.g. a `json` API error body) is syntax-coloured through
+  // the shared highlighter; an unknown/absent language falls back to plain text.
+  // Only the `.hljs-*` token classes are used, not the `.hljs` root - that would
+  // drag github.css's own background over the block's tint (see lib/markdown).
+  const codeHtml = toast.code && toast.codeLang ? highlightCode(toast.code, toast.codeLang) : null
   return (
     // Provider so rich `message` content (e.g. an agent link) can close its own
     // toast via ToastDismissContext instead of threading the id through show().
@@ -95,7 +105,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
                     {toast.codeLang}
                   </div>
                 )}
-                <pre className={`max-h-40 overflow-auto px-2.5 pb-2 text-[11px] leading-relaxed font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words ${toast.codeLang ? 'pt-1' : 'pt-2'}`}>{toast.code}</pre>
+                {codeHtml
+                  ? <pre className={`${codeClass} ${toast.codeLang ? 'pt-1' : 'pt-2'}`} dangerouslySetInnerHTML={{ __html: codeHtml }} />
+                  : <pre className={`${codeClass} ${toast.codeLang ? 'pt-1' : 'pt-2'}`}>{toast.code}</pre>}
               </div>
             )}
           </div>
