@@ -896,6 +896,16 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
+// The file's first line, when the diff actually shows it - getLanguage falls back
+// to a `#!` shebang for paths with no telling extension (`scripts/deploy`). Either
+// side will do: a hunk that doesn't reach line 1 (a windowed `-U3` hunk further
+// down the file) yields nothing and the file just stays plain.
+function firstFileLine(file: DiffFile): string | undefined {
+  const line = file.hunks?.[0]?.lines?.[0]
+  if (!line || (line.old_line_num !== 1 && line.new_line_num !== 1)) return undefined
+  return line.content
+}
+
 export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
@@ -950,7 +960,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // no ref to browse, which hides the header button.
   openInRepo?: (path: string) => LinkProps
 }) {
-  const lang = getLanguage(file.path)
+  const lang = getLanguage(file.path, firstFileLine(file))
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 

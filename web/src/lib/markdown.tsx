@@ -224,22 +224,64 @@ export interface RenderMarkdownOptions {
   // activity lines that report a shell command being run.
   dollarCommand?: boolean
   // When true, render for a single-line preview (e.g. the sidebar's fixed-height
-  // activity row): collapse every whitespace run - newlines included - to a
-  // single space before parsing. This keeps the output one line and, since a
-  // fenced code block needs real newlines to match, stops a code block in a
-  // `last_message` from rendering as a multi-line `display:block` chip that would
-  // overflow the row and show clipped, half-cut lines.
+  // activity row): the parsed segments are flattened onto one line (see
+  // flattenToLine). This keeps the output one line and stops a fenced code block
+  // in a `last_message` from rendering as a multi-line `display:block` chip that
+  // would overflow the row and show clipped, half-cut lines.
   singleLine?: boolean
+}
+
+// collapseWs turns every whitespace run - newlines included - into a single space.
+const collapseWs = (s: string) => s.replace(/\s+/g, ' ')
+
+// flattenToLine squashes a parsed segment list onto one line for the fixed-height
+// preview rows.
+//
+// The flattening happens AFTER parsing, deliberately. Collapsing the newlines up
+// front (what this used to do) destroys the line boundaries that the line-scoped
+// constructs need to terminate: `# Some heading\nAnd some text` became
+// `# Some heading And some text`, and since a heading runs to the end of its
+// line, the body text got swallowed into the heading and rendered bold too.
+//
+// A fenced block can't survive as a block here (it renders `display:block` and
+// would blow the row height), so it degrades to an ordinary inline code chip.
+function flattenToLine(segs: Seg[]): Seg[] {
+  const out: Seg[] = []
+  // Whitespace is collapsed ACROSS segment boundaries too: a heading's trailing
+  // spaces plus the blank line after it are one gap, not three, and the gap is
+  // emitted as plain text so it never ends up inside the bold/code span it
+  // followed. A gap before the first (or after the last) segment is dropped.
+  let gap = false
+  const push = (s: Seg) => {
+    if (gap && out.length > 0) out.push({ kind: 'text', value: ' ' })
+    gap = false
+    out.push(s)
+  }
+  for (const s of segs) {
+    const value = collapseWs(s.value)
+    gap = gap || value.startsWith(' ')
+    const core = value.trim()
+    // An empty text seg is pure gap; an empty code chip still renders (it is a
+    // deliberate span in the source).
+    if (core !== '' || s.kind === 'code' || s.kind === 'codeblock') {
+      push(s.kind === 'codeblock' ? { kind: 'code', marker: '`', value: core } : { ...s, value: core })
+    }
+    gap = gap || value.endsWith(' ')
+  }
+  return out
 }
 
 // renderMarkdown turns inline markdown into styled React nodes for read-only
 // display, dropping the markers themselves (so `*hi*` shows as italic "hi").
 export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): ReactNode {
-  if (opts.singleLine) text = text.replace(/\s+/g, ' ').trim()
+  const singleLine = opts.singleLine === true
+  if (singleLine) text = text.trim()
   if (opts.dollarCommand && text.startsWith('$')) {
-    return <code className={CODE_CLASS}>{text}</code>
+    return <code className={CODE_CLASS}>{singleLine ? collapseWs(text) : text}</code>
   }
-  const segs = trimAroundBlocks(parseInline(text))
+  // trimAroundBlocks only matters for a real block-level codeblock, which the
+  // single-line flattening turns into an inline chip anyway.
+  const segs = singleLine ? flattenToLine(parseInline(text)) : trimAroundBlocks(parseInline(text))
   return segs.map((s, i) => {
     switch (s.kind) {
       case 'escape':

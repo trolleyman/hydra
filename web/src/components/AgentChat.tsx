@@ -64,6 +64,7 @@ import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
+import { selectionToMarkdown } from '../lib/copyMarkdown'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -3615,15 +3616,12 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
-  const copyWithoutBlockPadding = (event: ClipboardEvent<HTMLDivElement>) => {
-    const selected = window.getSelection()?.toString() ?? ''
-    if (!selected || !/\n+$/.test(selected)) return
-    event.preventDefault()
-    event.clipboardData.setData('text/plain', selected.replace(/\n+$/, ''))
-  }
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`} onCopy={copyWithoutBlockPadding}>
+      {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
+          handler (copyTranscriptAsMarkdown), which also trims the trailing
+          newlines the browser adds for the bubble's block padding. */}
+      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -7303,6 +7301,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // copyTranscriptAsMarkdown puts markdown source on the clipboard when a
+  // selection inside the transcript is copied: chat messages are RENDERED
+  // markdown, so a default copy drops the asterisks, fences, bullets and table
+  // pipes the agent (or the user) actually wrote. selectionToMarkdown walks the
+  // selected DOM and re-serializes it; the chat's non-markdown chrome (tool
+  // cards, diffs) still comes out as plain text, as before. Selecting inside a
+  // single code block yields the raw code, not a fenced block.
+  function copyTranscriptAsMarkdown(event: ClipboardEvent<HTMLDivElement>) {
+    const md = selectionToMarkdown(window.getSelection())
+    if (!md) return
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', md)
+  }
+
   // --- Rendering ----------------------------------------------------------------
 
   // renderAssistantText renders assistant prose, lifting any fenced
@@ -7750,7 +7762,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             outside the near-bottom threshold and un-pins the follow - whether it
             happened depended on which node got picked as the anchor. Our own
             pin/follow logic owns bottom-following instead. */}
-        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          onCopy={copyTranscriptAsMarkdown}
+          className="h-full overflow-y-auto [overflow-anchor:none]"
+        >
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
