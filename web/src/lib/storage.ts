@@ -135,6 +135,14 @@ export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
 export const projectViewKey = (projectId: string): string =>
   `${PROJECT_VIEW_PREFIX}${projectId}`
 
+// Last-seen live agent list, one entry per project, so switching into a project
+// paints its sidebar (and a restored agent page) from cache instead of showing
+// the *previous* project's agents until the list request lands. Replaced by the
+// first real response. See lib/agentCache.ts.
+export const AGENTS_CACHE_PREFIX = 'hydra-agents-'
+export const agentsCacheKey = (projectId: string): string =>
+  `${AGENTS_CACHE_PREFIX}${projectId}`
+
 // Per-artifact view prefs, keyed by project + agent + artifact name (see
 // artifactPrefs.ts). projectId may be null → '_' keeps the key shape stable.
 export const ARTIFACT_PREFS_PREFIX = 'hydra-artifact-'

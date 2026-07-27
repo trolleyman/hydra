@@ -49,6 +49,7 @@ import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { pruneReviewDrafts } from '../lib/reviewDrafts'
+import { pruneAgentCaches } from '../lib/agentCache'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
 import {
   loadProjectView,
@@ -203,12 +204,6 @@ function RootLayout() {
   // Guards the one-time redirect from the bare root path to the selected
   // project (see effect below).
   const didAutoNavigate = useRef(false)
-  // When restoring a project view lands on the bare project page *because* the
-  // remembered agent had unread changes (see restoreProjectView), this holds
-  // that project id for one persist cycle so the deflection doesn't overwrite
-  // the remembered agent with `{ kind: 'project' }`. The memory is kept so a
-  // later switch back restores the agent once it's been read.
-  const deflectedUnreadProject = useRef<string | null>(null)
   const [restarting, setRestarting] = useState(false)
   // Sidebar visibility: the persisted desktop collapse preference and the
   // transient mobile panel state are independent flags (see lib/sidebar.ts), so
@@ -287,11 +282,13 @@ function RootLayout() {
   const pageActive = usePageActive()
 
   // Navigate to a project's remembered view (agent / repository / settings /
-  // bare project). Used by the boot restore and the project-switch dropdown. A
-  // remembered agent that no longer exists is corrected to the project page by
-  // the agent page itself (which redirects + resets the memory once a getAgent
-  // lookup confirms it's truly gone), so it's safe to route to it optimistically
-  // here without first waiting for the agent list.
+  // bare project). Used by the boot restore and the project-switch dropdown.
+  //
+  // Deliberately unconditional: no lookup runs first, so the switch is instant.
+  // That means a remembered agent is opened even if it has unread changes (which
+  // opening it clears - the point of a switch is to get back to what you were
+  // doing, not to preserve a dot) and even if it no longer exists, in which case
+  // the agent page corrects itself once its own getAgent confirms it is gone.
   const navigateToProjectView = useCallback((projectId: string, view: ProjectViewRoute) => {
     if (view.kind === 'agent') {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: view.agentId } })
@@ -311,30 +308,10 @@ function RootLayout() {
     }
   }, [navigate])
 
-  // Restore a project's remembered view when switching into it - but never
-  // auto-open a remembered agent that currently has unread changes. Opening an
-  // agent clears its unread dot (the auto-clear effect below), so silently
-  // restoring an unread agent on a project switch would "read" a notification
-  // the user never looked at. In that case land on the bare project page
-  // instead; the agent stays in the sidebar (dot lit) for the user to open
-  // deliberately, and its remembered view is preserved (deflectedUnreadProject)
-  // so a later switch back restores it once read. A remembered agent that's
-  // already read - or whose lookup fails (gone / offline) - is opened as before;
-  // the agent page self-corrects a truly-dead one.
-  const restoreProjectView = useCallback(async (projectId: string, stored: string) => {
-    const view = parseProjectView(stored)
-    if (view.kind === 'agent') {
-      try {
-        const agent = await api.default.getAgent(projectId, view.agentId)
-        if (agent.has_unread_changes) {
-          deflectedUnreadProject.current = projectId
-          navigate({ to: '/project/$projectId', params: { projectId } })
-          return
-        }
-      } catch { /* lookup failed - fall through and open optimistically */ }
-    }
-    navigateToProjectView(projectId, view)
-  }, [navigate, navigateToProjectView])
+  // Restore a project's remembered view when switching into it.
+  const restoreProjectView = useCallback((projectId: string, stored: string) => {
+    navigateToProjectView(projectId, parseProjectView(stored))
+  }, [navigateToProjectView])
 
   // Switch the active project: record the selection and route to its remembered
   // view. Shared by the header dropdown and the Ctrl/Cmd+` keyboard shortcut so
@@ -561,25 +538,17 @@ function RootLayout() {
   useEffect(() => {
     const here = splitProjectHref(location.href)
     if (!here) return // not on a project route ("/", "/settings") - leave storage alone
-    // The deflection from restoreProjectView lands on the bare project page,
-    // but that isn't a deliberate navigation - skip it so the remembered agent
-    // survives (one cycle only, then resume normal persistence). If the user
-    // has already moved on to an agent, just drop the stale marker and persist
-    // as usual.
-    if (deflectedUnreadProject.current === here.projectId) {
-      deflectedUnreadProject.current = null
-      if (parseProjectView(here.view).kind !== 'agent') return
-    }
     saveProjectView(here.projectId, here.view)
   }, [location.href])
 
-  // Drop expired per-artifact and per-agent-view UI prefs once on boot, plus
-  // the retired split-layout opt-out key (the toggle is gone; split is always
-  // on).
+  // Drop expired per-artifact, per-agent-view and cached-agent-list entries once
+  // on boot, plus the retired split-layout opt-out key (the toggle is gone;
+  // split is always on).
   useEffect(() => {
     pruneArtifactPrefs()
     pruneAgentViewPrefs()
     pruneReviewDrafts()
+    pruneAgentCaches()
     try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
   }, [])
 

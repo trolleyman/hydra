@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useAgentStore } from './agentStore'
+import { useToastStore } from './toastStore'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
 
@@ -301,5 +302,36 @@ describe('overlays only touch matching ids', () => {
     ])
     expect(statusOf('a1')).toBe(AgentStatus.WAITING)
     expect(statusOf('a2')).toBe(AgentStatus.RUNNING)
+  })
+})
+
+describe('seedAgents (cached list painted while the real fetch is in flight)', () => {
+  it('shows the cached agents but leaves loading true, so nothing treats them as the server list', () => {
+    const store = useAgentStore.getState
+    store().setAgents([makeAgent('old-project-agent')], 'A')
+    expect(useAgentStore.getState().loading).toBe(false)
+
+    store().seedAgents([makeAgent('cached')])
+
+    const s = useAgentStore.getState()
+    expect(s.agents.map((a) => a.id)).toEqual(['cached'])
+    expect(s.loading).toBe(true)
+    // Tagged as belonging to no project: the fetch that follows must read as a
+    // project switch, not a same-project refresh.
+    expect(s.agentsProjectId).toBeNull()
+  })
+
+  it('does not let a stale cache fire a background-merge toast when the real list lands', () => {
+    const store = useAgentStore.getState
+    const toasts = vi.spyOn(useToastStore.getState(), 'show')
+
+    // Cached armed agent that the server no longer lists (merged days ago).
+    const armed = { ...makeAgent('armed'), merge_when_green: true }
+    store().seedAgents([armed])
+    store().setAgents([makeAgent('other')], 'B')
+
+    expect(toasts).not.toHaveBeenCalled()
+    expect(useAgentStore.getState().loading).toBe(false)
+    toasts.mockRestore()
   })
 })
