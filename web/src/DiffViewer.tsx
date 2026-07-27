@@ -1953,7 +1953,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 const UNCOMMITTED_TOOLTIP_FILES = 10
 
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
-// browser breaks mid-filename ("UncommittedChangesPane / l.tsx"); a <wbr> after
+// browser breaks mid-filename ("UncommittedChangesPane" / "l.tsx"); a <wbr> after
 // each separator gives it directory boundaries to prefer instead, and the
 // break-words on the row still catches a single segment that is too long on its
 // own. Split on "/" and " -> " so a rename breaks between its two paths.
@@ -1998,14 +1998,19 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
           <div key={g.heading} className="mt-1 first:mt-0">
             <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
             {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => (
-              // The indent keeps a wrapped remainder distinguishable from the
-              // next path in the list.
-              <p key={f} className="font-mono text-[10px] text-gray-500 dark:text-gray-400 pl-2 break-words">{wrappablePath(f)}</p>
+              // Dash and path as two flex cells rather than a "- " prefix in the
+              // text: that hangs the indent, so a wrapped path lines up under the
+              // start of the path above it instead of under its dash.
+              <div key={f} className="flex gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
+                <span aria-hidden className="shrink-0">-</span>
+                <span className="min-w-0 break-words">{wrappablePath(f)}</span>
+              </div>
             ))}
             {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 pl-2">
-                +{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more
-              </p>
+              <div className="flex gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
+                <span aria-hidden className="shrink-0">-</span>
+                <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
+              </div>
             )}
           </div>
         ))}
