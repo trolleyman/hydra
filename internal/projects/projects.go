@@ -163,6 +163,49 @@ func (m *Manager) RemoveProject(id string) (bool, error) {
 	return false, nil
 }
 
+// ReorderProjects rewrites the stored order of the project list to match ids.
+// The list order *is* the order the UI shows, so this is what backs the
+// drag-to-reorder in the project dropdown.
+//
+// Deliberately lenient about the ids it is given: any project not named in ids
+// keeps its relative order and is appended after the named ones, and ids that
+// name no known project are ignored. A client's list is always a snapshot -
+// another window may have added or removed a project since it rendered - and
+// dropping the whole reorder over that would be worse than placing a project
+// the client never saw at the end.
+func (m *Manager) ReorderProjects(ids []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	prev := m.projects
+	byID := make(map[string]ProjectInfo, len(m.projects))
+	for _, p := range m.projects {
+		byID[p.ID] = p
+	}
+	ordered := make([]ProjectInfo, 0, len(m.projects))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		p, ok := byID[id]
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ordered = append(ordered, p)
+	}
+	for _, p := range prev {
+		if !seen[p.ID] {
+			ordered = append(ordered, p)
+		}
+	}
+
+	m.projects = ordered
+	if err := m.save(); err != nil {
+		m.projects = prev // rollback, so memory and disk stay in step
+		return errtrace.Wrap(err)
+	}
+	return nil
+}
+
 // AddProject registers the given absolute path as a project (idempotent by path).
 // Returns the ProjectInfo (existing or newly created).
 func (m *Manager) AddProject(path string) (ProjectInfo, error) {

@@ -16,8 +16,28 @@ function readStoredReviewConfigs(): Record<string, ReviewConfigResponse> {
   )
 }
 
+// applyOrder sorts projects into the order given by `ids`. Projects absent from
+// `ids` keep their relative order after the named ones - the same reconciliation
+// the server does (projects.Manager.ReorderProjects), so an optimistic local
+// order and the order that comes back from the server agree.
+function applyOrder(projects: ProjectInfo[], ids: string[]): ProjectInfo[] {
+  const rank = new Map(ids.map((id, i) => [id, i]))
+  return [...projects].sort(
+    (a, b) => (rank.get(a.id) ?? ids.length) - (rank.get(b.id) ?? ids.length),
+  )
+}
+
+function sameOrder(a: ProjectInfo[], b: ProjectInfo[]): boolean {
+  return a.length === b.length && a.every((p, i) => p.id === b[i].id)
+}
+
 interface ProjectState {
   projects: ProjectInfo[]
+  // The order a drag-to-reorder just applied locally, held until the server's
+  // list comes back in that order. The project list is refetched on every status
+  // poll and events-stream nudge, so without this a poll already in flight when
+  // the drop happened would land the old order and visibly snap the row back.
+  pendingOrder: string[] | null
   selectedProjectId: string | null
   systemStatus: StatusResponse | null
   // Resolved [review] config, cached per project. It is project-scoped (not
@@ -25,6 +45,7 @@ interface ProjectState {
   // and the Settings editor, rather than re-fetched on every agent view.
   reviewConfigs: Record<string, ReviewConfigResponse>
   setProjects: (projects: ProjectInfo[]) => void
+  setProjectOrder: (ids: string[]) => void
   setSelectedProjectId: (id: string | null) => void
   setSystemStatus: (status: StatusResponse) => void
   setReviewConfig: (projectId: string, cfg: ReviewConfigResponse) => void
@@ -32,6 +53,7 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
+  pendingOrder: null,
   selectedProjectId: readLocal(StorageKeys.projectId),
   systemStatus: null,
   reviewConfigs: readStoredReviewConfigs(),
@@ -48,8 +70,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
       for (const id of stale) delete reviewConfigs[id]
       writeJSON(StorageKeys.reviewConfigs, reviewConfigs)
     }
-    return { projects: reconcileList(s.projects, projects, (p) => p.id), reviewConfigs }
+    // While a reorder is in flight, keep showing the order the user dropped
+    // things in; drop the override as soon as the server agrees with it.
+    const ordered = s.pendingOrder ? applyOrder(projects, s.pendingOrder) : projects
+    const pendingOrder = s.pendingOrder && sameOrder(projects, ordered) ? null : s.pendingOrder
+    return { projects: reconcileList(s.projects, ordered, (p) => p.id), reviewConfigs, pendingOrder }
   }),
+  setProjectOrder: (ids) => set((s) => ({
+    pendingOrder: ids,
+    projects: reconcileList(s.projects, applyOrder(s.projects, ids), (p) => p.id),
+  })),
   setSelectedProjectId: (id) => {
     writeLocal(StorageKeys.projectId, id)
     set({ selectedProjectId: id })
@@ -62,6 +92,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
     return { reviewConfigs }
   }),
 }))
+
+// reorderProjects applies a new project order locally (so the dropdown updates
+// under the pointer, with no round trip) and persists it. On failure the
+// override is dropped, which lets the next refetch put the server's order back.
+export function reorderProjects(ids: string[]): Promise<void> {
+  useProjectStore.getState().setProjectOrder(ids)
+  return api.default
+    .reorderProjects({ project_ids: ids })
+    .catch(() => {
+      useProjectStore.setState({ pendingOrder: null })
+    })
+}
 
 // One in-flight GET per project, shared by every consumer (root layout, agent
 // page, settings Review section): simultaneous cold mounts - including
