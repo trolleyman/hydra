@@ -3256,10 +3256,18 @@ function ChatViewSelector({
   // Click-away closes: once open, the toggle has morphed down to the current
   // row's slot, so the old muscle-memory spot (top-left) may be over a
   // different row - clicking anywhere outside should just dismiss.
+  //
+  // Except the other corner card (the plan panel): it has no click-away of its
+  // own, so without this exemption closing the plan also dismissed this card -
+  // one click shutting two things - while closing this one left the plan up.
+  // Each card now owns its own open state, and click-away still means anything
+  // in the transcript or composer.
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (target instanceof Element && target.closest('[data-chat-overlay]')) return
+      if (cardRef.current && !cardRef.current.contains(target)) setOpen(false)
     }
     // Capture phase: a panel that stops mousedown propagation (scroll/drag
     // handlers) must still dismiss the dropdown.
