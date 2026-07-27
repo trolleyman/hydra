@@ -2,10 +2,10 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
-import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
+import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch, MessageSquare, SquareTerminal } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -811,19 +811,32 @@ export const SpawnForm = memo(function SpawnForm({
     const showChat = agentType === 'claude' || agentType === 'codex'
     const showBranch = !!branches && branches.length > 0 && !isBuiltinProject
     if (!showChat && !showBranch) return null
+    // A two-option segmented control: a chat-mode head opens the web chat view,
+    // otherwise the head runs in a terminal. `chatMode === false` selects the
+    // terminal segment.
+    const modeSegment = (active: boolean) =>
+      `flex items-center gap-1.5 px-2.5 py-1 font-medium transition-colors cursor-pointer ${active
+        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
       <SettingsPopover label="Spawn options" width={240}>
         {showChat && (
-          <SettingsOptionRow
-            type="checkbox"
-            checked={chatMode}
-            onChange={setChatMode}
-            label="Chat mode"
-            title="Spawn a chat view instead of a terminal (Claude and Codex only)"
-          />
+          <>
+            <SettingsGroupLabel className="mb-1.5">Mode</SettingsGroupLabel>
+            <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
+              <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
+                <SquareTerminal className="w-3.5 h-3.5" />
+                terminal
+              </button>
+              <button type="button" aria-pressed={chatMode} onClick={() => setChatMode(true)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(chatMode)}`}>
+                <MessageSquare className="w-3.5 h-3.5" />
+                chat
+              </button>
+            </div>
+          </>
         )}
         {showChat && showBranch && (
-          <div className="my-2 border-t border-gray-100 dark:border-gray-700" />
+          <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
         {showBranch && branches && (
           <>
@@ -835,7 +848,7 @@ export const SpawnForm = memo(function SpawnForm({
               onSelect={setBaseBranch}
               onOpen={handleBranchOpen}
               title="Base branch to create the agent from (pick an agent branch to stack on it)"
-              flexible
+              fitContent
             />
           </>
         )}
