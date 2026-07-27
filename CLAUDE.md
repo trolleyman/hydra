@@ -142,7 +142,9 @@ area; do not re-derive it by reading source. Skip them otherwise.
   [docs/diff-viewer-improvements.md](docs/diff-viewer-improvements.md) (survey +
   ranked plan; character-level word diff, histogram, funcname headers,
   similarity pairing and edit-boundary sliding are built; moved-block detection
-  and whitespace-row dimming were tried and reverted - see the doc)
+  and whitespace-row dimming were tried and reverted - see the doc). A proper
+  boxes+jump redesign of moved-block viz is specced in
+  [docs/diff-moved-blocks.md](docs/diff-moved-blocks.md) (unbuilt)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
