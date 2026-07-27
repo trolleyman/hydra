@@ -1,12 +1,15 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronUp, FolderOpen, GripVertical, Plus } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useFinePointer } from '../lib/useFinePointer'
 import { ProjectIcon } from '../lib/projectIcon'
-import { reorderProjects } from '../stores/projectStore'
+import { api } from '../stores/apiClient'
+import { useDialogStore } from '../stores/dialogStore'
+import { useToastStore } from '../stores/toastStore'
+import { reorderProjects, useProjectStore } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 
@@ -54,14 +57,18 @@ interface RowReorder {
   onDragEnd: () => void
 }
 
-// The grip / up-down control at the head of a reorderable row. The grip is only
-// an affordance and a keyboard target - the whole row is what's draggable, so
-// the drag image is the row rather than a lone icon.
+// The reorder control sits *in the project icon's place* rather than in a gutter
+// of its own: a handle column would push every row's icon across, including the
+// rows that can't be reordered, which is a permanent cost for an occasional job.
+// On a fine pointer the grip fades in over the icon on hover (and is pinned in
+// edit mode); the icon is what identifies a row you're not pointing at anyway.
 function ReorderControl({ project: p, reorder }: { project: ProjectInfo; reorder: RowReorder }) {
   const stop = (e: React.MouseEvent) => e.stopPropagation() // never switch project
   if (!reorder.finePointer) {
+    // Touch: HTML5 drag never fires, so edit mode swaps the icon for a compact
+    // up/down pair. This is the only reorder affordance a touch user gets.
     return (
-      <span className="shrink-0 self-center flex flex-col -my-1 text-gray-400 dark:text-gray-500">
+      <span className="flex flex-col -my-1 -ml-0.5 text-gray-400 dark:text-gray-500">
         <button
           type="button"
           aria-label={`Move ${p.name} up`}
@@ -98,7 +105,7 @@ function ReorderControl({ project: p, reorder }: { project: ProjectInfo; reorder
         e.stopPropagation()
         reorder.onMove(e.key === 'ArrowUp' ? -1 : 1)
       }}
-      className="shrink-0 self-center -ml-1 text-gray-300 dark:text-gray-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus:outline-none focus-visible:text-blue-500 transition-opacity"
+      className="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-500 cursor-grab active:cursor-grabbing focus:outline-none focus-visible:text-blue-500"
     >
       <GripVertical className="w-3.5 h-3.5" />
     </button>
@@ -110,38 +117,50 @@ function ReorderControl({ project: p, reorder }: { project: ProjectInfo; reorder
 function ProjectRow({
   project: p,
   selected,
+  editing,
   onClick,
   reorder,
-  gutter,
+  onRemove,
 }: {
   project: ProjectInfo
   selected: boolean
+  // Edit mode: reorder handles are pinned instead of hover-only, removal is
+  // offered, and the row no longer switches project when clicked.
+  editing: boolean
   onClick: () => void
   reorder?: RowReorder
-  // A pinned built-in in an otherwise reorderable list: it gets no control, but
-  // it does get the space one takes, so every row's icon stays on one line.
-  gutter?: 'fine' | 'coarse'
+  onRemove?: () => void
 }) {
+  // A hover-swapped grip only exists on a fine pointer; in edit mode it (or the
+  // touch up/down pair) is pinned, which is what makes the mode discoverable.
+  const swapIcon = reorder != null && (editing || reorder.finePointer)
   return (
     <div
       // mx-1 + rounded: the highlight/hover is an inset pill, so the selected
       // row doesn't butt against the menu's py-1 padding (which read as a stray
       // white strip above/below edge rows).
-      className={`group relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-        selected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-      } ${reorder?.dragging ? 'opacity-40' : ''}`}
+      className={`group relative flex items-start gap-2.5 mx-1 px-2 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+        editing ? 'cursor-default' : 'cursor-pointer'
+      } ${selected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${reorder?.dragging ? 'opacity-40' : ''}`}
       onClick={onClick}
       draggable={reorder != null && reorder.finePointer}
       onDragStart={reorder?.onDragStart}
       onDragEnd={reorder?.onDragEnd}
     >
-      {reorder ? (
-        <ReorderControl project={p} reorder={reorder} />
-      ) : gutter ? (
-        <span aria-hidden className={`shrink-0 ${gutter === 'fine' ? '-ml-1 w-3.5' : 'w-5'}`} />
-      ) : null}
-      <span className="shrink-0 mt-0.5 inline-flex text-gray-400">
-        <ProjectIcon icon={p.icon} projectId={p.id} size={14} />
+      {/* Icon slot, fixed at the icon's own size so swapping the grip in and out
+          of it never moves anything. */}
+      <span className="relative shrink-0 mt-0.5 inline-flex items-center justify-center w-3.5 h-3.5 text-gray-400">
+        <ProjectIcon
+          icon={p.icon}
+          projectId={p.id}
+          size={14}
+          className={
+            !swapIcon ? ''
+              : editing ? 'opacity-0'
+                : 'group-hover:opacity-0 transition-opacity'
+          }
+        />
+        {swapIcon && <ReorderControl project={p} reorder={reorder} />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -159,9 +178,20 @@ function ProjectRow({
       </div>
       {/* Per-project agent tally (running/waiting/finished/needs_input). Fixed
           to the trailing edge, centered against the two-line name/path - nothing
-          here appears on hover, so the counts never shift. Removal moved to the
-          project's Settings page. */}
-      <ProjectAgentCounts project={p} className="shrink-0 self-center" />
+          appears on plain hover, so the counts never shift; edit mode trades
+          them for the remove button. */}
+      {editing && onRemove ? (
+        <button
+          type="button"
+          aria-label={`Remove ${p.name} from Hydra`}
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          className="shrink-0 self-center p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      ) : (
+        <ProjectAgentCounts project={p} className="shrink-0 self-center" />
+      )}
     </div>
   )
 }
@@ -212,10 +242,16 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   // "after the last row").
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+  // Edit mode: pins the reorder handles (the only way to reorder on a touch
+  // screen) and turns the per-row agent tally into a remove button. Kept a mode
+  // rather than always-on hover affordances, because "remove" on hover is what
+  // this menu used to have and it was too easy to hit by accident.
+  const [editing, setEditing] = useState(false)
   // A drag can't outlive the menu (closing it unmounts every drop target), so
   // every path that closes the menu drops it - otherwise the next open would
-  // render a row still dimmed as "being dragged".
-  const clearDrag = () => { setDragId(null); setDropIndex(null) }
+  // render a row still dimmed as "being dragged". Edit mode is dropped with it:
+  // reopening the menu should be the plain list again.
+  const clearDrag = () => { setDragId(null); setDropIndex(null); setEditing(false) }
 
   const isOpen = open
 
@@ -354,6 +390,9 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   const ordered = orderProjects(projects)
   const firstMovable = ordered.findIndex((p) => !p.builtin)
   const canReorder = firstMovable >= 0 && ordered.length - firstMovable > 1
+  // Edit mode is worth offering as soon as there is one project to remove, even
+  // if there is nothing to reorder yet.
+  const canEditList = firstMovable >= 0
 
   // Persist a new order. No-op when the drag put everything back where it was.
   function commitOrder(ids: string[]) {
@@ -386,6 +425,39 @@ export const ProjectDropdown = memo(function ProjectDropdown({
     if (dragId != null && dropIndex != null) commitOrder(moveProject(ordered, dragId, dropIndex))
     setDragId(null)
     setDropIndex(null)
+  }
+
+  // Unregister a project. Non-destructive (nothing on disk is touched), but it
+  // stops the project's services and takes it off every device's list, so it
+  // asks first - the same confirmation and copy as the Settings danger zone,
+  // which is the other place this lives.
+  function confirmRemove(p: ProjectInfo) {
+    useDialogStore.getState().show({
+      title: 'Remove project',
+      message: `Remove "${p.name}" from Hydra? Your files, git history and existing agents are all kept - re-adding the folder brings them back. Only the project's background services are stopped.`,
+      type: 'warning',
+      confirmLabel: 'Remove project',
+      showCancel: true,
+      onConfirm: () => { void removeProject(p) },
+    })
+  }
+
+  async function removeProject(p: ProjectInfo) {
+    try {
+      await api.default.removeProject(p.id)
+      const store = useProjectStore.getState()
+      store.setProjects(store.projects.filter((x) => x.id !== p.id))
+      useToastStore.getState().show({ message: `Removed "${p.name}" from Hydra.`, type: 'success' })
+      // Removing the project you're looking at leaves the page pointing at
+      // nothing - hand back to the caller's deselect, which navigates away.
+      if (selectedId === p.id) onDeselect()
+    } catch (err) {
+      useDialogStore.getState().show({
+        title: 'Remove failed',
+        message: `Failed to remove project: ${formatError(err)}`,
+        type: 'error',
+      })
+    }
   }
 
   return (
@@ -454,7 +526,10 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                   <ProjectRow
                     project={p}
                     selected={p.id === selectedId}
+                    editing={editing}
                     onClick={() => {
+                      // Edit mode is for arranging the list, not leaving it.
+                      if (editing) return
                       if (p.id === selectedId) {
                         onDeselect()
                       } else {
@@ -462,8 +537,10 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                       }
                       setOpen(false)
                     }}
-                    gutter={canReorder ? (finePointer ? 'fine' : 'coarse') : undefined}
-                    reorder={canReorder && !p.builtin ? {
+                    onRemove={p.builtin ? undefined : () => confirmRemove(p)}
+                    // Touch has no drag, so its up/down pair only exists in edit
+                    // mode; a mouse can always drag, handle or no handle.
+                    reorder={canReorder && !p.builtin && (finePointer || editing) ? {
                       dragging: dragId === p.id,
                       finePointer,
                       canMoveUp: i > firstMovable,
@@ -544,9 +621,33 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                 </div>
               </form>
             )}
+            {/* Arrange mode. Reordering and removing are both occasional jobs,
+                so they live behind this rather than as hover affordances on
+                every row - the hover "x" this menu used to have was too easy to
+                hit by accident, which is why removal moved to Settings. */}
+            {canEditList && !showAddInput && (
+              <button
+                onClick={() => { setEditing((v) => !v); setDragId(null); setDropIndex(null) }}
+                className={`w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                  editing
+                    ? 'text-blue-600 dark:text-blue-400 font-medium'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                {editing ? <Check className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
+                {editing ? 'Done' : 'Edit list'}
+              </button>
+            )}
           </div>
 
-          {projects.length > 1 && finePointer && (
+          {/* In edit mode the footer explains the mode instead of the switch
+              shortcut - notably that removing a project is not destructive. */}
+          {editing ? (
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 leading-snug">
+              {canReorder ? (finePointer ? 'Drag a project to reorder it. ' : 'Use the arrows to reorder. ') : ''}
+              Removing only takes a project off this list - your files stay put.
+            </div>
+          ) : projects.length > 1 && finePointer && (
             <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
               {SWITCH_PROJECT_HINT}
             </div>
