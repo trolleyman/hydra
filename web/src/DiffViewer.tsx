@@ -13,7 +13,7 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
@@ -51,32 +51,23 @@ import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { addReviewComment, removeReviewComment, clearReviewDraft, loadReviewDraft, type PendingReviewComment } from './lib/reviewDrafts'
-import { copyText } from './lib/clipboard'
+import { useCopyFlash } from './lib/useCopyFlash'
+import { CopyStateIcon } from './components/CopyStateIcon'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    // copyText works on insecure LAN origins too (a bare writeText silently
-    // no-ops there); only flip to the tick once the text actually landed.
-    if (!(await copyText(text))) return
-    setCopied(true)
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => setCopied(false), 1500)
-  }
+  const { state, copy } = useCopyFlash()
+  // Reuse the same hint tooltip rather than adding a second one: swap its label
+  // to reflect the copy outcome while the icon flashes, then revert to "Copy path".
+  const label = state === 'ok' ? 'Copied to clipboard' : state === 'err' ? 'Copy failed' : 'Copy path'
   return (
-    // Reuse the same hint tooltip rather than adding a second one: swap its label
-    // to "Copied to clipboard" while the tick is up, so a click that happened
-    // mid-hover reads as confirmation, then it reverts to "Copy path".
-    <Tooltip content={copied ? 'Copied to clipboard' : 'Copy path'}>
+    <Tooltip content={label}>
       <button
-        onClick={handleCopy}
+        onClick={(e) => { e.stopPropagation(); void copy(text) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+        <CopyStateIcon state={state} idleColor="text-gray-400" />
       </button>
     </Tooltip>
   )

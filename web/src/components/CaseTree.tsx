@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { Link, type LinkProps } from '@tanstack/react-router'
-import { AlertTriangle, Box, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
-import { copyText } from '../lib/clipboard'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { CopyStateIcon } from './CopyStateIcon'
 
 // CaseTree renders test cases as a collapsible location tree (TESTS_PLAN.md
 // Feature 1), built from each case's structured location:
@@ -247,16 +248,20 @@ export function NodeBadges({ counts }: { counts: Record<string, number> }) {
   )
 }
 
-// CopyButton is the hover-revealed copy affordance on dir/case rows.
+// CopyButton is the hover-revealed copy affordance on dir/case rows. It keeps a
+// native title (not a portal Tooltip) because it renders once per row of a
+// potentially long tree - see the tooltip perf note in CLAUDE.md - but still
+// flashes the shared tick/X so a copy that silently failed is visible.
 function CopyButton({ text, title }: { text: string; title: string }) {
+  const { state, copy } = useCopyFlash()
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); copyText(text) }}
+      onClick={(e) => { e.stopPropagation(); void copy(text) }}
       title={title}
       aria-label={title}
       className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-opacity cursor-pointer"
     >
-      <Copy className="w-3 h-3" />
+      <CopyStateIcon state={state} size="w-3 h-3" />
     </button>
   )
 }
