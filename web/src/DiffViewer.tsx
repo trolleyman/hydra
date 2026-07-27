@@ -3349,23 +3349,33 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           slides away cleanly); the transition is dropped mid width-drag. */}
       <div
         ref={sidebarRef}
-        className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
+        className="hidden md:block shrink-0 relative self-start sticky z-20"
         style={{
           width: filesListHidden ? 0 : sidebarWidth,
           marginRight: filesListHidden ? 0 : 16,
-          borderWidth: filesListHidden ? 0 : undefined,
           top: FILE_STICKY_TOP,
           transition: isResizing ? undefined : 'width 240ms ease, margin-right 240ms ease',
         }}
       >
-        <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        {/* The panel proper. `overflow-hidden` both rounds the list's corners
+            and clips it while the column tweens to 0 - which is why the drag
+            handle can't live in here (see below), hence the wrapper above. */}
+        <div
+          className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm"
+          style={{ borderWidth: filesListHidden ? 0 : undefined }}
+        >
+          <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+        </div>
         {/* Width drag handle: invisible strip, shared pill on hover (the
-            unified resize affordance). Hidden while the column is collapsed. */}
+            unified resize affordance). Hidden while the column is collapsed.
+            It sits in the 16px gutter, overlapping the panel by only 2px: the
+            old inside-the-panel strip covered the file list's scrollbar, so the
+            thumb was almost impossible to grab. */}
         {!filesListHidden && (
           <div
             onMouseDown={startResizing}
             title="Drag to resize"
-            className="group/resize absolute right-0 top-0 bottom-0 w-3 -mr-1 flex items-center justify-center cursor-col-resize z-20 touch-none"
+            className="group/resize absolute inset-y-0 -right-2 w-2.5 flex items-center justify-center cursor-col-resize z-20 touch-none"
           >
             <ResizeGrip orientation="vertical" />
           </div>

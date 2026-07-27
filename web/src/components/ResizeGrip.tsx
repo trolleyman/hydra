@@ -6,6 +6,11 @@ import { memo } from 'react'
 // each call site, which must carry the `group/resize` class so the hover/active
 // states light this pill. Namespaced (`/resize`) so an ancestor `group` (a
 // hoverable card, the sidebar) can't light it from afar.
+// When you place that strip: keep it OFF the panel's scrollbar. A ~10px strip
+// parked on a scroll container's inner right edge sits exactly on top of the
+// native scrollbar (10px here, see index.css) and swallows the thumb. Straddle
+// the panel's outer edge instead - a couple of pixels in, the rest in the
+// gutter - as the root sidebar and the diff file list do.
 // memo: a pure presentational leaf whose only prop is a constant orientation, so
 // it never needs to re-render with its parent. It sits inside frequently
 // re-rendering shells (the chat composer, sidebar, diff and spawn cards all
