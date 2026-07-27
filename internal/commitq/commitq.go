@@ -1,7 +1,7 @@
 // Package commitq is the file-channel the in-sandbox git_commit tool uses to have
-// the daemon perform a commit on its behalf, for the refs/readonly git-isolation
-// modes where .git is read-only in the sandbox (so an in-sandbox commit can't
-// update a ref). It mirrors the gate approval channel: the sandbox writes a
+// the daemon perform a commit on its behalf, for the readonly git-isolation mode
+// where .git is read-only in the sandbox (so an in-sandbox commit can't write it).
+// It mirrors the gate approval channel: the sandbox writes a
 // request file into a per-head writable dir and polls for a result file the host
 // writes back; the daemon can't be reached over its socket from inside the box.
 //

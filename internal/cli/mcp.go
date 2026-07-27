@@ -65,8 +65,8 @@ const (
 // commitHeadChanges backs the git_commit MCP tool. It commits the head's changes
 // onto its own branch inside its worktree, using the head-context env
 // (HYDRA_WORKTREE / HYDRA_BRANCH). When HYDRA_COMMIT_DIR is set (git_isolation
-// refs/readonly, where .git is read-only in the sandbox), it hands the commit to
-// the host daemon over the commitq file channel instead of running git itself.
+// readonly, where .git is read-only in the sandbox), it hands the commit to the
+// host daemon over the commitq file channel instead of running git itself.
 func commitHeadChanges(req mcpserver.CommitRequest) mcpserver.CommitResult {
 	if dir := os.Getenv("HYDRA_COMMIT_DIR"); dir != "" {
 		return commitViaDaemon(dir, req)
