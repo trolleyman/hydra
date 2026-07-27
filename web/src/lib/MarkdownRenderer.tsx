@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
 import { highlightCode } from './markdown'
+import { buildRepoSplat } from './repoSplat'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -96,7 +97,7 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
     path = path.slice(ctx.worktreePath.length).replace(/^\/+/, '')
   }
   const resolved = resolveRepoPath(dirOf(ctx.filePath), path)
-  const splat = resolved ? `${ctx.refStr}/${resolved}` : ctx.refStr
+  const splat = buildRepoSplat(ctx.refStr, resolved)
   const url = `/project/${encodePath(ctx.projectId)}/repository/${encodePath(splat)}${lineHash}`
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return

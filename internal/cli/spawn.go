@@ -27,7 +27,7 @@ func init() {
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.force, "force", "f", false, "Force replace an existing head with the same ID")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.detach, "detach", "d", false, "Start the agent and exit instead of attaching")
-	spawnCmd.Flags().BoolVar(&spawnFlags.chat, "chat", false, "Run the head in chat mode (Claude only): stream-json + the web UI's chat view; implies --detach")
+	spawnCmd.Flags().BoolVar(&spawnFlags.chat, "chat", false, "Run the head in chat mode (Claude or Codex): stream-json + the web UI's chat view; implies --detach. Defaults on for claude/codex; use --chat=false for a terminal session")
 	rootCmd.AddCommand(spawnCmd)
 }
 
@@ -48,8 +48,15 @@ var spawnCmd = &cobra.Command{
 		default:
 			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini, copilot, codex", agentType))
 		}
-		if spawnFlags.chat && agentType != sandbox.AgentTypeClaude {
-			return errtrace.Wrap(fmt.Errorf("--chat is only supported for claude agents (got %q)", agentType))
+		chatCapable := agentType == sandbox.AgentTypeClaude || agentType == sandbox.AgentTypeCodex
+		if spawnFlags.chat && !chatCapable {
+			return errtrace.Wrap(fmt.Errorf("--chat is only supported for claude and codex agents (got %q)", agentType))
+		}
+		// Chat mode is the default for claude/codex heads. Only auto-enable when
+		// the user did not explicitly pass --chat, so --chat=false still opts out
+		// and other agent types are unaffected.
+		if !cmd.Flags().Changed("chat") && chatCapable {
+			spawnFlags.chat = true
 		}
 
 		projectRoot, err := paths.GetProjectRootFromCwd()
