@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
@@ -14,7 +15,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, FolderSync,
-  SquarePlus, SquareMinus, SquareArrowRight,
+  SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
@@ -69,6 +70,27 @@ function CopyButton({ text }: { text: string }) {
       >
         {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
       </button>
+    </Tooltip>
+  )
+}
+
+// RepoOpenButton deep-links the file to the repository browser at the agent's
+// branch - the diff-header sibling of the tests panel's "open in repository"
+// affordance (CaseTree's RepoLinkButton). It renders a real <Link> (an <a href>)
+// so middle-click / Ctrl-click open it in a new tab natively; stopPropagation
+// keeps a left-click from also toggling the header's collapse. Styled to match
+// the adjacent CopyButton rather than the test row's hover-reveal look, since
+// the header's actions are always visible.
+function RepoOpenButton({ target }: { target: LinkProps }) {
+  return (
+    <Tooltip content="Open in repository">
+      <Link
+        {...target}
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
+      >
+        <SquareArrowOutUpRight className="w-3.5 h-3.5 text-gray-400" />
+      </Link>
     </Tooltip>
   )
 }
@@ -661,7 +683,7 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, fileRef, onComment, onAddToReview, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -699,6 +721,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // is the shift-click flag - the parent resolves the anchor.
   selection?: DiffLineSelection | null
   onSelectLine?: (side: DiffSide, line: number, extend: boolean) => void
+  // Builds the "open in repository" <Link> target for this file at the agent's
+  // branch. Omitted in the read-only repo view (no header) and whenever there's
+  // no ref to browse, which hides the header button.
+  openInRepo?: (path: string) => LinkProps
 }) {
   const lang = getLanguage(file.path)
 
@@ -999,6 +1025,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
           <ChangeTypeIcon type={file.change_type} />
         </div>
         <CopyButton text={file.path} />
+        {/* A deleted file no longer exists at the branch tip, so a repo-view link
+            would 404 - hide it there; every other change type opens fine. */}
+        {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
             {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
@@ -2045,6 +2074,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => { writeLocal(StorageKeys.diffArtifactView, artifactView) }, [artifactView])
   useEffect(() => { writeLocal(StorageKeys.diffArtifactHighlight, String(artifactHighlight)) }, [artifactHighlight])
 
+  // Deep-links each diff file's header to the repository browser at the agent's
+  // branch - the same target the tests panel builds (see TestsPanel's
+  // onOpenInRepo). Undefined (button hidden) when there's no ref to browse.
+  const openInRepo = useMemo(() => {
+    const ref = agent.branch_name
+    if (!ref || !projectId) return undefined
+    return (path: string) => linkOptions({
+      to: '/project/$projectId/repository/$',
+      params: { projectId, _splat: `${ref}/${path}` },
+    })
+  }, [projectId, agent.branch_name])
+
   // DiffViewer is remounted on every agent switch (the route keys the whole
   // AgentDetail subtree by project+agent), so the collapsed-file set and the
   // commit selectors initialise fresh from this agent's prefs above - no
@@ -2972,6 +3013,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               imageDiffMode={imageDiffMode}
               imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
               imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
+              openInRepo={openInRepo}
             />
           </>
         ) : (
@@ -2996,6 +3038,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               imageDiffMode={imageDiffMode}
               imageBefore={img.before}
               imageAfter={img.after}
+              openInRepo={openInRepo}
             />
             )
           })

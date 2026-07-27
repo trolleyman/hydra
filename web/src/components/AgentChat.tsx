@@ -52,6 +52,7 @@ import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { renderMarkdownSource } from '../lib/markdown'
+import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { Tooltip } from './Tooltip'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
@@ -6885,7 +6886,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
     // not RUNNING/STARTING), so a running turn means the daemon should queue it.
     const queued = isTurnRunning
-    const clientId = crypto.randomUUID()
+    const clientId = randomId()
     ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
     if (queued) {
       // A held message shows as a queued bubble pinned under the transcript
@@ -6917,7 +6918,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
     setPinned(true)
-    const clientId = crypto.randomUUID()
+    const clientId = randomId()
     ws.send(JSON.stringify({ type: 'shell_command', id: clientId, command }))
     optimisticShellRef.current.add(clientId)
     setItems((prev) => [...prev, { kind: 'shellCmd', id: optimisticIdRef.current--, clientId, command, output: '', running: true }])
