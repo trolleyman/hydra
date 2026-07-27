@@ -366,6 +366,26 @@ func projectIconValue(projectRoot string) string {
 	return strings.TrimSpace(*cfg.Icon)
 }
 
+// ReorderProjects rewrites the stored order of the project list, which is the
+// order the project selector renders. Clients send the full list of IDs in
+// their new order; see Manager.ReorderProjects for how a stale client list
+// (one that misses a just-added project) is reconciled.
+func (s *Server) ReorderProjects(_ context.Context, request api.ReorderProjectsRequestObject) (api.ReorderProjectsResponseObject, error) {
+	if request.Body == nil {
+		return api.ReorderProjects400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "project_ids is required",
+		}, nil
+	}
+	if err := s.ProjectsManager.ReorderProjects(request.Body.ProjectIds); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	// Other connected clients refetch the list and pick up the new order.
+	s.Events.ProjectsChanged()
+	return api.ReorderProjects204Response{}, nil
+}
+
 // SetProjectIcon sets (or clears) a project's custom icon in its
 // .hydra/config.toml and returns the updated ProjectInfo. An empty icon restores
 // the default folder glyph.

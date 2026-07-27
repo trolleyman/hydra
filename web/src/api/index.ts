@@ -44,6 +44,7 @@ export type { PreviewsResponse } from './models/PreviewsResponse';
 export { PreviewState } from './models/PreviewState';
 export type { PreviewStatus } from './models/PreviewStatus';
 export type { ProjectInfo } from './models/ProjectInfo';
+export type { ReorderProjectsRequest } from './models/ReorderProjectsRequest';
 export type { RepositoryArtifactFile } from './models/RepositoryArtifactFile';
 export { RepositoryArtifactResponse } from './models/RepositoryArtifactResponse';
 export type { RepositoryArtifactScript } from './models/RepositoryArtifactScript';

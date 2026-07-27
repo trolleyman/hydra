@@ -127,6 +127,13 @@ export interface Toast {
   projectContext?: ToastProjectContext
 }
 
+// Default lifetimes when a caller doesn't pass an explicit `duration`. An error
+// toast sticks around markedly longer than a success/info one: it usually carries
+// detail worth reading (an HTTP status, a JSON body) and, unlike a confirmation,
+// it is the only record of what went wrong once it fades.
+const DEFAULT_DURATION_MS = 3000
+const ERROR_DURATION_MS = 10000
+
 // How long the leave animation runs before the toast is removed from the list.
 // Must match the `toast-out` keyframe duration in index.css.
 const EXIT_ANIMATION_MS = 220
@@ -140,6 +147,8 @@ interface ToastState {
     code?: string
     codeLang?: string
     type?: ToastType
+    // Lifetime in ms; 0 = persistent. Omitted, it defaults by type (errors get
+    // the longer ERROR_DURATION_MS, everything else DEFAULT_DURATION_MS).
     duration?: number
     actions?: ToastAction[]
     onDismiss?: () => void
@@ -198,7 +207,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, code, codeLang, type = 'info', duration = 3000, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
+  show: ({ message, code, codeLang, type = 'info', duration = type === 'error' ? ERROR_DURATION_MS : DEFAULT_DURATION_MS, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {

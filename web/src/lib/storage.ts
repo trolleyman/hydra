@@ -62,6 +62,12 @@ export const StorageKeys = {
   // ~quarter-second chunks (the claude CLI flushes deltas ~5x/sec). Client-only,
   // global (localStorage, like Theme). See lib/chatPrefs.
   chatSmoothStreaming: 'hydra-chat-smooth-streaming',
+  // 'off' when the user has turned OFF the line-number gutter on multi-line code
+  // blocks - the chat transcript (a Bash command, a tool's JSON input) and the
+  // security approval card's command box. Default (absent) = on: the numbers tell
+  // a wrapped long line apart from a genuinely new one. Client-only, global
+  // (localStorage, like Theme). See lib/chatPrefs.
+  chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
@@ -134,6 +140,14 @@ export const StorageKeys = {
 export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
 export const projectViewKey = (projectId: string): string =>
   `${PROJECT_VIEW_PREFIX}${projectId}`
+
+// Last-seen live agent list, one entry per project, so switching into a project
+// paints its sidebar (and a restored agent page) from cache instead of showing
+// the *previous* project's agents until the list request lands. Replaced by the
+// first real response. See lib/agentCache.ts.
+export const AGENTS_CACHE_PREFIX = 'hydra-agents-'
+export const agentsCacheKey = (projectId: string): string =>
+  `${AGENTS_CACHE_PREFIX}${projectId}`
 
 // Per-artifact view prefs, keyed by project + agent + artifact name (see
 // artifactPrefs.ts). projectId may be null → '_' keeps the key shape stable.

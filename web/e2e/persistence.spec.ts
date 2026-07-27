@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 // End-to-end coverage for the localStorage persistence that the storage cleanup
 // (shared readJSON/writeJSON + createShardedStore) runs through. The unit tests
@@ -42,7 +42,7 @@ test.describe('project-view persistence (readJSON / writeJSON round-trip)', () =
         const raw = await page.evaluate((k) => window.localStorage.getItem(k), PROJECT_VIEW_KEY)
         return raw ? JSON.parse(raw) : null
       })
-      .toEqual({ kind: 'repository', path: '' })
+      .toEqual({ view: '/repository' })
   })
 
   test('restores the last-open view after a reload from the root', async ({ page }) => {
@@ -63,14 +63,42 @@ test.describe('project-view persistence (readJSON / writeJSON round-trip)', () =
         const raw = await page.evaluate((k) => window.localStorage.getItem(k), PROJECT_VIEW_KEY)
         return raw ? JSON.parse(raw) : null
       })
-      .toEqual({ kind: 'repository', path: '' })
+      .toEqual({ view: '/repository' })
 
     // Land on the bare root: the boot restore reads the saved view back and
     // navigates into the remembered view rather than the spawn/landing page.
     await page.goto('/')
     await expect(page).toHaveURL(/\/project\/sim-project\/repository\b/, { timeout: 15_000 })
   })
+
+  // Regression guard: switching projects used to persist the *new* project's
+  // path under the *old* project's id (route params lag the location by a
+  // render), wiping the memory of the project being left - so switching back
+  // always dropped you on its spawn page. Non-agent views are used here because
+  // a remembered agent with unread changes is deliberately deflected to the
+  // project page (see restoreProjectView).
+  for (const [what, path, expected] of [
+    ['a deep repository file', 'repository/main/src/App.tsx', /\/project\/sim-project\/repository\/main\/src\/App\.tsx$/],
+    ['the settings page', 'settings', /\/project\/sim-project\/settings$/],
+  ] as const) {
+    test(`restores ${what} after switching to another project and back`, async ({ page }) => {
+      await page.goto(PROJECT + path)
+      await expect(page).toHaveURL(expected)
+
+      await switchProject(page, 'mobile-app')
+      await expect(page).toHaveURL(/\/project\/mobile-app\b/)
+
+      await switchProject(page, 'simulated-project')
+      await expect(page).toHaveURL(expected)
+    })
+  }
 })
+
+// Pick a project from the header dropdown by its displayed name.
+async function switchProject(page: Page, name: string): Promise<void> {
+  await page.getByLabel('Select project').click()
+  await page.getByText(name, { exact: true }).first().click()
+}
 
 test.describe('trusted-projects persistence (readJSON / writeJSON round-trip)', () => {
   // Seed only the selected-project id here - NOT the trust list - so the Trust

@@ -748,7 +748,18 @@ func (Deploy) Tailscale() error {
 	fmt.Printf("     %sfor p in $(seq %d %d); do tailscale serve --bg --https=$p http://127.0.0.1:$p; done%s\n", colorBold, plo, phi, colorReset)
 	fmt.Printf("   -> a preview on port %d becomes %shttps://%s:%d/%s\n\n", plo, colorCyan, host, plo, colorReset)
 
-	fmt.Printf("%sHydra needs no changes:%s it stays on localhost:%s (no auth key, no 0.0.0.0 bind).\n", colorBold, colorReset, port)
+	fmt.Printf("%sHydra needs no changes:%s serve proxies in from 127.0.0.1, so localhost:%s is enough\n", colorBold, colorReset, port)
+	fmt.Printf("(no auth key, no 0.0.0.0 bind).\n")
+	// The preview mappings bind every port in the range on this node's tailnet
+	// addresses. That is invisible to a loopback-bound Hydra, but an EXPOSED one
+	// binds the wildcard, which collides with a specific-address listener - so
+	// without this note the range silently looks "all busy" to it. Hydra now
+	// falls back to loopback in that case (internal/preview.allocListener), which
+	// is what these mappings proxy to anyway; say so rather than let it surprise.
+	fmt.Printf("%sRunning Hydra exposed too%s (mage prod / HYDRA_API_ADDR=0.0.0.0:...)? The preview\n", colorBold, colorReset)
+	fmt.Printf("mappings claim %d-%d on your tailnet addresses, so Hydra binds its preview\n", plo, phi)
+	fmt.Printf("listeners on 127.0.0.1 instead - reachable through this TLS front, but not\n")
+	fmt.Printf("directly over plain HTTP from the LAN.\n")
 	fmt.Printf("Inspect or undo with %stailscale serve status%s / %stailscale serve reset%s.\n\n", colorBold, colorReset, colorBold, colorReset)
 
 	if !haveTailscale {

@@ -107,6 +107,37 @@ export const useChatStreamStore = create<ChatSmoothState>()(
   ),
 )
 
+// Reads the persisted code line-number preference. Absent (or anything but
+// 'off') = on, the default. Exported for non-React callers / unit testing.
+export function loadChatCodeLineNumbers(): boolean {
+  return readLocal(StorageKeys.chatCodeLineNumbers) !== 'off'
+}
+
+interface ChatCodeLinesState {
+  lineNumbers: boolean
+  setLineNumbers: (lineNumbers: boolean) => void
+}
+
+// Line-number gutter on multi-line code blocks in the transcript. A long shell
+// command wraps, and without numbers a wrapped continuation reads as its own
+// step - the numbers are what tell the two apart. Stored as the bare 'off'
+// marker, like the smooth-streaming toggle.
+export const useChatCodeLinesStore = create<ChatCodeLinesState>()(
+  persist(
+    (set) => ({
+      lineNumbers: loadChatCodeLineNumbers(),
+      setLineNumbers: (lineNumbers) => set({ lineNumbers }),
+    }),
+    {
+      name: StorageKeys.chatCodeLineNumbers,
+      storage: singleFieldStorage('lineNumbers', loadChatCodeLineNumbers, (lineNumbers) =>
+        writeLocal(StorageKeys.chatCodeLineNumbers, lineNumbers ? null : 'off'),
+      ),
+      partialize: (s) => ({ lineNumbers: s.lineNumbers }),
+    },
+  ),
+)
+
 interface ChatFontState {
   serif: boolean
   setSerif: (serif: boolean) => void

@@ -208,6 +208,27 @@ export function dropRedundantSemicolons(cmd: string): string {
   return out
 }
 
+// HOST_RUN matches the sandbox escape hatch an agent runs to ask for a command
+// on the host - `hydra host-run -- <command>`, however the binary is spelled
+// (`/tmp/hydra-internal`, a worktree-local `./hydra`, a bare `hydra`).
+const HOST_RUN = /^\s*(?:[\w./-]*\/)?hydra(?:-internal)?\s+host-run\s+(?:--\s+)?([\s\S]+)$/
+
+// parseHostRunScript returns the command a `hydra host-run` invocation is asking
+// the user to run on the host, or null when the command isn't a host-run at all.
+// The `bash -c '<script>'` wrapper agents habitually add is unwrapped, and a
+// whole script passed as one quoted argument is unquoted - both mirror what the
+// CLI itself does when it renders the request for the approval card, so the chat
+// shows the same text the card asks about.
+export function parseHostRunScript(command: string): string | null {
+  const match = command.match(HOST_RUN)
+  if (!match) return null
+  const rest = match[1].trim()
+  if (!rest) return null
+  const unwrapped = unwrapBashLoginCommand(rest)
+  if (unwrapped !== rest) return unwrapped
+  return parseOneShellWord(rest) ?? rest
+}
+
 function quoteShellPath(path: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
