@@ -11,20 +11,10 @@ import { test, expect } from '@playwright/test'
 
 const PROJECT = '/project/sim-project/'
 
-test.beforeEach(async ({ page }) => {
-  // Pre-trust the sim projects so the Trust modal doesn't intercept clicks (see
-  // flows.spec.ts for the rationale).
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
-    } catch {
-      /* ignore */
-    }
-  })
-})
-
+// Sidebar agent rows are real links to the agent page (AgentSidebarItem), not
+// buttons - middle-click has to open them in a new tab.
 function agentRow(page: import('@playwright/test').Page, title: string) {
-  return page.locator('aside').getByRole('button', { name: new RegExp(title) })
+  return page.locator('aside').getByRole('link', { name: new RegExp(title) })
 }
 
 test('sidebar status chips + dots take their status color', async ({ page }) => {
@@ -48,10 +38,16 @@ test('the agent detail header renders the brand-colored type pill', async ({ pag
   await agentRow(page, 'Migrate auth providers to OAuth').click()
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
 
-  // The rounded-full pill is detail-only (the sidebar uses bare colored text for
-  // the type), so this uniquely targets the <Badge variant="pill"> with its
-  // gemini brand palette - proving the pill + custom className path renders.
-  const pill = page.locator('span.rounded-full', { hasText: 'gemini' })
+  // The type pill is detail-only (the sidebar uses bare colored text for the
+  // type) and ICON-ONLY - the label moved into its tooltip, so there is no
+  // "gemini" text to match on. It is the first badge in the header meta strip
+  // (AgentDetail MetaStrip, [data-meta-strip]); this asserts the
+  // <Badge variant="pill"> + custom className path still paints the gemini
+  // brand palette.
+  const pill = page.locator('[data-meta-strip] span.rounded-full').first()
   await expect(pill).toBeVisible()
   await expect(pill).toHaveClass(/bg-violet-100/)
+  // ...and the type it stands for is still reachable, via that tooltip.
+  await pill.hover()
+  await expect(page.getByRole('tooltip').filter({ hasText: 'gemini' })).toBeVisible()
 })

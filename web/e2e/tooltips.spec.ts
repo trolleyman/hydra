@@ -10,18 +10,6 @@ import { test, expect } from '@playwright/test'
 // Both tooltips portal to <body>, so they're asserted as page-level text rather
 // than as descendants of their trigger.
 
-// Pre-trust the simulated project so the first-open "Trust this project?" modal
-// never intercepts hovers (same approach as flows.spec.ts).
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
-    } catch {
-      /* ignore */
-    }
-  })
-})
-
 test('dark tooltip appears on hover and clears when the pointer leaves', async ({ page }) => {
   await page.goto('/project/sim-project/')
 
@@ -46,11 +34,11 @@ test('card tooltip shows its info card and stays open while hovered', async ({ p
   await page.goto('/project/sim-project/settings')
 
   // The "Sandbox Policy" section header carries an InfoTooltip (title "OS
-  // Sandbox"). Its trigger is the lucide Info icon - the only svg in the row
-  // tagged cursor-help.
-  const header = page.locator('h3', { hasText: 'Sandbox Policy' })
-  await expect(header).toBeVisible()
-  const icon = header.locator('xpath=following-sibling::*').locator('svg.cursor-help').first()
+  // Sandbox"). Its trigger is a real <button> wrapping the lucide Info icon -
+  // it needs a 20px hit target and keyboard focus - named "<title> help" by
+  // InfoTooltip, which is the stable handle for it.
+  await expect(page.locator('h3', { hasText: 'Sandbox Policy' })).toBeVisible()
+  const icon = page.getByRole('button', { name: 'OS Sandbox help' })
 
   const title = page.getByText('OS Sandbox', { exact: true })
   await expect(title).toHaveCount(0)

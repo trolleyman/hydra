@@ -7,34 +7,20 @@ import { test, expect } from '@playwright/test'
 // carries the blue unread-changes dot), agent-2 ("Migrate auth providers to
 // OAuth", which is needs_input → red needs-input dot), agent-md, agent-3,
 // agent-approval. Selectors mirror the real markup:
-//   - sidebar agent rows are <button>s whose accessible name starts with the
-//     agent title (web/src/components/AgentComponents.tsx AgentSidebarItem)
+//   - sidebar agent rows are LINKS (real <a> to the agent page, so middle-click
+//     opens a tab) whose accessible name starts with the agent title
+//     (web/src/components/AgentComponents.tsx AgentSidebarItem)
 //   - the blue unread dot is <span aria-label="unread changes"> on that row;
 //     the red needs-input dot is <span aria-label="needs your input">
 //   - the project switcher is <button aria-label="Select project"> (__root.tsx)
 
 const PROJECT = '/project/sim-project/'
 
-// Pre-trust the simulated projects so the first-open "Trust this project?" modal
-// (TrustProjectModal) - a fixed full-screen overlay that intercepts clicks -
-// never blocks these flows. Trust is client-side localStorage keyed by project
-// id (lib/storage StorageKeys.trustedProjects), so seeding it before the app
-// boots dismisses the gate, exactly as the screenshot harness does.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
-    } catch {
-      /* ignore */
-    }
-  })
-})
-
 // Locate a sidebar agent row by its (unique) title text. getByRole matches the
-// regex against the row button's full accessible name, so the leading title is
+// regex against the row link's full accessible name, so the leading title is
 // enough - no dependency on the trailing status/activity text.
 function agentRow(page: import('@playwright/test').Page, title: string) {
-  return page.locator('aside').getByRole('button', { name: new RegExp(title) })
+  return page.locator('aside').getByRole('link', { name: new RegExp(title) })
 }
 
 test('opening an agent from the sidebar navigates to its detail view', async ({ page }) => {
@@ -47,9 +33,12 @@ test('opening an agent from the sidebar navigates to its detail view', async ({ 
   // URL reflects the opened agent...
   await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
   // ...and the detail view renders agent-1's seeded prompt (unique to the detail
-  // page; the sidebar only shows the title + activity line).
+  // page; the sidebar only shows the title + activity line). The prompt card
+  // (CollapsiblePrompt) keeps its expanded body mounted behind a 0fr grid row
+  // while collapsed, so the text is in the DOM twice - once as the truncated
+  // one-line summary, once in the clipped body. Either proves it rendered.
   await expect(
-    page.getByText('Let agents be renamed with a human-friendly title', { exact: false }),
+    page.getByText('Let agents be renamed with a human-friendly title', { exact: false }).first(),
   ).toBeVisible()
 })
 
@@ -143,7 +132,8 @@ test('switching agents remounts the detail view, so an unsaved rename never blee
   await expect(title).toHaveValue('Migrate auth providers to OAuth')
   await expect(title).toHaveJSProperty('readOnly', true)
   // The body re-rendered for the new agent too (agent-2's unique prompt text).
-  await expect(page.getByText('OAuth 2.0 with PKCE', { exact: false })).toBeVisible()
+  // .first(): the collapsed prompt card holds it as both summary and body.
+  await expect(page.getByText('OAuth 2.0 with PKCE', { exact: false }).first()).toBeVisible()
 
   // And switching back lands on agent-1's real title, not the abandoned draft.
   await agentRow(page, 'Add renameable agent titles').click()
