@@ -196,6 +196,10 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *SimulationServer) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteJSON(w, http.StatusOK, api.TrackRemoteResponse{Remote: "hydra-agents"})
+}
+
 // simAgent1Prompt is the seeded prompt for the live simulated agent (agent-1),
 // shared by ListAgents and GetAgent so the detail page (populated from either)
 // always renders the prompt block.

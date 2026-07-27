@@ -30,6 +30,7 @@ import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { TestsResponse } from '../models/TestsResponse';
+import type { TrackRemoteResponse } from '../models/TrackRemoteResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
@@ -191,6 +192,27 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
+     * @param projectId
+     * @returns TrackRemoteResponse OK
+     * @throws ApiError
+     */
+    public ensureTrackRemote(
+        projectId: string,
+    ): CancelablePromise<TrackRemoteResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/track-remote',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },

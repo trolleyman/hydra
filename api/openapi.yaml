@@ -220,6 +220,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/track-remote:
+    post:
+      summary: Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
+      operationId: ensureTrackRemote
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackRemoteResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/config-toml:
     get:
       summary: Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
@@ -2696,6 +2726,16 @@ components:
         exists:
           type: boolean
           description: Whether a .hydra/config.toml file is present in the project
+
+    TrackRemoteResponse:
+      type: object
+      required: [remote]
+      properties:
+        remote:
+          type: string
+          description: >-
+            The configured local remote name (e.g. "hydra-agents"). Check out and
+            follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
 
     SetProjectIconRequest:
       type: object

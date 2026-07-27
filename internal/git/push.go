@@ -150,6 +150,32 @@ func Fetch(ctx context.Context, projectRoot, remote string) error {
 	return nil
 }
 
+// TrackRemoteName is the local git remote Hydra configures so a user can follow
+// head branches (hydra/*) as remote-tracking refs and `git pull` them. Named to
+// avoid colliding with the hydra/* branch namespace: a remote literally named
+// "hydra" would make the shorthand "hydra/<id>" ambiguous (refs/heads vs
+// refs/remotes). See docs/git-isolation.md.
+const TrackRemoteName = "hydra-agents"
+
+// EnsureTrackRemote idempotently configures the TrackRemoteName remote in the
+// project's repo - url "." (the repo itself, so no network) with a fetch refspec
+// mapping refs/heads/hydra/* into refs/remotes/hydra-agents/* - and fetches once so
+// the refs exist immediately. The user can then `git checkout -t hydra-agents/<id>`
+// and `git pull` to follow a head's branch. Returns the remote name.
+func EnsureTrackRemote(ctx context.Context, projectRoot string) (string, error) {
+	if out, err := gitCombined(projectRoot, "config", "remote."+TrackRemoteName+".url", "."); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("set %s url: %s", TrackRemoteName, firstNonEmpty(strings.TrimSpace(out), err.Error())))
+	}
+	refspec := "+refs/heads/hydra/*:refs/remotes/" + TrackRemoteName + "/*"
+	if out, err := gitCombined(projectRoot, "config", "remote."+TrackRemoteName+".fetch", refspec); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("set %s fetch: %s", TrackRemoteName, firstNonEmpty(strings.TrimSpace(out), err.Error())))
+	}
+	if err := Fetch(ctx, projectRoot, TrackRemoteName); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return TrackRemoteName, nil
+}
+
 // RemoteURL returns the fetch URL configured for remote, or "" if it has none.
 func RemoteURL(projectRoot, remote string) string {
 	if remote == "" {

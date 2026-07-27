@@ -1565,6 +1565,12 @@ type TestsResponse struct {
 	Runners []TestRunResult `json:"runners"`
 }
 
+// TrackRemoteResponse defines model for TrackRemoteResponse.
+type TrackRemoteResponse struct {
+	// Remote The configured local remote name (e.g. "hydra-agents"). Check out and follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
+	Remote string `json:"remote"`
+}
+
 // UncommittedSummary defines model for UncommittedSummary.
 type UncommittedSummary struct {
 	// TrackedCount Number of tracked files with staged or unstaged changes
@@ -2035,6 +2041,9 @@ type ServerInterface interface {
 	// Restart the project's supervised services (picks up config changes)
 	// (POST /api/projects/{project_id}/services/restart)
 	RestartServices(w http.ResponseWriter, r *http.Request, projectId string)
+	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
+	// (POST /api/projects/{project_id}/track-remote)
+	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -4234,6 +4243,31 @@ func (siw *ServerInterfaceWrapper) RestartServices(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// EnsureTrackRemote operation middleware
+func (siw *ServerInterfaceWrapper) EnsureTrackRemote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnsureTrackRemote(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -4466,6 +4500,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/reviews", wrapper.ListReviews)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/track-remote", wrapper.EnsureTrackRemote)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
@@ -6649,6 +6684,41 @@ func (response RestartServices404JSONResponse) VisitRestartServicesResponse(w ht
 	return json.NewEncoder(w).Encode(response)
 }
 
+type EnsureTrackRemoteRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type EnsureTrackRemoteResponseObject interface {
+	VisitEnsureTrackRemoteResponse(w http.ResponseWriter) error
+}
+
+type EnsureTrackRemote200JSONResponse TrackRemoteResponse
+
+func (response EnsureTrackRemote200JSONResponse) VisitEnsureTrackRemoteResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnsureTrackRemote404JSONResponse ErrorResponse
+
+func (response EnsureTrackRemote404JSONResponse) VisitEnsureTrackRemoteResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnsureTrackRemote500JSONResponse ErrorResponse
+
+func (response EnsureTrackRemote500JSONResponse) VisitEnsureTrackRemoteResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -6890,6 +6960,9 @@ type StrictServerInterface interface {
 	// Restart the project's supervised services (picks up config changes)
 	// (POST /api/projects/{project_id}/services/restart)
 	RestartServices(ctx context.Context, request RestartServicesRequestObject) (RestartServicesResponseObject, error)
+	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
+	// (POST /api/projects/{project_id}/track-remote)
+	EnsureTrackRemote(ctx context.Context, request EnsureTrackRemoteRequestObject) (EnsureTrackRemoteResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -8519,6 +8592,32 @@ func (sh *strictHandler) RestartServices(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartServicesResponseObject); ok {
 		if err := validResponse.VisitRestartServicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnsureTrackRemote operation middleware
+func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request EnsureTrackRemoteRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnsureTrackRemote(ctx, request.(EnsureTrackRemoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnsureTrackRemote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnsureTrackRemoteResponseObject); ok {
+		if err := validResponse.VisitEnsureTrackRemoteResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

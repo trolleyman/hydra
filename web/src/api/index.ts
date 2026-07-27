@@ -80,6 +80,7 @@ export type { TestScript } from './models/TestScript';
 export type { TestsResponse } from './models/TestsResponse';
 export { TestStatus } from './models/TestStatus';
 export type { TestSummary } from './models/TestSummary';
+export type { TrackRemoteResponse } from './models/TrackRemoteResponse';
 export type { UncommittedSummary } from './models/UncommittedSummary';
 export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
 
