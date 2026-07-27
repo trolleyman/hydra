@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ChatPane } from './AgentChat'
+import { ChatPane, reduceHistoryEvents } from './AgentChat'
+import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -161,4 +162,75 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     expect(ta.value).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
+})
+
+// History pages arrive NEWEST first, so a tool call whose tool_use and
+// tool_result straddle a page boundary is reduced result-first: the batch
+// carrying the answer is reduced pages before the batch that builds the card.
+// The result used to be dropped on the floor there - scrolling back to an
+// answered AskUserQuestion showed a blank, interactive card with no record of
+// the selection. A shared ToolResultLink carries it forward.
+describe('reduceHistoryEvents across page boundaries', () => {
+  const QUESTION_INPUT = {
+    questions: [
+      {
+        question: 'Which offset?',
+        header: 'Agent box',
+        multiSelect: false,
+        options: [{ label: 'Floating cards' }, { label: 'The composer' }],
+      },
+    ],
+  }
+  const ANSWER = 'Your questions have been answered: "Which offset?"="Floating cards".'
+
+  // A decrementing allocator, like the real older-history one.
+  const alloc = () => {
+    let id = -1
+    return () => id--
+  }
+
+  it('applies a tool_result reduced in a newer page to a card built by an older page', () => {
+    const link = newToolResultLink()
+    // Newer page: only the result.
+    const newer = reduceHistoryEvents(
+      [{ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] } }],
+      alloc(), undefined, undefined, link,
+    )
+    expect(newer).toHaveLength(0)
+    // Older page: the tool_use that owns it.
+    const older = reduceHistoryEvents(
+      [{ type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] } }],
+      alloc(), undefined, undefined, link,
+    )
+    const tool = older.find((it) => it.kind === 'tool')
+    expect(tool).toMatchObject({ kind: 'tool', toolUseId: 'toolu_1', result: 'ok' })
+  })
+
+  it('settles a question card whose answer was in the newer page', () => {
+    const link = newToolResultLink()
+    reduceHistoryEvents(
+      [{ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_q', content: ANSWER }] } }],
+      alloc(), undefined, undefined, link,
+    )
+    const older = reduceHistoryEvents(
+      [{ type: 'assistant', message: { id: 'm2', content: [{ type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion', input: QUESTION_INPUT }] } }],
+      alloc(), undefined, undefined, link,
+    )
+    const question = older.find((it) => it.kind === 'question')
+    expect(question).toMatchObject({ kind: 'question', toolUseId: 'toolu_q', result: ANSWER })
+  })
+
+  it('still pairs a tool_use and tool_result inside one page', () => {
+    const link = newToolResultLink()
+    const items = reduceHistoryEvents(
+      [
+        { type: 'assistant', message: { id: 'm3', content: [{ type: 'tool_use', id: 'toolu_2', name: 'Bash', input: {} }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'done' }] } },
+      ],
+      alloc(), undefined, undefined, link,
+    )
+    expect(items.find((it) => it.kind === 'tool')).toMatchObject({ result: 'done' })
+    expect(link.orphans.size).toBe(0)
+  })
+
 })

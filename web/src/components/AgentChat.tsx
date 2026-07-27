@@ -68,6 +68,8 @@ import { useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
+import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/toolResultLink'
+import type { ToolResultLink } from '../lib/toolResultLink'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -3814,15 +3816,18 @@ function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
 // assistant text/thinking/tool_use/question blocks with tool_result patching,
 // and result footers. A TodoWrite is dropped (the plan panel already holds the
 // latest state, not this older one). allocId hands out ids for the batch.
-function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>): ChatItem[] {
+// Exported only for its regression test (the page-boundary result carry below);
+// AgentChat is otherwise a component module.
+// eslint-disable-next-line react-refresh/only-export-components
+export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, durations?: Map<string, number>, tsOut?: Map<number, number>, link?: ToolResultLink): ChatItem[] {
   const items: ChatItem[] = []
   // The current event's transcript timestamp, carried forward over entries
   // without one - stamped per pushed item (tsOut) for the commit-chip interleave.
   let lastTs: number | null = null
-  const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
+  const push = (raw: DistributiveOmit<ChatItem, 'id'>) => {
     const id = allocId()
     if (lastTs != null) tsOut?.set(id, lastTs)
-    items.push({ ...item, id } as ChatItem)
+    items.push({ ...claimOrphanResult(link, raw), id } as ChatItem)
   }
   const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -3838,6 +3843,11 @@ function reduceHistoryEvents(events: ProviderEvent[], allocId: () => number, dur
         return
       }
     }
+    // No card in this batch: its tool_use is in a page not loaded yet (this
+    // batch's own older neighbour). Hold the result for whichever batch builds
+    // it - the card is created by a LATER, older page, so patching forward is
+    // the only way it can ever show its result.
+    stashOrphanResult(link, toolUseId, { result: text, isError, images })
   }
   // Distinct task-notifications already rendered in this batch: the CLI records
   // each one several times (queue-operation, attachment, sometimes a consumed
@@ -4590,6 +4600,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     })
 
     const pending: ChatItem[] = []
+    // Tool results whose card belongs to a history page further back (see
+    // ToolResultLink). Connection-scoped, like `items`: a reconnect rebuilds
+    // the transcript from scratch, so the link starts empty with it.
+    const toolResults = newToolResultLink()
     let flushScheduled = false
     const flush = () => {
       flushScheduled = false
@@ -4597,14 +4611,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const batch = pending.splice(0, pending.length)
       setItems((prev) => [...prev, ...batch])
     }
-    const push = (item: DistributiveOmit<ChatItem, 'id'>) => {
+    const push = (raw: DistributiveOmit<ChatItem, 'id'>) => {
       const id = nextId++
       // Stamp the item's wall-clock time for the commit-chip interleave:
       // replayed events use the transcript's timestamp (prevEventTs carries it
       // forward over ring lines, which have none), live items arrival time.
       const ts = replaying ? prevEventTs : Date.now()
       if (ts != null) itemTsRef.current.set(id, ts)
-      pending.push({ ...item, id } as ChatItem)
+      pending.push({ ...claimOrphanResult(toolResults, raw), id } as ChatItem)
       if (!replaying && !flushScheduled) {
         flushScheduled = true
         queueMicrotask(flush)
@@ -5094,6 +5108,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         inPending.result = result
         return
       }
+      // The initial history window is reduced here too, and it is the NEWEST
+      // page - so a result whose card was never built belongs to a page the
+      // user has not scrolled back to yet. Hold it for that page.
+      if (!toolResults.known.has(toolUseId)) {
+        stashOrphanResult(toolResults, toolUseId, { result, isError, images })
+        return
+      }
       setItems((prev) =>
         prev.map((it) => {
           if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages }
@@ -5181,10 +5202,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )
         }
         // A request whose tool_use we never saw (shouldn't happen, but the
-        // protocol doesn't guarantee it) still gets a card.
+        // protocol doesn't guarantee it) still gets a card. It bypasses push(),
+        // so register it with the result link by hand - otherwise its answer
+        // would be filed as an orphan and the card would never settle.
         const specs = parseQuestionSpecs(input)
         if (!specs) return prev
-        return [...prev, { kind: 'question', id: nextId++, toolUseId, input, specs, requestId }]
+        const card = claimOrphanResult(toolResults, { kind: 'question', toolUseId, input, specs, requestId })
+        return [...prev, { ...card, id: nextId++ } as ChatItem]
       })
     }
 
@@ -5225,7 +5249,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
-        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current, itemTsRef.current)
+        const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current, itemTsRef.current, toolResults)
         // Advance the anchor to the oldest event of this batch.
         const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
         if (anchor) oldestUuidRef.current = anchor
