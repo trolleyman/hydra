@@ -9,25 +9,12 @@ import { test, expect } from '@playwright/test'
 // service ("emu-pool"). Asserting each section renders its seeded data proves the
 // re-homed components still mount and wire up through the barrel.
 
-// Pre-trust the simulated project so the first-open "Trust this project?" overlay
-// (TrustProjectModal) can't intercept clicks - mirrors flows.spec.ts.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
-    } catch {
-      /* ignore */
-    }
-  })
-})
-
 test('the settings page renders every split section with its seeded config', async ({ page }) => {
   await page.goto('/project/sim-project/settings')
 
-  // Theme + Terminal: the two client-only preference sections (shared.tsx
-  // SettingSection heading + their own controls).
-  await expect(page.getByRole('heading', { name: 'Theme', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible()
+  // The page splits its config across layer tabs (role="tab"): Project / Local /
+  // User hold the config.toml layers, Browser the client-only preferences. The
+  // Project tab is the default one, so the config sections below need no click.
 
   // ConfigForm (defaults / "All agents" tab): the pre-prompt textarea carries the
   // seeded default, and the sandbox policy exposes the allow-listed host.
@@ -35,13 +22,23 @@ test('the settings page renders every split section with its seeded config', asy
   await expect(page.getByText('System Pre-Prompt')).toBeVisible()
   await expect(page.getByPlaceholder('Default pre-prompt')).toHaveValue('Default pre-prompt')
   await expect(page.getByRole('heading', { name: 'Sandbox Policy' })).toBeVisible()
-  await expect(page.getByPlaceholder('e.g. api.anthropic.com').first()).toHaveValue('api.anthropic.com')
+  // The network allow-list, seeded with the sim's two hosts (simulation.go
+  // AllowedHosts); the block-list below it has its own placeholder.
+  await expect(page.getByPlaceholder('e.g. api.internal.example.com').first()).toHaveValue('api.internal.example.com')
+  await expect(page.getByPlaceholder('e.g. *.tracker.io').first()).toHaveValue('*.tracker.io')
 
   // ArtifactsEditor + ServicesEditor, each with its one seeded entry.
   await expect(page.getByRole('heading', { name: 'Diff Artifacts' })).toBeVisible()
   await expect(page.getByPlaceholder('e.g. screenshots')).toHaveValue('screenshots')
   await expect(page.getByRole('heading', { name: 'Services', exact: true })).toBeVisible()
   await expect(page.getByPlaceholder('e.g. emu-pool')).toHaveValue('emu-pool')
+
+  // Theme + Terminal: the client-only preference sections (shared.tsx
+  // SettingSection heading + their own controls), which live on the Browser tab
+  // - they are per-device, not part of any config.toml layer.
+  await page.getByRole('tab', { name: 'Browser', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Theme', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible()
 })
 
 test('switching the agent tab swaps in that agent’s ConfigForm', async ({ page }) => {

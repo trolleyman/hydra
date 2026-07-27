@@ -39,7 +39,6 @@ test.describe('opening an unread chat agent', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       try {
-        window.localStorage.setItem('hydra-trusted-projects', '["sim-project"]')
         window.localStorage.setItem('hydra-project-id', 'sim-project')
       } catch {
         /* ignore */

@@ -10,18 +10,6 @@ import { test, expect } from '@playwright/test'
 
 const AGENT = '/project/sim-project/agent/agent-1'
 
-// Pre-trust the simulated project so the "Trust this project?" overlay can't
-// intercept clicks - mirrors flows.spec.ts.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]')
-    } catch {
-      /* ignore */
-    }
-  })
-})
-
 // The artifact set cards default to collapsed and only appear once the artifacts
 // WS/poll snapshot has populated the panel, so wait for the named header button
 // then click it to expand. Mirrors the screenshot harness's showArtifacts step.
@@ -57,25 +45,37 @@ test('a failed set surfaces its xterm build-log viewer', async ({ page }) => {
   await expect(page.locator('.xterm').first()).toBeVisible()
 })
 
-test('a side that fails mid-generation gets the red border, not green', async ({ page }) => {
+test('a partially failed set colours each side by its own outcome', async ({ page }) => {
   await page.goto(AGENT)
 
-  // The "components" set is still generating: its before (left) side already
-  // exited 1 while the after (right) side keeps rendering (see simArtifactSets).
-  // The failed side's live-log box must read as failed (red border + faint red
-  // wash), NOT clean-finish green - the bug was that a drained live log with a
-  // persisted URL but no error was mistaken for success.
-  const card = setCard(page, 'components')
+  // The "dashboard" set settled with only its before (left) side failed, so its
+  // build log auto-opens with the two sides coloured independently: red for the
+  // failure, green for the side that finished clean. The mid-GENERATION variant
+  // of this (a failed side whose drained live log + persisted URL make it look
+  // like a clean finish) is guarded in src/components/ArtifactLogView.test.tsx -
+  // the sim no longer has a set in that transient shape.
+  const card = setCard(page, 'dashboard')
   await expect(card).toBeVisible()
   await card.click()
 
-  // Only the expanded components card renders log boxes (collapsed cards render no
-  // body), so the two LogView terminals (max-h-64) are its Before/After panes in
-  // order. The failed before side is red; the still-generating after side stays
-  // neutral grey (not green - it hasn't finished).
   const boxes = page.locator('div.max-h-64')
   await expect(boxes).toHaveCount(2)
   await expect(boxes.nth(0)).toHaveClass(/border-red-/)
   await expect(boxes.nth(0)).not.toHaveClass(/border-green-/)
+  await expect(boxes.nth(1)).toHaveClass(/border-green-/)
+})
+
+test('a still-generating set keeps both sides neutral', async ({ page }) => {
+  await page.goto(AGENT)
+
+  // "components" is the in-flight set (both sides building while tiles stream
+  // in), so neither log box claims an outcome yet - neutral grey, not green.
+  const card = setCard(page, 'components')
+  await expect(card).toBeVisible()
+  await card.click()
+
+  const boxes = page.locator('div.max-h-64')
+  await expect(boxes).toHaveCount(2)
+  await expect(boxes.nth(0)).not.toHaveClass(/border-(red|green)-/)
   await expect(boxes.nth(1)).not.toHaveClass(/border-(red|green)-/)
 })
