@@ -1492,9 +1492,9 @@ type ReviewMessagePart = Pick<PendingReviewComment, 'text' | 'fromLabel' | 'toLa
 
 // Build the chat message sent to the agent for one or more review comments.
 // A single comment gets a "Comment on <from> -> <to> diff:" header; multiple are
-// grouped by their comparison (usually just one group) with each numbered "# n"
-// under a "Comments on <from> -> <to> diff:" header. Each comment carries its own
-// ```diff context block (already fenced) followed by its text.
+// grouped by their comparison (usually just one group) under a "Comments on
+// <from> -> <to> diff:" header, separated by a blank line. Each comment carries
+// its own ```diff context block (already fenced) followed by its text.
 function buildReviewMessage(comments: ReviewMessagePart[]): string {
   if (comments.length === 0) return ''
   if (comments.length === 1) {
@@ -1504,23 +1504,22 @@ function buildReviewMessage(comments: ReviewMessagePart[]): string {
     s += `\nComment:\n${c.text}`
     return s
   }
-  // Group by comparison, preserving first-seen order, but number globally so the
-  // agent sees a single 1..N sequence across the whole message.
-  const groups: { label: string; items: { c: ReviewMessagePart; n: number }[] }[] = []
-  comments.forEach((c, i) => {
+  // Group by comparison, preserving first-seen order.
+  const groups: { label: string; items: ReviewMessagePart[] }[] = []
+  comments.forEach((c) => {
     const label = `${c.fromLabel} -> ${c.toLabel}`
     let g = groups.find((grp) => grp.label === label)
     if (!g) { g = { label, items: [] }; groups.push(g) }
-    g.items.push({ c, n: i + 1 })
+    g.items.push(c)
   })
   return groups.map((g) => {
-    const parts = g.items.map(({ c, n }) => {
-      let s = `# ${n}\n`
+    const parts = g.items.map((c) => {
+      let s = ''
       if (c.contextBlock) s += `${c.contextBlock}\n`
       s += `Comment:\n${c.text}`
       return s
     })
-    return `Comments on ${g.label} diff:\n${parts.join('\n')}`
+    return `Comments on ${g.label} diff:\n\n${parts.join('\n\n')}`
   }).join('\n\n')
 }
 
