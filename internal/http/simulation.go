@@ -3280,6 +3280,26 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd1","content":"Updated task #1 status"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_taskupd2","content":[{"type":"tool_use","id":"toolu_sim_taskupd2","name":"TaskUpdate","input":{"taskId":"2","status":"in_progress"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_taskupd2","content":"Updated task #2 status"}]}}`,
+	// The mcp__hydra__git_* tools - Hydra's own git plumbing, which replaces raw
+	// git for a sandboxed head. Each renders as the ACTION it takes rather than as
+	// its argument JSON (summarizeGitInput / GIT_TOOL_LABELS in AgentChat.tsx): a
+	// commit shows just its subject line, not the whole escaped multi-line message;
+	// a stage shows the file and line range; a reset shows "mixed -> HEAD~1".
+	// The commit below uses staged:true, the mode that commits the partial index
+	// the git_add above built - the other modes re-stage whole files and would
+	// silently widen it.
+	`{"type":"assistant","timestamp":"2026-07-09T18:03:00.000Z","message":{"id":"msg_sim_gitadd","content":[{"type":"tool_use","id":"toolu_sim_gitadd","name":"mcp__hydra__git_add","input":{"files":[{"path":"internal/artifacts/upload.go","ranges":[[12,18]]}]}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitadd","content":"Staged: internal/artifacts/upload.go (lines 12-18)"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_gitcommit","content":[{"type":"tool_use","id":"toolu_sim_gitcommit","name":"mcp__hydra__git_commit","input":{"message":"Retry uploads with jittered exponential backoff\n\nPut now retries a failed upload up to maxAttempts times, sleeping a\njittered exponential delay between tries, and surfaces the last error\nonce every attempt is exhausted.","staged":true}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitcommit","content":"Committed 4f2ab19c on hydra/retry-uploads: Retry uploads with jittered exponential backoff"}]}}`,
+	// The conflict path, which is where the output cleanup shows: the summary
+	// names the conflicting files up front, and git's post-abort "hint:" block is
+	// stripped - it told you to resolve and run a --continue, but the pick was
+	// already rolled back, so following it was impossible.
+	`{"type":"assistant","message":{"id":"msg_sim_gitpick","content":[{"type":"tool_use","id":"toolu_sim_gitpick","name":"mcp__hydra__git_cherry_pick","input":{"commit":"0a5501ec"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitpick","content":"cherry-pick of 0a5501ec hit conflicts in internal/heads/heads.go, internal/tui/model.go and was aborted - your branch is unchanged.\nAuto-merging internal/heads/heads.go\nCONFLICT (content): Merge conflict in internal/heads/heads.go\nAuto-merging internal/tui/model.go\nCONFLICT (content): Merge conflict in internal/tui/model.go\nerror: could not apply 0a5501ec... use slug as agent ID instead of random characters","is_error":true}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_gitreset","content":[{"type":"tool_use","id":"toolu_sim_gitreset","name":"mcp__hydra__git_reset","input":{"to":"HEAD~1","mode":"mixed"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitreset","content":"Reset (mixed) hydra/retry-uploads to HEAD~1 (4f2ab19c)."}]}}`,
 	// A queued message consumed INTO the running turn (queue-operation "remove"
 	// path): recorded only as this queued_command attachment - no plain user
 	// event exists - so the chat must rebuild the user bubble from it on replay.

@@ -19,7 +19,14 @@ type commitResult struct {
 }
 
 func gitCommit(worktree, branch, message string, paths ...string) commitResult {
-	ok, msg := git.GuardedCommit(worktree, branch, message, paths, false)
+	ok, msg := git.GuardedCommit(worktree, branch, message, paths, false, false)
+	return commitResult{OK: ok, Message: msg}
+}
+
+// gitCommitStaged is gitCommit with `staged` set: it commits the index exactly
+// as it stands instead of re-staging, which is what preserves a partial index.
+func gitCommitStaged(worktree, branch, message string) commitResult {
+	ok, msg := git.GuardedCommit(worktree, branch, message, nil, false, true)
 	return commitResult{OK: ok, Message: msg}
 }
 
@@ -136,6 +143,55 @@ func TestGitCommitStagesOnlyGivenPaths(t *testing.T) {
 	st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput()
 	if !strings.Contains(string(st), "skip.txt") {
 		t.Errorf("skip.txt should still be uncommitted: %q", st)
+	}
+}
+
+// TestGitCommitStagedKeepsPartialIndex is the regression guard for the reason
+// `staged` exists: both other modes re-stage (add -A, or add -- <paths>), so a
+// partial index built by git_add was impossible to commit without widening it.
+func TestGitCommitStagedKeepsPartialIndex(t *testing.T) {
+	dir := initCommitRepo(t, "hydra/test")
+	writeFile(t, dir, "staged.txt", "in\n")
+	if out, err := exec.Command("git", "-C", dir, "add", "staged.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v %s", err, out)
+	}
+	// An unstaged file that add -A would have swept in.
+	writeFile(t, dir, "loose.txt", "out\n")
+
+	r := gitCommitStaged(dir, "hydra/test", "only the index")
+	if !r.OK {
+		t.Fatalf("expected OK, got %q", r.Message)
+	}
+	out, _ := exec.Command("git", "-C", dir, "log", "-1", "--name-only", "--pretty=format:").CombinedOutput()
+	if files := string(out); !strings.Contains(files, "staged.txt") || strings.Contains(files, "loose.txt") {
+		t.Errorf("expected only staged.txt committed, got:\n%s", files)
+	}
+	st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput()
+	if !strings.Contains(string(st), "loose.txt") {
+		t.Errorf("loose.txt should still be uncommitted: %q", st)
+	}
+}
+
+// TestGitCommitStagedEmptyIndex checks the empty-index case explains itself
+// rather than surfacing git's bare "nothing to commit".
+func TestGitCommitStagedEmptyIndex(t *testing.T) {
+	dir := initCommitRepo(t, "hydra/test")
+	writeFile(t, dir, "loose.txt", "out\n")
+
+	r := gitCommitStaged(dir, "hydra/test", "nothing staged")
+	if r.OK || !strings.Contains(r.Message, "git_add") {
+		t.Errorf("expected a staged-nothing explanation, got OK=%v msg=%q", r.OK, r.Message)
+	}
+}
+
+// TestGitCommitStagedRejectsPaths - the two are contradictory instructions.
+func TestGitCommitStagedRejectsPaths(t *testing.T) {
+	dir := initCommitRepo(t, "hydra/test")
+	writeFile(t, dir, "a.txt", "a\n")
+
+	ok, msg := git.GuardedCommit(dir, "hydra/test", "both", []string{"a.txt"}, false, true)
+	if ok || !strings.Contains(msg, "not both") {
+		t.Errorf("staged+paths should be rejected, got OK=%v msg=%q", ok, msg)
 	}
 }
 

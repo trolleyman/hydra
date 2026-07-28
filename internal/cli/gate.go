@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -59,6 +60,16 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 	toolName := stringField(input, "tool_name")
 	toolInput, _ := input["tool_input"].(map[string]any)
 
+	// PostToolUse is advice-only: the call already ran, so there is nothing to
+	// decide. It exists so the readonly git redirect can stop being a deny (see
+	// gate.GitReadonlyAdvice) - the command runs, the OS refuses the .git write,
+	// and we explain that afterwards instead of pre-emptively killing the whole
+	// Bash call over one git clause.
+	if event := stringField(input, "hook_event_name"); event == "PostToolUse" || event == "PostToolUseFailure" {
+		emitPostAdvice(stdout, toolName, toolInput, input["tool_response"])
+		return nil
+	}
+
 	policyPath := os.Getenv(gate.EnvPolicyPath)
 	if policyPath == "" {
 		return nil // no policy seeded → fail open
@@ -92,6 +103,48 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	return nil
+}
+
+// emitPostAdvice attaches after-the-fact guidance to a tool call that already
+// ran. Currently the only advice is the read-only .git explanation, which needs
+// both the command and its output, so it applies to Bash alone. Silence is the
+// normal case - a hook that printed on every tool call would be noise.
+func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any) {
+	if toolName != "Bash" {
+		return
+	}
+	advice := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response))
+	if advice == "" {
+		return
+	}
+	appendJSONLine(w, map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "PostToolUse",
+			"additionalContext": advice,
+		},
+	})
+}
+
+// toolResponseText flattens a hook payload's tool_response into searchable text.
+// Claude sends a Bash result either as a bare string or as an object carrying
+// stdout/stderr, and the read-only error arrives on stderr, so both shapes have
+// to be covered or the advice never fires.
+func toolResponseText(response any) string {
+	switch v := response.(type) {
+	case string:
+		return v
+	case map[string]any:
+		var b strings.Builder
+		for _, key := range []string{"stdout", "stderr", "output", "error", "content"} {
+			if s := stringField(v, key); s != "" {
+				b.WriteString(s)
+				b.WriteString("\n")
+			}
+		}
+		return b.String()
+	default:
+		return ""
+	}
 }
 
 // emitDeny writes the PreToolUse "deny" decision Claude Code reads on stdout. It

@@ -875,14 +875,65 @@ function trimWorktreePaths(text: string, worktree: string | null): string {
 // or an Agent brief isn't code.
 const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'summary', 'description', 'prompt', 'reason'])
 
+// summarizeGitInput renders an mcp__hydra__git_* call as the action it performs
+// ("hard -> 67b6ffa2", a commit subject) rather than as its arguments. None of
+// these tools carry any of the keys the generic loop below looks for, so without
+// this they all fall through to the JSON.stringify fallback - which dumps a whole
+// escaped commit message, literal \n and all, into a one-line card header.
+// Returns null for a tool with nothing worth previewing.
+function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: string; prose: boolean } | null {
+  const str = (key: string) => (typeof obj[key] === 'string' ? (obj[key] as string) : '')
+  switch (tool) {
+    case 'git_commit': {
+      // Subject line only - the body is prose the agent already wrote out, and it
+      // is what renders as a literal \n\n when squeezed onto one line. The amend
+      // and path-count notes stay: they change what the commit actually captures.
+      const subject = str('message').split('\n')[0].trim()
+      const paths = Array.isArray(obj.paths) ? obj.paths.length : 0
+      const notes = [obj.amend === true ? 'amend' : '', paths > 0 ? `${paths} path${paths === 1 ? '' : 's'}` : ''].filter(Boolean)
+      return { text: subject + (notes.length ? ` (${notes.join(', ')})` : ''), prose: true }
+    }
+    case 'git_add': {
+      const files = Array.isArray(obj.files) ? obj.files : []
+      if (files.length !== 1) return { text: `${files.length} files`, prose: true }
+      const only = (files[0] ?? {}) as Record<string, unknown>
+      const ranges = Array.isArray(only.ranges) ? only.ranges : []
+      const lines = ranges
+        .map((range) => (Array.isArray(range) ? (range[0] === range[1] ? `${range[0]}` : `${range[0]}-${range[1]}`) : ''))
+        .filter(Boolean)
+      return { text: `${String(only.path ?? '')}${lines.length ? ` lines ${lines.join(', ')}` : ''}`, prose: false }
+    }
+    case 'git_reset': {
+      const unstage = Array.isArray(obj.unstage) ? obj.unstage : []
+      if (unstage.length) return { text: `unstage ${unstage.join(', ')}`, prose: false }
+      return { text: `${str('mode') || 'soft'} -> ${str('to') || 'HEAD'}`, prose: false }
+    }
+    case 'git_revert':
+    case 'git_cherry_pick':
+      return { text: str('commit'), prose: false }
+    case 'git_rebase': {
+      const plan = Array.isArray(obj.plan) ? obj.plan : []
+      return { text: `${plan.length} step${plan.length === 1 ? '' : 's'} above ${str('base')}`, prose: true }
+    }
+    default:
+      return null
+  }
+}
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
 // card, favouring the fields agent tools actually carry, and reports whether
-// the picked field is prose (see PROSE_INPUT_KEYS).
-function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
+// the picked field is prose (see PROSE_INPUT_KEYS). name is the raw tool name,
+// used to give the git tools an action-shaped summary (see summarizeGitInput).
+function summarizeToolInput(input: unknown, name = ''): { text: string; prose: boolean } {
   if (input == null) return { text: '', prose: false }
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
+  if (gitTool) {
+    const git = summarizeGitInput(gitTool[1], obj)
+    if (git) return git
+  }
   // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
   if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
     const status = typeof obj.status === 'string' ? obj.status : ''
@@ -991,9 +1042,24 @@ function parseSendMessageResult(text?: string): SendMessageResult | null {
   }
 }
 
+// GIT_TOOL_LABELS names the mcp__hydra__git_* tools after the action they take.
+// They are Hydra's own git plumbing - the sanctioned replacement for raw git,
+// which is gate-denied - so the generic "MCP hydra::git_cherry_pick" rendering
+// buries the verb behind transport detail that means nothing to the reader.
+const GIT_TOOL_LABELS: Record<string, string> = {
+  git_commit: 'Git commit',
+  git_add: 'Git stage',
+  git_reset: 'Git reset',
+  git_revert: 'Git revert',
+  git_cherry_pick: 'Git cherry-pick',
+  git_rebase: 'Git rebase',
+  git_rebase_continue: 'Git rebase continue',
+  git_rebase_abort: 'Git rebase abort',
+}
+
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
+  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcp[1]}::${mcp[2]}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
@@ -2037,6 +2103,16 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   TaskCreate: ListPlus,
   TaskUpdate: ListChecks,
   UpdatePlan: ListChecks,
+  // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
+  // gives no hint that the card rewrote the branch.
+  mcp__hydra__git_commit: GitCommitHorizontal,
+  mcp__hydra__git_add: GitCommitHorizontal,
+  mcp__hydra__git_reset: GitCommitHorizontal,
+  mcp__hydra__git_revert: GitCommitHorizontal,
+  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
+  mcp__hydra__git_rebase: GitCommitHorizontal,
+  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
+  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -2145,7 +2221,7 @@ const ToolCard = memo(function ToolCard({
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
-  const summarized = summarizeToolInput(input)
+  const summarized = summarizeToolInput(input, item.name)
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []

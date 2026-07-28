@@ -97,6 +97,19 @@ func BuildClaudeSettings(existing []byte, hydraBin string, gateEnabled bool, mcp
 		preToolHooks = append(preToolHooks, hookHandler{Type: "command", Command: GateCommand(hydraBin, "claude")})
 	}
 	hooks["PreToolUse"] = []matcherGroup{{Hooks: preToolHooks}}
+	// The gate also runs after the fact, where it adds context rather than
+	// decisions - it is what lets the read-only .git redirect be advice instead of
+	// a deny that costs the whole Bash call (see cli.emitPostAdvice). It stays
+	// silent for everything else.
+	if gateEnabled {
+		gateGroup := matcherGroup{Hooks: []hookHandler{{Type: "command", Command: GateCommand(hydraBin, "claude")}}}
+		for _, event := range []string{"PostToolUse", "PostToolUseFailure"} {
+			// buildHooksMap hands every event the SAME backing slice, so append to a
+			// copy - appending in place would leak this hook into sibling events.
+			existing, _ := hooks[event].([]matcherGroup)
+			hooks[event] = append(append([]matcherGroup{}, existing...), gateGroup)
+		}
+	}
 
 	settings := make(map[string]interface{})
 	if len(existing) > 0 {

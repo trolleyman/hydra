@@ -16,20 +16,21 @@ func gitToolDefs() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "git_commit",
-			"description": "Commit your work onto YOUR branch, inside your worktree. By default stages ALL your changes (tracked + untracked, like `git add -A`) then commits; pass `paths` to stage only specific files, or `amend` to amend your last commit. Raw `git commit` in the shell is blocked, so a commit can never land on the main repo or another branch.",
+			"description": "Commit your work onto YOUR branch, inside your worktree. By default stages ALL your changes (tracked + untracked, like `git add -A`) then commits; pass `paths` to stage only specific files, `staged` to commit what you already staged with git_add, or `amend` to amend your last commit. Raw `git commit` in the shell is blocked, so a commit can never land on the main repo or another branch.",
 			"inputSchema": map[string]any{
 				"type":     "object",
 				"required": []string{"message"},
 				"properties": map[string]any{
 					"message": map[string]any{"type": "string", "description": "The commit message."},
-					"paths":   withDesc(strArray, "Optional: repo-relative paths to stage before committing. Omit to stage all changes."),
+					"paths":   withDesc(strArray, "Optional: repo-relative paths to stage before committing. Omit to stage all changes. Stages WHOLE files - to commit a partial (line-range) stage, use `staged` instead."),
 					"amend":   map[string]any{"type": "boolean", "description": "Amend your previous commit instead of creating a new one."},
+					"staged":  map[string]any{"type": "boolean", "description": "Commit the index exactly as it stands, staging nothing further. Use this after git_add - it is the only mode that preserves a partial (line-range) stage, since the other two re-stage whole files. Cannot be combined with `paths`."},
 				},
 			},
 		},
 		{
 			"name":        "git_add",
-			"description": "Stage changes into the index without committing (for building up a commit incrementally, then calling git_commit). Each entry stages a whole file, or - with `ranges` - only the changed lines that fall within those (1-based, current-file) line ranges. Useful for splitting unrelated changes in one file across separate commits.",
+			"description": "Stage changes into the index without committing (for building up a commit incrementally, then calling git_commit with `staged: true` - that flag is required to keep the index you build here, because a plain git_commit re-stages whole files and would undo the split). Each entry stages a whole file, or - with `ranges` - only the changed lines that fall within those (1-based, current-file) line ranges. Useful for splitting unrelated changes in one file across separate commits.",
 			"inputSchema": map[string]any{
 				"type":     "object",
 				"required": []string{"files"},
@@ -137,12 +138,16 @@ func parseGitOp(name string, raw json.RawMessage) (GitOpRequest, string) {
 			Message string   `json:"message"`
 			Paths   []string `json:"paths"`
 			Amend   bool     `json:"amend"`
+			Staged  bool     `json:"staged"`
 		}
 		_ = json.Unmarshal(raw, &a)
 		if strings.TrimSpace(a.Message) == "" {
 			return GitOpRequest{}, "git_commit requires a non-empty \"message\"."
 		}
-		return GitOpRequest{Op: "commit", Message: a.Message, Paths: a.Paths, Amend: a.Amend}, ""
+		if a.Staged && len(a.Paths) > 0 {
+			return GitOpRequest{}, "git_commit takes either \"staged\" or \"paths\", not both: \"staged\" commits the index as it stands, \"paths\" re-stages those files first."
+		}
+		return GitOpRequest{Op: "commit", Message: a.Message, Paths: a.Paths, Amend: a.Amend, Staged: a.Staged}, ""
 	case "git_add":
 		var a struct {
 			Files []GitAddSpec `json:"files"`

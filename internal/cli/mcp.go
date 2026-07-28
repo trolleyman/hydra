@@ -79,7 +79,7 @@ func gitOpFromMCP(req mcpserver.GitOpRequest) mcpserver.GitOpResult {
 	}
 	res := runGitOp(gitq.Request{
 		Op:      gitq.Op(req.Op),
-		Message: req.Message, Paths: req.Paths, Amend: req.Amend,
+		Message: req.Message, Paths: req.Paths, Amend: req.Amend, Staged: req.Staged,
 		Mode: req.Mode, To: req.To, Unstage: req.Unstage, Confirm: req.Confirm,
 		Add:    add,
 		Commit: req.Commit,
