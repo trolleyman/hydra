@@ -41,10 +41,12 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
+import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { pasteMarkerText } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -256,7 +258,11 @@ type ChatItem =
   | { kind: 'thinking'; id: number; text: string; durationMs?: number; msgId?: string; noEntrance?: boolean; uuid?: string }
   // ended: the turn finished (or history was replayed) without a result for this
   // tool, so stop showing it as "running" (item 42).
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string }
+  // rawUse/rawResult are the provider's own blocks, kept so the Raw panel can
+  // print what was actually sent rather than a reconstruction of it (see
+  // toolRawJson). They cost one wrapper object per card: the heavy part of a
+  // result is its text, and that string is shared with `result`, not copied.
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -368,6 +374,9 @@ interface PendingSend {
 // else in the events is intentionally ignored (unknown types are skipped).
 interface ClaudeContentBlock {
   type: string
+  // Set on blocks Hydra makes up (a plan checkpoint has no tool call behind
+  // it): they are not provider payloads, so Raw must not present them as one.
+  synthetic?: boolean
   text?: string
   thinking?: string
   id?: string
@@ -618,7 +627,9 @@ function cleanSubagentReport(text: string): string {
 // Bridge the provider-neutral backend timeline into the mature presentation
 // reducer while Claude's legacy wire format is being retired. Provider details
 // stop at this boundary; paging and live delivery use the same conversion.
-function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
+// (Exported for tests.)
+// eslint-disable-next-line react-refresh/only-export-components
+export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
   const p = ev.payload ?? {}
   const base = {
     timestamp: ev.timestamp,
@@ -669,11 +680,19 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning 
     case 'tool_started': {
       const name = typeof p.name === 'string' ? p.name : 'tool'
       const input = p.input ?? p.item ?? (typeof p.command === 'string' ? { command: p.command, cwd: p.cwd } : p)
-      return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input }] } }]
+      // Claude's normalized tool payloads are the Anthropic block, field for
+      // field, so the block rebuilt here IS what the provider sent and Raw can
+      // show it. Codex's are not - they carry the item's status/output (and its
+      // native item), and the daemon passes the true payload separately as
+      // `_raw` - so mark those blocks synthetic and let Raw fall back to it.
+      const codexShaped = p.status !== undefined || p.output !== undefined || p.item !== undefined
+      return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input, synthetic: codexShaped }] } }]
     }
     case 'tool_completed': {
       const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
-      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed' }] } }]
+      // Same rule for the result: `content` is Claude's verbatim tool_result
+      // payload; anything reconstructed from output/status is not a block.
+      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed', synthetic: p.content == null }] } }]
     }
     case 'plan_updated': {
       // Claude exposes its TaskCreate/TaskUpdate calls as ordinary tool cards;
@@ -685,9 +704,12 @@ function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning 
       const completed = plan.filter((entry) => entry && typeof entry === 'object' && (entry as { status?: unknown }).status === 'completed').length
       const summary = `${plan.length} task${plan.length === 1 ? '' : 's'} · ${completed} completed`
       const toolID = `plan:${ev.seq}`
+      // Hydra invents this card from a plan checkpoint - there is no tool call
+      // behind it, so `synthetic` keeps its made-up blocks out of Raw (they
+      // would read as a protocol payload the provider never sent).
       return [
-        { ...base, type: 'assistant', message: { id: `tool:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'UpdatePlan', input: { description: summary, plan } }] } },
-        { ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: 'Plan updated' }] } },
+        { ...base, type: 'assistant', message: { id: `tool:${toolID}`, content: [{ type: 'tool_use', id: toolID, name: 'UpdatePlan', input: { description: summary, plan }, synthetic: true }] } },
+        { ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: 'Plan updated', synthetic: true }] } },
       ]
     }
     case 'subagent_completed': {
@@ -913,6 +935,21 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
   }
 }
 
+// summarizeToolSearchQuery renders a ToolSearch query as the thing it looks up.
+// The `select:a,b` form is an exact list of tool names, and the wire spelling of
+// an MCP one (`mcp__hydra__git_commit`) is transport detail - it reads as
+// "hydra::git_commit", the same namespace::tool shape the card heading uses.
+// Any other query is a keyword search, i.e. words the agent typed, so it stays
+// verbatim and prose. The Raw view keeps the query as sent. (Exported for tests.)
+// eslint-disable-next-line react-refresh/only-export-components
+export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
+  const select = /^\s*select:(.*)$/.exec(query)
+  if (!select) return { text: query, prose: true }
+  const names = select[1].split(',').map((n) => n.trim()).filter(Boolean)
+  if (names.length === 0) return { text: query, prose: false }
+  return { text: names.map(mcpToolLabel).join(', '), prose: false }
+}
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
 // card, favouring the fields agent tools actually carry, and reports whether
 // the picked field is prose (see PROSE_INPUT_KEYS). name is the raw tool name,
@@ -922,6 +959,7 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
   if (gitTool) {
     const git = summarizeGitInput(gitTool[1], obj)
@@ -1072,9 +1110,17 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
   return label
 }
 
+// mcpToolLabel spells an MCP tool as "server::tool" - the wire name's `mcp__`
+// prefix and `__` separators are protocol noise. Anything that isn't an MCP
+// name is returned unchanged.
+function mcpToolLabel(name: string): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  return mcp ? `${mcp[1]}::${mcp[2]}` : name
+}
+
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcp[1]}::${mcp[2]}`
+  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcpToolLabel(name)}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
@@ -1129,12 +1175,18 @@ function langFromPath(path: string): string {
 // 4). Base64 sources become data URLs; url sources are used verbatim.
 function parseToolResult(content: unknown): { text: string; images: string[] } {
   const images: string[] = []
+  // A ToolSearch result is a list of `tool_reference` blocks - the loaded tool's
+  // NAME and nothing else, no text anywhere - so the card used to render the
+  // whole schema load as "(no output)". They become the one line that says what
+  // the call actually did (namespaced like the header, see mcpToolLabel).
+  const loaded: string[] = []
   const collect = (c: unknown): string => {
     if (typeof c === 'string') return c
     if (Array.isArray(c)) return c.map(collect).filter(Boolean).join('\n')
     if (c && typeof c === 'object') {
       const b = c as ClaudeContentBlock & {
         source?: { type?: string; media_type?: string; data?: string; url?: string }
+        tool_name?: string
       }
       if (b.type === 'image' && b.source) {
         const s = b.source
@@ -1142,11 +1194,93 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
         else if (s.type === 'url' && s.url) images.push(s.url)
         return ''
       }
+      if (b.type === 'tool_reference' && b.tool_name) {
+        loaded.push(mcpToolLabel(b.tool_name))
+        return ''
+      }
       if (typeof b.text === 'string') return b.text
     }
     return ''
   }
-  return { text: stripToolUseError(collect(content)), images }
+  const text = stripToolUseError(collect(content))
+  if (loaded.length === 0) return { text, images }
+  // One name reads as a sentence; several are worth counting, since a keyword
+  // search returns however many tools matched.
+  const summary = loaded.length === 1 ? `Loaded ${loaded[0]}` : `Loaded ${loaded.length} tools: ${loaded.join(', ')}`
+  return { text: text ? `${summary}\n${text}` : summary, images }
+}
+
+// scrubRawImageData prepares a tool_result block for the Raw panel: everything
+// verbatim EXCEPT an image block's base64, which is swapped for its size. The
+// pixels are already decoded into the card's rendered image, and a screenshot is
+// megabytes of base64 - keeping it here would hold those bytes a second time and
+// bury the block's actual shape. media_type and the block structure stay true.
+// Returns the block itself (no copy) when there is nothing to scrub, which is
+// every non-image result.
+function isBase64ImageBlock(b: unknown): b is { type: string; source: { type?: string; media_type?: string; data: string } } {
+  if (!b || typeof b !== 'object') return false
+  const block = b as { type?: string; source?: { data?: unknown } }
+  return block.type === 'image' && typeof block.source?.data === 'string'
+}
+function scrubRawImageData(block: ClaudeContentBlock): unknown {
+  const content = block.content
+  if (!Array.isArray(content) || !content.some(isBase64ImageBlock)) return block
+  return {
+    ...block,
+    content: content.map((b) =>
+      isBase64ImageBlock(b)
+        ? { ...b, source: { ...b.source, data: `<${formatBytes(Math.round((b.source.data.length * 3) / 4))} base64, rendered above>` } }
+        : b,
+    ),
+  }
+}
+
+// rawUseBlock / rawResultBlock are what a card keeps for its Raw panel: the
+// provider's block, images scrubbed, or nothing at all for one Hydra made up.
+// `synthetic` is Hydra's own marker, so it is dropped from what Raw prints.
+function keptRawBlock(block: ClaudeContentBlock, value: unknown): unknown {
+  if (block.synthetic) return undefined
+  if (!('synthetic' in block) || !value || typeof value !== 'object') return value
+  const rest = { ...(value as ClaudeContentBlock) }
+  delete rest.synthetic
+  return rest
+}
+function rawUseBlock(block: ClaudeContentBlock): unknown {
+  return keptRawBlock(block, block)
+}
+function rawResultBlock(block: ClaudeContentBlock): unknown {
+  return keptRawBlock(block, scrubRawImageData(block))
+}
+
+// toolRawJson builds the Raw panel's text for a tool card - the provider's own
+// tool_use / tool_result blocks, as sent (item: raw passthrough).
+//
+// Codex is the exception: its native items are not Anthropic blocks, so the
+// daemon hands them over under `_raw` / `_raw_events` on the input and THAT is
+// its true raw - it wins where present. Cards Hydra synthesizes itself (a plan
+// checkpoint, a codex event with no captured block) keep the older
+// input/result rendering, since there is no wire payload to show.
+// (Exported for tests.)
+// eslint-disable-next-line react-refresh/only-export-components
+export function toolRawJson(input: unknown, rawUse: unknown, rawResult: unknown, result: string | undefined): string {
+  const obj = input && typeof input === 'object' ? (input as Record<string, unknown>) : null
+  if (Array.isArray(obj?._raw_events)) return JSON.stringify({ events: obj._raw_events }, null, 2)
+  if (obj?._raw && typeof obj._raw === 'object') {
+    const raw: Record<string, unknown> = { ...(obj._raw as Record<string, unknown>) }
+    if (result !== undefined && !('aggregatedOutput' in raw) && !('result' in raw)) raw.result = result
+    return JSON.stringify(raw, null, 2)
+  }
+  if (rawUse !== undefined || rawResult !== undefined) {
+    const raw: Record<string, unknown> = { tool_use: rawUse }
+    // A call still running has no result block yet - show whatever output is
+    // streaming in rather than nothing.
+    if (rawResult !== undefined) raw.tool_result = rawResult
+    else if (result !== undefined) raw.result = result
+    return JSON.stringify(raw, null, 2)
+  }
+  const raw: Record<string, unknown> = { input }
+  if (result !== undefined) raw.result = result
+  return JSON.stringify(raw, null, 2)
 }
 
 // Decoded intrinsic sizes of tool-result images, cached module-wide so a
@@ -2359,6 +2493,10 @@ const ToolCard = memo(function ToolCard({
   // old_string/new_string side by side. Both syntax-highlight by the target
   // file's extension.
   const filePath = typeof input?.file_path === 'string' ? (input.file_path as string) : ''
+  // A tool's image output is laid out at its logical size. A data-URL image
+  // carries no name, so the density hint comes from the path that produced it
+  // (shot@2x.png) - see lib/imageDensity.
+  const imageDensity = densityFromPath(readPath || filePath)
   const isWrite = item.name === 'Write' && typeof input?.content === 'string'
   const isEdit = item.name === 'Edit' && typeof input?.old_string === 'string' && typeof input?.new_string === 'string'
   const fileLang = isWrite || isEdit ? langFromPath(filePath) : ''
@@ -2441,18 +2579,10 @@ const ToolCard = memo(function ToolCard({
     if (awaitingApproval) setOpen(true)
   }
 
-  const rawJson = useMemo(() => {
-    if (!showRaw) return ''
-		const protocolEvents = rawInput?._raw_events
-		const protocolInput = rawInput?._raw
-		const raw: Record<string, unknown> = Array.isArray(protocolEvents)
-			? { events: protocolEvents }
-			: protocolInput && typeof protocolInput === 'object'
-			? { ...(protocolInput as Record<string, unknown>) }
-			: { input: item.input }
-		if (visibleResult !== undefined && !('aggregatedOutput' in raw) && !('result' in raw) && !('events' in raw)) raw.result = visibleResult
-    return JSON.stringify(raw, null, 2)
-	}, [showRaw, rawInput, item.input, visibleResult])
+  const rawJson = useMemo(
+    () => (showRaw ? toolRawJson(item.input, item.rawUse, item.rawResult, visibleResult) : ''),
+    [showRaw, item.input, item.rawUse, item.rawResult, visibleResult],
+  )
 
   return (
     <div
@@ -2599,21 +2729,30 @@ const ToolCard = memo(function ToolCard({
                       {item.resultImages.map((src, i) => {
                         // width/height attrs (from the eager decode) + h-auto:
                         // layout reserves the image's aspect box before the
-                        // browser paints the pixels - see useImageDims.
+                        // browser paints the pixels - see useImageDims. The size
+                        // is LOGICAL (physical px / the @2x density in the read
+                        // path), so a 2x capture lays out like a 1x one, sharper.
                         const dims = imageDims.get(src)
+                        const logical = dims && logicalSize(dims, imageDensity)
                         return (
                           <img
                             key={i}
                             src={src}
-                            width={dims?.w}
-                            height={dims?.h}
+                            width={logical?.w}
+                            height={logical?.h}
                             alt="Tool output image"
                             onClick={() => setImgLightbox(i)}
+                            // A ring, NOT a border: with border-box sizing (the
+                            // Tailwind default) a 1px border eats 2px out of the
+                            // content box the width attr set, so a 420px shot was
+                            // resampled into 418x199.047 - a fractional rescale
+                            // that softens every pixel. A ring is a box-shadow
+                            // and costs no layout, so the image draws 1:1.
                             // min-h while the size is still unknown (a slow
                             // url-source image opened before the eager decode
                             // finished): the open measures a visible loading
                             // box instead of a sliver.
-                            className={`max-w-full h-auto rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
+                            className={`max-w-full h-auto rounded-md ring-1 ring-stone-200 dark:ring-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
                           />
                         )
                       })}
@@ -2644,7 +2783,7 @@ const ToolCard = memo(function ToolCard({
           full-size in the shared lightbox, like an attachment image. */}
       {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
         <ImageLightbox
-          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0 }))}
+          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
@@ -2664,12 +2803,10 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
   const [open, setOpen] = useState(true)
   const [showRaw, setShowRaw] = useState(false)
   const parsed = useMemo(() => parseExitPlan(item.input), [item.input])
-  const rawJson = useMemo(() => {
-    if (!showRaw) return ''
-    const raw: Record<string, unknown> = { input: item.input }
-    if (item.result !== undefined) raw.result = item.result
-    return JSON.stringify(raw, null, 2)
-  }, [showRaw, item.input, item.result])
+  const rawJson = useMemo(
+    () => (showRaw ? toolRawJson(item.input, item.rawUse, item.rawResult, item.result) : ''),
+    [showRaw, item.input, item.rawUse, item.rawResult, item.result],
+  )
   // A malformed ExitPlanMode input (no plan text) falls back to the generic card.
   if (!parsed) return <ToolCard item={item} worktree={null} />
 
@@ -4108,13 +4245,14 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     if (lastTs != null) tsOut?.set(id, lastTs)
     items.push({ ...claimOrphanResult(link, raw), id } as ChatItem)
   }
-  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[]) => {
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[], raw?: unknown) => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind === 'tool' && it.toolUseId === toolUseId) {
         it.result = text
         it.isError = isError
         it.resultImages = images.length ? images : undefined
+        it.rawResult = raw
         return
       }
       if (it.kind === 'question' && it.toolUseId === toolUseId) {
@@ -4126,7 +4264,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     // batch's own older neighbour). Hold the result for whichever batch builds
     // it - the card is created by a LATER, older page, so patching forward is
     // the only way it can ever show its result.
-    stashOrphanResult(link, toolUseId, { result: text, isError, images })
+    stashOrphanResult(link, toolUseId, { result: text, isError, images, raw })
   }
   // Distinct task-notifications already rendered in this batch: the CLI records
   // each one several times (queue-operation, attachment, sometimes a consumed
@@ -4275,7 +4413,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
-          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images)
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block))
         }
       }
     } else if (ev.type === 'assistant') {
@@ -4316,7 +4454,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
           // Task* ops fall through to a normal tool card (like any other tool);
           // only the panel state is latest-wins, and that is driven by the live
           // reducer's replay, not this older page.
-          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
         }
       }
       // Turn-footer synthesis (item: historical usage): roll this message's
@@ -4796,9 +4934,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
   )
-  const chatLinkCtx = projectId
-    ? { projectId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
-    : undefined
+  // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
+  // would re-parse every rendered message on every keystroke in the composer.
+  // agentId lets a markdown image resolve against this head's files.
+  const chatLinkCtx = useMemo(
+    () =>
+      projectId
+        ? { projectId, agentId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+        : undefined,
+    [projectId, agentId, branchName, worktreePath],
+  )
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value
@@ -5176,7 +5321,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       scheduleSubFlush()
     }
-    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[]) => {
+    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
       const resultImages = images.length > 0 ? images : undefined
       // Replace the item with a fresh object (not an in-place mutation): the
       // memoized ToolCard compares its `item` prop by reference, so mutating the
@@ -5185,7 +5330,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       for (let i = 0; i < sub.items.length; i++) {
         const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
-          sub.items[i] = { ...it, result, isError, resultImages }
+          sub.items[i] = { ...it, result, isError, resultImages, rawResult: raw }
           break
         }
       }
@@ -5370,7 +5515,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (block.type === 'text' && block.text) takePrompt(block.text)
             else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
             }
           }
       } else if (ev.type === 'assistant') {
@@ -5393,7 +5538,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
               sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
             } else if (block.type === 'tool_use' && block.id) {
-              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input })
+              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
             }
           }
         }
@@ -5406,7 +5551,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       scheduleSubFlush()
     }
 
-    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[]) => {
+    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
       // rendered.
@@ -5417,6 +5562,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         inPending.result = result
         inPending.isError = isError
         inPending.resultImages = resultImages
+        inPending.rawResult = raw
         return
       }
       if (inPending && inPending.kind === 'question') {
@@ -5427,12 +5573,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // page - so a result whose card was never built belongs to a page the
       // user has not scrolled back to yet. Hold it for that page.
       if (!toolResults.known.has(toolUseId)) {
-        stashOrphanResult(toolResults, toolUseId, { result, isError, images })
+        stashOrphanResult(toolResults, toolUseId, { result, isError, images, raw })
         return
       }
       setItems((prev) =>
         prev.map((it) => {
-          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages }
+          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages, rawResult: raw }
           if (it.kind === 'question' && it.toolUseId === toolUseId) return { ...it, result }
           return it
         }),
@@ -5918,7 +6064,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images)
+              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
               if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
               if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
@@ -6021,7 +6167,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     scheduleSubFlush()
                   }
                 }
-                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid })
+                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid, rawUse: rawUseBlock(block) })
               }
             }
           }

@@ -1,11 +1,16 @@
-import { memo, type ReactNode, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
+import { ImageOff } from 'lucide-react'
 import { highlightCode } from './markdown'
 import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
+import { UPLOAD_PATH_RE } from './uploadAttachments'
+import { useImageLightbox } from '../stores/imageLightboxStore'
+import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
+import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -35,6 +40,10 @@ export interface RepoLinkContext {
   // Chat messages may contain absolute paths emitted by an agent. Strip this
   // worktree prefix before routing them into the repository browser.
   worktreePath?: string
+  // The head whose files a chat message's images resolve against (see
+  // MarkdownImage). Unset for surfaces with no head - README previews, the
+  // config pre-prompt - where a local-path image simply isn't rendered.
+  agentId?: string
 }
 
 type Variant = 'chat' | 'doc'
@@ -110,6 +119,82 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
     })
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
+}
+
+// --- Images -------------------------------------------------------------------
+
+// isDataHref matches the URL forms an <img> can load directly without going
+// through the backend (remote, inline, or an object URL).
+function isDataHref(src: string): boolean {
+  return /^(https?:|data:|blob:)/i.test(src) || src.startsWith('//')
+}
+
+// resolveImageSrc turns a markdown image target into something the browser can
+// actually fetch. An agent writes a screenshot to its worktree or to /tmp and
+// then references that path - which means nothing to the browser - so a local
+// path is routed through the agent-files endpoint, which serves it from the
+// head's own filesystem. Falls back to the uploads blob endpoint for a path in
+// the project's uploads dir (the user's own pasted images, which surfaces
+// without a head still show). Returns null when nothing can serve it.
+function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
+  if (!src) return null
+  if (isDataHref(src)) return src
+  if (ctx?.agentId) return agentFileUrl(ctx.projectId, ctx.agentId, src)
+  const upload = UPLOAD_PATH_RE.exec(src)
+  UPLOAD_PATH_RE.lastIndex = 0
+  if (upload && ctx) return uploadBlobUrl(ctx.projectId, upload[0].split('/').pop() ?? '')
+  return null
+}
+
+// MarkdownImage renders a markdown image. Anything that resolves is shown at its
+// logical size (natural px / the @2x density in its name, capped to the column)
+// and opens in the app-wide lightbox on click; anything that doesn't - an
+// unservable path, or a scratch file that has since been reclaimed - degrades to
+// a muted chip naming it, rather than the browser's broken-image icon.
+function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
+  const openLightbox = useImageLightbox()
+  // The source that failed to load, rather than a bare flag: a streamed message
+  // rewrites the same node's src as more text arrives, and keying the failure to
+  // the src means a new one is retried instead of inheriting the old verdict.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const url = src ? resolveImageSrc(src, ctx) : null
+  const label = alt || (src ? src.split('/').pop() || src : 'image')
+  const density = densityFromPath(src)
+  const natural = useNaturalSize(url)
+  const logical = natural ? logicalSize(natural, density) : null
+  if (!url || failedSrc === src) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded border border-gray-300/60 dark:border-gray-500/30 bg-gray-100/70 dark:bg-black/25 px-1.5 py-0.5 align-middle text-[0.85em] text-gray-600 dark:text-gray-400"
+        title={src}
+      >
+        <ImageOff className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
+        {label}
+      </span>
+    )
+  }
+  return (
+    <img
+      src={url}
+      alt={label}
+      // Laid out at its LOGICAL size: physical px / the @2x density in the name,
+      // so a 2x capture is the same size as a 1x one, just sharp. The size is
+      // measured off-screen first (useNaturalSize) so the visible image gets its
+      // width on the FIRST layout instead of painting big and snapping smaller.
+      width={logical?.w}
+      height={logical?.h}
+      // A ring, NOT a border: with border-box sizing a 1px border eats 2px out of
+      // the content box the width attr set, and the browser then resamples the
+      // image into the remainder (420 -> 418x199.047), softening every pixel.
+      className="my-1 max-w-full h-auto rounded-md ring-1 ring-gray-200 dark:ring-gray-600/40 cursor-zoom-in"
+      // The path as written, so copy-as-markdown gives back the source rather
+      // than the blob URL we rewrote it to (lib/copyMarkdown).
+      data-md-src={src}
+      loading="lazy"
+      onError={() => setFailedSrc(src ?? null)}
+      onClick={() => openLightbox([{ url, filename: label, size: 0, dpi: density }])}
+    />
+  )
 }
 
 // --- Per-variant styling ------------------------------------------------------
@@ -227,6 +312,7 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
       ) : (
         <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
       ),
+    img: ({ src, alt }) => <MarkdownImage src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
     table: ({ children }) => (
       <div className={s.tableWrap}>
         <table className={s.table}>{children}</table>

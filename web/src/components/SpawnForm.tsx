@@ -455,6 +455,25 @@ export const SpawnForm = memo(function SpawnForm({
     if (!compact) textareaRef.current?.focus()
   }, [compact])
 
+  // Spawning blurs the composer: the textarea is disabled while the request is
+  // in flight, and clicking the Spawn button put focus on the button (also
+  // disabled) - so focus lands on <body> exactly when the user is ready to type
+  // the next task. Put it back once the box is interactive again, so spawn after
+  // spawn is pure typing. Only for the sidebar box; the full-page form unmounts
+  // when the spawn navigates to the new agent (ref is null, so this is a no-op).
+  const refocusRef = useRef(false)
+  useEffect(() => {
+    if (loading || !refocusRef.current) return
+    refocusRef.current = false
+    const ta = textareaRef.current
+    if (!ta || ta.disabled) return
+    // Don't steal focus if the user moved on during the spawn (clicked another
+    // control, or a navigation focused something on the new agent's page).
+    const active = document.activeElement
+    if (active && active !== document.body && !cardRef.current?.contains(active)) return
+    ta.focus()
+  }, [loading])
+
   // Persist the in-progress prompt as a per-project draft so it survives page
   // reloads and project switches. The compact (sidebar) and full-page boxes use
   // distinct keys so their drafts never bleed into one another.
@@ -711,6 +730,10 @@ export const SpawnForm = memo(function SpawnForm({
     if (!canSubmit || loading) return
     setLoading(true)
     setError(null)
+    // Whatever the outcome, the composer gets focus back once it re-enables
+    // (see the effect above) - on an error too, so the prompt can be edited and
+    // retried without reaching for the mouse.
+    refocusRef.current = true
     try {
       // Append uploaded file paths so the agent receives them as part of the
       // task. They sit on their own lines below the typed prompt.

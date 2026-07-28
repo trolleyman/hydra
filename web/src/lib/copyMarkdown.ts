@@ -383,7 +383,10 @@ function convert(node: Node, ctx: Ctx): string {
       return `[${inner}](${href})`
     }
     case 'IMG': {
-      const src = el.getAttribute('src') ?? ''
+      // data-md-src carries the path as it was WRITTEN, for an image whose real
+      // src is a blob endpoint we rewrote it to (MarkdownRenderer.MarkdownImage);
+      // copying should give back the source, not our internal URL.
+      const src = el.getAttribute('data-md-src') || el.getAttribute('src') || ''
       return src ? `![${el.getAttribute('alt') ?? ''}](${src})` : ''
     }
     case 'INPUT':

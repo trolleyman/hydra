@@ -621,6 +621,7 @@ func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
+	setBlobSecurityHeaders(w, contentType)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if artifacts.IsDownloadName(path) {
 		// Download-class artifacts (an .apk, a .zip) save to disk on click

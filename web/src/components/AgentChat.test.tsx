@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ChatPane, reduceHistoryEvents } from './AgentChat'
+import { ChatPane, normalizedToProviderEvents, reduceHistoryEvents, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -233,4 +233,153 @@ describe('reduceHistoryEvents across page boundaries', () => {
     expect(link.orphans.size).toBe(0)
   })
 
+})
+
+// A ToolSearch card's header used to show the raw query, i.e. the wire tool name
+// with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
+describe('summarizeToolSearchQuery', () => {
+  it('renders a select: lookup as the bare tool names, MCP ones namespaced', () => {
+    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: false })
+    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, hydra::git_add', prose: false })
+  })
+
+  it('leaves a keyword search alone', () => {
+    expect(summarizeToolSearchQuery('notebook jupyter')).toEqual({ text: 'notebook jupyter', prose: true })
+    expect(summarizeToolSearchQuery('+slack send')).toEqual({ text: '+slack send', prose: true })
+  })
+
+  it('falls back to the raw query when select: names nothing', () => {
+    expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: false })
+  })
+})
+
+// A ToolSearch result is `tool_reference` blocks carrying only the loaded tool's
+// name - no text - so the card rendered the whole schema load as "(no output)".
+describe('ToolSearch tool_reference results', () => {
+  const alloc = () => {
+    let id = 0
+    return () => ++id
+  }
+  const search = (result: unknown[]) =>
+    reduceHistoryEvents(
+      [
+        { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'toolu_ts', name: 'ToolSearch', input: { query: 'select:mcp__hydra__git_commit' } }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_ts', content: result }] } },
+      ],
+      alloc(),
+    ).find((it) => it.kind === 'tool')
+
+  it('names the single tool it loaded', () => {
+    expect(search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])).toMatchObject({ result: 'Loaded hydra::git_commit' })
+  })
+
+  it('counts and lists several', () => {
+    const item = search([
+      { type: 'tool_reference', tool_name: 'mcp__hydra__git_add' },
+      { type: 'tool_reference', tool_name: 'Read' },
+    ])
+    expect(item).toMatchObject({ result: 'Loaded 2 tools: hydra::git_add, Read' })
+  })
+
+  it('keeps the provider blocks for the Raw panel', () => {
+    const item = search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])
+    const raw = JSON.parse(toolRawJson(item!.input, item!.rawUse, item!.rawResult, item!.result))
+    expect(raw.tool_use).toMatchObject({ type: 'tool_use', name: 'ToolSearch', input: { query: 'select:mcp__hydra__git_commit' } })
+    expect(raw.tool_result).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_ts', content: [{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }] })
+    // The flattened text is the card's summary, not something the wire carried.
+    expect(raw.result).toBeUndefined()
+  })
+
+  it('keeps any text the result does carry', () => {
+    const item = search([
+      { type: 'text', text: 'No exact match; closest below.' },
+      { type: 'tool_reference', tool_name: 'Read' },
+    ])
+    expect(item).toMatchObject({ result: 'Loaded Read\nNo exact match; closest below.' })
+  })
+})
+
+// The Raw panel used to rebuild {input, result} from what the card kept, so it
+// showed the FLATTENED result and no envelope. It now prints the blocks as sent
+// - except an image's base64, which the card already renders and which is
+// megabytes of noise here.
+describe('toolRawJson', () => {
+  const alloc = () => {
+    let id = 0
+    return () => ++id
+  }
+  const reduce = (name: string, input: unknown, content: unknown) =>
+    reduceHistoryEvents(
+      [
+        { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'tu', name, input }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu', content }] } },
+      ],
+      alloc(),
+    ).find((it) => it.kind === 'tool')!
+  const raw = (it: { input: unknown; rawUse?: unknown; rawResult?: unknown; result?: string }) =>
+    JSON.parse(toolRawJson(it.input, it.rawUse, it.rawResult, it.result))
+
+  it('swaps an image payload for its size, keeping the block shape', () => {
+    const data = 'A'.repeat(4000)
+    const item = reduce('Read', { file_path: 'shot.png' }, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }])
+    const image = raw(item).tool_result.content[0]
+    expect(image.source.media_type).toBe('image/png')
+    expect(image.source.data).toBe('<2.9 KB base64, rendered above>')
+    expect(item.resultImages?.[0]).toContain(data)
+  })
+
+  it('shows a running call as its tool_use plus the output so far', () => {
+    const json = raw({ input: { command: 'ls' }, rawUse: { type: 'tool_use', name: 'Bash' }, result: 'partial' })
+    expect(json).toEqual({ tool_use: { type: 'tool_use', name: 'Bash' }, result: 'partial' })
+  })
+
+  it('prefers Codex\'s own item, which is its true wire payload', () => {
+    const codexItem = { id: 'item_1', item_type: 'command_execution', command: 'ls', status: 'completed' }
+    const json = raw({ input: { command: 'ls', cwd: '/repo', _raw: codexItem }, rawUse: { type: 'tool_use' }, result: 'out' })
+    expect(json).toEqual({ ...codexItem, result: 'out' })
+    expect(json.tool_use).toBeUndefined()
+  })
+
+  it('keeps the aggregated Codex event list when there is one', () => {
+    const events = [{ id: 'item_1', status: 'in_progress' }, { id: 'item_1', status: 'completed' }]
+    expect(raw({ input: { command: 'ls', _raw_events: events }, result: 'out' })).toEqual({ events })
+  })
+
+  // Codex tool payloads are recognised by their status/output/item fields. The
+  // blocks the chat builds from one are Hydra's shape, not Codex's, so they must
+  // not reach Raw - Codex's own item (`_raw`) is the truthful payload there.
+  const codexPair = (payloadIn: Record<string, unknown>, payloadOut: Record<string, unknown>) =>
+    reduceHistoryEvents(
+      [
+        ...normalizedToProviderEvents({ seq: 1, type: 'tool_started', timestamp: '', payload: payloadIn }),
+        ...normalizedToProviderEvents({ seq: 2, type: 'tool_completed', timestamp: '', payload: payloadOut }),
+      ],
+      alloc(),
+    ).find((it) => it.kind === 'tool')!
+
+  it('shows Codex its own item, not an Anthropic block it never sent', () => {
+    const native = { id: 'c1', item_type: 'command_execution', command: 'ls', status: 'completed' }
+    const item = codexPair(
+      { id: 'c1', name: 'Bash', status: 'in_progress', input: { command: 'ls', cwd: '.', _raw: native } },
+      { id: 'c1', name: 'Bash', output: 'out', status: 'completed' },
+    )
+    expect(item.rawUse).toBeUndefined()
+    expect(item.rawResult).toBeUndefined()
+    expect(raw(item)).toEqual({ ...native, result: 'out' })
+  })
+
+  it('keeps Claude blocks, marker and all stripped', () => {
+    const item = codexPair(
+      { id: 't1', name: 'Read', input: { file_path: 'a.ts' } },
+      { id: 't1', content: [{ type: 'text', text: 'contents' }] },
+    )
+    const json = raw(item)
+    expect(json.tool_use).toEqual({ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a.ts' } })
+    expect(json.tool_result.content).toEqual([{ type: 'text', text: 'contents' }])
+    expect(JSON.stringify(json)).not.toContain('synthetic')
+  })
+
+  it('falls back to input/result for a card Hydra synthesized', () => {
+    expect(raw({ input: { description: '2 tasks' }, result: 'Plan updated' })).toEqual({ input: { description: '2 tasks' }, result: 'Plan updated' })
+  })
 })

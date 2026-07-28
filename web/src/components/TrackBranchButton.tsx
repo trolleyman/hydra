@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { GitBranch, Check, Copy } from 'lucide-react'
+import { MonitorDown, Check, Copy } from 'lucide-react'
 import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
 import { api } from '../stores/apiClient'
 
@@ -8,6 +8,9 @@ import { api } from '../stores/apiClient'
 // the user's own repo. On open it ensures the project's `hydra-agents` remote
 // exists (a daemon action), so the shown command is just a `git checkout -t` -
 // no long remote-setup incantation. The chevron marks it as a menu, not an action.
+// The icon is a monitor-with-down-arrow rather than a branch glyph: the header
+// already carries git-ish marks, and the action here is "pull this onto my own
+// machine", not "look at a branch".
 export function TrackBranchButton({ projectId, agentId }: { projectId: string; agentId: string }) {
   const [remote, setRemote] = useState('hydra-agents')
   const [copied, setCopied] = useState(false)
@@ -31,7 +34,7 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
   return (
     <SettingsPopover
       label="Check out this branch locally"
-      icon={<GitBranch className="w-3.5 h-3.5" />}
+      icon={<MonitorDown className="w-3.5 h-3.5" />}
       chevron
       width={340}
       fitContent
