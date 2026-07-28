@@ -109,6 +109,32 @@ func (s *genScheduler) setLimit(n int) {
 	}
 }
 
+// queuePosition reports where key sits in the service order: 0 when it is not
+// queued (already running, or unknown), else its 1-based place among the
+// waiters, ordered exactly as release would hand the next slot out (foreground
+// first, then FIFO).
+//
+// This exists so the UI can tell "queued behind other work" from "running", which
+// from the outside look identical: an entry is marked in-flight BEFORE it
+// acquires a slot (see Manager.get), so a queued generation reports itself as
+// generating, with a ticking elapsed time and no output - indistinguishable from
+// one that is genuinely running but slow to print.
+func (s *genScheduler) queuePosition(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	me := s.waiters[key]
+	if me == nil {
+		return 0
+	}
+	pos := 1
+	for k, w := range s.waiters {
+		if k != key && better(w, me) {
+			pos++
+		}
+	}
+	return pos
+}
+
 // bestLocked returns the highest-priority queued waiter (foreground first, then
 // lowest seq) and its key, or ("", nil) when none are queued. Caller holds mu.
 func (s *genScheduler) bestLocked() (string, *waiter) {

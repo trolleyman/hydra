@@ -134,6 +134,11 @@ type Report struct {
 	// ::hydra:test:total::), so the UI can render it as approximate. Only ever
 	// true while running: a settled report's Total is the exact case count.
 	TotalEstimated bool `json:"-"`
+	// Queued is the run's 1-based place in the runner queue while it waits for a
+	// slot, and 0 once it is actually running. A run is marked in-flight BEFORE it
+	// acquires a slot, so without this "queued behind another suite" and "running"
+	// are the same StatusRunning with the same ticking clock. Transient.
+	Queued int `json:"-"`
 }
 
 // Version selects which checkout a test runs against, mirroring artifacts.Version:

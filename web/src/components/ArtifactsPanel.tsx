@@ -965,6 +965,14 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
   // Header progress while generating: both sides' latest progress lines joined by
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
+  // Queue position of whichever side is furthest back. Only meaningful while a
+  // side is waiting for a slot; a running side reports 0/absent. The two sides of
+  // one set are usually adjacent in the queue, so the worst of them is what the
+  // user is actually waiting on.
+  const queuedAt = Math.max(set.left_queued ?? 0, set.right_queued ?? 0)
+  const queuedNote = queuedAt > 0
+    ? (queuedAt === 1 ? 'queued - next up' : `queued - ${queuedAt - 1} ahead`)
+    : ''
 
   const statusChips = (
     <>
@@ -972,11 +980,18 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
             // Live header: spinner, the latest stdout line as progress (truncated so
             // it can't push the refresh button off the row), then how long the job
             // has been running, separated by a "·". Expand the card for the full log.
+            //
+            // "generating" covers two very different states, because an entry is
+            // marked in-flight BEFORE it acquires a generation slot: it may be
+            // running, or it may be sat in the queue behind other work, and both
+            // otherwise look like a spinner and a climbing timer with no output.
+            // When it's queued we say so, and name the elapsed time as the wait -
+            // otherwise a saturated machine is indistinguishable from a hung build.
             <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-400 dark:text-gray-500">
               <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
-              <span className="truncate">{progressText || 'generating...'}</span>
+              <span className="truncate">{queuedNote || progressText || 'generating...'}</span>
               {set.started_at ? (
-                <span className="shrink-0">· <ElapsedTime startedAt={set.started_at} /></span>
+                <span className="shrink-0">· <ElapsedTime startedAt={set.started_at} />{queuedNote ? ' waiting' : ''}</span>
               ) : null}
             </span>
           )}

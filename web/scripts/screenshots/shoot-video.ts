@@ -14,6 +14,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { proxyLaunchOptions } from '../lib/browserProxy.ts'
+import { cacheWebfonts } from '../lib/fontCache.ts'
 
 const SRC = join(import.meta.dirname, '..', '..', '..')
 const BIN = process.env.HYDRA_BIN || '/tmp/hydra-vidshot'
@@ -59,6 +60,7 @@ try {
   for (const theme of ['dark', 'light'] as const) {
     for (const mode of MODES) {
       const ctx = await browser.newContext({ viewport: { width: 900, height: 1000 }, deviceScaleFactor: 2, colorScheme: theme })
+      await cacheWebfonts(ctx)
       await ctx.addInitScript((m) => {
         try {
           localStorage.setItem('hydra-theme-mode', m.theme)

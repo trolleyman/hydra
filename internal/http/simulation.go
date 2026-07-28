@@ -1300,6 +1300,14 @@ func simTestRunners(id string) []api.TestRunResult {
 				},
 			},
 			{
+				// QUEUED, not running: test concurrency defaults to 1, so a project with
+				// several runners normally has some of them waiting rather than running.
+				// A run is marked in-flight before it takes a slot, so this looked
+				// exactly like a running one - and its clock read as time spent testing.
+				Name: "e2e", Status: api.TestStatusRunning,
+				Queued: ptr(2), StartedAt: ptr(simNow().Add(-95 * time.Second).Unix()),
+			},
+			{
 				Name: "playwright", Status: api.TestStatusRunning,
 				// No declared ::hydra:test:total::, but a prior run seeded an ESTIMATED
 				// denominator (48). TotalEstimated flags it approximate → the panel shows
@@ -2553,6 +2561,18 @@ func simArtifactSets(id string) []api.ArtifactSet {
 			LeftLog:       &leftLog,
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
+		},
+		// Queued, not running: an entry is marked in-flight before it acquires a
+		// generation slot, so this is the state that used to be indistinguishable
+		// from the one above - spinner, climbing clock, no output. Both sides are
+		// waiting, so the card says so and names the clock as the wait.
+		{
+			Name:        "screenshots",
+			Status:      api.ArtifactSetStatusGenerating,
+			StartedAt:   &startedAt,
+			LeftQueued:  ptr(2),
+			RightQueued: ptr(3),
+			Files:       []api.ArtifactFile{},
 		},
 		// Failure: both sides failed, so the card surfaces the build log as two
 		// red-bordered terminals (the script's stderr is the error) instead of a

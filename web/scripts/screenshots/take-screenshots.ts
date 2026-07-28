@@ -42,6 +42,7 @@ import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { proxyLaunchOptions } from '../lib/browserProxy.ts'
+import { cacheWebfonts } from '../lib/fontCache.ts'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
@@ -1879,6 +1880,11 @@ try {
           deviceScaleFactor: dpi,
           colorScheme: theme,
         })
+        // Serve the webfonts from the shared in-process cache: this context has
+        // its own empty HTTP cache, and there are ~80 of them, so without this
+        // every shot refetches Merriweather + Roboto Flex over the egress proxy
+        // while its networkidle wait blocks on them.
+        await cacheWebfonts(ctx)
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
         // UI's "elapsed"/"X ago" labels are byte-stable across the two renders.
         // setFixedTime only freezes the wall clock - timers and requestAnimationFrame
