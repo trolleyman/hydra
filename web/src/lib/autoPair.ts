@@ -8,6 +8,10 @@
 //   - typing a mark with text selected WRAPS the selection (` ( [ { " ' * _ ~).
 //   - Backspace between an empty pair deletes both.
 //
+// A mark the user has backslash-escaped ("\`") is a literal, so nothing pairs it
+// (see isEscaped). Wrapping a selection is exempt: it is an explicit request, and
+// declining it would replace the selected text with the mark.
+//
 // Everything here is a pure function of (key, value, selection) so the rules are
 // testable without a DOM; the component turns a returned edit into a real one
 // through applyEdit.
@@ -38,6 +42,17 @@ const CLOSERS = new Set(Object.values(PAIRS))
 const WORD = /[\p{L}\p{N}]/u
 
 const FENCE = '```'
+
+// isEscaped reports whether the character typed at `pos` is escaped by a
+// markdown backslash. Every mark we pair is backslash-escapable, and an escaped
+// mark is a literal - "\`" is a backtick in the text, not the start of a code
+// span, so pairing it would leave a stray closer behind. Backslashes escape each
+// other, so it is an ODD run of them that escapes what follows ("\\`" pairs).
+function isEscaped(value: string, pos: number): boolean {
+  let n = 0
+  while (pos - n > 0 && value[pos - n - 1] === '\\') n++
+  return n % 2 === 1
+}
 
 // inOpenFence reports whether `pos` sits inside an unclosed ``` block. Fence
 // markers are counted by line, so an odd number of them before the caret means
@@ -100,6 +115,11 @@ export function autoPairEdit(key: string, value: string, selStart: number, selEn
     }
   }
 
+  // Escaped: the mark is a literal, so it neither opens a pair nor closes one.
+  // Insert it as typed - stepping over the closer ahead would swallow it and
+  // leave the span open ("`\|`" + "`" must give "`\`|`", not "`\`|").
+  if (isEscaped(value, selStart)) return null
+
   // The closer is already sitting there (we inserted it): step over it. This is
   // what makes typing `foo` end up as one code span rather than `foo``.
   if (CLOSERS.has(key) && next === key) return { value, caret: selStart + 1 }
@@ -124,5 +144,7 @@ export function backspacePairEdit(value: string, selStart: number, selEnd: numbe
   if (selStart !== selEnd || selStart === 0) return null
   const closer = PAIRS[value[selStart - 1]]
   if (!closer || value[selStart] !== closer) return null
+  // An escaped mark is a literal we never paired, so only delete the one char.
+  if (isEscaped(value, selStart - 1)) return null
   return { value: value.slice(0, selStart - 1) + value.slice(selStart + 1), caret: selStart - 1 }
 }

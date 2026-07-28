@@ -138,6 +138,25 @@ to act on: a flex container has none, so a label wrapper that is itself
 `flex items-center gap-*` must become an inline span (with the gap moved onto its
 separator) before the class does anything - see the chat result footer.
 
+### Hostnames and URLs: `HostName` / `UrlText`
+
+A host or URL shown to the user goes through `web/src/components/HostName.tsx`,
+which lowlights everything but the registrable domain - `registry.` fades,
+`npmjs.org` stays - the way a browser's address bar does. Which part is the
+domain comes from the Public Suffix List (`tldts`, wrapped in
+`web/src/lib/publicSuffix.ts`), so `bbc.co.uk` keeps both of its final labels
+and, more to the point, `npmjs.org.evil.com` highlights `evil.com`. That last
+case is why these exist: the main caller is the network / web-fetch approval
+card, where the part naming who you are really talking to has to be the part
+that reads loudest.
+
+Two rules the module holds to, both worth preserving in anything built on it:
+it never guesses (the list is a ~46KB lazy chunk, and hosts render undimmed
+until it lands, so the failure mode is "no dimming" and never "the wrong part
+dimmed"), and it never drops characters (`prefix + domain` is always exactly
+the input). The lowlight is `opacity`, not a colour, so the components compose
+into a neutral chip, a muted caption and a blue link alike.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL
