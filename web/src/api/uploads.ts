@@ -37,6 +37,17 @@ export function uploadBlobUrl(projectId: string | null, filename: string): strin
   return `/uploads/projects/${pid}/blob?name=${encodeURIComponent(filename)}`
 }
 
+// URL that serves a file an agent referenced by path in a chat message (a
+// screenshot it wrote to its worktree or to /tmp). The path is sent exactly as
+// the agent wrote it; the backend translates it to its host location and serves
+// it only if it lands inside that head's worktree, private /tmp, or the project's
+// uploads dir. Backed by GET /agent-files/projects/{id}/agents/{id}/blob.
+export function agentFileUrl(projectId: string, agentId: string, path: string): string {
+  const pid = encodeURIComponent(projectId)
+  const aid = encodeURIComponent(agentId)
+  return `/agent-files/projects/${pid}/agents/${aid}/blob?path=${encodeURIComponent(path)}`
+}
+
 const IMAGE_RE = /^image\//
 
 /**

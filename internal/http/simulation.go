@@ -2925,6 +2925,25 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	_, _ = w.Write([]byte(content))
 }
 
+// HandleAgentFileBlob serves the picture behind a markdown image an agent
+// embedded in a chat message. The simulation has no head filesystem to resolve
+// against, so any image-looking path yields the same placeholder PNG - enough to
+// exercise the chat renderer's inline-image path (and the "unresolvable path"
+// fallback, for anything that isn't an image).
+func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
+	if !agentImageExts[strings.ToLower(path.Ext(r.URL.Query().Get("path")))] {
+		http.NotFound(w, r)
+		return
+	}
+	png, err := base64.StdEncoding.DecodeString(simDiffImageAfterBase64)
+	if err != nil {
+		http.Error(w, "decode error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	_, _ = w.Write(png)
+}
+
 // HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.
 // The simulation has no real worktree or refs, so it ignores ref/worktree and
 // resolves purely by path - mirroring HandleRepositoryBlob - which is enough to
@@ -3326,6 +3345,14 @@ var simChatEvents = []string{
 	// The commit below uses staged:true, the mode that commits the partial index
 	// the git_add above built - the other modes re-stage whole files and would
 	// silently widen it.
+	// Loading a deferred tool's schema before calling it. The header shows what is
+	// being looked up, not the wire name: a `select:` list renders as the bare tool
+	// names with MCP ones as "hydra::git_add" (summarizeToolSearchQuery).
+	`{"type":"assistant","message":{"id":"msg_sim_toolsearch","content":[{"type":"tool_use","id":"toolu_sim_toolsearch","name":"ToolSearch","input":{"query":"select:mcp__hydra__git_add,mcp__hydra__git_commit","max_results":2}}]}}`,
+	// The result carries no text at all - one `tool_reference` block per loaded
+	// tool - which is why the card rendered "(no output)" until parseToolResult
+	// learned to name them.
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_toolsearch","content":[{"type":"tool_reference","tool_name":"mcp__hydra__git_add"},{"type":"tool_reference","tool_name":"mcp__hydra__git_commit"}]}]}}`,
 	`{"type":"assistant","timestamp":"2026-07-09T18:03:00.000Z","message":{"id":"msg_sim_gitadd","content":[{"type":"tool_use","id":"toolu_sim_gitadd","name":"mcp__hydra__git_add","input":{"files":[{"path":"internal/artifacts/upload.go","ranges":[[12,18]]}]}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitadd","content":"Staged: internal/artifacts/upload.go (lines 12-18)"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_gitcommit","content":[{"type":"tool_use","id":"toolu_sim_gitcommit","name":"mcp__hydra__git_commit","input":{"message":"Retry uploads with jittered exponential backoff\n\nPut now retries a failed upload up to maxAttempts times, sleeping a\njittered exponential delay between tries, and surfaces the last error\nonce every attempt is exhausted.","staged":true}}]}}`,
@@ -3460,6 +3487,11 @@ var simChatEvents = []string{
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
+	// An assistant reply that embeds a screenshot IT took, by the path it wrote it
+	// to (inside the head's private /tmp). The chat markdown renderer resolves that
+	// through the agent-files endpoint and shows the picture inline - see
+	// MarkdownImage / HandleAgentFileBlob.
+	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
 	// A background Bash command plus its completion <task-notification>
 	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
 	// deduped to ONE notice chip). The notification carries the <output-file>
@@ -3536,7 +3568,12 @@ func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, pay
 	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
-// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. It
+// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. Its
+// tool payloads carry the status (and, for the command, the `_raw` native item)
+// that codexToolPayload always sends: that pair is what tells the chat a card
+// came from Codex rather than Claude, so the Raw panel shows Codex's own item
+// instead of an Anthropic block it never sent.
+// It
 // includes the regressions that are otherwise difficult to reproduce on demand:
 // a rich multi-file edit, a spawn whose transport result is merely "completed",
 // and a later closeAgent control that must remain an ordinary tool rather than
@@ -3562,18 +3599,18 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
 		{"assistant_delta", map[string]any{"message_id": "sim-codex-seed", "text": " and finished after."}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
-		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
+		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "_raw": map[string]any{"id": "sim-codex-bash", "item_type": "command_execution", "command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "status": "in_progress"}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/codex-chat.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Codex chat\n+# Codex chat support\n"},
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "TOOL_DEMO.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-draft\n+complete\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "output": "File updated", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/sim-added.md", "kind": map[string]any{"type": "add"}, "diff": "# Added document\n First character and indentation preserved\n+literal plus preserved\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-write", "name": "Write", "output": "File updated", "status": "completed"}},

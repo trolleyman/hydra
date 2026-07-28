@@ -178,6 +178,10 @@ func runSimulationServer() error {
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
 
+	// Images an agent embedded in a chat message by local path (mirrors the real
+	// server's non-OpenAPI route), so the inline-image rendering can be demoed.
+	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
+
 	// Persisted build logs behind the artifacts / tests "Show build log" toggles
 	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
 	// screenshotted - and so a settled test card's log button is live, as it is
