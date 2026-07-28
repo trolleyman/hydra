@@ -90,7 +90,7 @@ func GetDeployConfigPath(projectRoot string) string {
 // override layer with the same schema as config.toml. It is loaded as the fourth
 // config merge layer (defaults -> user -> project -> project-local) and, being
 // host-side and editable only by the user, is as trusted as the root config (it
-// participates in the unsafe_host trusted set). See NON_LOCAL_INTEGRATION.md 3.1.
+// participates in the unsafe_host trusted set). See docs/non-local-integration.md
 func GetProjectConfigLocalPath(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "config.local.toml")
 }
@@ -246,8 +246,8 @@ func GetChatThinkingJsonFromProjectRoot(projectRoot, id string) string {
 
 // GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle
 // watcher writes (status + unresolved discussions) and the in-sandbox `hydra mcp`
-// server reads for get_review_status / get_review_comments (NON_LOCAL_INTEGRATION.md
-// 3.5a). Per-head by construction: it is bound only into that head's sandbox, so
+// server reads for get_review_status / get_review_comments
+// (docs/non-local-integration.md). Per-head by construction: it is bound only into that head's sandbox, so
 // the agent's identity comes from the channel, never a self-reported id. Lives
 // at .hydra/local/review/<id>.json.
 func GetReviewDirFromProjectRoot(projectRoot string) string {
@@ -275,6 +275,38 @@ func GetSubagentsDirFromProjectRoot(projectRoot, id string) string {
 // the daemon writes back decisions. Lives under .hydra/local/approvals/<id>.
 func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
+}
+
+// GetReviewThreadsJson returns the per-head cache of the MR's review threads,
+// written whenever they are read from the forge so the diff viewer still renders
+// the conversation when a live read fails. Lives at
+// .hydra/local/review-threads/<id>.json.
+func GetReviewThreadsJson(projectRoot, id string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-threads", id+".json")
+}
+
+// GetReviewNotesJson returns the per-head store of LOCAL-ONLY review notes -
+// replies that live in Hydra and are never sent to the forge (an agent's answer
+// to a reviewer, or a note to self). Lives at
+// .hydra/local/review-notes/<id>.json.
+func GetReviewNotesJson(projectRoot, id string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-notes", id+".json")
+}
+
+// GetReviewReqRootDir returns the parent dir holding every head's review-refresh
+// channel (.hydra/local/review-req). The daemon's review-request watcher scans it
+// to find heads asking for a forge refresh.
+func GetReviewReqRootDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-req")
+}
+
+// GetReviewReqDir returns the per-head directory used for the on-demand review
+// refresh round-trip: the in-sandbox review tools write a request here (the dir
+// is made writable at its real host path, like the approvals dir) and the daemon
+// re-reads the MR from the forge, rewrites the head's review file and writes back
+// a result. Lives under .hydra/local/review-req/<id>.
+func GetReviewReqDir(projectRoot, id string) string {
+	return filepath.Join(GetReviewReqRootDir(projectRoot), id)
 }
 
 // GetGitopsRootDir returns the parent dir holding every head's host-mediated git

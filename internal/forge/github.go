@@ -236,42 +236,133 @@ func (p *githubProvider) Merge(ctx context.Context, repoDir, _ string, id string
 	return errtrace.Wrap(err)
 }
 
-// ghComment is one PR review comment (file/line context) from `gh api`.
-type ghComment struct {
-	ID   int    `json:"id"`
-	Body string `json:"body"`
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	User struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	HTMLURL string `json:"html_url"`
+// ghThreadsQuery pulls the PR's review threads with their comments. Thread
+// resolution is GraphQL-only on GitHub (see ghViewFields), and fetching the
+// comments in the same query keeps a thread render to ONE round trip.
+const ghThreadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated path line originalLine comments(first:100){nodes{databaseId body url createdAt author{login}}}}}}}}`
+
+// ghThreadsResp is the shape of ghThreadsQuery's response.
+type ghThreadsResp struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					Nodes []struct {
+						IsResolved   bool   `json:"isResolved"`
+						IsOutdated   bool   `json:"isOutdated"`
+						Path         string `json:"path"`
+						Line         *int   `json:"line"`
+						OriginalLine *int   `json:"originalLine"`
+						Comments     struct {
+							Nodes []struct {
+								DatabaseID int    `json:"databaseId"`
+								Body       string `json:"body"`
+								URL        string `json:"url"`
+								CreatedAt  string `json:"createdAt"`
+								Author     struct {
+									Login string `json:"login"`
+								} `json:"author"`
+							} `json:"nodes"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
 }
 
-func (p *githubProvider) Discussions(ctx context.Context, repoDir, _ string, id string) ([]Discussion, error) {
-	// Review comments (with file/line) via the REST API through gh, which reuses
-	// gh's auth. This lists all review comments; GitHub does not expose a simple
-	// "unresolved only" filter over REST, so all are returned (best-effort).
-	out, err := p.run(ctx, repoDir, "gh", "api", "repos/{owner}/{repo}/pulls/"+id+"/comments", "--paginate")
+func (p *githubProvider) Threads(ctx context.Context, repoDir, _ string, id string) ([]Thread, error) {
+	num, err := strconv.Atoi(id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	var comments []ghComment
-	if err := json.Unmarshal([]byte(out), &comments); err != nil {
+	owner, name, err := p.repoOwnerName(ctx, repoDir)
+	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	res := make([]Discussion, 0, len(comments))
-	for _, c := range comments {
-		res = append(res, Discussion{
-			ID:     strconv.Itoa(c.ID),
-			Author: c.User.Login,
-			Body:   c.Body,
-			Path:   c.Path,
-			Line:   c.Line,
-			URL:    c.HTMLURL,
-		})
+	out, err := p.run(ctx, repoDir, "gh", "api", "graphql",
+		"-f", "query="+ghThreadsQuery,
+		"-F", "owner="+owner,
+		"-F", "name="+name,
+		"-F", "number="+strconv.Itoa(num))
+	if err != nil {
+		return nil, errtrace.Wrap(err)
 	}
-	return res, nil
+	var resp ghThreadsResp
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	nodes := resp.Data.Repository.PullRequest.ReviewThreads.Nodes
+	threads := make([]Thread, 0, len(nodes))
+	for _, n := range nodes {
+		t := Thread{Path: n.Path, Resolved: n.IsResolved, Outdated: n.IsOutdated}
+		// `line` goes null once a thread is outdated; originalLine still anchors it
+		// to where it was written, which is what the diff viewer can match on.
+		if n.Line != nil {
+			t.Line = *n.Line
+		} else if n.OriginalLine != nil {
+			t.Line = *n.OriginalLine
+		}
+		for _, c := range n.Comments.Nodes {
+			t.Notes = append(t.Notes, Note{
+				ID:        strconv.Itoa(c.DatabaseID),
+				Author:    c.Author.Login,
+				Body:      c.Body,
+				URL:       c.URL,
+				CreatedAt: c.CreatedAt,
+			})
+		}
+		if len(t.Notes) == 0 {
+			continue // a thread with no readable comments has nothing to show or reply to
+		}
+		// GitHub replies address the ROOT comment's REST id, so that is the thread
+		// handle Hydra carries around.
+		t.ID = t.Notes[0].ID
+		t.URL = t.Notes[0].URL
+		threads = append(threads, t)
+	}
+	return threads, nil
+}
+
+func (p *githubProvider) ReplyToThread(ctx context.Context, repoDir, _ string, id, threadID, body string) error {
+	if strings.TrimSpace(body) == "" {
+		return errtrace.Wrap(errors.New("reply body is empty"))
+	}
+	owner, name, err := p.repoOwnerName(ctx, repoDir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	path := fmt.Sprintf("repos/%s/%s/pulls/%s/comments/%s/replies", owner, name, id, threadID)
+	_, err = p.run(ctx, repoDir, "gh", "api", "-X", "POST", path, "-f", "body="+body)
+	return errtrace.Wrap(err)
+}
+
+func (p *githubProvider) CommentOnLine(ctx context.Context, repoDir, _ string, id string, c NewLineComment) error {
+	if strings.TrimSpace(c.Body) == "" {
+		return errtrace.Wrap(errors.New("comment body is empty"))
+	}
+	owner, name, err := p.repoOwnerName(ctx, repoDir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	// A new review comment must name the commit it applies to; GitHub rejects a
+	// stale sha, so it is read fresh rather than cached on the head.
+	sha, err := p.run(ctx, repoDir, "gh", "api", fmt.Sprintf("repos/%s/%s/pulls/%s", owner, name, id), "-q", ".head.sha")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return errtrace.Wrap(fmt.Errorf("could not resolve the head commit of PR %s", id))
+	}
+	_, err = p.run(ctx, repoDir, "gh", "api", "-X", "POST",
+		fmt.Sprintf("repos/%s/%s/pulls/%s/comments", owner, name, id),
+		"-f", "body="+c.Body,
+		"-f", "commit_id="+sha,
+		"-f", "path="+c.Path,
+		"-F", "line="+strconv.Itoa(c.Line),
+		"-f", "side=RIGHT")
+	return errtrace.Wrap(err)
 }
 
 // ghPRRef is the subset of `gh pr {list,view} --json ...` fields needed to adopt

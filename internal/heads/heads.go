@@ -23,6 +23,7 @@ import (
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/mcpserver"
 	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -67,7 +68,7 @@ type Head struct {
 	// MergeWhenGreen is true when auto-merge is armed for this head (PLAN #68).
 	MergeWhenGreen bool
 
-	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// --- Non-local integration (MR/PR link, docs/non-local-integration.md) ---
 	// DownstreamBranch is the name the head's work is pushed AS (local stays
 	// hydra/<id>); "" until set.
 	DownstreamBranch string
@@ -413,6 +414,12 @@ type AdoptSpec struct {
 	HeadRepoURL  string // push target ("" = configured remote / same-repo PR)
 	WorktreeBase string // the already-fetched local ref (refs/hydra/pr/...) to base the worktree on
 	CanPush      bool   // whether the PR head branch is pushable (false = read-only head)
+	// Review is the PR's forge state + unresolved discussions as of the lookup,
+	// written to the head's review file BEFORE the agent launches. Without it the
+	// agent's first get_review_comments call (typically a few seconds into the
+	// first turn) would read the empty seed and conclude the head has no PR, since
+	// the review watcher only fills the file in on its next 30s tick.
+	Review *mcpserver.ReviewFile
 }
 
 // SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
@@ -499,6 +506,11 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		"<branch>", branchName,
 		"<base-branch>", baseBranch,
 	).Replace(opts.PrePrompt)
+	// An adopted head is working on someone else's PR - tell it so, and point it at
+	// the review tools (the note is persisted on the row, so resume keeps it).
+	if opts.Adopt != nil {
+		opts.PrePrompt += adoptedPrePromptNote(*opts.Adopt)
+	}
 
 	now := time.Now()
 
@@ -594,6 +606,15 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 	if err := WriteAgentStatus(projectRoot, opts.ID, initialStatus); err != nil {
 		log.Printf("warn: write initial agent status: %v", err)
+	}
+	// Seed an adopted head's review file with the PR state the spawn already
+	// fetched, BEFORE the sandbox is built (seedHead only creates an empty
+	// linked=false file when none exists). The agent's first turn usually asks for
+	// the review comments within seconds - long before the watcher's first poll.
+	if opts.Adopt != nil && opts.Adopt.Review != nil {
+		if err := WriteReviewSnapshot(projectRoot, opts.ID, *opts.Adopt.Review); err != nil {
+			log.Printf("warn: seed review file for adopted head %s: %v", opts.ID, err)
+		}
 	}
 
 	setStatus := func(status api.AgentStatus) {

@@ -121,6 +121,18 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	res.WritablePaths = append(res.WritablePaths, reviewJSONHost)
 	res.Env = append(res.Env, "HYDRA_REVIEW_PATH="+reviewJSONHost)
 
+	// Per-head review-refresh channel: the review tools ask the daemon to re-read
+	// the MR from the forge before answering, rather than serving whatever the 30s
+	// watcher last cached. The forge CLIs are host-side only (no credentials, and
+	// under hard egress no route, inside the sandbox), so this is a request/result
+	// file round-trip like the gate approval and gitq channels.
+	reviewReqDirHost := paths.GetReviewReqDir(projectRoot, id)
+	if err := os.MkdirAll(reviewReqDirHost, 0755); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", reviewReqDirHost, err))
+	}
+	res.WritablePaths = append(res.WritablePaths, reviewReqDirHost)
+	res.Env = append(res.Env, "HYDRA_REVIEW_REQ_DIR="+reviewReqDirHost)
+
 	// Per-head sub-agent tracking dir: trigger-hook drops a marker file per live
 	// Claude sub-agent so the main agent's Stop hook can distinguish a real finish
 	// from "turn ended but sub-agents still running". A directory (one file per

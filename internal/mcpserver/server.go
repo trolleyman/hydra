@@ -40,9 +40,15 @@ type Deps struct {
 	RequestAccess func(name string) (approved bool, message string)
 	// GetReview returns this head's current MR link + cached forge state (status,
 	// unresolved discussions), or nil when unavailable. Populated from the per-head
-	// review file the MR watcher writes; nil disables the review tools. See
-	// NON_LOCAL_INTEGRATION.md 3.5a.
+	// review file the MR watcher writes; nil disables the review tools.
+	// See docs/non-local-integration.md.
 	GetReview func() *ReviewFile
+	// ReplyLocal records a LOCAL-ONLY reply on one of this head's review threads:
+	// visible to the user in Hydra's diff viewer, never sent to the forge. Agents
+	// have no forge credentials by design and Hydra only writes to a PR as an
+	// explicit user action, so this is the whole of an agent's write access to a
+	// review conversation. Nil hides the tool.
+	ReplyLocal func(threadID, body string) (ok bool, message string)
 	// GitOp performs a git write-operation on the head's OWN branch, inside its
 	// worktree - never another branch or a path outside the worktree. It backs the
 	// git_* tools (commit / reset / revert / add / rebase / cherry-pick): raw git
@@ -117,10 +123,17 @@ type ReviewFile struct {
 	Mergeable             bool            `json:"mergeable,omitempty"`
 	Comments              []ReviewComment `json:"comments,omitempty"`
 	UpdatedAt             string          `json:"updated_at,omitempty"`
+	// StaleReason is set by the loader (not persisted) when it could not confirm
+	// this snapshot is current - the on-demand forge refresh failed or timed out.
+	// The tools pass it on so the agent knows to treat the answer as possibly
+	// out of date rather than acting on "no comments".
+	StaleReason string `json:"-"`
 }
 
 // ReviewComment is one unresolved review thread with file/line context.
 type ReviewComment struct {
+	// ID is the thread handle, which reply_to_review_comment takes.
+	ID     string `json:"id,omitempty"`
 	Author string `json:"author,omitempty"`
 	Body   string `json:"body,omitempty"`
 	Path   string `json:"path,omitempty"`
@@ -233,17 +246,33 @@ func toolDefs(deps Deps) []map[string]any {
 		defs = append(defs,
 			map[string]any{
 				"name":        "get_review_status",
-				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Scoped to this head's own MR only.",
+				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Reads the MR from the forge on every call (a second or two), so the answer is live - call it again whenever you need current state. Scoped to this head's own MR only.",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
 			map[string]any{
 				"name":        "get_review_comments",
-				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Use this to address reviewer feedback, then commit your changes.",
+				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Reads the MR from the forge on every call (a second or two), so it picks up comments left while you were working - call it again after a push. Use this to address reviewer feedback, then commit your changes.",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
 		)
+		if deps.ReplyLocal != nil {
+			defs = append(defs, map[string]any{
+				"name": "reply_to_review_comment",
+				"description": "Reply to one review discussion on YOUR merge/pull request, for the USER to read in Hydra's diff viewer. " +
+					"The reply is LOCAL ONLY - it is never posted to the forge, so the reviewer will not see it; the user decides what to send on. " +
+					"Use it to say what you changed and why, or to disagree with a comment, next to the thread it answers. Take the thread id from get_review_comments.",
+				"inputSchema": map[string]any{
+					"type":     "object",
+					"required": []string{"thread_id", "body"},
+					"properties": map[string]any{
+						"thread_id": map[string]any{"type": "string", "description": "The discussion's thread id, as given by get_review_comments."},
+						"body":      map[string]any{"type": "string", "description": "Your reply, in markdown."},
+					},
+				},
+			})
+		}
 	}
 	return defs
 }
@@ -283,19 +312,44 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		return textResult(reviewStatusText(deps), false)
 	case "get_review_comments":
 		return textResult(reviewCommentsText(deps), false)
+	case "reply_to_review_comment":
+		if deps.ReplyLocal == nil {
+			return textResult("reply_to_review_comment is not available in this session.", true)
+		}
+		var args struct {
+			ThreadID string `json:"thread_id"`
+			Body     string `json:"body"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.ThreadID) == "" || strings.TrimSpace(args.Body) == "" {
+			return textResult("reply_to_review_comment needs a non-empty \"thread_id\" and \"body\".", true)
+		}
+		ok, msg := deps.ReplyLocal(args.ThreadID, args.Body)
+		if msg == "" && ok {
+			msg = "Saved as a local note on that discussion. The user can see it in Hydra next to the thread; it was NOT posted to the forge."
+		}
+		return textResult(msg, !ok)
 	default:
 		return textResult("unknown tool: "+p.Name, true)
 	}
 }
 
+// unlinkedText explains an unlinked head to the agent. It names the two ways a
+// head gets a PR (adopted at spawn, or published later) so the agent asks the
+// user instead of reaching for `gh`/`glab`, which are unauthenticated in the
+// sandbox - every forge call runs host-side in the daemon.
+const unlinkedText = "This head is not linked to a merge/pull request: it was not spawned onto an existing PR, and it has not been published yet. " +
+	"`gh`/`glab` are not authenticated inside the sandbox, so there is no other way to reach the forge from here - " +
+	"ask the user to publish this head (or to respawn it onto the PR) from Hydra's UI."
+
 // reviewStatusText renders this head's MR status for get_review_status.
 func reviewStatusText(deps Deps) string {
 	if deps.GetReview == nil {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	rf := deps.GetReview()
 	if rf == nil || !rf.Linked {
-		return "This head is not linked to a merge/pull request. It has not been published yet."
+		return unlinkedText
 	}
 	var b strings.Builder
 	b.WriteString("Your merge/pull request:\n")
@@ -314,26 +368,45 @@ func reviewStatusText(deps Deps) string {
 		b.WriteString("- Approvals: " + itoa(rf.Approvals) + "/" + itoa(rf.ApprovalsRequired) + "\n")
 	}
 	b.WriteString("- Unresolved discussions: " + itoa(rf.UnresolvedDiscussions) + "\n")
+	if rf.UpdatedAt != "" {
+		b.WriteString("- Fetched from the forge at: " + rf.UpdatedAt + "\n")
+	}
+	b.WriteString(freshnessNote(rf))
 	if rf.UnresolvedDiscussions > 0 {
 		b.WriteString("Use get_review_comments to read the unresolved discussions.\n")
 	}
 	return b.String()
 }
 
+// freshnessNote tells the agent how much to trust the snapshot's age. Each tool
+// call asks the daemon to re-read the MR first, so the normal case is "this is
+// live"; StaleReason is set only when that refresh could not be completed.
+func freshnessNote(rf *ReviewFile) string {
+	if rf.StaleReason != "" {
+		return "NOTE: " + rf.StaleReason + "\n"
+	}
+	return ""
+}
+
 // reviewCommentsText renders this head's unresolved discussions for
 // get_review_comments.
 func reviewCommentsText(deps Deps) string {
 	if deps.GetReview == nil {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	rf := deps.GetReview()
 	if rf == nil || !rf.Linked {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	if len(rf.Comments) == 0 {
-		return "No unresolved review discussions."
+		msg := "No unresolved review discussions on " + rf.URL
+		if rf.UpdatedAt != "" {
+			msg += " as of " + rf.UpdatedAt
+		}
+		return msg + ".\n" + freshnessNote(rf)
 	}
 	var b strings.Builder
+	b.WriteString(freshnessNote(rf))
 	b.WriteString("Unresolved review discussions on your MR (address them, then commit):\n\n")
 	for i, c := range rf.Comments {
 		b.WriteString(itoa(i + 1))
@@ -348,9 +421,15 @@ func reviewCommentsText(deps Deps) string {
 		if c.Author != "" {
 			b.WriteString("(@" + c.Author + ") ")
 		}
+		if c.ID != "" {
+			b.WriteString("[thread " + c.ID + "]")
+		}
 		b.WriteString("\n   ")
 		b.WriteString(strings.ReplaceAll(strings.TrimSpace(c.Body), "\n", "\n   "))
 		b.WriteString("\n")
+	}
+	if deps.ReplyLocal != nil {
+		b.WriteString("\nUse reply_to_review_comment with a thread id to answer one of these for the USER to read in Hydra (local only - it is not posted to the forge).\n")
 	}
 	return b.String()
 }

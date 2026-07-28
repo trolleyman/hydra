@@ -8,7 +8,7 @@
 // Keeping them apart means submitting a review can wipe the draft cleanly without
 // touching layout prefs, and the two prune independently.
 
-import { reviewDraftKey, REVIEW_DRAFT_PREFIX, lineDraftKey, LINE_DRAFT_PREFIX, createShardedStore } from './storage'
+import { reviewDraftKey, REVIEW_DRAFT_PREFIX, lineDraftKey, LINE_DRAFT_PREFIX, threadDraftKey, THREAD_DRAFT_PREFIX, createShardedStore } from './storage'
 import { randomId } from './uuid'
 
 // One queued comment. `path` + `lineNum` + `isNew` anchor it to a diff line the
@@ -160,8 +160,38 @@ export function clearLineDraft(
   saveLineDraft(projectId, agentId, path, lineNum, isNew, '')
 }
 
-// Drop expired review-draft and line-draft entries. Cheap to call once on app boot.
+// ── In-progress forge-thread replies ─────────────────────────────────────────
+// The same idea as the line drafts above, for the reply box on a FORGE review
+// thread (docs/review-threads.md): a thread card can scroll out of view (which
+// unmounts it) or the page can reload mid-sentence, and losing a half-written
+// reply to a reviewer is worse than losing a note to the agent. Keyed by thread
+// id, which is stable for the life of the thread on both forges.
+
+const threadStore = createShardedStore<LineDrafts>(THREAD_DRAFT_PREFIX, REVIEW_DRAFT_TTL_MS)
+
+// The saved in-progress reply for a thread, or '' when nothing is stored.
+export function loadThreadDraft(projectId: string | null, agentId: string, threadId: string): string {
+  return threadStore.load(threadDraftKey(projectId, agentId))?.drafts?.[threadId] ?? ''
+}
+
+// Persist (or, for empty text, drop) the in-progress reply for a thread.
+export function saveThreadDraft(projectId: string | null, agentId: string, threadId: string, text: string): void {
+  const key = threadDraftKey(projectId, agentId)
+  const drafts = { ...(threadStore.load(key)?.drafts ?? {}) }
+  if (text.trim()) drafts[threadId] = text
+  else delete drafts[threadId]
+  threadStore.save(key, { drafts })
+}
+
+// Drop the in-progress reply for a thread (after it's been posted or saved).
+export function clearThreadDraft(projectId: string | null, agentId: string, threadId: string): void {
+  saveThreadDraft(projectId, agentId, threadId, '')
+}
+
+// Drop expired review-draft, line-draft and thread-draft entries. Cheap to call
+// once on app boot.
 export function pruneReviewDrafts(): void {
   store.prune()
   lineStore.prune()
+  threadStore.prune()
 }

@@ -15,6 +15,7 @@ import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ListReviewsResponse } from '../models/ListReviewsResponse';
+import type { NewReviewCommentRequest } from '../models/NewReviewCommentRequest';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
@@ -26,6 +27,8 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
+import type { ReviewReplyRequest } from '../models/ReviewReplyRequest';
+import type { ReviewThreadsResponse } from '../models/ReviewThreadsResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -472,7 +475,7 @@ export class DefaultService {
     }
     /**
      * Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
-     * Host-side, by the daemon, with the user's own credentials (NON_LOCAL_INTEGRATION.md 3.3). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
+     * Host-side, by the daemon, with the user's own credentials (docs/non-local-integration.md). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
      * @param projectId
      * @param id
      * @param force Bypass the local test gate (same semantics as merge's force).
@@ -600,6 +603,94 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request (invalid branch name, or soft-locked after publish without confirm)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * The review threads on this head's MR, for the diff viewer
+     * Returns the forge's review conversations for this head's linked MR, anchored to file/line, with Hydra's local-only notes merged in (docs/review-threads.md). Fetched live from the forge host-side; if that call fails the last cached threads are returned with stale=true and an error hint, so the diff still renders. An unlinked head returns an empty list.
+     *
+     * @param projectId
+     * @param id
+     * @returns ReviewThreadsResponse The head's review threads (empty when unlinked).
+     * @throws ApiError
+     */
+    public getReviewThreads(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<ReviewThreadsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/review/threads',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Start a new review thread on a line of this head's MR
+     * Posts a new review comment on the MR's diff, as the user, host-side via gh/glab. The line is a NEW-side line number. Fails cleanly when the head has no MR, when the line is not part of the MR's diff, or when the forge CLI is unauthenticated.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns ReviewThreadsResponse Posted (returns the refreshed threads).
+     * @throws ApiError
+     */
+    public createReviewComment(
+        projectId: string,
+        id: string,
+        requestBody: NewReviewCommentRequest,
+    ): CancelablePromise<ReviewThreadsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/threads',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (unlinked head, empty body, or the forge rejected it)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Reply to a review thread on this head's MR
+     * Adds a reply to an existing thread. `local: true` keeps the reply inside Hydra (visible in the diff viewer, never sent to the forge); otherwise it is posted to the forge as the user. Agents only ever write local notes, and they do so through their MCP tool rather than this endpoint.
+     *
+     * @param projectId
+     * @param id
+     * @param threadId
+     * @param requestBody
+     * @returns ReviewThreadsResponse Replied (returns the refreshed threads).
+     * @throws ApiError
+     */
+    public replyToReviewThread(
+        projectId: string,
+        id: string,
+        threadId: string,
+        requestBody: ReviewReplyRequest,
+    ): CancelablePromise<ReviewThreadsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'thread_id': threadId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (unlinked head, empty body, or the forge rejected it)`,
                 404: `Not Found`,
             },
         });
@@ -1039,7 +1130,7 @@ export class DefaultService {
     }
     /**
      * Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-     * Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent.
+     * Arms "publish when green" (docs/non-local-integration.md): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent.
      *
      * @param projectId
      * @param id

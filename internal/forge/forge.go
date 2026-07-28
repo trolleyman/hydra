@@ -1,5 +1,5 @@
 // Package forge is Hydra's thin abstraction over a code-review forge (GitHub /
-// GitLab) for the non-local integration flow (NON_LOCAL_INTEGRATION.md 3.3-3.5).
+// GitLab) for the non-local integration flow (docs/non-local-integration.md).
 // It is CLI-first: the default implementations shell out to `gh` / `glab` on the
 // host (which own auth, including self-hosted via their multi-host config), so
 // Hydra needs no OAuth code and no token in-sandbox. Everything here runs
@@ -62,7 +62,7 @@ type MergeOptions struct {
 	RemoveSourceBranch bool
 	// Auto enables the forge's own auto-merge (merge-when-pipeline-succeeds /
 	// GitHub auto-merge) instead of merging immediately - preferred where available
-	// because it respects merge trains and protected-branch rules (3.5).
+	// because it respects merge trains and protected-branch rules.
 	Auto bool
 }
 
@@ -85,7 +85,7 @@ type Status struct {
 }
 
 // Discussion is one unresolved review thread with file/line context, ready for an
-// agent to act on (get_review_comments / the "respond to review" prompt, 3.5a).
+// agent to act on (get_review_comments / the "respond to review" prompt).
 type Discussion struct {
 	ID     string
 	Author string
@@ -95,19 +95,82 @@ type Discussion struct {
 	URL    string
 }
 
+// Thread is one review conversation on an MR, anchored to a file and line, with
+// its notes in order. It is the full shape behind Discussion - the diff viewer
+// renders threads inline, while the agent-facing tools flatten the unresolved
+// ones to Discussions (see UnresolvedDiscussions).
+type Thread struct {
+	// ID identifies the thread for replies. GitHub: the root review comment's
+	// numeric id (what the replies endpoint takes). GitLab: the discussion id.
+	ID       string
+	Path     string
+	Line     int
+	Resolved bool
+	// Outdated marks a thread whose anchor line no longer exists in the diff
+	// (GitHub reports this; GitLab position simply goes null).
+	Outdated bool
+	URL      string
+	Notes    []Note
+}
+
+// Note is one comment inside a Thread.
+type Note struct {
+	ID        string
+	Author    string
+	Body      string
+	URL       string
+	CreatedAt string // RFC3339, as reported by the forge
+}
+
+// NewLineComment starts a new review thread on a line of the MR's diff.
+type NewLineComment struct {
+	Path string
+	Line int
+	Body string
+}
+
+// UnresolvedDiscussions flattens threads to the agent-facing Discussion shape:
+// one entry per note in each unresolved thread, in thread order. Shared so the
+// review file and the diff viewer never disagree about what "unresolved" means.
+func UnresolvedDiscussions(threads []Thread) []Discussion {
+	var out []Discussion
+	for _, t := range threads {
+		if t.Resolved {
+			continue
+		}
+		for _, n := range t.Notes {
+			out = append(out, Discussion{
+				ID: t.ID, Author: n.Author, Body: n.Body,
+				Path: t.Path, Line: t.Line, URL: firstNonEmptyStr(n.URL, t.URL),
+			})
+		}
+	}
+	return out
+}
+
 // Provider is a forge Hydra can publish to and track. All methods run host-side.
 type Provider interface {
 	// Name is the provider identifier ("github" | "gitlab").
 	Name() string
 	// EnsureMR creates the MR/PR for opts.SourceBranch if none exists, else returns
-	// the existing one - idempotent, so re-publish is safe (3.3 step 6).
+	// the existing one - idempotent, so re-publish is safe.
 	EnsureMR(ctx context.Context, opts EnsureMROptions) (MR, error)
 	// Status returns the normalized state of the MR identified by id.
 	Status(ctx context.Context, repoDir, remote, id string) (Status, error)
 	// Merge merges (or arms auto-merge for) the MR identified by id.
 	Merge(ctx context.Context, repoDir, remote, id string, o MergeOptions) error
-	// Discussions returns the unresolved review threads on the MR.
-	Discussions(ctx context.Context, repoDir, remote, id string) ([]Discussion, error)
+	// Threads returns the MR's review conversations (resolved ones included, so
+	// the caller decides what to show), each anchored to a file/line where the
+	// forge reports one.
+	Threads(ctx context.Context, repoDir, remote, id string) ([]Thread, error)
+	// ReplyToThread posts a reply into an existing thread, AS THE USER. Hydra's
+	// own writes to a forge are always explicit user actions - an agent never
+	// reaches this (its replies are local-only, see internal/reviewnotes).
+	ReplyToThread(ctx context.Context, repoDir, remote, id, threadID, body string) error
+	// CommentOnLine starts a new review thread on a line of the MR's diff, as the
+	// user. The line is a NEW-side line number, matching how the diff viewer
+	// anchors comments.
+	CommentOnLine(ctx context.Context, repoDir, remote, id string, c NewLineComment) error
 	// ListMRs enumerates existing MRs/PRs for the adoption picker (open by
 	// default). It returns light MRRefs - the per-PR detail that needs an extra
 	// round trip (a fork's clone URL) is filled by GetMR on selection.

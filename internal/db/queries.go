@@ -355,7 +355,7 @@ func (s *Store) SetDownstreamBranch(id, branch string) error {
 
 // SetReviewLink records the head<->MR link after a publish: the forge URL/id, the
 // resolved provider, the MR target branch and the downstream branch it was pushed
-// as (NON_LOCAL_INTEGRATION.md 3.3 step 4). Metadata only - the head's status
+// as (docs/non-local-integration.md). Metadata only - the head's status
 // lifecycle is unchanged.
 func (s *Store) SetReviewLink(id, downstreamBranch, url, reviewID, provider, targetBranch string) error {
 	updates := map[string]any{
@@ -370,7 +370,7 @@ func (s *Store) SetReviewLink(id, downstreamBranch, url, reviewID, provider, tar
 }
 
 // ClearReviewLink detaches a head from its MR (leaves the forge MR alone). Used by
-// the "detach" kill/merge option (3.3c). Downstream branch is preserved so a
+// the "detach" kill/merge option. Downstream branch is preserved so a
 // re-publish reuses the same name.
 func (s *Store) ClearReviewLink(id string) error {
 	updates := map[string]any{

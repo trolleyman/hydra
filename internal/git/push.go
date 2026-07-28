@@ -95,7 +95,7 @@ func revListCount(projectRoot string, args ...string) (int, error) {
 // how many `theirs` has that `ours` lacks (behind), from the last-known refs (no
 // fetch). ok is false when either ref can't be resolved - e.g. the remote
 // downstream branch doesn't exist yet - so callers can distinguish "unpublished"
-// from "in sync". Used for the Push to MR / Pull from MR affordances (3.3b).
+// from "in sync". Used for the Push to MR / Pull from MR affordances.
 func AheadBehind(projectRoot, ours, theirs string) (ahead, behind int, ok bool) {
 	for _, ref := range []string{ours, theirs} {
 		if _, err := gitOutput(projectRoot, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
@@ -227,7 +227,7 @@ func resolveRemote(projectRoot, branch string) string {
 // nonInteractiveGitEnv returns os.Environ() augmented with the settings that make
 // git and ssh fail fast rather than block on a credential or key-passphrase
 // prompt. The daemon runs push/fetch with no controlling terminal, so an
-// interactive prompt would hang it forever (see NON_LOCAL_INTEGRATION.md 3.4);
+// interactive prompt would hang it forever (see docs/non-local-integration.md);
 // GIT_TERMINAL_PROMPT=0 disables git's own prompts and
 // GIT_SSH_COMMAND="ssh -oBatchMode=yes" stops ssh asking for a passphrase - the
 // answer to a passphrase-protected key is ssh-agent, never a Hydra prompt.
@@ -315,9 +315,10 @@ func Push(projectRoot string) (string, error) {
 
 // PushRefspec pushes a single refspec (e.g. "hydra/<id>:refs/heads/<downstream>")
 // to remote, host-side, strictly non-interactively. It is the publish primitive
-// (NON_LOCAL_INTEGRATION.md 3.3 step 3): the local branch is untouched - only the
+// (docs/non-local-integration.md): the local branch is untouched - only the
 // named refspec is sent. When forceWithLease is non-nil it pushes with
-// --force-with-lease=<forceWithLease> (the one safe force case in 3.3b: the head
+// --force-with-lease=<forceWithLease> (the one safe force case, see
+// docs/non-local-integration.md: the head
 // rewrote its own history and the remote tip still matches what it last pushed);
 // otherwise the push is a plain fast-forward-only push that fails cleanly if the
 // downstream branch diverged. Returns combined git output; an auth failure is an
@@ -346,7 +347,7 @@ func PushRefspec(ctx context.Context, projectRoot, remote, refspec string, force
 
 // DeleteRemoteBranch deletes a branch on remote (`git push <remote> --delete
 // <branch>`), host-side and non-interactively. Used when tearing down a linked
-// head that asked to close its MR and delete the remote branch (3.3c). A branch
+// head that asked to close its MR and delete the remote branch. A branch
 // that does not exist on the remote is treated as success (already gone).
 func DeleteRemoteBranch(ctx context.Context, projectRoot, remote, branch string) error {
 	if err := ValidateRef(remote); err != nil {

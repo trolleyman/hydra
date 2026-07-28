@@ -636,7 +636,7 @@ type Config struct {
 	// concurrency cap above still apply. nil/absent = enabled.
 	TestPrefetch *bool `toml:"test_prefetch"`
 	// Review configures how Hydra talks to a forge (GitHub/GitLab) and supplies
-	// defaults for the Create MR dialog (NON_LOCAL_INTEGRATION.md 3.2). nil = unset
+	// defaults for the Create MR dialog (docs/non-local-integration.md). nil = unset
 	// (a local-first project never touches any of it). Pointer so its own fields'
 	// nil-means-default convention is preserved across the merge layers.
 	Review *ReviewConfig `toml:"review"`
@@ -1542,7 +1542,7 @@ func Load(projectRoot string) (Config, error) {
 
 		// 3. Project-local override (.hydra/config.local.toml): untracked, non-secret,
 		// per-user-per-project. Same schema and union/last-wins merge semantics as the
-		// committed project config, applied last so it wins (NON_LOCAL_INTEGRATION.md
+		// committed project config, applied last so it wins (docs/non-local-integration.md
 		// 3.1). Absent file is not an error.
 		localCfg, err := LoadFile(paths.GetProjectConfigLocalPath(projectRoot))
 		if err != nil {
@@ -3240,8 +3240,8 @@ func renderConfig(existing []byte, cfg Config) string {
 }
 
 // reviewExampleLines returns a commented-out, self-documenting [review] example
-// for a config that has none, so the forge/MR settings are discoverable. See
-// NON_LOCAL_INTEGRATION.md 3.2. Personal (non-shared) values belong in
+// for a config that has none, so the forge/MR settings are discoverable.
+// See docs/non-local-integration.md Personal (non-shared) values belong in
 // config.local.toml; nothing secret goes in either file.
 func reviewExampleLines() []string {
 	return []string{

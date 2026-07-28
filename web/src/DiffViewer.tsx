@@ -9,7 +9,11 @@ import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewThread } from './api'
+import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
+import { ProviderIcon } from './components/ReviewControls'
+import { providerLabel } from './lib/forgeDisplay'
+import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadContext'
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
@@ -51,7 +55,7 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
-import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft, type PendingReviewComment } from './lib/reviewDrafts'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -118,12 +122,19 @@ export interface LineDraftApi {
 // entry carries a frozen `stale` flag (its anchoring hunk changed after it was
 // queued). Built in FileDiff from that file's comments; an empty file shares
 // EMPTY_LINE_COMMENTS so the memo'd hunks keep a stable prop.
-type LineCommentEntry = { comment: PendingReviewComment; stale: boolean }
+// An entry is either one of YOUR queued local comments or a forge review thread
+// pulled from the MR - both anchor to a line the same way, so they share one map
+// and one prop through the memo'd hunks.
+type LineCommentEntry =
+  | { kind: 'local'; comment: PendingReviewComment; stale: boolean }
+  | { kind: 'thread'; thread: ReviewThread }
 type LineCommentMap = Map<string, LineCommentEntry[]>
 const EMPTY_LINE_COMMENTS: LineCommentMap = new Map()
 // Shared empty list for files with no queued comments, so FileDiff's fileComments
 // prop keeps a stable identity and its memo isn't busted by a fresh [] each render.
 const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
+// Same for a file with no forge threads.
+const EMPTY_FILE_THREADS: ReviewThread[] = []
 
 // One queued comment shown inline beneath its diff line: the authored text rendered
 // as markdown (matching how it lands in the agent chat), with edit + remove. A
@@ -183,10 +194,15 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
 //     persistence - editing commits straight to the queued comment on save.
 // "Add to review" is synchronous (a localStorage write); the parent closes the row
 // after any action via its own state.
-function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCancel, onDraftChange }: {
+function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, forgeProvider, onSave, onCancel, onDraftChange }: {
   initialText?: string
   onSubmit?: (text: string) => Promise<void>
   onAddToReview?: (text: string) => void
+  // Wired only on a head whose MR is linked, and only for a new-side line: posts
+  // the comment on the pull request itself instead of to the agent.
+  onCommentOnPR?: (text: string) => Promise<void>
+  // "github" | "gitlab", for naming the forge on that button.
+  forgeProvider?: string
   onSave?: (text: string) => void
   onCancel: () => void
   onDraftChange?: (text: string) => void
@@ -220,6 +236,18 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
     if (!text.trim() || sending || !onSave) return
     onSave(text)
   }
+  const [prError, setPrError] = useState<string | null>(null)
+  const handleCommentOnPR = async () => {
+    if (!text.trim() || sending || !onCommentOnPR) return
+    setSending(true)
+    setPrError(null)
+    try {
+      await onCommentOnPR(text)
+    } catch (e) {
+      setPrError(e instanceof Error ? e.message : String(e))
+    }
+    setSending(false)
+  }
   // Ctrl+Enter fires the primary action for the mode: save when editing, else
   // queue into the review batch when that's available (the common reviewing flow),
   // else send immediately.
@@ -235,7 +263,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
   const placeholder = onSave
     ? 'Edit comment... (Ctrl+Enter to save)'
     : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to review)'
+      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
       : 'Write a comment... (Ctrl+Enter to submit)'
 
   const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
@@ -265,25 +293,46 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
           </button>
         ) : (
           <>
-            {onAddToReview && (
+            {onCommentOnPR && (
+              <Tooltip content={`Post this as a review comment on the pull request, where the author and reviewers will see it. It does not go to the agent.`} side="top">
+                <button
+                  disabled={!text.trim() || sending}
+                  onClick={() => void handleCommentOnPR()}
+                  className={`${btn} flex items-center gap-1 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50`}
+                >
+                  <ProviderIcon provider={forgeProvider} className="w-3 h-3" />
+                  Comment on {providerLabel(forgeProvider)}
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content="Send this to the agent on its own, right now." side="top">
               <button
                 disabled={!text.trim() || sending}
-                onClick={handleAdd}
-                className={`${btn} text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
+                onClick={handleSubmit}
+                className={`${btn} flex items-center gap-1 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
               >
-                Add to review
+                <Bot className="w-3 h-3" />
+                {sending ? 'Sending...' : 'Comment to agent'}
               </button>
+            </Tooltip>
+            {onAddToReview && (
+              // The primary action: batching several comments and sending them as
+              // one review is the usual way to brief a head, so it leads.
+              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
+                <button
+                  disabled={!text.trim() || sending}
+                  onClick={handleAdd}
+                  className={`${btn} flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+                >
+                  <Bot className="w-3 h-3" />
+                  Add to agent review
+                </button>
+              </Tooltip>
             )}
-            <button
-              disabled={!text.trim() || sending}
-              onClick={handleSubmit}
-              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-            >
-              {sending ? 'Sending...' : 'Send'}
-            </button>
           </>
         )}
       </div>
+      {prError && <p className="mt-1 text-[10px] text-red-500 break-words">{prError}</p>}
     </div>
   )
 }
@@ -307,24 +356,29 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const threadActions = useReviewThreadActions()
   if (!openNew && (!entries || entries.length === 0)) return null
   return (
     <>
-      {entries?.map(({ comment, stale }) =>
-        editingId === comment.id ? (
+      {entries?.map((entry) =>
+        entry.kind === 'thread' ? (
+          threadActions ? (
+            <ReviewThreadCard key={`t:${entry.thread.id}`} thread={entry.thread} actions={threadActions} />
+          ) : null
+        ) : editingId === entry.comment.id ? (
           <CommentRow
-            key={comment.id}
-            initialText={comment.text}
-            onSave={(t) => { onEditComment?.(comment.id, t); setEditingId(null) }}
+            key={entry.comment.id}
+            initialText={entry.comment.text}
+            onSave={(t) => { onEditComment?.(entry.comment.id, t); setEditingId(null) }}
             onCancel={() => setEditingId(null)}
           />
         ) : (
           <QueuedCommentCard
-            key={comment.id}
-            comment={comment}
-            stale={stale}
-            onEdit={() => setEditingId(comment.id)}
-            onRemove={() => onRemoveComment?.(comment.id)}
+            key={entry.comment.id}
+            comment={entry.comment}
+            stale={entry.stale}
+            onEdit={() => setEditingId(entry.comment.id)}
+            onRemove={() => onRemoveComment?.(entry.comment.id)}
           />
         ),
       )}
@@ -339,6 +393,12 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           }}
           onAddToReview={onAddToReview ? (text) => {
             onAddToReview(lineNum, isNew, text)
+            lineDraftApi?.clear(path, lineNum, isNew)
+            onCloseNew()
+          } : undefined}
+          forgeProvider={threadActions?.provider}
+          onCommentOnPR={threadActions && isNew ? async (text) => {
+            await threadActions.commentOnLine(path, lineNum, text)
             lineDraftApi?.clear(path, lineNum, isNew)
             onCloseNew()
           } : undefined}
@@ -366,6 +426,8 @@ const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: numb
     <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
       <Tooltip content="Add comment" side="top" className="pointer-events-auto">
         <button
+          type="button"
+          aria-label="Add comment"
           onClick={(e) => { e.stopPropagation(); onToggle(idx) }}
           className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
         >
@@ -906,7 +968,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -925,6 +987,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // Queued review comments anchored to this file, shown inline under their line.
   // A stable empty array when the file has none (keeps the hunks' memo intact).
   fileComments?: PendingReviewComment[]
+  // Forge review threads anchored to this file, rendered inline under their line
+  // alongside the queued comments (docs/review-threads.md).
+  fileThreads?: ReviewThread[]
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
   lineDraftApi?: LineDraftApi
@@ -1116,24 +1181,33 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // warning but still renders. A file with no comments shares EMPTY_LINE_COMMENTS
   // so the memo'd hunks keep a stable `comments` prop and skip re-rendering.
   const commentsByLine = useMemo<LineCommentMap>(() => {
-    if (!fileComments || fileComments.length === 0) return EMPTY_LINE_COMMENTS
+    const noComments = !fileComments || fileComments.length === 0
+    const noThreads = !fileThreads || fileThreads.length === 0
+    if (noComments && noThreads) return EMPTY_LINE_COMMENTS
     const m: LineCommentMap = new Map()
-    for (const c of fileComments) {
+    const push = (key: string, entry: LineCommentEntry) => {
+      const arr = m.get(key)
+      if (arr) arr.push(entry); else m.set(key, [entry])
+    }
+    // Forge threads first, so the conversation that already exists on the PR reads
+    // above your own unsent comments on the same line.
+    for (const t of fileThreads ?? []) {
+      if (!t.line) continue // the forge anchors some threads to the file, not a line
+      push(`new:${t.line}`, { kind: 'thread', thread: t })
+    }
+    for (const c of fileComments ?? []) {
       let stale = false
       if (c.hunkHash) {
         const hunk = findHunkForLine(file, c.lineNum, c.isNew)
         stale = (hunk ? hashHunks([hunk]) : '') !== c.hunkHash
       }
-      const key = `${c.isNew ? 'new' : 'old'}:${c.lineNum}`
-      const entry: LineCommentEntry = { comment: c, stale }
-      const arr = m.get(key)
-      if (arr) arr.push(entry); else m.set(key, [entry])
+      push(`${c.isNew ? 'new' : 'old'}:${c.lineNum}`, { kind: 'local', comment: c, stale })
     }
     return m
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes),
     // so this recomputes staleness only when the comments or the diff truly change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileComments, hunksSig])
+  }, [fileComments, fileThreads, hunksSig])
 
   // Placeholder height while the body is lazy-unmounted. Also used directly as
   // the tween wrapper's height during that phase: bodyH is 0 until the
@@ -3270,6 +3344,82 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setReviewComments(updateReviewComment(projectId, agent.id, id, text))
   }, [projectId, agent.id])
 
+  // Forge review threads for this head's MR, fetched when the head is linked. The
+  // fetch reads the forge live host-side (~a second), so it runs on mount and
+  // after any write rather than on a timer; the daemon's 30s watcher keeps the
+  // unresolved COUNT on the chip fresh in the meantime.
+  const [threads, setThreads] = useState<ReviewThread[]>([])
+  const linkedMR = !!agent.review?.url
+  const refreshThreads = useCallback(async () => {
+    if (!projectId || !linkedMR) { setThreads([]); return }
+    try {
+      const res = await api.default.getReviewThreads(projectId, agent.id)
+      setThreads(res.threads ?? [])
+      if (res.stale) console.warn('review threads are stale:', res.error)
+    } catch (e) {
+      console.error('Failed to load review threads:', e)
+    }
+  }, [projectId, agent.id, linkedMR])
+  // Deferred (not called synchronously in the effect) so its setState doesn't
+  // cascade during the same render pass - the same pattern as PRPicker's load.
+  useEffect(() => {
+    const t = setTimeout(() => void refreshThreads(), 0)
+    return () => clearTimeout(t)
+  }, [refreshThreads])
+
+  // The thread actions handed to every card by context. Each write returns the
+  // refreshed thread set, so the card re-renders with the reply already in place.
+  const threadActions = useMemo<ReviewThreadActions | null>(() => {
+    if (!projectId || !linkedMR) return null
+    return {
+      provider: agent.review?.provider,
+      reply: async (threadId, body) => {
+        const res = await api.default.replyToReviewThread(projectId, agent.id, threadId, { body })
+        setThreads(res.threads ?? [])
+      },
+      replyLocal: async (threadId, body) => {
+        const res = await api.default.replyToReviewThread(projectId, agent.id, threadId, { body, local: true })
+        setThreads(res.threads ?? [])
+      },
+      commentOnLine: async (path, line, body) => {
+        const res = await api.default.createReviewComment(projectId, agent.id, { path, line, body })
+        setThreads(res.threads ?? [])
+        showSentToast('Comment posted on the pull request')
+      },
+      resolveWithAgent: async (thread) => {
+        const quoted = thread.notes
+          .filter((n) => n.origin === 'forge')
+          .map((n) => `> ${(n.author ? `@${n.author}: ` : '') + n.body.replace(/\n/g, '\n> ')}`)
+          .join('\n>\n')
+        const where = thread.line ? `${thread.path}:${thread.line}` : thread.path
+        await api.default.sendAgentInput(projectId, agent.id, {
+          text: `Address this review comment on ${where} (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
+            + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
+        })
+        showSentToast('Sent the thread to the agent')
+      },
+      // In-progress replies persist like the line drafts do: a thread card
+      // unmounts when it scrolls out of the virtualised diff, and losing a
+      // half-written reply to a reviewer is worse than losing a note to the agent.
+      draft: {
+        load: (threadId) => loadThreadDraft(projectId, agent.id, threadId),
+        save: (threadId, text) => saveThreadDraft(projectId, agent.id, threadId, text),
+        clear: (threadId) => clearThreadDraft(projectId, agent.id, threadId),
+      },
+    }
+  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast])
+
+  // Threads grouped by file, mirroring commentsByPath so each FileDiff gets only
+  // its own (and files with none keep a stable empty identity for their memo).
+  const threadsByPath = useMemo(() => {
+    const m = new Map<string, ReviewThread[]>()
+    for (const t of threads) {
+      const arr = m.get(t.path)
+      if (arr) arr.push(t); else m.set(t.path, [t])
+    }
+    return m
+  }, [threads])
+
   // Queued comments grouped by file, so each FileDiff gets only its own. Files
   // with none share EMPTY_FILE_COMMENTS (stable identity) so their hunks' memo
   // holds. Rebuilds only when the queued set changes.
@@ -3656,6 +3806,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onComment={handleComment}
               onAddToReview={handleAddToReview}
               fileComments={commentsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_COMMENTS}
+              fileThreads={threadsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
               lineDraftApi={lineDraftApi}
@@ -3694,6 +3845,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onComment={handleComment}
               onAddToReview={handleAddToReview}
               fileComments={commentsByPath.get(f.path) ?? EMPTY_FILE_COMMENTS}
+              fileThreads={threadsByPath.get(f.path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
               lineDraftApi={lineDraftApi}
@@ -3774,11 +3926,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // ── Stacked layout (single-column page AND the split layout's inspector pane) ─
   return (
-    // --sticky-changes-h (the measured Changes-toolbar height) is published here so
-    // the artifacts filter bar and card headers below can dock flush beneath it even
-    // when the toolbar wraps. See the ResizeObserver above.
+    // The forge-thread actions ride a context so the memo'd hunks between here and
+    // the thread cards never see them as props (docs/review-threads.md).
+    //
+    // --sticky-changes-h (the measured Changes-toolbar height) is published on the
+    // div below so the artifacts filter bar and card headers can dock flush beneath
+    // it even when the toolbar wraps. See the ResizeObserver above.
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
+    <ReviewThreadContext.Provider value={threadActions}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
@@ -3903,5 +4059,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         document.body,
       )}
     </div>
+    </ReviewThreadContext.Provider>
   )
 }

@@ -1265,7 +1265,7 @@ export function AgentDetail({
       ? `Parent agent "${parent.id}" is running - merging will change its working files.`
       : undefined
     // Warn before a direct local merge into a branch listed in the [review]
-    // protected_branches config (NON_LOCAL_INTEGRATION.md 3.2): the branch is
+    // protected_branches config (docs/non-local-integration.md): the branch is
     // protected on the forge, so the local merge would land commits the server
     // will refuse on push - the MR path is the intended route.
     const reviewCfg = useProjectStore.getState().reviewConfigs[projectId ?? '']
@@ -1511,7 +1511,7 @@ export function AgentDetail({
     await doSave()
   }
 
-  // --- Non-local integration: publish / MR sync (NON_LOCAL_INTEGRATION.md 3.3) ---
+  // --- Non-local integration: publish / MR sync (docs/non-local-integration.md) ---
 
   // Fetch the review config once per project (if not already cached) as soon as
   // the head is on screen, so clicking "Create MR" opens the dialog instantly
@@ -1599,7 +1599,7 @@ export function AgentDetail({
   // respondToReview sends the agent a one-line canned prompt to fetch and address
   // its MR's unresolved review comments (via the mcp__hydra__* tools) - the same
   // agent-pull pattern as the diff viewer's "Fix the merge conflicts" action
-  // (NON_LOCAL_INTEGRATION.md 3.5). Data is fetched by the agent when it reads,
+  // (docs/non-local-integration.md). Data is fetched by the agent when it reads,
   // so it is fresh at that moment, not at click time.
   async function respondToReview() {
     await runWithToast(
@@ -1661,7 +1661,7 @@ export function AgentDetail({
           ] as AgentTopBarMenuItem[]),
         }
 
-  // publishAction is the Create MR / View MR button (NON_LOCAL_INTEGRATION.md 3.3).
+  // publishAction is the Create MR / View MR button (docs/non-local-integration.md).
   // Unlinked: "Create MR" opens the dialog. Linked: "View MR" deep-links to the
   // forge, with Push to MR / Pull from MR in its dropdown (shown by ahead/behind).
   const linked = !!agent.review

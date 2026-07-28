@@ -798,22 +798,24 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
-  // The "work on an existing PR" control: while a PR is selected it shows a chip
-  // (with a read-only lock when the PR can't be pushed to) plus a clear button;
-  // otherwise the PRPicker trigger. Hidden on the built-in scratch project, which
-  // has no forge to adopt from. Rendered inline in both spawn layouts (not folded
-  // into the cog), since adopting a PR is a prominent, distinct choice.
-  function renderAdoptControl(compactSel: boolean) {
+  // The "work on an existing PR" control, rendered as the first section of the
+  // spawn-options popover: while a PR is selected it shows a chip (with a
+  // read-only lock when the PR can't be pushed to) plus a clear button; otherwise
+  // the PRPicker trigger. Hidden on the built-in scratch project, which has no
+  // forge to adopt from. It lives in the popover rather than inline because the
+  // chip + picker overflowed the composer's footer row; the Spawn button switches
+  // to "Adopt PR #n" so the choice is still visible without opening the cog.
+  function renderAdoptControl() {
     if (isBuiltinProject || !projectId) return null
     if (adopt) {
       return (
-        <div className="flex items-center gap-1 shrink-0 min-w-0">
+        <div className="flex items-center gap-1 min-w-0">
           <Tooltip content={`Adopting PR #${adopt.id}: ${adopt.title}${adopt.can_push === false ? ' (read-only - no push access)' : ''}`}>
             <Badge
               tone="blue"
               icon={adopt.can_push === false ? <Lock className="w-3 h-3" /> : <GitBranch className="w-3 h-3" />}
             >
-              <span className="max-w-[8rem] truncate">PR #{adopt.id}</span>
+              <span className="max-w-[11rem] truncate">PR #{adopt.id} {adopt.title}</span>
             </Badge>
           </Tooltip>
           <Tooltip content="Don't adopt a PR">
@@ -829,15 +831,17 @@ export const SpawnForm = memo(function SpawnForm({
         </div>
       )
     }
-    return <PRPicker projectId={projectId} onSelect={setAdopt} compact={compactSel} />
+    return <PRPicker projectId={projectId} onSelect={setAdopt} />
   }
 
-  // Both spawn layouts collapse the per-spawn options (chat/terminal mode, base
-  // branch, git isolation) into a single settings cog, styled like the
-  // per-section options popovers elsewhere. Git isolation applies to every head,
-  // so the cog always renders.
+  // Both spawn layouts collapse the per-spawn options into a single settings cog,
+  // styled like the per-section options popovers elsewhere. Ordered widest-effect
+  // first: the PR to adopt (which decides the base branch for you), the base
+  // branch, the run mode, then git isolation. Git isolation applies to every
+  // head, so the cog always renders.
   function renderSpawnSettings() {
     const showChat = agentType === 'claude' || agentType === 'codex'
+    const adoptControl = renderAdoptControl()
     // While adopting a PR the base branch is the PR's target, chosen server-side,
     // so the base-branch section is suppressed (mirrors renderAdoptControl).
     const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt
@@ -850,6 +854,29 @@ export const SpawnForm = memo(function SpawnForm({
         : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
       <SettingsPopover label="Spawn options" width={260} align="left" fitContent>
+        {adoptControl && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Pull request</SettingsGroupLabel>
+            {adoptControl}
+            <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
+          </>
+        )}
+        {showBranch && branches && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Base branch</SettingsGroupLabel>
+            <BranchSelector
+              branches={branches}
+              activeRef={baseBranch}
+              isKnownBranch={branches.some((b) => b.name === baseBranch)}
+              onSelect={setBaseBranch}
+              onOpen={handleBranchOpen}
+              title="Base branch to create the agent from (pick an agent branch to stack on it)"
+              fitContent
+            />
+            <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
+          </>
+        )}
+        {showChat && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
         {showChat && (
           <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
             <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
@@ -862,29 +889,14 @@ export const SpawnForm = memo(function SpawnForm({
             </button>
           </div>
         )}
-        {showBranch && branches && (
-          <>
-            {showChat && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
-            <SettingsGroupLabel className="mb-1.5">Base branch</SettingsGroupLabel>
-            <BranchSelector
-              branches={branches}
-              activeRef={baseBranch}
-              isKnownBranch={branches.some((b) => b.name === baseBranch)}
-              onSelect={setBaseBranch}
-              onOpen={handleBranchOpen}
-              title="Base branch to create the agent from (pick an agent branch to stack on it)"
-              fitContent
-            />
-          </>
+        {showChat && (
+          <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
         {/* Git isolation (per-head override; Default inherits the project policy,
             which is readonly unless the project sets otherwise). Last in the
             popover, as a dropdown: its options carry two-line explanations that
             crowded out the other controls when listed inline. See
             docs/git-isolation.md. */}
-        {(showChat || showBranch) && (
-          <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
-        )}
         <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>
         <SettingsSelect
           label="Git isolation"
@@ -1002,10 +1014,6 @@ export const SpawnForm = memo(function SpawnForm({
                   </button>
                 </Tooltip>
                 <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
-                {/* The PR-adopt control stays inline (not in the Spawn options
-                    popover) so the "Adopting PR #n" chip is visible in the
-                    collapsed footer; chat mode + base branch live in the popover. */}
-                {renderAdoptControl(true)}
               </div>
               {renderSpawnSettings()}
               <button
@@ -1086,7 +1094,6 @@ export const SpawnForm = memo(function SpawnForm({
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
                   <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
                   {renderSpawnSettings()}
-                  {renderAdoptControl(false)}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                   <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>

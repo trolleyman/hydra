@@ -4,16 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/forge"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/mcpserver"
-	"github.com/trolleyman/hydra/internal/paths"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
@@ -29,7 +28,7 @@ const reviewPollInterval = 30 * time.Second
 //     archives the head as "merged" and tears it down (the code has landed);
 //   - auto-publishes / auto-pushes armed publish-when-green heads once green.
 //
-// NON_LOCAL_INTEGRATION.md 3.5. Unlinked heads cost nothing (they aren't polled).
+// See docs/non-local-integration.md. Unlinked heads cost nothing (they aren't polled).
 func (s *Server) RunReviewWatcher(ctx context.Context) {
 	t := time.NewTicker(reviewPollInterval)
 	defer t.Stop()
@@ -56,35 +55,50 @@ func (s *Server) pollLinkedReviews(ctx context.Context) {
 		return
 	}
 	for _, a := range linked {
-		projectRoot := a.ProjectPath
-		review := reviewConfigFor(projectRoot)
-		remote := review.GetRemote()
-		remoteURL := git.RemoteURL(projectRoot, remote)
-		provider, err := forge.Resolve(review, remoteURL)
+		st, err := s.refreshHeadReview(ctx, a)
 		if err != nil {
-			continue // provider not resolvable now (CLI missing / auto-detect) - retry
+			continue // provider not resolvable / transient forge error - retry next tick
 		}
-		st, err := provider.Status(ctx, projectRoot, remote, a.ReviewID)
-		if err != nil {
-			continue // transient forge error
-		}
-		// Cache the fresh state on the head (for the UI chip).
-		s.cacheReviewState(projectRoot, a.ID, st)
-
-		// Fetch unresolved discussions only when the status reports some, then write
-		// the per-head review file the agent's mcp__hydra__* tools read (3.5a).
-		var discussions []forge.Discussion
-		if st.UnresolvedDiscussions > 0 {
-			if d, derr := provider.Discussions(ctx, projectRoot, remote, a.ReviewID); derr == nil {
-				discussions = d
-			}
-		}
-		writeReviewFile(projectRoot, a, st, discussions)
-
 		if st.State == forge.StateMerged {
-			s.handleRemoteMerge(ctx, projectRoot, a.ID)
+			s.handleRemoteMerge(ctx, a.ProjectPath, a.ID)
 		}
 	}
+}
+
+// refreshHeadReview re-reads one linked head's MR from the forge and rewrites
+// both the cached UI state and the head's review file (the snapshot the agent's
+// review tools read). Shared by the 30s watcher tick and the on-demand refresh a
+// head requests through reviewq, so both paths produce identical state.
+func (s *Server) refreshHeadReview(ctx context.Context, a db.Agent) (forge.Status, error) {
+	projectRoot := a.ProjectPath
+	review := reviewConfigFor(projectRoot)
+	remote := review.GetRemote()
+	provider, err := forge.Resolve(review, git.RemoteURL(projectRoot, remote))
+	if err != nil {
+		return forge.Status{}, errtrace.Wrap(err)
+	}
+	st, err := provider.Status(ctx, projectRoot, remote, a.ReviewID)
+	if err != nil {
+		return forge.Status{}, errtrace.Wrap(err)
+	}
+	// Cache the fresh state on the head (for the UI chip).
+	s.cacheReviewState(projectRoot, a.ID, st)
+
+	// Fetch the review threads only when the status reports unresolved ones, then
+	// write the per-head review file the agent's mcp__hydra__* tools read. The
+	// threads are cached for the diff viewer in the same pass, so opening the diff
+	// does not re-hit the forge.
+	var discussions []forge.Discussion
+	if st.UnresolvedDiscussions > 0 {
+		if threads, terr := provider.Threads(ctx, projectRoot, remote, a.ReviewID); terr == nil {
+			discussions = forge.UnresolvedDiscussions(threads)
+			cacheThreads(projectRoot, a.ID, threads)
+		}
+	} else {
+		cacheThreads(projectRoot, a.ID, nil)
+	}
+	writeReviewFile(projectRoot, a, st, discussions)
+	return st, nil
 }
 
 // cacheReviewState persists a forge Status onto the head and notifies clients when
@@ -99,15 +113,17 @@ func (s *Server) cacheReviewState(projectRoot, headID string, st forge.Status) {
 	s.notifyAgentsChanged(projectRoot, false)
 }
 
-// writeReviewFile writes the per-head review snapshot (status + unresolved
-// discussions) the in-sandbox `hydra mcp` server reads (3.5a). Best-effort.
-func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
+// reviewSnapshot assembles the per-head review file the in-sandbox `hydra mcp`
+// server reads from an MR link plus its freshly-polled forge state. Shared
+// by the watcher and the adopt-spawn seed (docs/pr-adoption.md), so both write
+// the same shape.
+func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, discussions []forge.Discussion) mcpserver.ReviewFile {
 	rf := mcpserver.ReviewFile{
 		Linked:                true,
-		URL:                   a.ReviewURL,
-		ID:                    a.ReviewID,
-		Provider:              a.ReviewProvider,
-		TargetBranch:          a.ReviewTargetBranch,
+		URL:                   url,
+		ID:                    id,
+		Provider:              provider,
+		TargetBranch:          targetBranch,
 		State:                 st.State,
 		CIStatus:              st.CIStatus,
 		Approvals:             st.Approvals,
@@ -118,23 +134,23 @@ func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussion
 	}
 	for _, d := range discussions {
 		rf.Comments = append(rf.Comments, mcpserver.ReviewComment{
-			Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
+			ID: d.ID, Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
 		})
 	}
-	data, err := json.Marshal(rf)
-	if err != nil {
-		return
-	}
-	// The review file lives in its own dir now (PLAN #26); ensure it exists in
-	// case the watcher writes before the head's sandbox was seeded.
-	_ = os.MkdirAll(paths.GetReviewDirFromProjectRoot(projectRoot), 0o755)
-	_ = os.WriteFile(paths.GetReviewJsonFromProjectRoot(projectRoot, a.ID), data, 0644)
+	return rf
+}
+
+// writeReviewFile writes the per-head review snapshot (status + unresolved
+// discussions) the in-sandbox `hydra mcp` server reads. Best-effort.
+func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
+	rf := reviewSnapshot(a.ReviewURL, a.ReviewID, a.ReviewProvider, a.ReviewTargetBranch, st, discussions)
+	_ = heads.WriteReviewSnapshot(projectRoot, a.ID, rf)
 }
 
 // handleRemoteMerge tears down a head whose MR reports merged: fetch, fast-forward
 // the local target branch (the code has landed remotely), then archive as merged
 // via the existing teardown. Squash merges are handled because the truth is the MR
-// state, not git ancestry (3.5). Best-effort ff: a divergent local target is left
+// state, not git ancestry. Best-effort ff: a divergent local target is left
 // for the user's Sync rather than forced.
 func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID string) {
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
@@ -182,7 +198,7 @@ func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID stri
 
 // checkPublishWhenGreen auto-publishes/pushes armed heads once their local tests
 // are green and the agent has finished, mirroring the merge-when-green watcher
-// (3.5). An unlinked armed head auto-opens a DRAFT MR; a linked one auto-pushes
+// . An unlinked armed head auto-opens a DRAFT MR; a linked one auto-pushes
 // (plain push only - never auto-force).
 func (s *Server) checkPublishWhenGreen(ctx context.Context) {
 	if s.DB == nil || s.Tests == nil {

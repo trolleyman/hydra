@@ -11,8 +11,8 @@ import (
 // project-relative spelling of [sandbox] masked_paths, letting a project hide its
 // own secret/personal files (`.env*`, `secrets/`, ...) from heads. Masks only ever
 // ADD restriction, so honoring a head's own branch copy is safe - a branch can
-// restrict itself further but can never unmask anything. See
-// NON_LOCAL_INTEGRATION.md 3.4.
+// restrict itself further but can never unmask anything.
+// See docs/non-local-integration.md.
 const HydraignoreName = ".hydraignore"
 
 // ProjectRelativeMaskDefaults are shipped mask entries resolved against the
