@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -36,6 +36,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
 import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
@@ -2764,8 +2765,18 @@ function SendMessageOutcome({
   )
 }
 
-// Per-tool icons for the card header; anything unlisted gets the wrench.
-const TOOL_ICONS: Record<string, typeof Wrench> = {
+// GitMark is git's own logo, which lucide does not carry - the simple-icons set
+// does (the same one the forge marks come from, see ProviderIcon). title=""
+// suppresses the SVG <title> ("Git") those marks render by default: that is a
+// native OS tooltip, and the card header it sits in is interactive.
+function GitMark({ className }: { className?: string }) {
+  return <SiGit className={className} title="" aria-hidden />
+}
+
+// Per-tool icons for the card header; anything unlisted gets the wrench. Typed
+// by the props actually passed below rather than as a lucide icon, so a
+// simple-icons mark (GitMark) fits the same map.
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Bash: SquareTerminal,
   Read: FileText,
   Edit: FilePen,
@@ -2783,14 +2794,14 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
   // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
   // gives no hint that the card rewrote the branch.
-  mcp__hydra__git_commit: GitCommitHorizontal,
-  mcp__hydra__git_add: GitCommitHorizontal,
-  mcp__hydra__git_reset: GitCommitHorizontal,
-  mcp__hydra__git_revert: GitCommitHorizontal,
-  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
-  mcp__hydra__git_rebase: GitCommitHorizontal,
-  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
-  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_commit: GitMark,
+  mcp__hydra__git_add: GitMark,
+  mcp__hydra__git_reset: GitMark,
+  mcp__hydra__git_revert: GitMark,
+  mcp__hydra__git_cherry_pick: GitMark,
+  mcp__hydra__git_rebase: GitMark,
+  mcp__hydra__git_rebase_continue: GitMark,
+  mcp__hydra__git_rebase_abort: GitMark,
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
@@ -4322,6 +4333,9 @@ interface QuestionSpec {
   multiSelect: boolean
   options: QuestionOption[]
 }
+// The free-text notes riding alongside the picked options, keyed by question
+// text - the shape AskUserQuestion's own `annotations` input field takes.
+type QuestionAnnotations = Record<string, { notes: string }>
 
 // parseQuestionSpecs validates a {questions: [...]} value (a native
 // AskUserQuestion input, or a fenced block's parsed JSON), returning null for
@@ -4359,28 +4373,99 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
-// deriveAnswered reconstructs which options (and any free-text "Other") each
-// question resolved to, from the recorded tool_result text. On a resume the
-// card's local selection state is gone - all we have is the durable result,
-// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
-// shape the real CLI's AskUserQuestion result produces, mirrored by the
-// simulation). Matching those labels back to option indices lets a replayed
-// card highlight the chosen options just as it did right after answering.
-function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+// What the CLI writes in place of the quoted value for a question the user
+// left unpicked but attached a note to, and the marker introducing that note.
+const NO_OPTION_PICKED = '(no option selected)'
+const NOTE_MARKER = ' notes: '
+// The sentences the CLI wraps the answer list in. A note is the last thing in
+// its entry, so recovering one means knowing where the list stops.
+const ANSWER_TAILS = ['. You can now continue with these answers in mind.', '. Read the answers carefully']
+
+// deriveAnswered reconstructs which options (and any free-text "Other", and any
+// note) each question resolved to, from the recorded tool_result text. On a
+// resume the card's local selection state is gone - all we have is the durable
+// result, which embeds the answers as `"<question>"="<comma-joined labels>"`
+// pairs, each optionally trailed by ` notes: <note>` (the shape the real CLI's
+// AskUserQuestion result produces, mirrored by the simulation). Matching those
+// labels back to option indices lets a replayed card highlight the chosen
+// options just as it did right after answering.
+// A question's notes, keyed by the row each belongs to: an option's index as a
+// string, or "other". A key being present is what makes the note box open, so
+// an empty string is a note being written and a missing key is no note at all.
+type NoteMap = Record<string, string>
+const noteKey = (at: number | 'other') => String(at)
+
+// The protocol carries ONE note per question, so several are merged into one
+// string as "<label>: <text>" segments (a single note stays plain, which is
+// what most answers are). splitNotes is the inverse, for a replayed card: it
+// looks for those labels at a segment boundary, and hands the whole string to
+// the last selected row if it can't find any - a note is display-only by then,
+// so a graceful miss beats a wrong split.
+const NOTE_JOIN = '; '
+function splitNotes(slots: { key: string; label: string }[], merged: string): NoteMap {
+  if (slots.length === 0 || merged === '') return {}
+  const fallback = () => ({ [slots[slots.length - 1].key]: merged })
+  if (slots.length === 1) return fallback()
+  const marks = slots
+    .map(({ key, label }) => {
+      if (merged.startsWith(label + ': ')) return { key, start: 0, text: label.length + 2 }
+      const at = merged.indexOf(NOTE_JOIN + label + ': ')
+      if (at === -1) return null
+      return { key, start: at, text: at + NOTE_JOIN.length + label.length + 2 }
+    })
+    .filter((m) => m !== null)
+    .sort((a, b) => a.start - b.start)
+  if (marks.length === 0) return fallback()
+  const out: NoteMap = {}
+  marks.forEach((m, i) => {
+    out[m.key] = merged.slice(m.text, i + 1 < marks.length ? marks[i + 1].start : merged.length)
+  })
+  return out
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function deriveAnswered(
+  specs: QuestionSpec[],
+  answeredText: string,
+): { selected: Set<number>[]; other: string[]; notes: NoteMap[] } {
   const selected = specs.map(() => new Set<number>())
   const other = specs.map(() => '')
+  const notes: NoteMap[] = specs.map(() => ({}))
+  const merged = specs.map(() => '')
+  // Where every question's entry begins, so a note - which runs to the end of
+  // its entry - knows to stop at the next question rather than swallowing it.
+  const starts = specs.map((q) => answeredText.indexOf(`"${q.question}"=`))
   specs.forEach((q, qi) => {
-    const needle = `"${q.question}"="`
-    const start = answeredText.indexOf(needle)
+    const start = starts[qi]
     if (start === -1) return
-    const from = start + needle.length
-    const end = answeredText.indexOf('"', from)
-    if (end === -1) return
+    let pos = start + `"${q.question}"=`.length
+    let value = ''
+    if (answeredText[pos] === '"') {
+      const end = answeredText.indexOf('"', pos + 1)
+      if (end === -1) return
+      value = answeredText.slice(pos + 1, end)
+      pos = end + 1
+    } else if (answeredText.startsWith(NO_OPTION_PICKED, pos)) {
+      pos += NO_OPTION_PICKED.length
+    } else {
+      return
+    }
+    if (answeredText.startsWith(NOTE_MARKER, pos)) {
+      // The note ends at whichever comes first: the next question's entry, the
+      // sentence the CLI closes the list with, or the end of the text.
+      const bounds = [
+        ...starts.filter((s) => s > pos),
+        ...ANSWER_TAILS.map((t) => answeredText.indexOf(t, pos)).filter((i) => i !== -1),
+        answeredText.length,
+      ]
+      const end = Math.min(...bounds)
+      merged[qi] = answeredText.slice(pos + NOTE_MARKER.length, end).replace(/,\s*$/, '').trim()
+    }
     // The labels were joined with ", " (see submit()). Consume the value left to
     // right, matching whole option labels (longest first, so a label that itself
     // contains ", " isn't mistaken for two) and dropping anything else into the
     // free-text "Other" field.
-    let rest = answeredText.slice(from, end)
+    let rest = value
     const extras: string[] = []
     while (rest.length > 0) {
       const match = q.options
@@ -4397,11 +4482,24 @@ function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected
       }
     }
     if (extras.length) other[qi] = extras.join(', ')
+    // Now the selection is known, the merged note can be split back over the
+    // rows it came from, in the order submit() joined them.
+    const slots = [...selected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: q.options[oi].label }))
+    if (other[qi] !== '') slots.push({ key: noteKey('other'), label: other[qi] })
+    notes[qi] = splitNotes(slots, merged[qi])
   })
-  return { selected, other }
+  return { selected, other, notes }
 }
 
-function QuestionCard({
+// Pending "before" row positions for the note's slide, keyed by the row list
+// they were measured in. Module-level rather than a ref because this is
+// transient DOM measurement - written by the click that reorders the list and
+// consumed by the very next layout effect, never something a render reads.
+const questionFlipFrom = new Map<HTMLElement, Map<HTMLElement, number>>()
+
+export function QuestionCard({
   specs,
   disabled,
   expired,
@@ -4419,10 +4517,17 @@ function QuestionCard({
   // the card settled even across a reconnect, where local state is lost.
   answeredText?: string
   // Returns true when the answers were actually handed to the socket.
-  onSubmit: (answers: Record<string, string>) => boolean
+  onSubmit: (answers: Record<string, string>, annotations: QuestionAnnotations) => boolean
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // Free-text notes that ride ALONGSIDE the picked options rather than
+  // replacing them ("Postgres, but keep the schema in one file") - the CLI's
+  // AskUserQuestion takes these as `annotations[question].notes` and renders
+  // them into the tool result next to the answer. One per picked row, so a
+  // multi-select can qualify each of its choices separately; they are merged
+  // into the single string the protocol carries on the way out.
+  const [notes, setNotes] = useState<NoteMap[]>(() => specs.map(() => ({})))
   // Whether the "Other" row is selected, per question. Explicit state (not
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
@@ -4450,13 +4555,53 @@ function QuestionCard({
     [specs, answeredText],
   )
   const localEmpty =
-    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
+    selected.every((s) => s.size === 0) &&
+    other.every((v) => v.trim() === '') &&
+    otherSel.every((v) => !v) &&
+    notes.every((m) => Object.keys(m).length === 0)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
   const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
+  const showNotes = derived && localEmpty ? derived.notes : notes
 
-  function toggleOption(qi: number, oi: number) {
+  // A note belongs with the choice it qualifies, so it trails whichever row you
+  // picked rather than sitting at the foot of the card. Moving it is a FLIP:
+  // every row keeps its size and only slides, so the question's height is the
+  // same before, during and after - nothing below it jumps. Positions are
+  // snapshotted in the click that reorders the list, so typing in the note
+  // (which regrows it on every keystroke) never sets an animation going.
+  function snapshotRows(origin: Element | null) {
+    const el = origin?.closest<HTMLElement>('[data-question-rows]')
+    if (!el) return
+    const from = new Map<HTMLElement, number>()
+    for (const row of Array.from(el.children)) from.set(row as HTMLElement, (row as HTMLElement).offsetTop)
+    questionFlipFrom.set(el, from)
+  }
+
+  useLayoutEffect(() => {
+    if (questionFlipFrom.size === 0) return
+    const pending = new Map(questionFlipFrom)
+    questionFlipFrom.clear()
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    for (const [el, from] of pending) {
+      for (const row of Array.from(el.children) as HTMLElement[]) {
+        const was = from.get(row)
+        if (was == null) continue
+        const delta = was - row.offsetTop
+        if (delta === 0) continue
+        // Element.animate is absent in jsdom, where the slide is untestable
+        // anyway - the reorder itself is what the tests assert.
+        row.animate?.([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+          duration: 200,
+          easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        })
+      }
+    }
+  })
+
+  function toggleOption(origin: Element | null, qi: number, oi: number) {
     if (answered) return
+    snapshotRows(origin)
     setSelected((prev) =>
       prev.map((s, i) => {
         if (i !== qi) return s
@@ -4472,93 +4617,240 @@ function QuestionCard({
       }),
     )
     // Picking a real option in a single-select takes over from "Other" (the
-    // typed text stays in the box, just deselected).
+    // typed text stays in the box, just deselected), and carries any note over
+    // with it - in a single-select there is only ever one answer for a note to
+    // belong to, so stranding it on the row you just moved off would lose it.
     if (!specs[qi].multiSelect) {
       setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+      moveNote(qi, noteKey(oi))
     }
   }
 
   // Select (or, when the dot itself is clicked, toggle) the "Other" row.
   // Clicking anywhere in the row and typing both select it; in a single-select
   // that clears the picked option, mirroring toggleOption's takeover.
-  function selectOther(qi: number, next = true) {
+  function selectOther(origin: Element | null, qi: number, next = true) {
     if (answered) return
+    if (next !== otherSel[qi]) snapshotRows(origin)
     setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
     if (next && !specs[qi].multiSelect) {
       setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+      moveNote(qi, noteKey('other'))
     }
   }
 
+  // Re-key a single-select's one note onto the row now holding the answer.
+  function moveNote(qi: number, to: string) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const from = Object.keys(m)
+        if (from.length === 0 || (from.length === 1 && from[0] === to)) return m
+        return { [to]: m[from[0]] }
+      }),
+    )
+  }
+
+  function setNote(qi: number, at: number | 'other', value: string | null) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const next = { ...m }
+        if (value === null) delete next[noteKey(at)]
+        else next[noteKey(at)] = value
+        return next
+      }),
+    )
+  }
+
+  // Whether `at` is part of the answer, and so whether a note on it counts.
+  function rowPicked(qi: number, at: number | 'other') {
+    return at === 'other' ? showOtherSel[qi] : showSelected[qi].has(at)
+  }
+
+  // The rows carrying a note, in the order submit() merges them.
+  function notedSlots(qi: number) {
+    const slots = [...showSelected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: specs[qi].options[oi].label }))
+    if (showOtherSel[qi]) slots.push({ key: noteKey('other'), label: showOther[qi].trim() || 'Other' })
+    return slots.filter((s) => (showNotes[qi][s.key] ?? '').trim() !== '')
+  }
+
+  // A note now always belongs to a picked row, so answering means picking
+  // something - except for "Other" selected with only a note in it, which the
+  // CLI records as `(no option selected) notes: ...` and handles fine.
   const complete = specs.every(
-    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+    (_, i) =>
+      selected[i].size > 0 ||
+      (otherSel[i] && (other[i].trim() !== '' || (notes[i][noteKey('other')] ?? '').trim() !== '')),
   )
+
+  // The corner trigger that opens (or discards) the note on a row. Hidden until
+  // the row is hovered or the trigger itself is focused, so an untouched card
+  // is still just a list of options - but it is a real button in the tab order
+  // either way, since a control that only exists on hover is unreachable by
+  // keyboard.
+  function noteTrigger(qi: number, at: number | 'other') {
+    if (answered) return null
+    const open = rowPicked(qi, at) && showNotes[qi][noteKey(at)] !== undefined
+    return (
+      <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top" className="absolute right-1 top-1">
+        <button
+          type="button"
+          aria-label={open ? 'Discard note' : 'Add a note'}
+          onClick={(e) => {
+            e.stopPropagation()
+            snapshotRows(e.currentTarget)
+            if (open) {
+              // Closing drops the note entirely: one left in state but out of
+              // sight would still be submitted.
+              setNote(qi, at, null)
+              return
+            }
+            // Opening from a row that is not picked picks it first, so the note
+            // lands where you asked for it. In a single-select that also moves
+            // any existing note here, which must not then be blanked.
+            if (at === 'other') selectOther(e.currentTarget, qi)
+            else if (!selected[qi].has(at)) toggleOption(e.currentTarget, qi, at)
+            setNotes((prev) =>
+              prev.map((m, i) =>
+                i !== qi || m[noteKey(at)] !== undefined ? m : { ...m, [noteKey(at)]: '' },
+              ),
+            )
+          }}
+          className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
+            open ? 'opacity-100' : ''
+          }`}
+        >
+          {open ? <X className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+        </button>
+      </Tooltip>
+    )
+  }
+
+  // The note itself, rendered inside the row it qualifies - under a hairline,
+  // and indented to the row's LABEL rather than its edge (ml-8 = the px-2.5
+  // padding plus the dot and its gap), so it reads as part of what that option
+  // says rather than as another row that happens to share the box.
+  function noteBody(qi: number, at: number | 'other') {
+    const value = showNotes[qi][noteKey(at)]
+    if (value === undefined || !rowPicked(qi, at)) return null
+    return (
+      <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+        {/* Auto-grows the same way the "Other" box does - an invisible span in
+            the same grid cell drives the height. */}
+        <div className="grid min-w-0 flex-1">
+          <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
+            {value + ' '}
+          </span>
+          <textarea
+            rows={1}
+            autoFocus={value === '' && !answered}
+            value={value}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setNote(qi, at, e.target.value)}
+            onKeyDown={(e) => {
+              // Enter submits, as in the "Other" box; shift+Enter is a newline,
+              // which a note wants more often than an option label does.
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              e.stopPropagation()
+              submit()
+            }}
+            disabled={answered}
+            placeholder="Note to go with your answer..."
+            aria-label="Note to go with your answer"
+            className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+          />
+        </div>
+      </div>
+    )
+  }
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
+    const annotations: QuestionAnnotations = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
+      // The protocol carries one note per question, so several are merged into
+      // "<label>: <text>" segments. A lone note stays plain - most answers have
+      // exactly one, and labelling it would only restate the answer.
+      const noted = notedSlots(i)
+      if (noted.length === 1) annotations[q.question] = { notes: notes[i][noted[0].key].trim() }
+      else if (noted.length > 1) {
+        annotations[q.question] = {
+          notes: noted.map((sl) => `${sl.label}: ${notes[i][sl.key].trim()}`).join(NOTE_JOIN),
+        }
+      }
     }
-    if (!onSubmit(answers)) return
+    if (!onSubmit(answers, annotations)) return
     if (expired) setSent(true)
     else setSubmitted(true)
   }
 
   return (
     <div className="max-w-xl rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.03] p-3 space-y-3">
-      {specs.map((q, qi) => (
-        <div key={qi} className="space-y-1.5">
-          <div className="flex items-baseline gap-1.5">
-            {q.header && (
-              <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
-                {q.header}
-              </span>
-            )}
-            <span className="font-medium">{q.question}</span>
-          </div>
-          <div className="space-y-1">
-            {q.options.map((o, oi) => {
+      {specs.map((q, qi) => {
+        // The note lives INSIDE the row you picked, so a caveat is visibly part
+        // of the answer it qualifies rather than a separate thing below it - and
+        // a multi-select can carry one per pick.
+        const rows: ReactNode[] = []
+        const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
+              // The border, background and rounding belong to a wrapper, not to
+              // the clickable button: a <textarea> cannot live inside a
+              // <button>, so the note has to be the button's SIBLING while
+              // still sitting inside the same box.
               return (
-                <button
+                <div
                   key={oi}
-                  onClick={() => toggleOption(qi, oi)}
-                  disabled={answered}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
-                    answered ? 'cursor-default' : 'cursor-pointer'
-                  } ${
+                  className={`group relative rounded-lg border transition-colors ${
                     isSel
                       ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
-                  <span
-                    className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
-                      q.multiSelect ? 'rounded' : 'rounded-full'
-                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                  <button
+                    onClick={(e) => toggleOption(e.currentTarget, qi, oi)}
+                    disabled={answered}
+                    className={`flex w-full items-start gap-2 px-2.5 py-1.5 pr-7 text-left ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
                   >
-                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium">{o.label}</span>
-                    {o.description && (
-                      <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
-                    )}
-                  </span>
-                </button>
+                    <span
+                      className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                        q.multiSelect ? 'rounded' : 'rounded-full'
+                      } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                    >
+                      {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">{o.label}</span>
+                      {o.description && (
+                        <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
+                      )}
+                    </span>
+                  </button>
+                  {noteTrigger(qi, oi)}
+                  {noteBody(qi, oi)}
+                </div>
               )
-            })}
-            {/* "Other" renders as one more option row: it has its own dot and
-                is selected by clicking the row, typing in it, or toggling the
-                dot - and a settled card highlights it like any picked option. */}
-            {(() => {
+            })
+        // "Other" renders as one more option row: it has its own dot and is
+        // selected by clicking the row, typing in it, or toggling the dot - and
+        // a settled card highlights it like any picked option.
+        const other = (() => {
               const isSel = showOtherSel[qi]
               return (
                 <div
-                  onClick={() => selectOther(qi)}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  key="other"
+                  onClick={(e) => selectOther(e.currentTarget, qi)}
+                  className={`group relative w-full rounded-lg border transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
                     isSel
@@ -4566,6 +4858,7 @@ function QuestionCard({
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
+                  <div className="flex items-start gap-2 px-2.5 py-1.5 pr-7">
                   <button
                     type="button"
                     disabled={answered}
@@ -4574,7 +4867,7 @@ function QuestionCard({
                     onClick={(e) => {
                       // The dot is the one spot that can also DEselect.
                       e.stopPropagation()
-                      selectOther(qi, !otherSel[qi])
+                      selectOther(e.currentTarget, qi, !otherSel[qi])
                     }}
                     className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                       q.multiSelect ? 'rounded' : 'rounded-full'
@@ -4603,9 +4896,9 @@ function QuestionCard({
                         const v = e.target.value
                         setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
                         // Typing claims the selection.
-                        selectOther(qi)
+                        selectOther(e.currentTarget, qi)
                       }}
-                      onFocus={() => selectOther(qi)}
+                      onFocus={(e) => selectOther(e.currentTarget, qi)}
                       onKeyDown={(e) => {
                         // Enter submits the card, like the composer (shift+Enter
                         // still inserts a newline). Ignored while an IME is
@@ -4621,12 +4914,30 @@ function QuestionCard({
                       className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
                     />
                   </div>
+                  </div>
+                  {noteTrigger(qi, 'other')}
+                  {noteBody(qi, 'other')}
                 </div>
               )
-            })()}
+            })()
+        options.forEach((row) => rows.push(row))
+        rows.push(other)
+        return (
+          <div key={qi} className="space-y-1.5">
+            <div className="flex items-baseline gap-1.5">
+              {q.header && (
+                <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
+                  {q.header}
+                </span>
+              )}
+              <span className="font-medium">{q.question}</span>
+            </div>
+            <div className="space-y-1" data-question-rows>
+              {rows}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
       {expired && !answered && (
         <div className="text-[11px] text-stone-500 dark:text-stone-400">
           This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
@@ -8303,13 +8614,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     )
   }
 
-  // Insert text into the composer at the caret, as its own undo step - used for
-  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
-  // paired with the chip's own step, walks the whole paste back).
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" paste markers into the composer at the caret, as their
+  // own undo step, so a single Ctrl+Z removes them (and, paired with the chip's
+  // own step, walks the whole paste back). The text before the caret decides
+  // whether they need a leading space; they never carry a trailing one, so the
+  // caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
+    const insert = pasteMarkerText(names, input.slice(0, start))
     const caret = start + insert.length
     commit(
       (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
@@ -8329,7 +8643,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -8569,18 +8883,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answerQuestion replies to a native AskUserQuestion via the control channel
-  // (control_response with the answers merged into updatedInput).
-  function answerQuestion(item: Extract<ChatItem, { kind: 'question' }>, answers: Record<string, string>): boolean {
+  // (control_response with the answers merged into updatedInput). Any notes go
+  // in the tool's own `annotations` field, which the CLI renders into the tool
+  // result next to the answer they qualify.
+  function answerQuestion(
+    item: Extract<ChatItem, { kind: 'question' }>,
+    answers: Record<string, string>,
+    annotations: QuestionAnnotations,
+  ): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN || !item.requestId) return false
     const input = typeof item.input === 'object' && item.input !== null ? (item.input as Record<string, unknown>) : {}
+    const updatedInput: Record<string, unknown> = { ...input, answers }
+    if (Object.keys(annotations).length > 0) updatedInput.annotations = annotations
     ws.send(
       JSON.stringify({
         type: 'control_response',
         response: {
           subtype: 'success',
           request_id: item.requestId,
-          response: { behavior: 'allow', updatedInput: { ...input, answers } },
+          response: { behavior: 'allow', updatedInput },
         },
       }),
     )
@@ -8588,9 +8910,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answersAsText renders an answers map as the plain-text reply used by the
-  // fenced ```question fallback (one "<question>: <labels>" line each).
-  function sendAnswersAsText(answers: Record<string, string>): boolean {
-    const lines = Object.entries(answers).map(([q, a]) => `${q}: ${a}`)
+  // fenced ```question fallback (one "<question>: <labels>" line each). There is
+  // no tool result to carry an `annotations` field here, so a note is spelled
+  // out inline instead.
+  function sendAnswersAsText(answers: Record<string, string>, annotations: QuestionAnnotations): boolean {
+    const lines = Object.entries(answers).map(([q, a]) => {
+      const note = annotations[q]?.notes
+      return `${q}: ${a || '(no option selected)'}${note ? ` - note: ${note}` : ''}`
+    })
     return sendUserText(lines.join('\n'))
   }
 
@@ -9047,7 +9374,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             disabled={!connected || (!expired && item.requestId == null)}
             expired={expired}
             answeredText={item.result}
-            onSubmit={(answers) => (expired ? sendAnswersAsText(answers) : answerQuestion(item, answers))}
+            onSubmit={(answers, annotations) =>
+              expired ? sendAnswersAsText(answers, annotations) : answerQuestion(item, answers, annotations)
+            }
           />
         )
       }

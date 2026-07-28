@@ -5084,22 +5084,56 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 				}
 				continue
 			}
-			// Extract the answers map the question card submitted.
+			// Extract the answers map (and any per-question notes) the question
+			// card submitted.
 			var payload struct {
 				Response struct {
 					UpdatedInput struct {
-						Answers map[string]string `json:"answers"`
+						Answers     map[string]string `json:"answers"`
+						Annotations map[string]struct {
+							Notes string `json:"notes"`
+						} `json:"annotations"`
 					} `json:"updatedInput"`
 				} `json:"response"`
 			}
 			_ = json.Unmarshal(msg.Response, &payload)
-			var parts []string
-			for q, a := range payload.Response.UpdatedInput.Answers {
-				parts = append(parts, fmt.Sprintf("%q=%q", q, a))
+			in := payload.Response.UpdatedInput
+			// Mirror the real CLI's result text: an unpicked question is
+			// "(no option selected)" rather than an empty value, a note trails
+			// the answer it qualifies, and any note at all switches the closing
+			// sentence to the one that tells the agent to read them carefully.
+			questions := make([]string, 0, len(in.Answers)+len(in.Annotations))
+			for q := range in.Answers {
+				questions = append(questions, q)
 			}
-			sort.Strings(parts)
+			for q := range in.Annotations {
+				if _, ok := in.Answers[q]; !ok {
+					questions = append(questions, q)
+				}
+			}
+			sort.Strings(questions)
+			var parts []string
+			noted := false
+			for _, q := range questions {
+				a, notes := in.Answers[q], in.Annotations[q].Notes
+				if a == "" && notes == "" {
+					continue
+				}
+				part := fmt.Sprintf("%q=(no option selected)", q)
+				if a != "" {
+					part = fmt.Sprintf("%q=%q", q, a)
+				}
+				if notes != "" {
+					part += " notes: " + notes
+					noted = true
+				}
+				parts = append(parts, part)
+			}
 			sendStatusUpdate(conn, "running")
 			resultText := fmt.Sprintf("Your questions have been answered: %s. You can now continue with these answers in mind.", strings.Join(parts, ", "))
+			if noted {
+				resultText = fmt.Sprintf("The user answered: %s. Read the answers carefully - they may request clarification, changes, or that you not proceed - and follow what they actually say.", strings.Join(parts, ", "))
+			}
 			toolResult, _ := json.Marshal(map[string]any{
 				"type": "user",
 				"message": map[string]any{"role": "user", "content": []map[string]any{

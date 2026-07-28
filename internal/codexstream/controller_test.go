@@ -3,6 +3,7 @@ package codexstream
 import (
 	"braces.dev/errtrace"
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -240,6 +241,54 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	if _, ok := answers["q1"]; !ok {
 		t.Fatalf("response = %+v", sent[0])
 	}
+}
+
+// Claude's AskUserQuestion carries a note qualifying an answer in its own
+// `annotations` field; Codex's requestUserInput has no such field, only a list
+// of chosen answers per question. Dropping the note would lose what the user
+// actually said, so it rides as one more entry, labelled.
+func TestControllerFoldsAnswerNotesIntoCodexAnswers(t *testing.T) {
+	answersFor := func(t *testing.T, updatedInput string) map[string]any {
+		t.Helper()
+		var sent []map[string]any
+		c := New(Options{Send: func(line []byte) error {
+			var value map[string]any
+			_ = json.Unmarshal(line, &value)
+			sent = append(sent, value)
+			return nil
+		}})
+		c.OnLine([]byte(`{"id":7,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which?"},{"id":"q2","question":"Extras?"}]}}`))
+		if err := c.Respond(json.RawMessage(`{"request_id":"7","response":{"behavior":"allow","updatedInput":` + updatedInput + `}}`)); err != nil {
+			t.Fatal(err)
+		}
+		return sent[0]["result"].(map[string]any)["answers"].(map[string]any)
+	}
+
+	t.Run("alongside a pick", func(t *testing.T) {
+		answers := answersFor(t, `{"answers":{"Which?":"A, B"},"annotations":{"Which?":{"notes":"but not in prod"}}}`)
+		got := answers["q1"].(map[string]any)["answers"].([]any)
+		want := []any{"A", "B", "note: but not in prod"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("answers = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("on its own", func(t *testing.T) {
+		answers := answersFor(t, `{"answers":{"Which?":""},"annotations":{"Which?":{"notes":"neither"}}}`)
+		got := answers["q1"].(map[string]any)["answers"].([]any)
+		if want := []any{"note: neither"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("answers = %#v, want %#v", got, want)
+		}
+	})
+
+	// A question left blank with no note is left out entirely rather than sent
+	// as a single empty answer.
+	t.Run("skips an empty answer", func(t *testing.T) {
+		answers := answersFor(t, `{"answers":{"Which?":"A","Extras?":""}}`)
+		if _, ok := answers["q2"]; ok {
+			t.Fatalf("unanswered question sent anyway: %#v", answers)
+		}
+	})
 }
 
 func TestControllerRespondsToZeroIDUserInputRequest(t *testing.T) {

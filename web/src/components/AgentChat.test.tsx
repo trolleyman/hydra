@@ -120,7 +120,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
 
     // The paste both inserts a "[image1.png]" marker and stages an image chip.
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png] ')
+    expect(ta.value).toBe('[image1.png]')
 
     // First Ctrl+Z: the marker is gone but the chip remains (two distinct steps).
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
@@ -149,7 +149,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
-    expect(ta.value).toBe('[image1.png] ')
+    expect(ta.value).toBe('[image1.png]')
   })
 
   it('keeps typed text when a later pasted image is undone', async () => {
@@ -165,7 +165,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     ta.selectionStart = ta.selectionEnd = ta.value.length
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('look at this [image1.png] ')
+    expect(ta.value).toBe('look at this [image1.png]')
 
     // Undo marker, then chip - the typed text survives.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
