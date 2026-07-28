@@ -118,11 +118,14 @@ export function mediaRectOf(wrapper: Element): Rect | null {
 }
 
 /**
- * Call `cb` with the media's box once it has one, or with null if it still has none
- * after `maxFrames` (a broken image, say). A freshly mounted frame measures itself
- * with a ResizeObserver, so its size only exists a frame or two after the commit -
- * starting a flight from a zero-sized box would shoot the picture out of a corner.
- * Returns a cancel function.
+ * Call `cb` with the media's box once it has SETTLED on one, or with null if it still
+ * hasn't after `maxFrames` (a broken image, say). Returns a cancel function.
+ *
+ * Settled means two consecutive frames agree. A freshly mounted frame measures itself
+ * with a ResizeObserver, so for the first frame or two it reports zero and then a
+ * value that is still a few pixels out - and the flight's whole job is to land the
+ * picture exactly where it will rest, so flying to a box that then moves under it
+ * shows up as a visible jump at the end.
  */
 export function whenMediaLaidOut(
   wrapper: HTMLElement,
@@ -132,11 +135,16 @@ export function whenMediaLaidOut(
   let raf = 0
   let frames = 0
   let cancelled = false
+  let last: Rect | null = null
+  const same = (a: Rect | null, b: Rect | null) =>
+    !!a && !!b && Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5
+      && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5
   const tick = () => {
     if (cancelled) return
     const rect = mediaRectOf(wrapper)
-    if (rect) return cb(rect)
-    if (++frames > maxFrames) return cb(null)
+    if (rect && same(rect, last)) return cb(rect)
+    last = rect
+    if (++frames > maxFrames) return cb(rect)
     raf = requestAnimationFrame(tick)
   }
   tick()
@@ -195,13 +203,4 @@ function absolute(url: string): string | null {
   } catch {
     return null
   }
-}
-
-/** Hide an element for the duration of a flight (so the picture is never in two
- *  places at once) and return the undo. Layout is kept - only the paint goes. */
-export function hideDuringFlight(el: HTMLElement | null | undefined): () => void {
-  if (!el) return () => {}
-  const prev = el.style.visibility
-  el.style.visibility = 'hidden'
-  return () => { el.style.visibility = prev }
 }

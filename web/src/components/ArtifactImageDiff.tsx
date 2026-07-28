@@ -1,9 +1,10 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
-  checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
+  IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
+import { CheckerLayer } from './CheckerLayer'
 import { ABControlsContext } from './artifactDiffContext'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
@@ -85,14 +86,15 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
           type="button"
           onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, url, name, e.currentTarget)}
           onAuxClick={makeAuxOpen(() => url)}
-          className={`block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
+          className={`relative block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
         >
+          <CheckerLayer className="rounded-md" />
           <img
             src={url}
             loading="lazy"
             draggable={false}
-            style={{ ...checkerStyle, aspectRatio: aspect }}
-            className={IMG_CLASS}
+            style={{ aspectRatio: aspect }}
+            className={`relative ${IMG_CLASS}`}
           />
         </button>
       ) : (
@@ -117,7 +119,7 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
 // buttons, the slider handle, the opacity blend) when only one side exists.
 function LayerNode({ url, style }: { url?: string | null; style?: React.CSSProperties }) {
   if (url) {
-    return <img src={url} style={{ ...checkerStyle, ...style }} className={OVERLAY_CLASS} draggable={false} />
+    return <img src={url} style={style} className={OVERLAY_CLASS} draggable={false} />
   }
   return (
     <div style={style} className={`${OVERLAY_CLASS} select-none flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
@@ -226,10 +228,11 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
           open, so a click flips instead. A middle click opens the currently-shown side's
           raw image file in a new browser tab. */}
       <div
-        className={`relative w-full select-none ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
         onClick={disableOpen ? flip : (e) => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
+        <CheckerLayer className="rounded-md" />
         <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
         <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
@@ -297,12 +300,13 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
   return (
     <div
       ref={ref}
-      className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
+      className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
       onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.currentTarget, e.clientX), name, e.currentTarget)}
       onAuxClick={makeAuxOpen((e) => sideAt(e.currentTarget, e.clientX))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
+      <CheckerLayer className="rounded-md" />
       <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
       <LayerNode url={right} />
       <LayerNode url={left} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
@@ -348,10 +352,11 @@ function OnionCompare({ left, right, name, aspect, gallery, index, disableOpen }
   return (
     <div className="min-w-0">
       <div
-        className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
         onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, (opacity >= 50 ? right : left) || sizer, name, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
+        <CheckerLayer className="rounded-md" />
         <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />

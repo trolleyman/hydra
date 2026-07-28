@@ -4,11 +4,12 @@ import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
+import { CheckerLayer } from './CheckerLayer'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
 import {
-  canFlip, findLightboxOrigin, hideDuringFlight, mediaRectOf, playFlip, rectOf,
+  canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
   whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
 } from '../lib/lightboxFlip'
 
@@ -62,6 +63,13 @@ function formatBytes(n: number): string {
 // Checkerboard behind images so transparent PNGs read as transparent rather than
 // blending into the dark backdrop. Shared by the main image and the side previews.
 const CHECKER = 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px'
+
+// The lightbox's checkerboard, as a layer behind the picture (see CheckerLayer for
+// why it isn't a background on the <img>). It carries the chrome's fade so a picture
+// flying out of a thumbnail that had no checkerboard doesn't snap one on as it lands.
+function LightboxChecker({ className }: { className?: string }) {
+  return <CheckerLayer className={className} style={{ background: CHECKER }} />
+}
 
 // The resting opacity of an edge preview (matches the `opacity-40` on it below).
 // A picture flying in from the edge fades up from it, and the one it replaces fades
@@ -208,26 +216,31 @@ export function ImageLightbox({
 
   // Play the entrance flight for whatever is now shown. A layout effect, because the
   // whole point is to measure the media AFTER React has put it in its final place -
-  // but the media only HAS a place once its frame has measured itself (a fresh ZoomPan
-  // reports zero for a frame or two), so it stays hidden until whenMediaLaidOut says
-  // there is a box to fly to. Hiding it is what keeps the picture from flashing at its
-  // destination for a frame before setting off.
+  // but the media only HAS a place once its frame has settled (a fresh ZoomPan measures
+  // itself with a ResizeObserver, so it reports zero and then a not-quite-final size
+  // for a frame or two), so it stays hidden until whenMediaLaidOut says there is a box
+  // to fly to. Hiding it is what keeps the picture from flashing at its destination for
+  // a frame before setting off.
+  //
+  // The cleanup CANCELS the flight, which matters more than it looks: React runs a
+  // mount effect twice under StrictMode, and a second run that measured the element
+  // mid-flight would read the animated box as its resting place - computing a flight
+  // from nonsense (that was the "opens huge for a moment, then shrinks into place"
+  // bug, worst when the window had been resized so the two boxes differ most).
+  // Cancelling first puts the element back at rest, so the re-run measures the truth.
   useLayoutEffect(() => {
     if (entrance.kind !== 'flip') return
     const wrapper = mediaRef.current
     if (!wrapper) return
     const out = entrance.outgoing
     const outgoingEl = out ? peekRef(out.side).current : null
+    let flights: Animation[] = []
     wrapper.style.opacity = '0'
     if (outgoingEl) outgoingEl.style.opacity = '0'
-    // On open the source thumbnail is hidden for the flight, so the picture is never
-    // in two places at once while the darkness is still translucent. (On navigation
-    // both endpoints are the lightbox's own elements, so there is nothing to hide.)
-    const showThumb = out ? () => {} : hideDuringFlight(opening?.el)
     const cancel = whenMediaLaidOut(wrapper, (to) => {
       wrapper.style.opacity = ''
       if (outgoingEl) outgoingEl.style.opacity = ''
-      if (!to) { showThumb(); return }
+      if (!to) return
       const duration = out ? FLIP_NAV_MS : FLIP_OPEN_MS
       const flight = playFlip(wrapper, {
         from: entrance.from,
@@ -238,22 +251,21 @@ export function ImageLightbox({
         // from a page thumbnail is one continuous picture, so opacity stays put.
         opacity: out ? [PEEK_OPACITY, 1] : undefined,
       })
-      if (flight) flight.onfinish = showThumb
-      else showThumb()
       // The counter-flight: the picture just replaced travels out to the edge preview
       // it has become (that preview element IS it, already re-sourced and parked in
       // its slot - so this is a real FLIP, not a ghost chasing it).
-      if (out && outgoingEl) {
-        playFlip(outgoingEl, { from: out.from, to: rectOf(outgoingEl), rest: 'to', duration, opacity: [1, PEEK_OPACITY] })
-      }
+      const counter = out && outgoingEl
+        ? playFlip(outgoingEl, { from: out.from, to: rectOf(outgoingEl), rest: 'to', duration, opacity: [1, PEEK_OPACITY] })
+        : null
+      flights = [flight, counter].filter((a): a is Animation => !!a)
     })
     return () => {
       cancel()
+      flights.forEach((a) => a.cancel())
       wrapper.style.opacity = ''
       if (outgoingEl) outgoingEl.style.opacity = ''
-      showThumb()
     }
-  }, [index, entrance, opening])
+  }, [index, entrance])
 
   // Close by flying the picture back into the thumbnail it belongs to while the
   // darkness lifts, THEN unmounting. With no thumbnail to land on (scrolled away, a
@@ -275,12 +287,10 @@ export function ImageLightbox({
     if (!flight || !target) { onClose(); return }
     closingRef.current = true
     setClosing(true)
-    const showThumb = hideDuringFlight(target.el)
     let landed = false
     const land = () => {
       if (landed) return
       landed = true
-      showThumb()
       onClose()
     }
     flight.onfinish = land
@@ -489,20 +499,22 @@ export function ImageLightbox({
               maxHeight="85vh"
               onVerticalSlide={followFrameSlide}
             >
-              <img
-                src={current.url}
-                alt={current.filename}
-                onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                // Middle-click opens the raw image file in a new browser tab.
-                onAuxClick={makeAuxOpen(() => current.url)}
-                draggable={false}
-                // Checkerboard behind the image so transparent PNGs (e.g. an icon)
-                // read as transparent rather than blending into the dark backdrop. The
-                // <img> sizes to the image's own aspect ratio, so this sits exactly
-                // behind the picture; opaque images simply cover it.
-                style={{ background: CHECKER }}
-                className={`max-h-[85vh] ${figureWidth} object-contain block`}
-              />
+              {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
+                  box), so the checkerboard layer behind it lines up with the picture. */}
+              <div className="relative">
+                <LightboxChecker className={chromeFade} />
+                <img
+                  src={current.url}
+                  alt={current.filename}
+                  onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  // Middle-click opens the raw image file in a new browser tab.
+                  onAuxClick={makeAuxOpen(() => current.url)}
+                  draggable={false}
+                  // relative so the picture paints ABOVE the checkerboard layer behind
+                  // it (a positioned element beats a static one in the same stack).
+                  className={`relative max-h-[85vh] ${figureWidth} object-contain block`}
+                />
+              </div>
             </ZoomPan>
           )}
         </div>
