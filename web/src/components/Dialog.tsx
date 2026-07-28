@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, ExternalLink, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import { BranchPill } from './BranchPill'
+import { UrlText } from './HostName'
 import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
 
@@ -118,6 +119,24 @@ export const Dialog: React.FC = () => {
           onSecondary={onSecondary ? handleSecondary : undefined}
           onCancel={handleCancel}
         />
+      ) : variant === 'externalLink' ? (
+        <RichConfirmPanel
+          tone="amber"
+          icon={<ExternalLink className="w-5 h-5" />}
+          title={title}
+          description={message}
+          confirmLabel={confirmLabel ?? 'Open link'}
+          confirmIcon={<ExternalLink className="w-4 h-4" />}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        >
+          {/* The URL in full, laid out like the approval card's fetch preview -
+              same mono box, same lowlight - because it asks the same question,
+              and the two should not need to be read differently. */}
+          <div className="px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] font-mono text-[12px] break-all text-gray-600 dark:text-[#8b94a6]">
+            <UrlText url={details?.url ?? ''} />
+          </div>
+        </RichConfirmPanel>
       ) : variant === 'sendPrompt' ? (
         <SendPromptPanel
           title={title}
