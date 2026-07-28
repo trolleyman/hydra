@@ -18,7 +18,8 @@ import {
   Images, Camera, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
-import { canCopyImages, copyImageToClipboard, copyText } from '../lib/clipboard'
+import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
+import { copyWithToast, showCopyToast } from '../lib/copyToast'
 import { useCopyFlash } from '../lib/useCopyFlash'
 import { CopyStateIcon } from './CopyStateIcon'
 import { BranchSelector } from './BranchSelector'
@@ -177,12 +178,25 @@ function useFileActions(file: RepositoryFileResponse, projectId: string, refStr:
     try {
       // copyText handles insecure LAN origins (undefined navigator.clipboard);
       // it reports success as a boolean rather than throwing, so honour it.
+      // Both paths raise the standard copy toast: the button's icon flash is
+      // easy to miss (the pointer has usually already moved on), and for an
+      // image there is no preview of what landed on the clipboard at all.
+      // The preview is the file's PATH, not the first lines of its content: with
+      // a whole file on the clipboard, what you want confirmed is which file it
+      // came from - and for an image there is no text preview to show at all.
       let ok: boolean
-      if (file.content != null) ok = await copyText(file.content)
-      else if (isImg) { await copyImageToClipboard(rawUrl); ok = true }
-      else return
+      if (file.content != null) {
+        ok = await copyWithToast(file.content, { what: 'file contents', preview: contentPath })
+      } else if (isImg) {
+        await copyImageToClipboard(rawUrl)
+        ok = true
+        showCopyToast(true, contentPath, { what: 'image' })
+      } else return
       flash(ok)
     } catch {
+      // An image copy is the only path that throws here (copyText reports false
+      // instead), so this is where its failure toast has to come from.
+      if (file.content == null) showCopyToast(false, contentPath, { what: 'image' })
       flash(false)
     }
   }

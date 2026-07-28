@@ -16,10 +16,13 @@ import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
 import { TagScopeFilter } from './ArtifactFilterBar'
-import { CaseTree, NodeBadges, type OpenInRepo } from './CaseTree'
+import { CaseTree, NodeBadges, type FixCase, type OpenInRepo } from './CaseTree'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatLineHash } from '../lib/lineRange'
 import { buildRepoSplat } from '../lib/repoSplat'
+import { buildFixTestMessage } from '../lib/testCases'
+import { useDialogStore } from '../stores/dialogStore'
+import { runWithToast } from '../lib/apiAction'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import { AnsiText } from './AnsiText'
@@ -292,6 +295,27 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
       hash: line != null && line > 0 ? formatLineHash(line, line) : undefined,
     })
   }, [projectId, repoRef])
+
+  // "Ask the agent to fix this test": build the message, show it in full, and
+  // only send once the user confirms. Nothing is sent from the row click itself
+  // - starting an agent turn is not something to discover after the fact.
+  const fixCase = useCallback((runner: string, c: TestCase) => {
+    const prompt = buildFixTestMessage(runner, c)
+    useDialogStore.getState().show({
+      variant: 'sendPrompt',
+      title: 'Ask the agent to fix this test?',
+      message: 'This is sent to the agent as a new chat message, and starts a turn (or queues behind the one running).',
+      confirmLabel: 'Send to agent',
+      details: { prompt },
+      onConfirm: () => {
+        void runWithToast(() => api.default.sendAgentInput(projectId, agentId, { text: prompt }), {
+          success: 'Sent the test failure to the agent',
+          errorPrefix: 'Failed to send to the agent',
+        })
+      },
+    })
+  }, [projectId, agentId])
+
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
   useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
 
@@ -414,6 +438,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
             useScope={!!useScope}
             onRefresh={() => requestRefresh(r.name)}
             onOpenInRepo={onOpenInRepo}
+            onFixCase={fixCase}
           />
         ))}
       </div>
@@ -438,7 +463,7 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
 // out identically to an artifact set card: the runner name + verdict chip +
 // summary on the left, the build-log toggle and Re-run melt buttons on the right,
 // and the filtered case tree / live log behind the collapse toggle.
-function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResult, useScope, onRefresh, onOpenInRepo }: {
+function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResult, useScope, onRefresh, onOpenInRepo, onFixCase }: {
   projectId: string
   agentId: string
   runner: TestRunResult
@@ -448,8 +473,17 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
   useScope: boolean
   onRefresh: () => void
   onOpenInRepo?: OpenInRepo
+  // Bound to this card's runner name before it reaches the tree, so a row only
+  // has to hand back the case it belongs to.
+  onFixCase?: (runner: string, c: TestCase) => void
 }) {
   const cases = useMemo(() => runner.cases ?? [], [runner.cases])
+  // Bind this card's runner name in once, so everything below only deals in the
+  // tree's own FixCase shape.
+  const fixCase = useMemo<FixCase | undefined>(
+    () => (onFixCase ? (c: TestCase) => onFixCase(runner.name, c) : undefined),
+    [onFixCase, runner.name],
+  )
   const running = runner.status === 'running'
   const errored = runner.status === 'errored'
   // A failing or errored runner reads as a failure: its log gets a red border.
@@ -634,8 +668,8 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       {visible.length > 0 && (
         <div className="-mx-3 flex flex-col">
           {groupResult
-            ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} />
-            : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} collapsed={treeCollapsed} onToggle={onToggleNode} />}
+            ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={fixCase} />
+            : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={fixCase} collapsed={treeCollapsed} onToggle={onToggleNode} />}
         </div>
       )}
 
@@ -670,7 +704,7 @@ const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boo
 // kept in JS so the unmount-after-collapse timer lines up with the CSS glide.
 const SECTION_COLLAPSE_MS = 200
 
-function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean; onOpenInRepo?: OpenInRepo }) {
+function ResultSections({ cases, visible, useScope, onOpenInRepo, onFixCase }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean; onOpenInRepo?: OpenInRepo; onFixCase?: FixCase }) {
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
   return (
     <>
@@ -690,6 +724,7 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: Tes
             onToggle={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
             useScope={useScope}
             onOpenInRepo={onOpenInRepo}
+            onFixCase={onFixCase}
           />
         )
       })}
@@ -705,7 +740,7 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo }: { cases: Tes
 // the instant `open` flips true (not an effect-frame later) so the [0fr]->[1fr]
 // slide has real content to grow into; `mounted` only keeps the body alive
 // through the closing glide before it is dropped.
-function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOpenInRepo }: {
+function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOpenInRepo, onFixCase }: {
   status: TestCaseStatus
   label: string
   all: TestCase[]
@@ -714,6 +749,7 @@ function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOp
   onToggle: () => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
+  onFixCase?: FixCase
 }) {
   const [mounted, setMounted] = useState(open)
   useEffect(() => {
@@ -748,7 +784,7 @@ function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOp
           so it appears open with no glide; only a user toggle animates. */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="overflow-hidden min-h-0">
-          {showBody && <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} />}
+          {showBody && <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} />}
         </div>
       </div>
     </div>

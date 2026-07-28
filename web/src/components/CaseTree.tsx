@@ -1,6 +1,6 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, type LinkProps } from '@tanstack/react-router'
-import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, MessageSquareWarning, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
@@ -46,6 +46,13 @@ type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 // Undefined when there's no ref to browse (see TestsPanel), which hides the
 // affordance entirely.
 export type OpenInRepo = (path: string, line?: number | null) => LinkProps
+
+// FixCase hands a failing case up to the tests panel, which opens the
+// confirmation dialog showing exactly what would be sent to the agent. The tree
+// never talks to the agent itself - it only knows which case you pointed at.
+// Undefined when there's no agent to ask (see TestsPanel), which hides the
+// affordance entirely.
+export type FixCase = (c: TestCase) => void
 
 function normScopeKind(k: string | null | undefined): ScopeKind {
   if (k === 'function') return 'function'
@@ -253,16 +260,44 @@ export function NodeBadges({ counts }: { counts: Record<string, number> }) {
 // native title (not a portal Tooltip) because it renders once per row of a
 // potentially long tree - see the tooltip perf note in CLAUDE.md - but still
 // flashes the shared tick/X so a copy that silently failed is visible.
-function CopyButton({ text, title }: { text: string; title: string }) {
+//
+// It also raises the standard copy toast (`what` is its noun phrase). On a
+// hover-revealed button the flash is especially easy to miss: move the pointer
+// off the row to go paste and the tick disappears with it, so the toast is the
+// only feedback that survives the gesture.
+function CopyButton({ text, title, what, idle }: {
+  text: string
+  title: string
+  what: string
+  idle?: ComponentType<{ className?: string }>
+}) {
   const { state, copy } = useCopyFlash()
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); void copy(text) }}
+      onClick={(e) => { e.stopPropagation(); void copy(text, { what }) }}
       title={title}
       aria-label={title}
       className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-opacity cursor-pointer"
     >
-      <CopyStateIcon state={state} size="w-3 h-3" />
+      <CopyStateIcon state={state} size="w-3 h-3" idle={idle} />
+    </button>
+  )
+}
+
+// FixButton is the hover-revealed "hand this failure to the agent" affordance on
+// a failing/warning case's message box. It never sends anything itself - it
+// hands the case to the panel's onFix, which opens a confirmation showing the
+// exact message that would go to the agent. Same native-title reasoning as
+// CopyButton (one per row).
+function FixButton({ onFix, title }: { onFix: () => void; title: string }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onFix() }}
+      title={title}
+      aria-label={title}
+      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-violet-600 dark:text-gray-500 dark:hover:text-violet-400 transition-opacity cursor-pointer"
+    >
+      <Sparkles className="w-3 h-3" />
     </button>
   )
 }
@@ -387,7 +422,7 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
 // glyph. Both carry the message box for failing/warning cases, duration, a copy
 // affordance, an open-in-repo affordance, and - in scope mode - the file:line
 // secondary so the diff deep-link survives the axis switch.
-export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
+export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFixCase }: {
   c: TestCase
   // The merged segment chain leading here when this row was hoisted out of a
   // one-case subtree (rendered before the leaf name, icons and all).
@@ -396,6 +431,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   showLocation?: boolean
   indent?: number
   onOpenInRepo?: OpenInRepo
+  onFixCase?: FixCase
 }) {
   const failedish = c.status === 'failed' || c.status === 'warning'
   // Skipped cases show their message too (the skip reason, dimmed) - skipped is
@@ -446,7 +482,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
           // file piece IS present the line already rides on it (see hasPathSeg).
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
-        <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
+        <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} what={loc ? 'test path' : 'test name'} />
         {onOpenInRepo && c.path && !c.path_missing ? (
           <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
         ) : null}
@@ -455,26 +491,48 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
         ) : null}
       </div>
       {showMessage ? (
-        <AnsiText text={c.message ?? ''} className={`ml-5 text-[11px] font-mono whitespace-pre-wrap border rounded px-2.5 py-1.5 ${msgTone}`} />
+        // The error's own actions ride in the box's top-right corner rather than
+        // up in the row's action cluster: there they'd be a second copy icon
+        // beside the path one with nothing to say which is which. The box keeps
+        // right padding so a long first line runs under, not into, them - and
+        // they reveal on the ROW's hover (the outer `group`), like every other
+        // affordance on the row.
+        <div className="relative ml-5">
+          <AnsiText text={c.message ?? ''} className={`text-[11px] font-mono whitespace-pre-wrap border rounded pl-2.5 pr-14 py-1.5 ${msgTone}`} />
+          <div className="absolute top-1 right-1 flex items-center gap-0.5">
+            <CopyButton
+              text={c.message ?? ''}
+              title="Copy test output"
+              what={c.status === 'skipped' ? 'skip reason' : 'test error'}
+              idle={MessageSquareWarning}
+            />
+            {/* Asking the agent to fix a SKIP reason is nonsense - the case never
+                ran and there's no failure to chase. */}
+            {onFixCase && c.status !== 'skipped' ? (
+              <FixButton onFix={() => onFixCase(c)} title="Ask the agent to fix this test" />
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </div>
   )
 }
 
-function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, missingPaths }: {
+function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
   node: TreeNode
   depth: number
   collapsed: Set<string>
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
+  onFixCase?: FixCase
   // Repo-relative file paths that weren't found in the checkout (see CaseTree).
   missingPaths: Set<string>
 }) {
   // One-case subtree → hoist the whole chain into a single case row.
   const hoisted = hoistedCase(node)
   if (hoisted) {
-    return <CaseRow c={hoisted.c} segs={hoisted.segs} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />
+    return <CaseRow c={hoisted.c} segs={hoisted.segs} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} />
   }
   const isCollapsed = collapsed.has(node.key)
   const isDir = nodeIsDir(node)
@@ -501,7 +559,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, mi
         {/* One chevron, rotated 90° when expanded, so the twist animates. */}
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
         <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} pathMissing={pathMissing} />
-        {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
+        {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} what="test path" /> : null}
         {onOpenInRepo && copyPath && !pathMissing ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
       </div>
@@ -510,14 +568,14 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, mi
           collapse state persists). */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
         <div className="overflow-hidden min-h-0">
-          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />
+          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
         </div>
       </div>
     </div>
   )
 }
 
-function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo, missingPaths }: {
+function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
   node: TreeNode
   depth: number
   // Draw a `tree`-style connector left of each child, linking it to the parent
@@ -528,6 +586,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
+  onFixCase?: FixCase
   missingPaths: Set<string>
 }) {
   // Directories first (alphabetical), then this node's own cases, worst
@@ -556,12 +615,12 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
     ...children.map((child) => ({
       key: child.key,
       hasChevron: hoistedCase(child) === null,
-      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />,
+      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />,
     })),
     ...cases.map((c) => ({
       key: rowKeys.get(c)!,
       hasChevron: false,
-      el: <CaseRow c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} />,
+      el: <CaseRow c={c} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} />,
     })),
   ]
   return (
@@ -580,7 +639,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
   )
 }
 
-export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, onOpenInRepo, collapsed: collapsedProp, onToggle: onToggleProp }: {
+export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, onOpenInRepo, onFixCase, collapsed: collapsedProp, onToggle: onToggleProp }: {
   // ALL of the runner's cases - badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
@@ -594,6 +653,8 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
   rootConnect?: boolean
   // Deep-link rows to the repository browser (omitted → no link affordance).
   onOpenInRepo?: OpenInRepo
+  // Offer "ask the agent to fix this" on failing rows (omitted → no affordance).
+  onFixCase?: FixCase
   // Collapse state can be lifted out (persisted per agent). When omitted the
   // tree keeps its own ephemeral state.
   collapsed?: Set<string>
@@ -623,7 +684,7 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
   if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />
+      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
     </div>
   )
 }

@@ -42,3 +42,22 @@ export function caseLocation(c: TestCase): string {
   }
   return loc
 }
+
+// buildFixTestMessage renders the chat message the tests panel's "fix this test"
+// sparkle would send: which runner and case, where it lives, and the runner's
+// own output for it fenced verbatim. Everything comes off the case itself - the
+// user is shown this exact string in a confirmation before anything is sent, so
+// it has to be complete and literal rather than a summary filled in later.
+//
+// The closing instruction is deliberate: the shortest path to a green run is to
+// weaken the assertion, and that is almost never what you wanted when you
+// clicked the button on a failure.
+export function buildFixTestMessage(runner: string, c: TestCase): string {
+  const loc = caseLocation(c)
+  const lines = [`The \`${runner}\` test runner reports a ${c.status === 'warning' ? 'warning' : 'failure'}.`, '']
+  lines.push(`Test: ${c.scope?.length ? `${c.scope.join(' > ')} > ${c.name}` : c.name}`)
+  if (loc) lines.push(`Location: ${loc}`)
+  if (c.message) lines.push('', 'Output:', '```', c.message.trimEnd(), '```')
+  lines.push('', 'Find out what is actually wrong and fix the underlying cause. Only change the test itself if the test is the thing that is wrong.')
+  return lines.join('\n')
+}
