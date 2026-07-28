@@ -203,6 +203,25 @@ function segmentsOfLine(ta: HTMLTextAreaElement, pos: number): Array<[number, nu
   return starts.map((s, i) => [s, i + 1 < starts.length ? starts[i + 1] : le] as [number, number])
 }
 
+// visualEndOf is the offset a caret must sit at to RENDER at the end of visual
+// segment `i` - which is NOT the segment's [start, end) end offset. That end is
+// the first character of the NEXT visual line, and a caret placed there draws at
+// the start of that line, because a textarea caret has a line affinity we cannot
+// set from JS and the browser's default is downstream. So for a wrapped segment
+// back up over the run of whitespace the wrap swallowed: those spaces hang past
+// the line's edge, so the offset before them is the last one that still draws on
+// this line. Returns null when the wrap ate no whitespace (a long token broken
+// mid-word), where no offset renders at this line's end and the caller should
+// leave the keystroke to the browser - its own End knows the affinity. The last
+// segment ends at the hard line's real end, which is never ambiguous.
+function visualEndOf(value: string, segs: Array<[number, number]>, i: number): number | null {
+  const [s, e] = segs[i]
+  if (i + 1 >= segs.length) return e
+  let end = e
+  while (end > s && (value[end - 1] === ' ' || value[end - 1] === '\t')) end--
+  return end === e ? null : end
+}
+
 // visualLineTarget computes where Home/End should put the caret (item 5):
 // End goes to the end of the caret's visual line, or - when the caret is
 // ALREADY there and the line WRAPS on - to the end of the next wrapped
@@ -218,10 +237,13 @@ export function visualLineTarget(ta: HTMLTextAreaElement, caret: number, edge: '
   if (edge === 'end') {
     const i = segs.findIndex(([, e]) => e >= caret)
     if (i === -1) return null
-    if (segs[i][1] > caret) return segs[i][1]
-    // Already at this segment's end: on to the next wrapped one, if the hard
-    // line has one. If it doesn't, this is the end of the line - stay put.
-    return i + 1 < segs.length ? segs[i + 1][1] : null
+    const here = visualEndOf(ta.value, segs, i)
+    if (here == null) return null // unplaceable end: the browser does it better
+    if (here > caret) return here
+    // Already at this segment's visual end (or among the spaces the wrap ate):
+    // on to the next wrapped one, if the hard line has one. If it doesn't, this
+    // is the end of the line - stay put.
+    return i + 1 < segs.length ? visualEndOf(ta.value, segs, i + 1) : null
   }
   let i = -1
   for (let k = 0; k < segs.length; k++) if (segs[k][0] <= caret) i = k
