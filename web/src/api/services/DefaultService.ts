@@ -27,6 +27,7 @@ import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesRes
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
+import type { ResolvedPathResponse } from '../models/ResolvedPathResponse';
 import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
 import type { ReviewReplyRequest } from '../models/ReviewReplyRequest';
 import type { ReviewThreadsResponse } from '../models/ReviewThreadsResponse';
@@ -276,6 +277,27 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/config-toml-preview',
+            query: {
+                'path': path,
+            },
+            errors: {
+                400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
+     * @param path
+     * @returns ResolvedPathResponse OK
+     * @throws ApiError
+     */
+    public resolvePath(
+        path: string,
+    ): CancelablePromise<ResolvedPathResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/resolve-path',
             query: {
                 'path': path,
             },

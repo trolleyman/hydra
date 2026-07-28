@@ -17,6 +17,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 )
 
@@ -223,6 +224,27 @@ func (s *SimulationServer) GetProjectConfigToml(w http.ResponseWriter, r *http.R
 
 func (s *SimulationServer) PreviewConfigToml(w http.ResponseWriter, r *http.Request, params api.PreviewConfigTomlParams) {
 	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false})
+}
+
+// ResolvePath answers for real (unlike AddProject) - it only reads path
+// metadata, and the add-project input's live "this is where that lands" hint is
+// worth exercising against the actual filesystem.
+func (s *SimulationServer) ResolvePath(w http.ResponseWriter, r *http.Request, params api.ResolvePathParams) {
+	resolved := resolveProjectPath(params.Path)
+	if resolved == "" {
+		api.WriteError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	resp := api.ResolvedPathResponse{Path: resolved, DisplayPath: *displayPathPtr(resolved)}
+	if st, err := os.Stat(resolved); err == nil {
+		resp.Exists = true
+		resp.IsDir = st.IsDir()
+	}
+	if root, err := paths.GetProjectRoot(resolved); err == nil {
+		resp.IsGitRepo = true
+		resp.RepoRoot = &root
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
