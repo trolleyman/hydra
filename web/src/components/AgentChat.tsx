@@ -4966,6 +4966,10 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
 // the comparator so a change to any of them still refreshes the list.
 interface SettledMessagesProps {
   items: ChatItem[]
+  // The in-flight streamed reply, rendered as the list's last row so the
+  // settled event can take that row over in place. Kept out of `items` so the
+  // settled rows' memo survives a per-frame stream update.
+  liveItem: ChatItem | null
   liveFromId: number | null
   renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   serif: boolean
@@ -5033,28 +5037,38 @@ const SettledRow = memo(
 )
 
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
-    return (
-      <>
-        {items.map((item) => (
-          <SettledRow
-            key={item.id}
-            item={item}
-            animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
-            renderItem={renderItem}
-            shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
-            serif={serif}
-            connected={connected}
-            worktreePath={worktreePath}
-            subByToolUse={subByToolUse}
-            subagents={subagents}
-          />
-        ))}
-      </>
+  function SettledMessages({ items, liveItem, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
+    const row = (item: ChatItem) => (
+      <SettledRow
+        key={item.id}
+        item={item}
+        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        renderItem={renderItem}
+        shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
+        serif={serif}
+        connected={connected}
+        worktreePath={worktreePath}
+        subByToolUse={subByToolUse}
+        subagents={subagents}
+      />
     )
+    // The settled rows are memoized as ELEMENTS, not just per-row components: a
+    // streamed reply re-renders this list once per animation frame (it is the
+    // last row, see liveItem), and handing React the identical element objects
+    // back lets it bail on each settled subtree instead of rebuilding an element
+    // per row 60 times a second. The deps are exactly this component's memo keys
+    // below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
+    const rows = useMemo(() => items.map(row), [items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds])
+    // ONE keyed list, live row included. It has to be the same list the settled
+    // row lands in: a separate slot beside it would be a separate position, and
+    // React would tear the live node down to build the settled one - which is
+    // the whole thing this arrangement exists to avoid.
+    return <>{liveItem ? [...rows, row(liveItem)] : rows}</>
   },
   (a, b) =>
     a.items === b.items &&
+    a.liveItem === b.liveItem &&
     a.liveFromId === b.liveFromId &&
     a.renderItem === b.renderItem &&
     a.shellCwds === b.shellCwds &&
@@ -5151,9 +5165,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // re-renders and the whole connection's worth of durations stays in hand.
   const thoughtDurationsRef = useRef<Map<string, number>>(new Map())
   // The in-flight streamed content block (token streaming via stream_event
-  // deltas), rendered live below the settled items and superseded by the
-  // complete assistant event that follows it.
-  const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
+  // deltas), superseded by the complete assistant event that follows it. A
+  // streamed REPLY renders as the transcript's last row (see liveItem); a
+  // streamed THOUGHT renders as its own card below it.
+  // `id` is the transcript-item id the block is rendered under, so the settled
+  // event can take the row over in place (see liveId in the reducer).
+  const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string; id: number } | null>(null)
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
   // Seeded from the persisted plan (planStore) so navigating away and back shows
@@ -5568,8 +5585,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const batch = pending.splice(0, pending.length)
       setItems((prev) => [...prev, ...batch])
     }
-    const push = (raw: DistributiveOmit<ChatItem, 'id'>) => {
-      const id = nextId++
+    // `forcedId` re-uses an id already on screen (the live streamed block's, see
+    // liveId) so the settled row lands on the same React key and keeps its DOM.
+    const push = (raw: DistributiveOmit<ChatItem, 'id'>, forcedId?: number) => {
+      const id = forcedId ?? nextId++
       // Stamp the item's wall-clock time for the commit-chip interleave:
       // replayed events use the transcript's timestamp (prevEventTs carries it
       // forward over ring lines, which have none), live items arrival time.
@@ -5612,6 +5631,41 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let revealed = 0
     let streamFrame: number | null = null
+    // The item id the in-flight block is rendered under. A live text block is a
+    // real row in the transcript list (see liveItem), keyed by this id, and the
+    // settled event that supersedes it REUSES the id - so React updates that row
+    // in place instead of unmounting one node and mounting an identical one.
+    // That is what keeps a text selection alive across the swap: a selection
+    // anchored in a text node dies the moment the browser sees that node
+    // removed, which is why selecting a reply while it streamed used to clear
+    // itself a beat later. Allocated on the first rendered frame of a block,
+    // consumed by the settle, and reset by the next block.
+    let liveId: number | null = null
+    // The kind and text last rendered under liveId, so a turn that ends without
+    // the settled event ever arriving can still commit what was streamed.
+    let liveKind: 'assistant' | 'thinking' | null = null
+    let liveText: string | null = null
+    const takeLiveId = () => {
+      if (liveId == null) {
+        liveId = nextId++
+        // Stamp it like a pushed item so an interleaved commit chip sorts around
+        // it the same way before and after it settles (see mergedItems).
+        itemTsRef.current.set(liveId, Date.now())
+      }
+      return liveId
+    }
+    // The id to settle a finished block under: the one it is already rendered
+    // with when this is the block we streamed, otherwise undefined (push then
+    // allocates a fresh one as usual). Consumed, so a second block in the same
+    // message can't claim the same row.
+    const takeLive = (kind: 'assistant' | 'thinking'): number | undefined => {
+      if (liveKind !== kind || liveId == null) return undefined
+      const id = liveId
+      liveId = null
+      liveKind = null
+      liveText = null
+      return id
+    }
     // Which block kinds this message streamed live. `message_stop` clears
     // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
     // event arrives, so streamBuf can't tell the settle "you were already on
@@ -5671,10 +5725,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const REVEAL_CAP = 40 // max chars/frame so a big burst never dumps at once
     const onStreamFrame = () => {
       streamFrame = null
-      if (!streamBuf) {
-        setStream(null)
-        return
-      }
+      if (!streamBuf) return
       const full = streamBuf.text.length
       if (smoothStreamRef.current) {
         if (revealed < full) {
@@ -5685,7 +5736,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       } else {
         revealed = full
       }
-      setStream({ kind: streamBuf.kind, text: streamBuf.text.slice(0, revealed) })
+      liveKind = streamBuf.kind
+      liveText = streamBuf.text.slice(0, revealed)
+      setStream({ kind: liveKind, text: liveText, id: takeLiveId() })
       // Keep animating until the reveal catches up, even after deltas stop.
       if (revealed < full) scheduleStreamFlush()
     }
@@ -5702,16 +5755,58 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       streamBuf = { kind, text }
       revealed = text.length
       streamedKinds.add(kind)
-      setStream({ kind, text })
+      liveId = null
+      liveKind = kind
+      liveText = text
+      setStream({ kind, text, id: takeLiveId() })
     }
-    const clearStream = () => {
-      streamBuf = null
+    const stopStreamFrame = () => {
       revealed = 0
       if (streamFrame != null) {
         cancelAnimationFrame(streamFrame)
         streamFrame = null
       }
+    }
+    const clearStream = () => {
+      streamBuf = null
+      liveId = null
+      liveKind = null
+      liveText = null
+      stopStreamFrame()
       setStream(null)
+    }
+    // The block is finished but its settled event hasn't arrived yet
+    // (message_stop lands first, as its own frame). Keep the rendered row -
+    // blanking it here is what made the text flash out and, worse, tore down the
+    // node any selection in it was anchored to. It stays until the settled event
+    // supersedes it in place, or the turn ends (see settleLiveStream).
+    const endStream = () => {
+      const full = streamBuf?.text ?? null
+      const kind = streamBuf?.kind ?? null
+      streamBuf = null
+      stopStreamFrame()
+      // Show the whole block: the paced reveal may still have been catching up,
+      // and the settled event about to land would jump to the full text anyway.
+      if (full != null && kind != null && full !== liveText) {
+        liveKind = kind
+        liveText = full
+        setStream({ kind, text: full, id: takeLiveId() })
+      }
+    }
+    // Commit whatever is still rendered live as a real item, under the same id,
+    // when nothing else will: the turn ended (or was interrupted) without the
+    // settled event that normally supersedes it.
+    const settleLiveStream = () => {
+      const kind = streamBuf?.kind ?? liveKind
+      // The buffer (everything received) beats the revealed prefix: a turn cut
+      // short should keep all of what the agent actually said.
+      const text = streamBuf?.text ?? liveText
+      if (kind == null || !text?.trim()) {
+        clearStream()
+        return
+      }
+      push({ kind, text, noEntrance: true }, takeLiveId())
+      clearStream()
     }
 
     // --- Sub-agent (Task tool) routing -------------------------------------
@@ -6340,12 +6435,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // Codex can be interrupted before it emits item/completed. Preserve
         // everything received so far as the assistant's partial response
         // before closing the presentation stream and adding the boundary.
-        if (streamBuf?.text.trim()) {
-          push(streamBuf.kind === 'assistant'
-            ? { kind: 'assistant', text: streamBuf.text, noEntrance: true }
-            : { kind: 'thinking', text: streamBuf.text, noEntrance: true })
-        }
-        clearStream()
+        settleLiveStream()
         push({ kind: 'interrupted' })
         interruptPending = true
         endPendingTools()
@@ -6631,7 +6721,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               // the text is already on screen, so a fade-in on swap flickers
               // (item 56). streamedKinds (not streamBuf, which message_stop has
               // already nulled) remembers we streamed this text.
-              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid })
+              //
+              // takeLive hands over the id that block is ALREADY rendered under,
+              // so this settles it in place - same React key, same DOM nodes,
+              // and anything selected inside it stays selected.
+              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid }, takeLive('assistant'))
             } else if (block.type === 'thinking') {
               // Duration comes from the daemon (a hydra_thinking event keyed by
               // this message id, already in hand - sent before the backfill and
@@ -6647,6 +6741,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
+                // No id hand-over here (unlike the text block above): a live
+                // thought renders as its own card below the transcript, not as a
+                // row in it, so there is no node to settle in place.
                 push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking'), uuid: ev.uuid })
               }
             } else if (block.type === 'tool_use' && block.id) {
@@ -6710,8 +6807,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const sr = ev.message?.stop_reason
           if (sr && sr !== 'tool_use') histStopReason = sr
           // The complete event supersedes any in-flight streamed block (finals
-          // always follow their own deltas). Cleared in the same batch as the
-          // push above, so the text swaps without a flash.
+          // always follow their own deltas). The settled item is flushed in the
+          // SAME batch as the clear (the normalized path does this too): left to
+          // its microtask, React can render the gap between them - the text
+          // blinks, and the live row is torn down and rebuilt instead of updated
+          // in place, taking any selection inside it with it.
+          if (!replaying) flush()
           clearStream()
           return
         }
@@ -6751,10 +6852,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             clearSending()
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
-            streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
-            revealed = 0
-            if (streamBuf) streamedKinds.add(streamBuf.kind)
-            scheduleStreamFlush()
+            const kind = bt === 'text' ? 'assistant' : bt === 'thinking' ? 'thinking' : null
+            if (kind) {
+              // A new block gets its own row. If the previous one is somehow
+              // still live (its settled event never arrived), commit it first
+              // rather than let this one overwrite it.
+              settleLiveStream()
+              streamBuf = { kind, text: '' }
+              revealed = 0
+              streamedKinds.add(kind)
+              scheduleStreamFlush()
+            }
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta
             if (d?.type === 'text_delta' && typeof d.text === 'string') {
@@ -6783,7 +6891,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             turnTokensRef.current += curMsgTokensRef.current
             curMsgTokensRef.current = 0
             setTurnTokens(turnTokensRef.current)
-            clearStream()
+            endStream()
           }
           return
         }
@@ -6825,7 +6933,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }
           }
           if (changed) scheduleSubFlush()
-          clearStream()
+          // The turn is over: anything still rendered live was never settled by
+          // an assistant event, so commit it rather than blank it.
+          settleLiveStream()
           endPendingTools()
           // The turn is over, so any question it left unanswered can no longer
           // be answered through the CLI (see expireQuestions).
@@ -8909,6 +9019,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
+  // The in-flight streamed reply is the LAST ROW of the transcript, not a
+  // separate node underneath it: it carries the id its settled event will land
+  // on, so the swap is an in-place update of one row (see liveId). Rendering it
+  // outside the list is what used to make it a different DOM node from the
+  // message it became - the browser dropped any selection inside it, and the
+  // text blinked out for the frame between the two.
+  //
+  // A closing fence is faked while the text ends inside an open ``` block, so
+  // the partial code renders as a code block rather than raw backticks.
+  // (A streamed THOUGHT still renders as its own card below - see `stream`
+  // further down: a live thought is a different shape from a settled one.)
+  const liveItem = useMemo<ChatItem | null>(
+    () =>
+      stream && stream.kind === 'assistant'
+        ? { id: stream.id, kind: 'assistant', text: closeOpenFence(stream.text), noEntrance: true }
+        : null,
+    [stream],
+  )
   // The turn's end-of-turn "Crunched for Xs" footer (a result item) has landed.
   // The agent status flip that clears isTurnRunning can lag a frame behind it, so
   // gate the live "working" indicator on this too - otherwise both the footer and
@@ -9039,6 +9167,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           <SettledMessages
             items={mergedItems}
+            liveItem={liveItem}
             liveFromId={liveFromId}
             renderItem={renderItem}
             serif={serif}
@@ -9048,20 +9177,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             subagents={subagents}
             shellCwds={shellCwds}
           />
-          {/* The in-flight streamed block: markdown-rendered live (with a
-              virtual closing fence while inside a code block); streamed thinking
-              uses the same collapsed card as settled thoughts, its preview
+          {/* The in-flight streamed REPLY is rendered as the transcript's last
+              row (see liveItem); only a streamed thought lands here, using the
+              same collapsed card as settled thoughts with its preview
               auto-updating as tokens arrive. It's the current turn's response,
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
-              no blinking caret or per-word opacity animation is applied here:
-              either one makes reparsed Markdown visibly flicker as delimiters
+              no blinking caret or per-word opacity animation is applied to
+              either: one makes reparsed Markdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
-          {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>
-              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
-            </div>
-          )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
               and the running output-token count when the CLI reports it. While a
