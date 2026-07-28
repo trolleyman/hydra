@@ -69,6 +69,40 @@ describe('QuestionCard notes', () => {
   })
 })
 
+// A note reads as a caveat on the choice it qualifies, so it sits directly
+// under that row rather than at the foot of the card. The "Add a note" link is
+// a question-level affordance and stays at the foot until there is a note.
+describe('QuestionCard note placement', () => {
+  const rows = () => Array.from(document.querySelector('[data-question-rows]')!.children)
+  const noteIndex = () => rows().findIndex((r) => r.querySelector('textarea[aria-label="Note to go with your answer"]'))
+  const optionIndex = (label: string) => rows().findIndex((r) => r.textContent?.startsWith(label))
+
+  it('moves the note under the option you pick, and back when you unpick', () => {
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
+
+    // Nothing picked yet: the note is the last row.
+    expect(noteIndex()).toBe(rows().length - 1)
+
+    fireEvent.click(screen.getByText('Postgres'))
+    expect(noteIndex()).toBe(optionIndex('Postgres') + 1)
+
+    fireEvent.click(screen.getByText('SQLite'))
+    expect(noteIndex()).toBe(optionIndex('SQLite') + 1)
+
+    // "Other" is the last row, so a note qualifying it stays at the foot.
+    fireEvent.focus(screen.getByPlaceholderText('Other...'))
+    expect(noteIndex()).toBe(rows().length - 1)
+  })
+
+  it('keeps the collapsed link at the foot even with an option picked', () => {
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
+    fireEvent.click(screen.getByText('Postgres'))
+    const link = rows().findIndex((r) => r.textContent === 'Add a note')
+    expect(link).toBe(rows().length - 1)
+  })
+})
+
 // On a resume the card's local state is gone and only the tool_result text
 // survives, so the note has to be recoverable from it - including knowing where
 // it stops, since a note is the last thing in its entry and the CLI wraps the

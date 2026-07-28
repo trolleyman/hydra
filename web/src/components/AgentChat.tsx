@@ -4294,6 +4294,12 @@ export function deriveAnswered(
   return { selected, other, notes }
 }
 
+// Pending "before" row positions for the note's slide, keyed by the row list
+// they were measured in. Module-level rather than a ref because this is
+// transient DOM measurement - written by the click that reorders the list and
+// consumed by the very next layout effect, never something a render reads.
+const questionFlipFrom = new Map<HTMLElement, Map<HTMLElement, number>>()
+
 export function QuestionCard({
   specs,
   disabled,
@@ -4361,8 +4367,44 @@ export function QuestionCard({
   const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
   const showNote = derived && localEmpty ? derived.notes : note
 
-  function toggleOption(qi: number, oi: number) {
+  // A note belongs with the choice it qualifies, so it trails whichever row you
+  // picked rather than sitting at the foot of the card. Moving it is a FLIP:
+  // every row keeps its size and only slides, so the question's height is the
+  // same before, during and after - nothing below it jumps. Positions are
+  // snapshotted in the click that reorders the list, so typing in the note
+  // (which regrows it on every keystroke) never sets an animation going.
+  function snapshotRows(origin: Element | null) {
+    const el = origin?.closest<HTMLElement>('[data-question-rows]')
+    if (!el) return
+    const from = new Map<HTMLElement, number>()
+    for (const row of Array.from(el.children)) from.set(row as HTMLElement, (row as HTMLElement).offsetTop)
+    questionFlipFrom.set(el, from)
+  }
+
+  useLayoutEffect(() => {
+    if (questionFlipFrom.size === 0) return
+    const pending = new Map(questionFlipFrom)
+    questionFlipFrom.clear()
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    for (const [el, from] of pending) {
+      for (const row of Array.from(el.children) as HTMLElement[]) {
+        const was = from.get(row)
+        if (was == null) continue
+        const delta = was - row.offsetTop
+        if (delta === 0) continue
+        // Element.animate is absent in jsdom, where the slide is untestable
+        // anyway - the reorder itself is what the tests assert.
+        row.animate?.([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+          duration: 200,
+          easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        })
+      }
+    }
+  })
+
+  function toggleOption(origin: Element | null, qi: number, oi: number) {
     if (answered) return
+    snapshotRows(origin)
     setSelected((prev) =>
       prev.map((s, i) => {
         if (i !== qi) return s
@@ -4387,8 +4429,9 @@ export function QuestionCard({
   // Select (or, when the dot itself is clicked, toggle) the "Other" row.
   // Clicking anywhere in the row and typing both select it; in a single-select
   // that clears the picked option, mirroring toggleOption's takeover.
-  function selectOther(qi: number, next = true) {
+  function selectOther(origin: Element | null, qi: number, next = true) {
     if (answered) return
+    if (next !== otherSel[qi]) snapshotRows(origin)
     setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
     if (next && !specs[qi].multiSelect) {
       setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
@@ -4420,23 +4463,21 @@ export function QuestionCard({
 
   return (
     <div className="max-w-xl rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.03] p-3 space-y-3">
-      {specs.map((q, qi) => (
-        <div key={qi} className="space-y-1.5">
-          <div className="flex items-baseline gap-1.5">
-            {q.header && (
-              <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
-                {q.header}
-              </span>
-            )}
-            <span className="font-medium">{q.question}</span>
-          </div>
-          <div className="space-y-1">
-            {q.options.map((o, oi) => {
+      {specs.map((q, qi) => {
+        const hasNote = showNote[qi] !== ''
+        const noteVisible = noteOpen[qi] || hasNote
+        // An actual note trails the last row you picked; the "Add a note" link
+        // is a question-level affordance, so it stays at the foot of the list
+        // (and so does a note written before anything was chosen).
+        const picked = [...showSelected[qi]]
+        const anchor = noteVisible && !showOtherSel[qi] && picked.length > 0 ? Math.max(...picked) : null
+        const rows: ReactNode[] = []
+        const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
               return (
                 <button
                   key={oi}
-                  onClick={() => toggleOption(qi, oi)}
+                  onClick={(e) => toggleOption(e.currentTarget, qi, oi)}
                   disabled={answered}
                   className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
                     answered ? 'cursor-default' : 'cursor-pointer'
@@ -4461,15 +4502,16 @@ export function QuestionCard({
                   </span>
                 </button>
               )
-            })}
-            {/* "Other" renders as one more option row: it has its own dot and
-                is selected by clicking the row, typing in it, or toggling the
-                dot - and a settled card highlights it like any picked option. */}
-            {(() => {
+            })
+        // "Other" renders as one more option row: it has its own dot and is
+        // selected by clicking the row, typing in it, or toggling the dot - and
+        // a settled card highlights it like any picked option.
+        const other = (() => {
               const isSel = showOtherSel[qi]
               return (
                 <div
-                  onClick={() => selectOther(qi)}
+                  key="other"
+                  onClick={(e) => selectOther(e.currentTarget, qi)}
                   className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
@@ -4486,7 +4528,7 @@ export function QuestionCard({
                     onClick={(e) => {
                       // The dot is the one spot that can also DEselect.
                       e.stopPropagation()
-                      selectOther(qi, !otherSel[qi])
+                      selectOther(e.currentTarget, qi, !otherSel[qi])
                     }}
                     className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                       q.multiSelect ? 'rounded' : 'rounded-full'
@@ -4515,9 +4557,9 @@ export function QuestionCard({
                         const v = e.target.value
                         setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
                         // Typing claims the selection.
-                        selectOther(qi)
+                        selectOther(e.currentTarget, qi)
                       }}
-                      onFocus={() => selectOther(qi)}
+                      onFocus={(e) => selectOther(e.currentTarget, qi)}
                       onKeyDown={(e) => {
                         // Enter submits the card, like the composer (shift+Enter
                         // still inserts a newline). Ignored while an IME is
@@ -4535,72 +4577,97 @@ export function QuestionCard({
                   </div>
                 </div>
               )
-            })()}
-          </div>
-          {/* The note sits below the options, not among them: it qualifies
-              whichever one you picked rather than competing with them, so it
-              gets no dot and stays folded away behind a link until wanted. A
-              recovered note (or one typed here) keeps the box open. */}
-          {(() => {
-            const open = noteOpen[qi] || showNote[qi] !== ''
-            if (!open) {
-              return answered ? null : (
-                <button
-                  type="button"
-                  onClick={() => setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))}
-                  className="flex cursor-pointer items-center gap-1 text-[11px] text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200"
-                >
-                  <MessageSquare className="h-3 w-3 shrink-0" />
-                  <span className="optical-center">Add a note</span>
-                </button>
-              )
-            }
-            return (
-              <div
-                className={`flex w-full items-start gap-2 rounded-lg border border-dashed px-2.5 py-1.5 ${
-                  showNote[qi] !== ''
+            })()
+        // The note is ONE row that moves, never a row destroyed here and rebuilt
+        // there: same key, same box metrics whether it holds the "Add a note"
+        // link or the open note, so the swap costs no height and the slide is
+        // pure translation. An answered card with no note drops the row instead
+        // of leaving a dead gap.
+        const noteRow =
+          answered && !hasNote ? null : (
+            <div
+              key="note"
+              className={`flex w-full items-start gap-2 rounded-lg border border-dashed px-2.5 py-1.5 transition-colors ${
+                !noteVisible
+                  ? 'border-transparent'
+                  : hasNote
                     ? 'border-stone-300 dark:border-white/20'
                     : 'border-stone-200 dark:border-white/[0.07]'
-                } ${answered && showNote[qi] === '' ? 'opacity-50' : ''}`}
-              >
-                <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-                {/* Auto-grows the same way the "Other" box does - an invisible
-                    span in the same grid cell drives the height. */}
-                <div className="grid min-w-0 flex-1">
-                  <span
-                    aria-hidden
-                    className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
-                  >
-                    {showNote[qi] + ' '}
-                  </span>
-                  <textarea
-                    rows={1}
-                    autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
-                    value={showNote[qi]}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                    }}
-                    onKeyDown={(e) => {
-                      // Enter submits, as in the "Other" box; shift+Enter is a
-                      // newline, which a note wants more often than an option
-                      // label does.
-                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      submit()
-                    }}
-                    disabled={answered}
-                    placeholder="Note to go with your answer..."
-                    aria-label="Note to go with your answer"
-                    className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
-                  />
-                </div>
-              </div>
-            )
-          })()}
-        </div>
-      ))}
+              }`}
+            >
+              {!noteVisible ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    snapshotRows(e.currentTarget)
+                    setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))
+                  }}
+                  className="flex cursor-pointer items-start gap-2 text-[11px] text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200"
+                >
+                  <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="leading-4">Add a note</span>
+                </button>
+              ) : (
+                <>
+                  <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+                  {/* Auto-grows the same way the "Other" box does - an invisible
+                      span in the same grid cell drives the height. */}
+                  <div className="grid min-w-0 flex-1">
+                    <span
+                      aria-hidden
+                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
+                    >
+                      {showNote[qi] + ' '}
+                    </span>
+                    <textarea
+                      rows={1}
+                      autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
+                      value={showNote[qi]}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                      }}
+                      onKeyDown={(e) => {
+                        // Enter submits, as in the "Other" box; shift+Enter is a
+                        // newline, which a note wants more often than an option
+                        // label does.
+                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        submit()
+                      }}
+                      disabled={answered}
+                      placeholder="Note to go with your answer..."
+                      aria-label="Note to go with your answer"
+                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        options.forEach((row, oi) => {
+          rows.push(row)
+          if (anchor === oi) rows.push(noteRow)
+        })
+        rows.push(other)
+        if (anchor === null) rows.push(noteRow)
+        return (
+          <div key={qi} className="space-y-1.5">
+            <div className="flex items-baseline gap-1.5">
+              {q.header && (
+                <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
+                  {q.header}
+                </span>
+              )}
+              <span className="font-medium">{q.question}</span>
+            </div>
+            <div className="space-y-1" data-question-rows>
+              {rows}
+            </div>
+          </div>
+        )
+      })}
       {expired && !answered && (
         <div className="text-[11px] text-stone-500 dark:text-stone-400">
           This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
