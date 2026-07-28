@@ -296,6 +296,9 @@ func simAgentChat() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentChatPrompt,
 		ChatMode:      ptr(true),
+		// A worktree path so the chat can trim it out of the commands the agent
+		// runs (an agent opens half its scripts with `cd <the worktree>`).
+		WorktreePath: ptr("/repo/.hydra/local/worktrees/feat-uploader-retry"),
 		// Model as the daemon would have captured it from the head's system:init
 		// line (see simChatEvents); the chat selector seeds its label from this.
 		Model: ptr("claude-opus-4-8"),
@@ -3665,6 +3668,12 @@ var simChatEvents = []string{
 	// A chained command with a description: the collapsed card shows the
 	// description, the expanded card the ;/&&-split highlighted script.
 	`{"type":"assistant","message":{"id":"msg_sim_3","content":[{"type":"tool_use","id":"toolu_sim_2","name":"Bash","input":{"command":"go vet ./internal/artifacts/ && go test ./internal/artifacts/ -run TestPutRetry -count=1; echo exit=$?","description":"Vet the package and run the retry test"}}]}}`,
+	// The shape agents write constantly: a `cd <worktree>` no-op, a subshell that
+	// ignores a failure, and a heredoc carrying a throwaway script. The card drops
+	// the no-op cd, splits the chain, keeps the subshell on one line, and leaves
+	// the heredoc body exactly as written (semicolons and all).
+	`{"type":"assistant","message":{"id":"msg_sim_heredoc","content":[{"type":"tool_use","id":"toolu_sim_heredoc","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,
