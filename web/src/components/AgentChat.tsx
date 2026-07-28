@@ -884,15 +884,11 @@ const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'summary', 'description', 
 function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: string; prose: boolean } | null {
   const str = (key: string) => (typeof obj[key] === 'string' ? (obj[key] as string) : '')
   switch (tool) {
-    case 'git_commit': {
-      // Subject line only - the body is prose the agent already wrote out, and it
-      // is what renders as a literal \n\n when squeezed onto one line. The amend
-      // and path-count notes stay: they change what the commit actually captures.
-      const subject = str('message').split('\n')[0].trim()
-      const paths = Array.isArray(obj.paths) ? obj.paths.length : 0
-      const notes = [obj.amend === true ? 'amend' : '', paths > 0 ? `${paths} path${paths === 1 ? '' : 's'}` : ''].filter(Boolean)
-      return { text: subject + (notes.length ? ` (${notes.join(', ')})` : ''), prose: true }
-    }
+    case 'git_commit':
+      // Subject line only - the rest of the message is prose the agent wrote out,
+      // and it is what renders as a literal \n\n when squeezed onto one line.
+      // --amend rides in the heading; the staging mode is in the body.
+      return { text: str('message').split('\n')[0].trim(), prose: true }
     case 'git_add': {
       // Only a fallback: a git_add with a readable path renders as a lowlit path
       // in the header (isPathSummary), with its ranges in the lineInfo slot.
@@ -900,9 +896,11 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
       return { text: specs.length === 1 ? specs[0].path : `${specs.length} files`, prose: specs.length !== 1 }
     }
     case 'git_reset': {
+      // The mode is in the heading (gitToolHeading), so the summary is just the
+      // operand: the target commit, or the paths being unstaged.
       const unstage = Array.isArray(obj.unstage) ? obj.unstage : []
-      if (unstage.length) return { text: `unstage ${unstage.join(', ')}`, prose: false }
-      return { text: `${str('mode') || 'soft'} -> ${str('to') || 'HEAD'}`, prose: false }
+      if (unstage.length) return { text: unstage.join(', '), prose: false }
+      return { text: str('to') || 'HEAD', prose: false }
     }
     case 'git_revert':
     case 'git_cherry_pick':
@@ -1054,6 +1052,25 @@ const GIT_TOOL_LABELS: Record<string, string> = {
   git_rebase: 'git rebase',
   git_rebase_continue: 'git rebase --continue',
   git_rebase_abort: 'git rebase --abort',
+}
+
+// gitToolHeading is GIT_TOOL_LABELS plus the flags this particular call used, so
+// the heading reads as the command that ran ("git reset --hard") instead of
+// making you open the card to find out which variant it was. Only flags that
+// change what the command DOES are promoted; the operands (a target commit, a
+// path list) stay in the summary and body.
+function gitToolHeading(tool: string, input: Record<string, unknown> | null): string {
+  const label = GIT_TOOL_LABELS[tool] ?? tool
+  if (!input) return label
+  if (tool === 'git_reset') {
+    // The path form (`reset -- <paths>`) takes no mode; only the HEAD-moving form
+    // does, and there soft is git's default.
+    if (Array.isArray(input.unstage) && input.unstage.length > 0) return label
+    const mode = typeof input.mode === 'string' && input.mode ? input.mode : 'soft'
+    return `${label} --${mode}`
+  }
+  if (tool === 'git_commit' && input.amend === true) return `${label} --amend`
+  return label
 }
 
 function displayToolName(name: string): string {
@@ -1991,52 +2008,57 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
   const note = 'text-[11px] text-stone-500 dark:text-stone-400'
   const sha = (value: string) => <span className="font-mono text-[11px] text-stone-600 dark:text-stone-300">{value}</span>
 
+  // A "- " bulleted path row. LowlitPath is a FRAGMENT of two spans (dir + name),
+  // so it must sit inside its own element: dropping it straight into a flex row
+  // makes the gap apply BETWEEN the directory and the filename.
+  const bullet = (key: string, body: ReactNode) => (
+    <div key={key} className="flex items-baseline gap-1.5">
+      <span className="select-none text-stone-400 dark:text-stone-500">-</span>
+      {body}
+    </div>
+  )
+
   if (tool === 'git_commit') {
     const paths = strs('paths')
+    // What the commit captured, stated as fact. Not advice: the reader is looking
+    // at something that already happened, and the agent is not the audience.
     const staging = input.staged === true
-      ? 'Commits the index as it already stands - stages nothing further'
+      ? 'Committed the already-staged changes; nothing else was staged'
       : paths.length > 0
-        ? 'Stages only the paths below'
-        : 'Stages all changes, tracked and untracked (git add -A)'
+        ? 'Staged only the paths below, then committed'
+        : 'Staged every change, tracked and untracked'
     return (
       <div className="space-y-1.5">
-        <div className={note}>
-          {staging}
-          {input.amend === true && <span> &middot; amends the previous commit</span>}
-        </div>
+        <div className={note}>{staging}</div>
         <LabeledField label="Message">
           <pre className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
             {str('message')}
           </pre>
         </LabeledField>
         {paths.length > 0 && (
-          <LabeledField label={paths.length === 1 ? 'Path' : 'Paths'}>
-            <div className="space-y-0.5">{paths.map((p) => <div key={p}><LowlitPath path={path(p)} /></div>)}</div>
-          </LabeledField>
+          <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
         )}
       </div>
     )
   }
 
   if (tool === 'git_add') {
+    // Multi-file only - a single-file add says everything in its header, so the
+    // card hides this panel entirely rather than repeating it (see gitAddSimple).
     const specs = gitAddSpecs(input)
     return (
-      <div className="space-y-1.5">
-        <div className={note}>
-          {specs.some((s) => s.lines.length > 0)
-            ? 'Stages only the listed lines - commit with git_commit staged to keep the split'
-            : 'Stages these files into the index without committing'}
-        </div>
-        <div className="space-y-0.5">
-          {specs.map((s) => (
-            <div key={s.path} className="flex items-baseline gap-1.5">
+      <div className="space-y-0.5">
+        {specs.map((s) =>
+          bullet(
+            s.path,
+            <span>
               <LowlitPath path={path(s.path)} />
               {s.lines.length > 0 && (
-                <span className="font-mono text-[10px] text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+                <span className="ml-1.5 font-mono text-[10px] text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
               )}
-            </div>
-          ))}
-        </div>
+            </span>,
+          ),
+        )}
       </div>
     )
   }
@@ -2046,20 +2068,20 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
     if (unstage.length > 0) {
       return (
         <div className="space-y-1.5">
-          <div className={note}>Unstages these paths - HEAD does not move</div>
-          <div className="space-y-0.5">{unstage.map((p) => <div key={p}><LowlitPath path={path(p)} /></div>)}</div>
+          <div className={note}>Unstaged these paths; the branch did not move</div>
+          <div className="space-y-0.5">{unstage.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
         </div>
       )
     }
     const mode = str('mode') || 'soft'
     const modeNote: Record<string, string> = {
-      soft: 'keeps your changes staged',
-      mixed: 'keeps your changes, unstaged',
-      hard: 'DISCARDS uncommitted changes',
+      soft: 'changes kept, still staged',
+      mixed: 'changes kept, unstaged',
+      hard: 'uncommitted changes discarded',
     }
     return (
       <div className={note}>
-        Moves the branch to {sha(str('to') || 'HEAD')} &middot; {mode} - {modeNote[mode] ?? mode}
+        Moved the branch to {sha(str('to') || 'HEAD')} &middot; {modeNote[mode] ?? mode}
       </div>
     )
   }
@@ -2067,9 +2089,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
   if (tool === 'git_revert' || tool === 'git_cherry_pick') {
     return (
       <div className={note}>
-        {tool === 'git_revert' ? 'Reverts ' : 'Applies '}
-        {sha(str('commit'))}
-        {tool === 'git_revert' ? ' with a new commit that undoes it' : ' onto your branch as a new commit'}
+        {tool === 'git_revert' ? <>Added a new commit undoing {sha(str('commit'))}</> : <>Applied {sha(str('commit'))} as a new commit</>}
       </div>
     )
   }
@@ -2078,17 +2098,18 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
     const plan = Array.isArray(input.plan) ? input.plan : []
     return (
       <div className="space-y-1.5">
-        <div className={note}>Rewrites your branch above {sha(str('base'))}</div>
+        <div className={note}>Rewrote {plan.length} commit{plan.length === 1 ? '' : 's'} above {sha(str('base'))}</div>
         <div className="space-y-0.5">
           {plan.map((raw, index) => {
             const step = (raw ?? {}) as Record<string, unknown>
             const message = typeof step.message === 'string' ? step.message.split('\n')[0] : ''
-            return (
-              <div key={`${String(step.commit)}:${index}`} className="flex items-baseline gap-1.5 text-[11px]">
+            return bullet(
+              `${String(step.commit)}:${index}`,
+              <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
                 <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
                 {sha(String(step.commit ?? ''))}
                 {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
-              </div>
+              </span>,
             )
           })}
         </div>
@@ -2326,17 +2347,20 @@ const ToolCard = memo(function ToolCard({
   const mem = isRead ? memoryName(readPath) : null
   // The bare git_* name for a Hydra git tool ('' for anything else).
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(item.name)?.[1] ?? ''
+  // A single-file git_add's subject is a file, so it gets the same lowlit-path
+  // treatment as a Read/Edit rather than a flat monospace run - its path just
+  // lives one level down, in files[].path. A multi-file add keeps the plain "N
+  // files" summary instead: listing every path here overflows the header, and
+  // the body's bulleted list is where they belong.
+  const gitAddSpecList = gitTool === 'git_add' && input ? gitAddSpecs(input) : []
+  const gitAddPaths = gitAddSpecList.length === 1 ? [gitAddSpecList[0].path] : []
   // Read's "lines N-M" slot doubles as git_add's staged line ranges: the path
   // renders lowlit like any other file, so the ranges ride alongside it rather
   // than forcing the whole summary back into monospace.
-  const lineInfo = isRead
-    ? readLineInfo(input)
-    : gitTool === 'git_add' && input
-      ? (() => {
-          const lines = gitAddSpecs(input).flatMap((s) => s.lines)
-          return lines.length > 0 ? `lines ${lines.join(', ')}` : ''
-        })()
-      : ''
+  // Only for the single-file form: ranges pooled across several files would read
+  // as one list belonging to none of them.
+  const gitAddLines = gitAddSpecList.length === 1 ? gitAddSpecList[0].lines : []
+  const lineInfo = isRead ? readLineInfo(input) : gitAddLines.length > 0 ? `lines ${gitAddLines.join(', ')}` : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -2385,10 +2409,6 @@ const ToolCard = memo(function ToolCard({
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
-  // A git_add's subject is a file too, so it gets the same lowlit-path treatment
-  // as a Read/Edit rather than a flat monospace run - its path just lives one
-  // level down, in files[].path.
-  const gitAddPaths = gitTool === 'git_add' && input ? gitAddSpecs(input).map((s) => s.path) : []
   const isPathSummary =
     !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryPaths = isFileChanges
@@ -2404,7 +2424,10 @@ const ToolCard = memo(function ToolCard({
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
   // its Command panel unlabelled (item 13).
   const emptyInput = input == null || Object.keys(input).length === 0
-  const hideInput = simpleRead || emptyInput
+  // A single-file git_add is the same case as a plain Read: its header already
+  // carries the path and the line ranges, so the panel would only repeat them.
+  const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
+  const hideInput = simpleRead || emptyInput || gitAddSimple
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -2468,7 +2491,7 @@ const ToolCard = memo(function ToolCard({
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : displayToolName(item.name)}</span>
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
@@ -2568,7 +2591,7 @@ const ToolCard = memo(function ToolCard({
                 />
               ) : isTaskTool && input ? (
                 <TaskToolFields input={input} serif={serif} />
-              ) : gitTool && input ? (
+              ) : gitTool && input && !hideInput ? (
                 <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />

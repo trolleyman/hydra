@@ -987,11 +987,13 @@ func simTestRunners(id string) []api.TestRunResult {
 			Cases: &[]api.TestCase{
 				// Scope levels are vitest describe blocks → ScopeKinds "module".
 				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
-				// This one's message carries ANSI, as a real runner's does (the dimmed
-				// "$ <command>" echo mage prints, go test's red FAIL). The case message
-				// renders through AnsiText, so the colour survives and the escape bytes
-				// never reach the reader as literal "[0m[2m[35m" garbage.
-				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("\x1b[2m\x1b[35m$ \x1b[0m\x1b[2m\x1b[1mgo test ./internal/auth/\x1b[0m\n\x1b[31m--- FAIL: TestGraceWindow\x1b[0m (0.01s)\n    \x1b[2mrotation_test.go:63:\x1b[0m TypeError: currentKid is not a function\n\x1b[31mFAIL\x1b[0m\texit=1")},
+				// This one's message carries ANSI, as a real runner's does (vitest
+				// colours the error class red and dims the stack frame). It renders
+				// through AnsiText, so the colour survives and the escape bytes never
+				// reach the reader as literal "[0m[2m[35m" garbage. Keep it shaped like
+				// a genuine assertion for THIS file - a command echo or a suite summary
+				// belongs in the build log, not on a single case.
+				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("\x1b[31mTypeError\x1b[0m: \x1b[1mcurrentKid\x1b[0m is not a function\n  \x1b[2mat token-service.ts:21:14\x1b[0m\n  \x1b[2mat rotation.test.ts:63:11\x1b[0m")},
 				{Name: "blends frames", Status: api.TestCasePassed, Path: ptr("diff/onion.test.ts"), Scope: ptr([]string{"onion skin"}), ScopeKinds: ptr([]string{"module"}), DurationMs: ptr(int64(5))},
 				{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 			},
@@ -3304,6 +3306,13 @@ var simChatEvents = []string{
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitpick","content":"cherry-pick of 0a5501ec hit conflicts in internal/heads/heads.go, internal/tui/model.go and was aborted - your branch is unchanged.\nAuto-merging internal/heads/heads.go\nCONFLICT (content): Merge conflict in internal/heads/heads.go\nAuto-merging internal/tui/model.go\nCONFLICT (content): Merge conflict in internal/tui/model.go\nerror: could not apply 0a5501ec... use slug as agent ID instead of random characters","is_error":true}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_gitreset","content":[{"type":"tool_use","id":"toolu_sim_gitreset","name":"mcp__hydra__git_reset","input":{"to":"HEAD~1","mode":"mixed"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitreset","content":"Reset (mixed) hydra/retry-uploads to HEAD~1 (4f2ab19c)."}]}}`,
+	// A multi-file git_add (the single-file form above hides its panel, since the
+	// header already says everything) and a rebase plan - the two cards whose
+	// bodies are lists rather than a sentence.
+	`{"type":"assistant","message":{"id":"msg_sim_gitadd2","content":[{"type":"tool_use","id":"toolu_sim_gitadd2","name":"mcp__hydra__git_add","input":{"files":[{"path":"internal/artifacts/upload.go"},{"path":"internal/artifacts/backoff.go"},{"path":"internal/artifacts/upload_test.go","ranges":[[40,58]]}]}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitadd2","content":"Staged: internal/artifacts/upload.go, internal/artifacts/backoff.go, internal/artifacts/upload_test.go (lines 40-58)"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_gitrebase","content":[{"type":"tool_use","id":"toolu_sim_gitrebase","name":"mcp__hydra__git_rebase","input":{"base":"HEAD~3","plan":[{"commit":"4f2ab19c","action":"reword","message":"Retry uploads with jittered exponential backoff"},{"commit":"9c1d0e77","action":"fixup"},{"commit":"b3e5a210","action":"pick"}]}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitrebase","content":"Rebased 3 commits above HEAD~3 on hydra/retry-uploads (now at 7d41c8ba)."}]}}`,
 	// A queued message consumed INTO the running turn (queue-operation "remove"
 	// path): recorded only as this queued_command attachment - no plain user
 	// event exists - so the chat must rebuild the user bubble from it on replay.
