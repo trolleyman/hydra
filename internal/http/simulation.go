@@ -4925,13 +4925,30 @@ const simAskQuestionInput = `{"questions":[` +
 	`{"label":"Hot reload","description":"Watch the files and re-apply without a restart."},` +
 	`{"label":"Secrets interpolation","description":"Expand ${VAR} from the process environment."}]}]}`
 
-// simAskEvents is the canned history for agent-ask: the head asked a native
-// AskUserQuestion (tool_use + its paired can_use_tool control_request) and is
-// parked waiting for the answer, so the page renders a live, answerable
-// question card.
+// simExpiredQuestionInput is an EARLIER question in agent-ask's history that
+// never got an answer: the turn behind it ended first (switching model
+// mid-question aborts the turn), which is what kills the CLI's control_request.
+// Its request_id replays with the transcript forever, so this is the case that
+// must render as an expired card rather than a live one.
+const simExpiredQuestionInput = `{"questions":[` +
+	`{"question":"Where should the override file live?","header":"Location","multiSelect":false,"options":[` +
+	`{"label":"Next to config.toml","description":"Same directory, discovered by name."},` +
+	`{"label":"Under .hydra/local/","description":"Alongside the other generated state."}]}]}`
+
+// simAskEvents is the canned history for agent-ask: an expired question from an
+// abandoned turn, then a native AskUserQuestion (tool_use + its paired
+// can_use_tool control_request) the head is parked waiting on - so the page
+// renders one dead card and one live, answerable one.
 var simAskEvents = []string{
 	`{"type":"system","subtype":"init","session_id":"sim-ask","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentAskPrompt + `"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_0","content":[{"type":"text","text":"One thing before I start:"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_0","content":[{"type":"tool_use","id":"toolu_ask_0","name":"AskUserQuestion","input":` + simExpiredQuestionInput + `}]}}`,
+	`{"type":"control_request","request_id":"sim-ask-req-0","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":` + simExpiredQuestionInput + `,"tool_use_id":"toolu_ask_0","requires_user_interaction":true}}`,
+	// The turn ends with the question still unanswered - from here on nothing
+	// will ever read a control_response quoting sim-ask-req-0.
+	`{"type":"result","subtype":"success","is_error":false,"duration_ms":9400,"result":""}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Never mind that - just pick something sensible and carry on."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"thinking","thinking":"The loader currently reads one config.toml. Layering strategy and scope of the first cut are product decisions - ask instead of guessing."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area. First, a sketch of the override file so we have something concrete to talk about:"}]}}`,
 	// A Write tool call: its content renders as a numbered, syntax-highlighted

@@ -276,8 +276,10 @@ type ChatItem =
   | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown; editPatch?: EditHunk[]; cwdAfter?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
-  // result is the tool_result once answered.
-  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; uuid?: string }
+  // result is the tool_result once answered. expired: the turn that raised the
+  // question ended without an answer, so that channel is gone (see
+  // expireQuestions) - the card stays but answers it as a plain message.
+  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; expired?: boolean; uuid?: string }
   | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
   // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
   // no Task card to fold into and renders as a standalone card in the flow. The
@@ -4237,11 +4239,17 @@ function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected
 function QuestionCard({
   specs,
   disabled,
+  expired,
   answeredText,
   onSubmit,
 }: {
   specs: QuestionSpec[]
   disabled: boolean
+  // The turn that asked ended without an answer, so the CLI is no longer
+  // listening on the control channel. The card stays fillable - onSubmit posts
+  // the answers as a normal message instead - but says so, rather than offering
+  // a Submit that quietly goes nowhere.
+  expired?: boolean
   // Set once the head has recorded an answer (the tool_result text) - renders
   // the card settled even across a reconnect, where local state is lost.
   answeredText?: string
@@ -4442,6 +4450,12 @@ function QuestionCard({
           </div>
         </div>
       ))}
+      {expired && !answered && (
+        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+          This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
+          back as an ordinary message instead.
+        </div>
+      )}
       <div className="flex items-center justify-end gap-2">
         {answeredText != null && (
           <span className="min-w-0 truncate text-[11px] italic text-stone-400 dark:text-stone-500">{answeredText}</span>
@@ -4457,7 +4471,15 @@ function QuestionCard({
                 : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
           }`}
         >
-          {answered ? 'Answered' : specs.length > 1 ? 'Submit all' : 'Submit'}
+          {expired
+            ? submitted
+              ? 'Sent'
+              : 'Send as message'
+            : answered
+              ? 'Answered'
+              : specs.length > 1
+                ? 'Submit all'
+                : 'Submit'}
         </button>
       </div>
     </div>
@@ -4849,7 +4871,12 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         else if (block.type === 'tool_use' && block.id) {
           const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
-          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+          // A page of older history is settled by definition, so a question in
+          // it that still has no answer never got one and its request is long
+          // gone - mark it expired up front (this reducer carries no
+          // control_request state at all, so it could never be answered here
+          // anyway; the flag is what tells the card to say so).
+          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs, expired: true })
           else if (todos) { /* older plan state - the panel already shows the latest */ }
           // Task* ops fall through to a normal tool card (like any other tool);
           // only the panel state is latest-wins, and that is driven by the live
@@ -5408,11 +5435,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
   const isTurnRunningRef = useRef(isTurnRunning)
+  // Whether an unanswered question replayed from history could still be live.
+  // A head blocked on an AskUserQuestion is NOT "running": the elicitation
+  // fires a Notification hook that parks it in needs_input (see
+  // cli/trigger_hook.go), which is precisely the state a reload during a
+  // pending question lands in. Any other resting state means the turn behind
+  // the question is over and its answer channel with it (see expireQuestions).
+  const questionMayBeLiveRef = useRef(false)
   const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
+    questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
     smoothStreamRef.current = smoothStream
   })
 
@@ -6065,6 +6100,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         prev.some((it) => it.kind === 'tool' && it.result === undefined && !it.ended)
           ? prev.map((it) => (it.kind === 'tool' && it.result === undefined && !it.ended ? { ...it, ended: true } : it))
           : prev,
+      )
+    }
+
+    // expireQuestions kills the answer channel of every question card still
+    // waiting for one. The CLI's can_use_tool request lives only as long as the
+    // turn that raised it: end that turn with the question unanswered (a
+    // mid-question /model switch, an interrupt, a process restart) and a
+    // control_response quoting its request_id is silently discarded. The
+    // request_id itself is durable - it is replayed out of the stored
+    // interaction_requested event on every reload - so without this the dead
+    // card came back looking perfectly live, and "Submit" did nothing at all.
+    const expireQuestions = () => {
+      const stale = (it: ChatItem) => it.kind === 'question' && it.result === undefined && !it.expired
+      for (const it of pending) if (stale(it)) (it as Extract<ChatItem, { kind: 'question' }>).expired = true
+      setItems((prev) =>
+        prev.some(stale) ? prev.map((it) => (stale(it) ? { ...it, expired: true } : it)) : prev,
       )
     }
 
@@ -6727,6 +6778,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (changed) scheduleSubFlush()
           clearStream()
           endPendingTools()
+          // The turn is over, so any question it left unanswered can no longer
+          // be answered through the CLI (see expireQuestions).
+          expireQuestions()
           return
         }
         default:
@@ -7209,6 +7263,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
+          // Same for a question the history left unanswered, unless the head is
+          // still working or parked on needs_input: that (and only that) is a
+          // reload during a turn still blocked on the answer, where the
+          // request_id replayed with it is genuinely still pending. Any other
+          // unanswered question is from a turn that is long over - the turn-end
+          // path above only catches the ones whose `result` line made it into
+          // the replay window.
+          if (!questionMayBeLiveRef.current) expireQuestions()
           // A BACKGROUND sub-agent settles only off its <task-notification>. That
           // record lives in the main transcript, which the backfill replays
           // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification
@@ -8618,18 +8680,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
         return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
-      case 'question':
+      case 'question': {
+        // Its control_request channel dies with the turn that raised it, and
+        // the request_id outlives it in the transcript - so an expired card
+        // would otherwise still look answerable and swallow the answer (see
+        // expireQuestions). Expired, it stays fillable but sends the answers as
+        // an ordinary message, which is the only thing the agent can still read.
+        const expired = item.result == null && item.expired === true
         return (
           <QuestionCard
             specs={item.specs}
-            // Interactive only while its control_request channel is live; a
-            // question replayed from the transcript alone (the process has
-            // since restarted, killing the pending turn) renders inert.
-            disabled={!connected || item.requestId == null}
+            disabled={!connected || (!expired && item.requestId == null)}
+            expired={expired}
             answeredText={item.result}
-            onSubmit={(answers) => answerQuestion(item, answers)}
+            onSubmit={(answers) => (expired ? sendAnswersAsText(answers) : answerQuestion(item, answers))}
           />
         )
+      }
       case 'result':
         if (item.isError) {
           return (
