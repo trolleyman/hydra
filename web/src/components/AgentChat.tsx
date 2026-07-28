@@ -1731,6 +1731,13 @@ function modelDisplayLabel(model: string): string {
     if (lower.includes(m.id)) return m.label
   }
   for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
+  // A BARE alias. The CLI accepts `/model opus`, and then reports `opus` - which
+  // matches no entry above, because those deliberately carry full ids so the two
+  // Opus versions stay distinguishable. Without this the chip rendered the raw
+  // lowercase alias ("opus") next to labels that are all title case. The version
+  // is genuinely unknown here, so the label says "Opus" and does not guess one.
+  const bare: Record<string, string> = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable' }
+  if (bare[lower]) return bare[lower]
   return model.replace(/^claude-/, '')
 }
 
