@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { ChatPane, reduceHistoryEvents } from './AgentChat'
+import { ChatPane, reduceHistoryEvents, summarizeToolSearchQuery } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -233,4 +233,22 @@ describe('reduceHistoryEvents across page boundaries', () => {
     expect(link.orphans.size).toBe(0)
   })
 
+})
+
+// A ToolSearch card's header used to show the raw query, i.e. the wire tool name
+// with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
+describe('summarizeToolSearchQuery', () => {
+  it('renders a select: lookup as the bare tool names, MCP ones namespaced', () => {
+    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: false })
+    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, hydra::git_add', prose: false })
+  })
+
+  it('leaves a keyword search alone', () => {
+    expect(summarizeToolSearchQuery('notebook jupyter')).toEqual({ text: 'notebook jupyter', prose: true })
+    expect(summarizeToolSearchQuery('+slack send')).toEqual({ text: '+slack send', prose: true })
+  })
+
+  it('falls back to the raw query when select: names nothing', () => {
+    expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: false })
+  })
 })

@@ -914,6 +914,21 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
   }
 }
 
+// summarizeToolSearchQuery renders a ToolSearch query as the thing it looks up.
+// The `select:a,b` form is an exact list of tool names, and the wire spelling of
+// an MCP one (`mcp__hydra__git_commit`) is transport detail - it reads as
+// "hydra::git_commit", the same namespace::tool shape the card heading uses.
+// Any other query is a keyword search, i.e. words the agent typed, so it stays
+// verbatim and prose. The Raw view keeps the query as sent. (Exported for tests.)
+// eslint-disable-next-line react-refresh/only-export-components
+export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
+  const select = /^\s*select:(.*)$/.exec(query)
+  if (!select) return { text: query, prose: true }
+  const names = select[1].split(',').map((n) => n.trim()).filter(Boolean)
+  if (names.length === 0) return { text: query, prose: false }
+  return { text: names.map(mcpToolLabel).join(', '), prose: false }
+}
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
 // card, favouring the fields agent tools actually carry, and reports whether
 // the picked field is prose (see PROSE_INPUT_KEYS). name is the raw tool name,
@@ -923,6 +938,7 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
   if (gitTool) {
     const git = summarizeGitInput(gitTool[1], obj)
@@ -1073,9 +1089,17 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
   return label
 }
 
+// mcpToolLabel spells an MCP tool as "server::tool" - the wire name's `mcp__`
+// prefix and `__` separators are protocol noise. Anything that isn't an MCP
+// name is returned unchanged.
+function mcpToolLabel(name: string): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
+  return mcp ? `${mcp[1]}::${mcp[2]}` : name
+}
+
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcp[1]}::${mcp[2]}`
+  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcpToolLabel(name)}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 

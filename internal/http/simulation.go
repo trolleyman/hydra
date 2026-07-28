@@ -3294,6 +3294,11 @@ var simChatEvents = []string{
 	// The commit below uses staged:true, the mode that commits the partial index
 	// the git_add above built - the other modes re-stage whole files and would
 	// silently widen it.
+	// Loading a deferred tool's schema before calling it. The header shows what is
+	// being looked up, not the wire name: a `select:` list renders as the bare tool
+	// names with MCP ones as "hydra::git_add" (summarizeToolSearchQuery).
+	`{"type":"assistant","message":{"id":"msg_sim_toolsearch","content":[{"type":"tool_use","id":"toolu_sim_toolsearch","name":"ToolSearch","input":{"query":"select:mcp__hydra__git_add,mcp__hydra__git_commit","max_results":2}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_toolsearch","content":"Loaded 2 tool schemas."}]}}`,
 	`{"type":"assistant","timestamp":"2026-07-09T18:03:00.000Z","message":{"id":"msg_sim_gitadd","content":[{"type":"tool_use","id":"toolu_sim_gitadd","name":"mcp__hydra__git_add","input":{"files":[{"path":"internal/artifacts/upload.go","ranges":[[12,18]]}]}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_gitadd","content":"Staged: internal/artifacts/upload.go (lines 12-18)"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_gitcommit","content":[{"type":"tool_use","id":"toolu_sim_gitcommit","name":"mcp__hydra__git_commit","input":{"message":"Retry uploads with jittered exponential backoff\n\nPut now retries a failed upload up to maxAttempts times, sleeping a\njittered exponential delay between tries, and surfaces the last error\nonce every attempt is exhausted.","staged":true}}]}}`,
