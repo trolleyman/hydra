@@ -125,11 +125,18 @@ height (`h-7`/`h-8`, as the top-bar buttons do) if it isn't. Not for prose
 either - trimming a multi-line block collapses the leading between its lines.
 
 Applied at: the top-bar action buttons, the repository + diff file trees, the
-sidebar project path, the collapsible card headers (previews / services / tests)
-and the Settings section headings. Reach for it on any new icon+label row rather
-than nudging with `relative top-[Npx]` - a hardcoded nudge is tuned to whichever
-font happened to load when you measured it, and this UI's font stack resolves
-differently per OS.
+sidebar project path, the collapsible card headers (previews / services / tests),
+the Settings section headings, and the chat rows beside a `WorkSpark`.
+
+**Correct the label, never the icon.** Both work - trimming the text down and
+nudging the mark up land in the same place - but the trim derives the offset from
+the font's own cap height, where a `-mt-px` / `relative top-[Npx]` on the icon is
+a constant tuned to one size in whichever font happened to load when it was
+measured, and this UI's stack resolves differently per OS. So the icon stays
+honestly centred and the label carries the class. Note the trim needs LINE BOXES
+to act on: a flex container has none, so a label wrapper that is itself
+`flex items-center gap-*` must become an inline span (with the gap moved onto its
+separator) before the class does anything - see the chat result footer.
 
 ### No raw control bytes in source
 
