@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -36,6 +36,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
 import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
@@ -2783,8 +2784,18 @@ function SendMessageOutcome({
   )
 }
 
-// Per-tool icons for the card header; anything unlisted gets the wrench.
-const TOOL_ICONS: Record<string, typeof Wrench> = {
+// GitMark is git's own logo, which lucide does not carry - the simple-icons set
+// does (the same one the forge marks come from, see ProviderIcon). title=""
+// suppresses the SVG <title> ("Git") those marks render by default: that is a
+// native OS tooltip, and the card header it sits in is interactive.
+function GitMark({ className }: { className?: string }) {
+  return <SiGit className={className} title="" aria-hidden />
+}
+
+// Per-tool icons for the card header; anything unlisted gets the wrench. Typed
+// by the props actually passed below rather than as a lucide icon, so a
+// simple-icons mark (GitMark) fits the same map.
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Bash: SquareTerminal,
   Read: FileText,
   Edit: FilePen,
@@ -2802,14 +2813,14 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
   // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
   // gives no hint that the card rewrote the branch.
-  mcp__hydra__git_commit: GitCommitHorizontal,
-  mcp__hydra__git_add: GitCommitHorizontal,
-  mcp__hydra__git_reset: GitCommitHorizontal,
-  mcp__hydra__git_revert: GitCommitHorizontal,
-  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
-  mcp__hydra__git_rebase: GitCommitHorizontal,
-  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
-  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_commit: GitMark,
+  mcp__hydra__git_add: GitMark,
+  mcp__hydra__git_reset: GitMark,
+  mcp__hydra__git_revert: GitMark,
+  mcp__hydra__git_cherry_pick: GitMark,
+  mcp__hydra__git_rebase: GitMark,
+  mcp__hydra__git_rebase_continue: GitMark,
+  mcp__hydra__git_rebase_abort: GitMark,
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
@@ -8606,13 +8617,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     )
   }
 
-  // Insert text into the composer at the caret, as its own undo step - used for
-  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
-  // paired with the chip's own step, walks the whole paste back).
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" paste markers into the composer at the caret, as their
+  // own undo step, so a single Ctrl+Z removes them (and, paired with the chip's
+  // own step, walks the whole paste back). The text before the caret decides
+  // whether they need a leading space; they never carry a trailing one, so the
+  // caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
+    const insert = pasteMarkerText(names, input.slice(0, start))
     const caret = start + insert.length
     commit(
       (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
@@ -8632,7 +8646,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
