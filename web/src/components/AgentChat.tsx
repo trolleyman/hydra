@@ -4232,14 +4232,49 @@ const ANSWER_TAILS = ['. You can now continue with these answers in mind.', '. R
 // AskUserQuestion result produces, mirrored by the simulation). Matching those
 // labels back to option indices lets a replayed card highlight the chosen
 // options just as it did right after answering.
+// A question's notes, keyed by the row each belongs to: an option's index as a
+// string, or "other". A key being present is what makes the note box open, so
+// an empty string is a note being written and a missing key is no note at all.
+type NoteMap = Record<string, string>
+const noteKey = (at: number | 'other') => String(at)
+
+// The protocol carries ONE note per question, so several are merged into one
+// string as "<label>: <text>" segments (a single note stays plain, which is
+// what most answers are). splitNotes is the inverse, for a replayed card: it
+// looks for those labels at a segment boundary, and hands the whole string to
+// the last selected row if it can't find any - a note is display-only by then,
+// so a graceful miss beats a wrong split.
+const NOTE_JOIN = '; '
+function splitNotes(slots: { key: string; label: string }[], merged: string): NoteMap {
+  if (slots.length === 0 || merged === '') return {}
+  const fallback = () => ({ [slots[slots.length - 1].key]: merged })
+  if (slots.length === 1) return fallback()
+  const marks = slots
+    .map(({ key, label }) => {
+      if (merged.startsWith(label + ': ')) return { key, start: 0, text: label.length + 2 }
+      const at = merged.indexOf(NOTE_JOIN + label + ': ')
+      if (at === -1) return null
+      return { key, start: at, text: at + NOTE_JOIN.length + label.length + 2 }
+    })
+    .filter((m) => m !== null)
+    .sort((a, b) => a.start - b.start)
+  if (marks.length === 0) return fallback()
+  const out: NoteMap = {}
+  marks.forEach((m, i) => {
+    out[m.key] = merged.slice(m.text, i + 1 < marks.length ? marks[i + 1].start : merged.length)
+  })
+  return out
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function deriveAnswered(
   specs: QuestionSpec[],
   answeredText: string,
-): { selected: Set<number>[]; other: string[]; notes: string[] } {
+): { selected: Set<number>[]; other: string[]; notes: NoteMap[] } {
   const selected = specs.map(() => new Set<number>())
   const other = specs.map(() => '')
-  const notes = specs.map(() => '')
+  const notes: NoteMap[] = specs.map(() => ({}))
+  const merged = specs.map(() => '')
   // Where every question's entry begins, so a note - which runs to the end of
   // its entry - knows to stop at the next question rather than swallowing it.
   const starts = specs.map((q) => answeredText.indexOf(`"${q.question}"=`))
@@ -4267,7 +4302,7 @@ export function deriveAnswered(
         answeredText.length,
       ]
       const end = Math.min(...bounds)
-      notes[qi] = answeredText.slice(pos + NOTE_MARKER.length, end).replace(/,\s*$/, '').trim()
+      merged[qi] = answeredText.slice(pos + NOTE_MARKER.length, end).replace(/,\s*$/, '').trim()
     }
     // The labels were joined with ", " (see submit()). Consume the value left to
     // right, matching whole option labels (longest first, so a label that itself
@@ -4290,6 +4325,13 @@ export function deriveAnswered(
       }
     }
     if (extras.length) other[qi] = extras.join(', ')
+    // Now the selection is known, the merged note can be split back over the
+    // rows it came from, in the order submit() joined them.
+    const slots = [...selected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: q.options[oi].label }))
+    if (other[qi] !== '') slots.push({ key: noteKey('other'), label: other[qi] })
+    notes[qi] = splitNotes(slots, merged[qi])
   })
   return { selected, other, notes }
 }
@@ -4322,15 +4364,13 @@ export function QuestionCard({
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
-  // A free-text note that rides ALONGSIDE the picked option rather than
-  // replacing it ("Postgres, but keep the schema in one file") - the CLI's
+  // Free-text notes that ride ALONGSIDE the picked options rather than
+  // replacing them ("Postgres, but keep the schema in one file") - the CLI's
   // AskUserQuestion takes these as `annotations[question].notes` and renders
-  // them into the tool result next to the answer.
-  const [note, setNote] = useState<string[]>(() => specs.map(() => ''))
-  // Whether the note box is open, per question. Kept out of the way behind an
-  // "Add a note" link so the common case - just pick an option - stays a card
-  // of options.
-  const [noteOpen, setNoteOpen] = useState<boolean[]>(() => specs.map(() => false))
+  // them into the tool result next to the answer. One per picked row, so a
+  // multi-select can qualify each of its choices separately; they are merged
+  // into the single string the protocol carries on the way out.
+  const [notes, setNotes] = useState<NoteMap[]>(() => specs.map(() => ({})))
   // Whether the "Other" row is selected, per question. Explicit state (not
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
@@ -4361,11 +4401,11 @@ export function QuestionCard({
     selected.every((s) => s.size === 0) &&
     other.every((v) => v.trim() === '') &&
     otherSel.every((v) => !v) &&
-    note.every((v) => v.trim() === '')
+    notes.every((m) => Object.keys(m).length === 0)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
   const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
-  const showNote = derived && localEmpty ? derived.notes : note
+  const showNotes = derived && localEmpty ? derived.notes : notes
 
   // A note belongs with the choice it qualifies, so it trails whichever row you
   // picked rather than sitting at the foot of the card. Moving it is a FLIP:
@@ -4420,9 +4460,12 @@ export function QuestionCard({
       }),
     )
     // Picking a real option in a single-select takes over from "Other" (the
-    // typed text stays in the box, just deselected).
+    // typed text stays in the box, just deselected), and carries any note over
+    // with it - in a single-select there is only ever one answer for a note to
+    // belong to, so stranding it on the row you just moved off would lose it.
     if (!specs[qi].multiSelect) {
       setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+      moveNote(qi, noteKey(oi))
     }
   }
 
@@ -4435,24 +4478,56 @@ export function QuestionCard({
     setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
     if (next && !specs[qi].multiSelect) {
       setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+      moveNote(qi, noteKey('other'))
     }
   }
 
-  // A note on its own counts as answering: the CLI records it as
-  // `"<question>"=(no option selected) notes: ...`, so a Submit locked out
-  // until an option is picked would just be refusing to send something it
-  // handles fine.
-  const complete = specs.every(
-    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== '') || note[i].trim() !== '',
-  )
-
-  // The row a note belongs to: the last option picked, or "Other" when that is
-  // what is selected. Nothing picked means nothing to qualify, so no note.
-  function noteAnchor(qi: number): number | 'other' | null {
-    if (showOtherSel[qi]) return 'other'
-    const picked = [...showSelected[qi]]
-    return picked.length > 0 ? Math.max(...picked) : null
+  // Re-key a single-select's one note onto the row now holding the answer.
+  function moveNote(qi: number, to: string) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const from = Object.keys(m)
+        if (from.length === 0 || (from.length === 1 && from[0] === to)) return m
+        return { [to]: m[from[0]] }
+      }),
+    )
   }
+
+  function setNote(qi: number, at: number | 'other', value: string | null) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const next = { ...m }
+        if (value === null) delete next[noteKey(at)]
+        else next[noteKey(at)] = value
+        return next
+      }),
+    )
+  }
+
+  // Whether `at` is part of the answer, and so whether a note on it counts.
+  function rowPicked(qi: number, at: number | 'other') {
+    return at === 'other' ? showOtherSel[qi] : showSelected[qi].has(at)
+  }
+
+  // The rows carrying a note, in the order submit() merges them.
+  function notedSlots(qi: number) {
+    const slots = [...showSelected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: specs[qi].options[oi].label }))
+    if (showOtherSel[qi]) slots.push({ key: noteKey('other'), label: showOther[qi].trim() || 'Other' })
+    return slots.filter((s) => (showNotes[qi][s.key] ?? '').trim() !== '')
+  }
+
+  // A note now always belongs to a picked row, so answering means picking
+  // something - except for "Other" selected with only a note in it, which the
+  // CLI records as `(no option selected) notes: ...` and handles fine.
+  const complete = specs.every(
+    (_, i) =>
+      selected[i].size > 0 ||
+      (otherSel[i] && (other[i].trim() !== '' || (notes[i][noteKey('other')] ?? '').trim() !== '')),
+  )
 
   // The corner trigger that opens (or discards) the note on a row. Hidden until
   // the row is hovered or the trigger itself is focused, so an untouched card
@@ -4461,7 +4536,7 @@ export function QuestionCard({
   // keyboard.
   function noteTrigger(qi: number, at: number | 'other') {
     if (answered) return null
-    const open = noteAnchor(qi) === at && (noteOpen[qi] || showNote[qi] !== '')
+    const open = rowPicked(qi, at) && showNotes[qi][noteKey(at)] !== undefined
     return (
       <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top" className="absolute right-1 top-1">
         <button
@@ -4471,17 +4546,21 @@ export function QuestionCard({
             e.stopPropagation()
             snapshotRows(e.currentTarget)
             if (open) {
-              // Closing has to clear the text: a note left in state but out of
+              // Closing drops the note entirely: one left in state but out of
               // sight would still be submitted.
-              setNote((prev) => prev.map((p, i) => (i === qi ? '' : p)))
-              setNoteOpen((prev) => prev.map((v, i) => (i === qi ? false : v)))
+              setNote(qi, at, null)
               return
             }
-            // Opening from a row that is not the picked one picks it first, so
-            // the note lands where you asked for it.
+            // Opening from a row that is not picked picks it first, so the note
+            // lands where you asked for it. In a single-select that also moves
+            // any existing note here, which must not then be blanked.
             if (at === 'other') selectOther(e.currentTarget, qi)
             else if (!selected[qi].has(at)) toggleOption(e.currentTarget, qi, at)
-            setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))
+            setNotes((prev) =>
+              prev.map((m, i) =>
+                i !== qi || m[noteKey(at)] !== undefined ? m : { ...m, [noteKey(at)]: '' },
+              ),
+            )
           }}
           className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
             open ? 'opacity-100' : ''
@@ -4497,8 +4576,9 @@ export function QuestionCard({
   // and indented to the row's LABEL rather than its edge (ml-8 = the px-2.5
   // padding plus the dot and its gap), so it reads as part of what that option
   // says rather than as another row that happens to share the box.
-  function noteBody(qi: number) {
-    if (!noteOpen[qi] && showNote[qi] === '') return null
+  function noteBody(qi: number, at: number | 'other') {
+    const value = showNotes[qi][noteKey(at)]
+    if (value === undefined || !rowPicked(qi, at)) return null
     return (
       <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
         <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
@@ -4506,17 +4586,14 @@ export function QuestionCard({
             the same grid cell drives the height. */}
         <div className="grid min-w-0 flex-1">
           <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
-            {showNote[qi] + ' '}
+            {value + ' '}
           </span>
           <textarea
             rows={1}
-            autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
-            value={showNote[qi]}
+            autoFocus={value === '' && !answered}
+            value={value}
             onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              const v = e.target.value
-              setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
-            }}
+            onChange={(e) => setNote(qi, at, e.target.value)}
             onKeyDown={(e) => {
               // Enter submits, as in the "Other" box; shift+Enter is a newline,
               // which a note wants more often than an option label does.
@@ -4543,7 +4620,16 @@ export function QuestionCard({
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
-      if (note[i].trim()) annotations[q.question] = { notes: note[i].trim() }
+      // The protocol carries one note per question, so several are merged into
+      // "<label>: <text>" segments. A lone note stays plain - most answers have
+      // exactly one, and labelling it would only restate the answer.
+      const noted = notedSlots(i)
+      if (noted.length === 1) annotations[q.question] = { notes: notes[i][noted[0].key].trim() }
+      else if (noted.length > 1) {
+        annotations[q.question] = {
+          notes: noted.map((sl) => `${sl.label}: ${notes[i][sl.key].trim()}`).join(NOTE_JOIN),
+        }
+      }
     }
     if (!onSubmit(answers, annotations)) return
     if (expired) setSent(true)
@@ -4554,8 +4640,8 @@ export function QuestionCard({
     <div className="max-w-xl rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.03] p-3 space-y-3">
       {specs.map((q, qi) => {
         // The note lives INSIDE the row you picked, so a caveat is visibly part
-        // of the answer it qualifies rather than a separate thing below it.
-        const anchor = noteAnchor(qi)
+        // of the answer it qualifies rather than a separate thing below it - and
+        // a multi-select can carry one per pick.
         const rows: ReactNode[] = []
         const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
@@ -4594,7 +4680,7 @@ export function QuestionCard({
                     </span>
                   </button>
                   {noteTrigger(qi, oi)}
-                  {anchor === oi && noteBody(qi)}
+                  {noteBody(qi, oi)}
                 </div>
               )
             })
@@ -4673,7 +4759,7 @@ export function QuestionCard({
                   </div>
                   </div>
                   {noteTrigger(qi, 'other')}
-                  {anchor === 'other' && noteBody(qi)}
+                  {noteBody(qi, 'other')}
                 </div>
               )
             })()

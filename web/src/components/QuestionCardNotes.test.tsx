@@ -123,9 +123,10 @@ describe('QuestionCard note placement', () => {
 })
 
 // On a resume the card's local state is gone and only the tool_result text
-// survives, so the note has to be recoverable from it - including knowing where
-// it stops, since a note is the last thing in its entry and the CLI wraps the
-// whole list in a sentence.
+// survives, so the notes have to be recoverable from it - including knowing
+// where each stops, since a note is the last thing in its entry, the CLI wraps
+// the whole list in a sentence, and several notes on one question arrive merged
+// into a single string.
 describe('deriveAnswered with notes', () => {
   const TWO = [
     { question: 'Which database?', multiSelect: false, options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
@@ -136,16 +137,32 @@ describe('deriveAnswered with notes', () => {
     const { selected, notes } = deriveAnswered(
       TWO,
       'The user answered: "Which database?"="Postgres" notes: but keep the schema in one file, ' +
-        '"Which extras?"="Schema validation, Hot reload" notes: only if it is cheap. ' +
+        '"Which extras?"="Schema validation, Hot reload" notes: ' +
+        'Schema validation: only if it is cheap; Hot reload: after the config lands. ' +
         'Read the answers carefully - they may request clarification, changes, or that you not proceed - and follow what they actually say.',
     )
     expect([...selected[0]]).toEqual([0])
     expect([...selected[1]]).toEqual([0, 1])
-    expect(notes[0]).toBe('but keep the schema in one file')
-    expect(notes[1]).toBe('only if it is cheap')
+    // A lone note is stored plain, against the one option it belongs to.
+    expect(notes[0]).toEqual({ '0': 'but keep the schema in one file' })
+    // Several are split back over the options whose labels tagged them.
+    expect(notes[1]).toEqual({ '0': 'only if it is cheap', '1': 'after the config lands' })
   })
 
-  it('recovers a note left on a question with no option picked', () => {
+  // A merged note whose labels can't be found (hand-edited, or written by an
+  // older client) goes to the last picked row whole rather than being dropped.
+  it('falls back to the last picked row when no labels are found', () => {
+    const { notes } = deriveAnswered(
+      TWO,
+      'The user answered: "Which extras?"="Schema validation, Hot reload" notes: only if they are cheap. ' +
+        'Read the answers carefully - and follow what they actually say.',
+    )
+    expect(notes[1]).toEqual({ '1': 'only if they are cheap' })
+  })
+
+  // With nothing picked there is no row for a note to live in, so the card
+  // shows none - the raw result line under it still carries the text.
+  it('has nowhere to put a note when no option was picked', () => {
     const { selected, other, notes } = deriveAnswered(
       TWO,
       'The user answered: "Which database?"=(no option selected) notes: neither - use the file store, ' +
@@ -153,9 +170,9 @@ describe('deriveAnswered with notes', () => {
     )
     expect(selected[0].size).toBe(0)
     expect(other[0]).toBe('')
-    expect(notes[0]).toBe('neither - use the file store')
+    expect(notes[0]).toEqual({})
     expect([...selected[1]]).toEqual([1])
-    expect(notes[1]).toBe('')
+    expect(notes[1]).toEqual({})
   })
 
   // The note-less result shape (and its cheerier closing sentence) still parses.
@@ -166,6 +183,80 @@ describe('deriveAnswered with notes', () => {
         'You can now continue with these answers in mind.',
     )
     expect([...selected[0]]).toEqual([1])
-    expect(notes).toEqual(['', ''])
+    expect(notes).toEqual([{}, {}])
+  })
+})
+
+// A multi-select answer is a SET of choices, and each can want its own caveat.
+// The protocol carries one note per question, so several are merged into
+// "<label>: <text>" segments on the way out.
+describe('QuestionCard notes on a multi-select', () => {
+  const MULTI = [
+    {
+      question: 'Which extras?',
+      multiSelect: true,
+      options: [{ label: 'Schema validation' }, { label: 'Hot reload' }, { label: 'Secrets interpolation' }],
+    },
+  ]
+  const noteBoxes = () => screen.getAllByLabelText('Note to go with your answer')
+
+  it('keeps a separate note per selected option and merges them, labelled', () => {
+    const onSubmit = vi.fn(() => true)
+    render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
+
+    fireEvent.click(trigger('Schema validation'))
+    fireEvent.change(noteBoxes()[0], { target: { value: 'only if it is cheap' } })
+    fireEvent.click(trigger('Hot reload'))
+    expect(noteBoxes()).toHaveLength(2)
+    fireEvent.change(noteBoxes()[1], { target: { value: 'after the config lands' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      { 'Which extras?': 'Schema validation, Hot reload' },
+      { 'Which extras?': { notes: 'Schema validation: only if it is cheap; Hot reload: after the config lands' } },
+    )
+  })
+
+  // One note needs no label - it would only restate the answer.
+  it('sends a lone note unlabelled', () => {
+    const onSubmit = vi.fn(() => true)
+    render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
+
+    fireEvent.click(screen.getByText('Hot reload'))
+    fireEvent.click(trigger('Hot reload'))
+    fireEvent.change(noteBoxes()[0], { target: { value: 'after the config lands' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      { 'Which extras?': 'Hot reload' },
+      { 'Which extras?': { notes: 'after the config lands' } },
+    )
+  })
+
+  // Unchecking an option takes its note out of the answer, but keeps the text
+  // in case the option comes back - it is only dropped by the X.
+  it('drops an unchecked option note from the answer, and restores it on re-check', () => {
+    const onSubmit = vi.fn(() => true)
+    render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
+
+    fireEvent.click(trigger('Schema validation'))
+    fireEvent.change(noteBoxes()[0], { target: { value: 'only if it is cheap' } })
+    fireEvent.click(trigger('Hot reload'))
+    fireEvent.change(noteBoxes()[1], { target: { value: 'after the config lands' } })
+
+    // Unchecked: its note goes out of sight...
+    fireEvent.click(screen.getByText('Schema validation'))
+    expect(noteBoxes()).toHaveLength(1)
+    // ...and comes back with its text when the option does.
+    fireEvent.click(screen.getByText('Schema validation'))
+    expect(noteBoxes()).toHaveLength(2)
+    expect((noteBoxes()[0] as HTMLTextAreaElement).value).toBe('only if it is cheap')
+
+    fireEvent.click(screen.getByText('Schema validation'))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    expect(onSubmit).toHaveBeenCalledWith(
+      { 'Which extras?': 'Hot reload' },
+      { 'Which extras?': { notes: 'after the config lands' } },
+    )
   })
 })
