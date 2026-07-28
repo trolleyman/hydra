@@ -29,13 +29,18 @@ export type TileTone =
   | 'red'
   | 'neutral'
 
-// Shared geometry for the tile's glyph. A lucide mark is drawn at stroke-width 2
-// by default, which is tuned for a dark line on a light background; reversed out
-// in white on a saturated fill the same stroke reads thin and the mark loses its
-// shape at 18px. 3 puts the weight back without turning the glyph into a
-// blob. Applied to the tile rather than to each icon so every call site gets it
-// - a tile's glyph arrives as `children` from a dozen different places.
-export const TILE_GLYPH = '[&_svg]:[stroke-width:3]'
+// Shared geometry for the tile's glyph.
+//
+// Lucide draws at stroke-width 2, and the tiles briefly ran at 3 to carry the
+// white-on-saturated reverse. That read heavier than every OTHER lucide mark in
+// the UI - the top-bar buttons, the menu rows, the chat - so a tile glyph and a
+// button glyph two inches apart looked like different icon sets. Back to 2: one
+// stroke weight everywhere is worth more than the small legibility gain, and the
+// solid fill already does the work of making the tile read.
+//
+// Kept as a shared constant even though it now matches the default, so the tile
+// has one place to change its glyph treatment if it ever needs to again.
+export const TILE_GLYPH = '[&_svg]:[stroke-width:2]'
 
 export const TILE_TONE: Record<TileTone, string> = {
   green:
