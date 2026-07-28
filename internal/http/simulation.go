@@ -1024,7 +1024,7 @@ func simTestRunners(id string) []api.TestRunResult {
 			{
 				Name: "go", Status: api.TestStatusRunning,
 				Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
-				StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"),
+				StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"), Format: ptr("stdout"),
 				Log: &[]api.ArtifactLogLine{
 					{Text: "$ vitest run --reporter=dot", Stream: "stdout"},
 					{Text: "✓ internal/heads/heads.test.ts (31)", Stream: "stdout"},

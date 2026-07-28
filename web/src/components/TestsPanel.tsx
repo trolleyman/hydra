@@ -23,6 +23,7 @@ import { buildRepoSplat } from '../lib/repoSplat'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import { AnsiText } from './AnsiText'
+import { ElapsedTime } from './ElapsedTime'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -769,10 +770,11 @@ function liveDenominator(runner: TestRunResult): number {
 
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
+  const running = runner.status === 'running'
   // items-center (not items-baseline): the header height must not depend on the
-  // summary's contents, or it grows by a pixel when a settled run adds its mono
-  // `. 4.2s . junit` suffix - a visible layout jump the moment the loading bar
-  // finishes. Centering pins every child to the row's natural height.
+  // summary's contents, or it grows by a pixel when a settled run swaps in its
+  // mono `. 4.2s . junit` suffix - a visible layout jump the moment the loading
+  // bar finishes. Centering pins every child to the row's natural height.
   return (
     <span className="flex items-center gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
@@ -810,8 +812,16 @@ function Summary({ runner }: { runner: TestRunResult }) {
           {runner.skipped}
         </span>
       ) : null}
+      {/* Time + format suffix, identical in shape while running and once settled:
+          a settled run shows its exact wall-clock, an in-flight one the elapsed
+          time ticking up from started_at (so the row doesn't gain a whole new
+          field the moment it finishes - the seconds just stop moving and gain a
+          decimal). The format is the backend's business: it only labels an
+          in-flight run when the runner's configured type pins it (stdout). */}
       {runner.duration_ms != null && runner.duration_ms > 0 ? (
         <span className="font-mono text-xs text-gray-400">· {(runner.duration_ms / 1000).toFixed(1)}s</span>
+      ) : running && runner.started_at ? (
+        <span className="font-mono text-xs text-gray-400">· <ElapsedTime startedAt={runner.started_at} /></span>
       ) : null}
       {runner.format ? <span className="font-mono text-xs text-gray-400">· {runner.format}</span> : null}
     </span>

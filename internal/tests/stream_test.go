@@ -386,3 +386,59 @@ func TestGenerateStreamingNoMarkersFallsBack(t *testing.T) {
 		t.Errorf("report = %+v, want passing via exit fallback", rep)
 	}
 }
+
+// An in-flight run reports the format its config already pins, so the tests
+// panel can render the same "time + format" suffix while running as it does once
+// the run settles. Only a streaming runner qualifies: a file-based one's format
+// isn't known until its report dir is parsed.
+func TestRunningReportCarriesConfiguredFormat(t *testing.T) {
+	workDir := t.TempDir()
+	initGitRepo(t, workDir)
+	m := NewManager(t.TempDir())
+	events, unsub := m.Subscribe()
+	defer unsub()
+
+	v := Version{WorktreeDir: workDir}
+	// Both runners block until the test releases them, so the first Get is
+	// guaranteed to observe a running snapshot rather than a settled report.
+	gate := filepath.Join(t.TempDir(), "gate")
+	wait := `while [ ! -f ` + gate + ` ]; do sleep 0.01; done`
+
+	streamed := config.TestScript{Name: "streamed", UnsafeHost: true, Type: "stdout", Command: wait}
+	fileBased := config.TestScript{Name: "file-based", UnsafeHost: true, Command: wait}
+
+	running, err := m.Get(streamed, v)
+	if err != nil {
+		t.Fatalf("Get(streamed): %v", err)
+	}
+	if running.Status != StatusRunning || running.Format != "stdout" {
+		t.Errorf("streaming running report = status %q format %q, want running/stdout", running.Status, running.Format)
+	}
+	if running.StartedAt <= 0 {
+		t.Errorf("running report has no StartedAt: %+v", running)
+	}
+	// The in-flight branch (a second Get while the first still runs) must agree.
+	if again, err := m.Get(streamed, v); err != nil {
+		t.Fatalf("second Get(streamed): %v", err)
+	} else if again.Status != StatusRunning || again.Format != "stdout" {
+		t.Errorf("in-flight re-Get = status %q format %q, want running/stdout", again.Status, again.Format)
+	}
+
+	other, err := m.Get(fileBased, v)
+	if err != nil {
+		t.Fatalf("Get(file-based): %v", err)
+	}
+	if other.Status != StatusRunning || other.Format != "" {
+		t.Errorf("file-based running report = status %q format %q, want running with no format", other.Status, other.Format)
+	}
+
+	writeFile(t, gate, "go")
+	settled := 0
+	for ev := range events {
+		if ev.Kind == "settled" {
+			if settled++; settled == 2 {
+				break
+			}
+		}
+	}
+}
