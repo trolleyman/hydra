@@ -58,11 +58,10 @@ func (s *Server) HandleProjectIcon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Go's mime table doesn't always map .svg; set it explicitly so browsers
-	// render it via <img>. ServeContent leaves an already-set Content-Type alone.
-	if strings.EqualFold(filepath.Ext(full), ".svg") {
-		w.Header().Set("Content-Type", "image/svg+xml")
-	}
+	// setBlobFileHeaders pins the Content-Type (Go's mime table doesn't always map
+	// .svg, and browsers need it to render one via <img> under nosniff).
+	// ServeContent leaves an already-set Content-Type alone.
+	setBlobFileHeaders(w, f, full)
 	// The URL is stable while the icon value is, but the file it points at can be
 	// swapped underneath it - don't let a stale copy stick around.
 	w.Header().Set("Cache-Control", "no-cache")

@@ -69,26 +69,6 @@ func agentFilePaths(projectRoot, worktree, tmpDir, raw string) []rootedPath {
 	return out
 }
 
-// containedIn reports whether full is root or sits underneath it, comparing the
-// symlink-resolved forms of both. Resolving means a symlink inside the root that
-// points outside it is rejected rather than followed, and a root that is itself
-// reached through a symlink (macOS /tmp -> /private/tmp) still matches.
-func containedIn(root, full string) bool {
-	r, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return false
-	}
-	f, err := filepath.EvalSymlinks(full)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(r, f)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // resolveAgentFile returns the host path to serve for an agent-emitted path, or
 // "" when it names nothing servable.
 func resolveAgentFile(projectRoot, worktree, tmpDir, raw string) string {
@@ -149,11 +129,7 @@ func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// An SVG served from our own origin would otherwise run its scripts if the
-	// user opened the blob URL directly, so lock the response down: nothing may
-	// load, and the sandbox directive kills script execution.
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	setBlobFileHeaders(w, f, full)
 	// Agent scratch files get rewritten in place (a re-run of the same script),
 	// so revalidate rather than cache - ServeContent's ETag/If-Modified-Since
 	// handling keeps that cheap.
