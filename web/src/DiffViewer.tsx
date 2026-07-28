@@ -1758,10 +1758,16 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   }, [visible, computePos, content])
 
   // The position is captured once on show, so it goes stale the moment the
-  // page scrolls. Dismiss on scroll rather than leave a detached box floating.
+  // page scrolls. Dismiss on scroll rather than leave a detached box floating -
+  // except when the scroll is the BOX's own: this listener is capture-phase, so
+  // it also sees a tall card being scrolled internally, and dismissing then made
+  // an overflowing card impossible to read past its first screen.
   useEffect(() => {
     if (!visible) return
-    const onScroll = () => hideNow()
+    const onScroll = (e: Event) => {
+      if (e.target instanceof Node && boxRef.current?.contains(e.target)) return
+      hideNow()
+    }
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
   }, [visible, hideNow])
@@ -1812,15 +1818,16 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="font-mono rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-          {commit.short_sha}
-        </span>
+        <span className={COMMIT_SHA_CHIP}>{commit.short_sha}</span>
         <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
         <span className="text-gray-400 dark:text-gray-500">&middot;</span>
         <span>{formatCommitDate(commit.timestamp)}</span>
       </div>
+      {/* The subject is a plain line, not a bolded heading: it is one sentence of
+          the same prose as the body, and weighting it made the card read as a
+          document with a title rather than as a commit message. */}
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <p className="text-[13px] font-semibold leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
+        <p className="text-[13px] leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
         {body && (
           <Markdown
             text={body}
@@ -1836,6 +1843,10 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 // Width of the commit hover card. Wide enough for a wrapped commit body, narrow
 // enough to sit beside the 256px dropdown on a laptop screen.
 const COMMIT_TIP_WIDTH = 440
+
+// The short-sha chip, shared by the selector rows and the hover card header.
+const COMMIT_SHA_CHIP =
+  'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
 
 // The shift-click affordance, spelled out at the foot of both commit dropdowns -
 // otherwise nobody would ever find it.
@@ -1932,13 +1943,14 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
                         if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }
                       }}
                       aria-disabled={!commitValid}
-                      className={`w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
+                      className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
                     >
-                      <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                        {c.short_sha}
-                      </span>
+                      {/* items-baseline, not items-start: the sha chip's padding
+                          made a top-aligned chip sit a couple of px low against
+                          the (larger) subject text next to it. */}
+                      <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
                       <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
-                      {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                      {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                     </button>
                   </CustomTooltip>
                 )
@@ -2049,14 +2061,12 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                       if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
                       onChange({ type: 'commit', sha: c.sha }); setOpen(false)
                     }}
-                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
                   >
-                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                      {c.short_sha}
-                    </span>
+                    <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
                     <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
-                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                   </button>
                 </CustomTooltip>
               ))}

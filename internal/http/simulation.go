@@ -1105,6 +1105,65 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 	if id == "agent-1" {
 		resp := api.GetAgentCommits200JSONResponse{
 			{
+				// A deliberately HUGE message: taller than any viewport, so the
+				// hover card's height cap has to bite and the card has to scroll
+				// rather than run off the screen. Also the only fixture with
+				// nested lists, a fenced block and a table in a commit message.
+				Sha:      "9f8e7d6c5b4a39281706fedcba9876543210abcd",
+				ShortSha: "9f8e7d6",
+				Subject:  ptr("Rework the artifact pipeline end to end"),
+				Message: "Rework the artifact pipeline end to end\n\n" +
+					"The generator, the uploader and the viewer each had their own\n" +
+					"idea of what an artifact was, so a run could produce a file the\n" +
+					"viewer refused to show and the uploader happily stored. They\n" +
+					"now share one manifest, written once by the generator and\n" +
+					"treated as read-only downstream.\n\n" +
+					"What moved:\n\n" +
+					"- `internal/artifacts/manifest.go` is new and owns the schema.\n" +
+					"  Every producer writes through it; nothing else constructs a\n" +
+					"  manifest literal any more.\n" +
+					"  - The `kind` field is a closed set (`image`, `log`, `server`)\n" +
+					"    rather than a free string, so an unknown kind is a load\n" +
+					"    error instead of a blank card three screens later.\n" +
+					"  - Dimensions are recorded at generation time. The viewer used\n" +
+					"    to decode every PNG just to lay out a grid.\n" +
+					"- `internal/artifacts/upload.go` retries transport errors and\n" +
+					"  5xx with a jittered exponential backoff, and gives up loudly.\n" +
+					"- The viewer reads the manifest and nothing else. It no longer\n" +
+					"  stats the directory, which is what made a half-written run\n" +
+					"  render as a wall of broken tiles.\n\n" +
+					"```go\n" +
+					"// The one constructor. Everything else is a method on it.\n" +
+					"m, err := artifacts.NewManifest(runID, artifacts.KindImage)\n" +
+					"if err != nil {\n" +
+					"\treturn errtrace.Wrap(err)\n" +
+					"}\n" +
+					"```\n\n" +
+					"| Stage     | Before            | After                |\n" +
+					"| --------- | ----------------- | -------------------- |\n" +
+					"| Generate  | ad-hoc JSON       | `NewManifest`        |\n" +
+					"| Upload    | fail on first 5xx | 5 tries, jittered    |\n" +
+					"| View      | stat the dir      | read the manifest    |\n\n" +
+					"Migration: an old run has no manifest, so the loader synthesises\n" +
+					"one from the directory listing the first time it is opened and\n" +
+					"writes it back. That path is deliberately lossy - it cannot\n" +
+					"recover the tags a run was generated with - and it will be\n" +
+					"removed once no live project has a pre-manifest run left.\n\n" +
+					"Not done here, on purpose:\n\n" +
+					"- Per-artifact retention. The manifest has the field, nothing\n" +
+					"  reads it yet, and the sweeper is its own change.\n" +
+					"- Content-addressed storage. Tempting, and it would kill the\n" +
+					"  duplicate screenshots entirely, but it changes the on-disk\n" +
+					"  layout for every existing project at once.\n\n" +
+					"Design decision (no user input): the synthesised manifest is\n" +
+					"written back rather than kept in memory, so the lossy path runs\n" +
+					"once per run instead of once per page load. It means opening an\n" +
+					"old run mutates its directory, which is worth saying out loud.",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   simNow().Add(-5 * time.Minute).Format(time.RFC3339),
+			},
+			{
 				// A long, hard-wrapped, bulleted message - the shape agents
 				// actually write. It is what exercises the commit hover card in
 				// the selectors: markdown body, paragraph reflow (no <br> per
