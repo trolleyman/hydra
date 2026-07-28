@@ -5153,7 +5153,7 @@ function StepGroup({
 }: {
   items: ChatItem[]
   liveFrom: number | null
-  renderRow: (item: ChatItem) => ReactNode
+  renderRow: (item: ChatItem, animate: boolean) => ReactNode
 }) {
   // Whether the group came into being while the reader was watching, rather than
   // arriving with a replayed transcript. That decides both how it enters (the
@@ -5165,6 +5165,26 @@ function StepGroup({
   // A parked approval overrides the fold: the row you have to answer is inside.
   const needsApproval = useGroupApproval(items)
   const shown = open || needsApproval
+  // Whether each step gets the entrance fade, decided ONCE - the first time the
+  // group sees it - and then held, so a later render can't strip the class
+  // mid-animation.
+  //
+  // A step fades in if it lands while the group is already open: that is a
+  // message arriving, exactly as it would outside a group. It does NOT fade if
+  // it is on screen because you just opened the group, or because the group was
+  // born around steps that were already there - both are old work being
+  // revealed, and a dozen cards fading in at once reads as a dozen things
+  // happening at once. A step that arrived while the group was folded is old by
+  // the time you open it, so it is settled here too.
+  const [entered, setEntered] = useState<Map<number, boolean>>(() => new Map(items.map((it) => [it.id, false])))
+  const fresh = items.filter((it) => !entered.has(it.id))
+  if (fresh.length > 0) {
+    // Render-phase adjustment (as in useDelayedUnmount): the decision has to be
+    // in place for this render, not a frame later.
+    const next = new Map(entered)
+    for (const it of fresh) next.set(it.id, shown)
+    setEntered(next)
+  }
   const header = (
     <button
       // Closing the group shrinks the transcript, which clamps scrollTop down
@@ -5215,7 +5235,9 @@ function StepGroup({
       {/* The rows sit tighter than the transcript's gap-3 so an expanded run
           still reads as one block rather than as loose messages. */}
       <Expandable open={shown}>
-        <div className="flex flex-col gap-2 pt-2">{items.map(renderRow)}</div>
+        <div className="flex flex-col gap-2 pt-2">
+          {items.map((it) => renderRow(it, entered.get(it.id) ?? false))}
+        </div>
       </Expandable>
     </div>
   )
@@ -5310,8 +5332,9 @@ const SettledMessages = memo(
     // the list without threading the value through every memo comparator.
     const grouped = useChatStepsStore((s) => s.grouped)
     // animate is the ENTRANCE fade, for a message arriving live. A row inside a
-    // step group never gets it: opening a group reveals steps that already
-    // happened, and fading them in reads as a dozen messages landing at once.
+    // step group is handed the group's own answer for it: a step that lands
+    // while the group is open fades in like any other message, one revealed by
+    // opening the group does not (see StepGroup).
     const row = (item: ChatItem, animate = true) => (
       <SettledRow
         key={item.id}
@@ -5338,7 +5361,7 @@ const SettledMessages = memo(
           r.row === 'item' ? (
             row(r.item)
           ) : (
-            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={(it) => row(it, false)} />
+            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
           ),
         ),
       // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
