@@ -100,7 +100,10 @@ export function ReviewSection({
               <Bool label="Request squash on merge" value={r.squash} effective={resolved?.squash} onChange={(v) => set('squash', v)} />
               <Bool label="Delete source branch on merge" value={r.delete_remote_branch} effective={resolved?.delete_remote_branch} onChange={(v) => set('delete_remote_branch', v)} />
               <Bool label="Gate publish on local tests" value={r.require_local_tests} effective={resolved?.require_local_tests} onChange={(v) => set('require_local_tests', v)} />
-              <Bool label="Arm publish-when-green on new heads" value={r.publish_when_green} effective={resolved?.publish_when_green} onChange={(v) => set('publish_when_green', v)} />
+              {/* The config key stays publish_when_green; the label doesn't say
+                  so, because "green" is the code's word for a passing test gate
+                  and means nothing in a settings row. */}
+              <Bool label="New heads open and update their MR on their own, once tests pass" value={r.publish_when_green} effective={resolved?.publish_when_green} onChange={(v) => set('publish_when_green', v)} />
             </div>
           </Row>
           {resolved && (

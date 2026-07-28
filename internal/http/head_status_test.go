@@ -78,21 +78,32 @@ func TestFailingCasesText(t *testing.T) {
 		{Name: "skipped", Status: hydratests.CaseSkipped},
 		{Name: "breaks", Status: hydratests.CaseFailed, Path: "internal/x/y.go", Line: 42, Scope: []string{"TestOuter"}, Message: "want 1\ngot 2"},
 	}
-	got := failingCasesText(cases)
-	for _, want := range []string{"TestOuter > breaks", "internal/x/y.go:42", "want 1 got 2"} {
+	got, withMessages := failingCasesText(cases)
+	// The message is the point: it must survive verbatim AND keep its shape, since
+	// an expected/actual diff flattened onto one line is unreadable.
+	for _, want := range []string{"TestOuter > breaks", "internal/x/y.go:42", "want 1\n      got 2"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("failingCasesText = %q, missing %q", got, want)
 		}
 	}
+	if withMessages != 1 {
+		t.Errorf("withMessages = %d, want 1", withMessages)
+	}
 	if strings.Contains(got, "passes") || strings.Contains(got, "skipped") {
 		t.Errorf("failingCasesText listed a non-failing case: %q", got)
+	}
+
+	// Names with no messages behind them must report zero, so the caller knows to
+	// fall back to the log tail rather than leaving the agent with just a name.
+	if _, n := failingCasesText([]hydratests.TestCase{{Name: "bare", Status: hydratests.CaseFailed}}); n != 0 {
+		t.Errorf("a message-less failure reported %d messages, want 0", n)
 	}
 
 	var bulk []hydratests.TestCase
 	for range headStatusMaxCases + 7 {
 		bulk = append(bulk, hydratests.TestCase{Name: "case", Status: hydratests.CaseFailed})
 	}
-	got = failingCasesText(bulk)
+	got, _ = failingCasesText(bulk)
 	if n := strings.Count(got, "  - case"); n != headStatusMaxCases {
 		t.Errorf("listed %d cases, want the cap of %d", n, headStatusMaxCases)
 	}
@@ -100,8 +111,39 @@ func TestFailingCasesText(t *testing.T) {
 		t.Errorf("bulk failure must count the tail it dropped, got %q", got)
 	}
 
-	if got := failingCasesText(cases[:2]); got != "" {
-		t.Errorf("no failures should render nothing, got %q", got)
+	// A suite whose every failure carries a huge message must not run away with the
+	// agent's context: the total message budget cuts it off and says so.
+	var wordy []hydratests.TestCase
+	for range headStatusMaxCases {
+		wordy = append(wordy, hydratests.TestCase{Name: "c", Status: hydratests.CaseFailed, Message: strings.Repeat("x", 5000)})
+	}
+	got, _ = failingCasesText(wordy)
+	if len(got) > caseMessageBudget+4000 {
+		t.Errorf("bulk messages ran to %d chars, over the budget of %d", len(got), caseMessageBudget)
+	}
+	if !strings.Contains(got, "were dropped to keep this short") {
+		t.Errorf("a truncated-by-budget answer must say so, got %q", got[max(0, len(got)-200):])
+	}
+
+	if got, n := failingCasesText(cases[:2]); got != "" || n != 0 {
+		t.Errorf("no failures should render nothing, got %q / %d", got, n)
+	}
+}
+
+// A failure message keeps its line structure but is bounded on both axes.
+func TestClampMessage(t *testing.T) {
+	if got := clampMessage("a\r\nb\nc", 8, 100); got != "a\nb\nc" {
+		t.Errorf("clampMessage = %q, want the lines preserved", got)
+	}
+	got := clampMessage(strings.Repeat("line\n", 20), 3, 1000)
+	if strings.Count(got, "line") != 3 || !strings.Contains(got, "truncated") {
+		t.Errorf("line cap not applied/announced: %q", got)
+	}
+	if got := clampMessage("anything", 8, 0); got != "" {
+		t.Errorf("an exhausted budget must render nothing, got %q", got)
+	}
+	if got := clampMessage("   \n  ", 8, 100); got != "" {
+		t.Errorf("a blank message must render nothing, got %q", got)
 	}
 }
 

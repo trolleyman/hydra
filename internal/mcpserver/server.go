@@ -285,7 +285,7 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.HeadStatus != nil {
 		defs = append(defs, map[string]any{
 			"name": "get_head_status",
-			"description": "Get the status of YOUR OWN work as Hydra sees it: the verdict of each configured test runner (with the names of the failing cases), the state of each artifact/screenshot set, and the project's supervised services. " +
+			"description": "Get the status of YOUR OWN work as Hydra sees it: the verdict of each configured test runner - with the failing cases NAMED and their failure messages included, so this is usually all you need to start fixing - plus the state of each artifact/screenshot set and the project's supervised services. " +
 				"This is the same state the user is looking at in Hydra's panels, and the test verdicts are what the merge and publish gates check - so this, not your own ad-hoc test command, is the answer to \"am I green?\". " +
 				"Everything is measured against your branch's latest COMMIT, so commit before calling it if you want your newest work judged. " +
 				"Read-only and cheap: it reports cached results and never starts a test run or a generation.",
@@ -296,7 +296,7 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.TestLogs != nil {
 		defs = append(defs, map[string]any{
 			"name": "get_test_logs",
-			"description": "Get the captured output of ONE of your test runners' latest run, when get_head_status alone does not say enough to fix a failure. " +
+			"description": "Get the captured output of ONE of your test runners' latest run, for when get_head_status is not enough - it already gives you the failing case names and their messages, so reach for this only if you need the surrounding output (a stack trace, a build error, the cases it had to truncate). " +
 				"Take the runner name from get_head_status; call that first rather than guessing one. " +
 				"Returns the END of the log (where a failure almost always is), 200 lines by default - raise \"tail\" only if the answer is genuinely cut off, since a long log costs you context you could spend fixing the test.",
 			"inputSchema": map[string]any{

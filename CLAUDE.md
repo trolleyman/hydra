@@ -101,6 +101,21 @@ Keep a card's body short enough to fit a phone screen. The card caps its height
 against the viewport and scrolls, but a card you have to scroll is a sign the
 content belongs in `docs/` with a pointer from the tooltip.
 
+### Labels beside icons: `.optical-center`
+
+A label centred next to an icon with `items-center` reads visibly **high**:
+flexbox centres the label's line box, which reserves room for ascenders and
+descenders the word may not use, so "Rename" is centred as if it had a descender
+it doesn't have (~1.7px high at top-bar size). Put `.optical-center`
+(`web/src/index.css` - `text-box: trim-both cap alphabetic`) on the label span so
+what gets centred is the cap-to-baseline box you actually see. Browsers without
+`text-box` support ignore it and render as before, so it can't regress anything.
+
+Use it on **labels**, not prose: trimming a multi-line block's box collapses the
+leading between its lines. Reach for it whenever you add an icon+label button,
+rather than nudging with `relative top-[Npx]` - a hardcoded nudge is tuned to
+whichever font happened to load when you measured it.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL

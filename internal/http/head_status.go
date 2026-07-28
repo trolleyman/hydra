@@ -19,9 +19,23 @@ const (
 	// tell the agent WHAT broke, not to paste the whole run into its context - the
 	// tail is summarised as a count instead.
 	headStatusMaxCases = 15
-	// headStatusMessageLen truncates one case's failure message. Enough for an
-	// assertion line; a stack trace belongs in get_test_logs.
+	// headStatusMessageLen truncates a one-line detail (a progress line, a service's
+	// message, an errored runner's error).
 	headStatusMessageLen = 300
+	// A failing case's message is the single most useful thing in the whole answer -
+	// it is usually the assertion that says what to fix - so it is kept as MULTIPLE
+	// lines (an expected/actual diff is unreadable flattened), bounded three ways:
+	// per-message lines, per-message characters, and a budget across the whole
+	// answer so a suite failing in bulk still can't run away with the context.
+	caseMessageLines  = 8
+	caseMessageLen    = 600
+	caseMessageBudget = 4000
+	// headStatusLogTail is how much of a runner's log get_head_status inlines when
+	// it has no case-level detail to show (a build that died before producing a
+	// report, an `exit`-format runner that parses no cases). Without this the
+	// answer for those is just "FAILING", which tells the agent nothing and costs it
+	// a second round trip to learn anything at all.
+	headStatusLogTail = 25
 	// testLogsDefaultTail / testLogsMaxTail bound get_test_logs. The default is
 	// what a failing build's tail usually needs; the cap stops a `tail` argument
 	// from turning a 200k-line CI log into one tool result. The failure is
@@ -94,7 +108,8 @@ func (s *Server) headTestsText(projectRoot string, head *heads.Head) string {
 			continue
 		case rep.Status == hydratests.StatusErrored:
 			fmt.Fprintf(&b, "- %s: ERRORED (the runner itself failed, so there is no verdict): %s\n", r.Name, oneLine(rep.Error, headStatusMessageLen))
-			fmt.Fprintf(&b, "  Call get_test_logs with runner %q for its output.\n", r.Name)
+			b.WriteString(logTailText(mgr, r.Name, rep.Key))
+			fmt.Fprintf(&b, "  Call get_test_logs with runner %q for its full output.\n", r.Name)
 			continue
 		}
 		fmt.Fprintf(&b, "- %s: %s (%d passed, %d failed, %d skipped of %d)\n",
@@ -102,12 +117,19 @@ func (s *Server) headTestsText(projectRoot string, head *heads.Head) string {
 		if rep.Status != hydratests.StatusFailing {
 			continue
 		}
+		// The failure messages are the answer to "what do I fix?", so they are
+		// inlined here rather than left behind a second tool call. Only when there
+		// are none - no parsed cases, or cases carrying no message - does the log
+		// tail stand in for them.
 		cases, cerr := mgr.PeekCases(r.Name, v)
-		if cerr != nil || len(cases) == 0 {
-			fmt.Fprintf(&b, "  Call get_test_logs with runner %q to see what failed.\n", r.Name)
-			continue
+		detail, withMessages := "", 0
+		if cerr == nil {
+			detail, withMessages = failingCasesText(cases)
+			b.WriteString(detail)
 		}
-		b.WriteString(failingCasesText(cases))
+		if withMessages == 0 {
+			b.WriteString(logTailText(mgr, r.Name, rep.Key))
+		}
 		fmt.Fprintf(&b, "  Call get_test_logs with runner %q for the full output.\n", r.Name)
 	}
 	if b.Len() == 0 {
@@ -116,9 +138,12 @@ func (s *Server) headTestsText(projectRoot string, head *heads.Head) string {
 	return b.String()
 }
 
-// failingCasesText lists the failed/errored cases of a report, capped at
-// headStatusMaxCases with the remainder counted.
-func failingCasesText(cases []hydratests.TestCase) string {
+// failingCasesText lists the failed cases of a report with their failure
+// messages, capped at headStatusMaxCases with the remainder counted. It also
+// returns how many cases contributed an actual message, so the caller can fall
+// back to the log tail when the list turns out to be names with nothing behind
+// them (which is no more use to an agent than "FAILING" alone).
+func failingCasesText(cases []hydratests.TestCase) (string, int) {
 	var failing []hydratests.TestCase
 	for _, c := range cases {
 		if c.Status == hydratests.CaseFailed {
@@ -126,13 +151,14 @@ func failingCasesText(cases []hydratests.TestCase) string {
 		}
 	}
 	if len(failing) == 0 {
-		return ""
+		return "", 0
 	}
 	var b strings.Builder
 	shown := failing
 	if len(shown) > headStatusMaxCases {
 		shown = shown[:headStatusMaxCases]
 	}
+	budget, withMessages := caseMessageBudget, 0
 	for _, c := range shown {
 		name := c.Name
 		if len(c.Scope) > 0 {
@@ -147,12 +173,68 @@ func failingCasesText(cases []hydratests.TestCase) string {
 			where += "]"
 		}
 		fmt.Fprintf(&b, "  - %s%s\n", name, where)
-		if msg := oneLine(c.Message, headStatusMessageLen); msg != "" {
-			fmt.Fprintf(&b, "    %s\n", msg)
+		msg := clampMessage(c.Message, caseMessageLines, min(caseMessageLen, budget))
+		if msg == "" {
+			continue
+		}
+		withMessages++
+		budget -= len(msg)
+		// Indented under its case so a multi-line assertion stays visibly attached
+		// to the test it belongs to.
+		for line := range strings.SplitSeq(msg, "\n") {
+			fmt.Fprintf(&b, "      %s\n", line)
 		}
 	}
 	if rest := len(failing) - len(shown); rest > 0 {
 		fmt.Fprintf(&b, "  ... and %d more failing case(s) - call get_test_logs for the rest.\n", rest)
+	}
+	if budget <= 0 {
+		b.WriteString("  (later failure messages were dropped to keep this short - call get_test_logs for them)\n")
+	}
+	return b.String(), withMessages
+}
+
+// clampMessage trims a failure message to at most maxLines lines and maxChars
+// characters, keeping its shape (an expected/actual diff is unreadable flattened
+// onto one line, which is why this is not oneLine).
+func clampMessage(text string, maxLines, maxChars int) string {
+	t := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if t == "" || maxChars <= 0 {
+		return ""
+	}
+	lines := strings.Split(t, "\n")
+	truncated := false
+	if len(lines) > maxLines {
+		lines, truncated = lines[:maxLines], true
+	}
+	t = strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	if len(t) > maxChars {
+		t, truncated = t[:maxChars], true
+	}
+	if truncated {
+		t += "\n      ... (truncated - call get_test_logs for the rest)"
+	}
+	return t
+}
+
+// logTailText renders the last headStatusLogTail lines of a settled runner's
+// persisted log, for a failure with no case-level detail to show. Empty when
+// there is no log (an in-flight run's output is not persisted yet).
+func logTailText(mgr *hydratests.Manager, runner, key string) string {
+	lines, ok := mgr.ReadLog(runner, key)
+	if !ok || len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	shown := lines
+	if len(shown) > headStatusLogTail {
+		shown = shown[len(shown)-headStatusLogTail:]
+		fmt.Fprintf(&b, "  No per-test detail; last %d of %d output lines:\n", len(shown), len(lines))
+	} else {
+		fmt.Fprintf(&b, "  No per-test detail; its %d output lines:\n", len(lines))
+	}
+	for _, l := range shown {
+		fmt.Fprintf(&b, "      %s\n", l.Text)
 	}
 	return b.String()
 }

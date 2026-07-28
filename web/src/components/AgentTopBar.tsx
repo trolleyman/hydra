@@ -31,6 +31,11 @@ export interface AgentTopBarMenuItem {
 
 export interface AgentTopBarAction {
   label: string
+  // A lowlit counter appended after the label (e.g. the "(1)" on "Push to MR"):
+  // the number qualifies the action rather than naming it, so it reads at a lower
+  // weight than the verb it follows. Kept out of `label` so the accessible name,
+  // the tooltip and the collapse measurement all stay the plain action.
+  count?: number
   icon: ReactNode
   onClick: () => void
   variant?: AgentTopBarVariant
@@ -119,6 +124,19 @@ const segmentGroupClass =
 const moreBtnClass =
   'shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer'
 
+// ActionLabel is a button's text: the action, plus a lowlit count when the
+// action carries one. The count is dimmed rather than sized down so it keeps the
+// label's baseline and the button's height - "Push to MR (1)" should read as one
+// line where only the number recedes.
+function ActionLabel({ a }: { a: AgentTopBarAction }) {
+  return (
+    <span className="whitespace-nowrap optical-center">
+      {a.label}
+      {a.count != null && <span className="ml-1 font-normal opacity-60">({a.count})</span>}
+    </span>
+  )
+}
+
 // Render a single action button.
 function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
   return (
@@ -132,7 +150,7 @@ function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: '
         className={actionBtnClass(mode, a)}
       >
         {a.icon}
-        {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+        {mode === 'labels' && <ActionLabel a={a} />}
       </button>
     </Tooltip>
   )
@@ -196,7 +214,7 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
           className={mainCls}
         >
           {a.icon}
-          {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+          {mode === 'labels' && <ActionLabel a={a} />}
         </button>
       </Tooltip>
       <button
@@ -476,7 +494,7 @@ function AdaptiveActions({
             {a.render ?? (
               <button className={actionBtnClass('labels', a)} tabIndex={-1}>
                 {a.icon}
-                <span className="whitespace-nowrap">{a.label}</span>
+                <ActionLabel a={a} />
                 {/* Reserve the split chevron's width so the fit calc accounts for it. */}
                 {a.menu && <span className="inline-block w-7" />}
               </button>
@@ -647,7 +665,7 @@ export function AgentTopBarContent({
                 ) : (
                   <Sparkles className="w-3.5 h-3.5" />
                 )}
-                <span className="whitespace-nowrap">Generate</span>
+                <span className="whitespace-nowrap optical-center">Generate</span>
               </button>
             </Tooltip>
           </div>

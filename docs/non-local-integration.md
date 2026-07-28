@@ -178,10 +178,16 @@ daemon's boot project's). Unlinked heads cost nothing. It:
   commit an agent makes *after* the MR opens is exactly the one that used to sit
   there. One flag covers both faces (`publish_when_green` on the row): before the
   MR exists it opens a draft one, after it pushes, and the menu label follows
-  whichever the head is about to do ("Publish when green" -> "Sync when green").
-  It is consumed only on failure, so a push that can never succeed (bad
-  credentials, a protected branch) cannot retry every 30s forever. A linked armed
-  head with nothing to push is a no-op: one local rev-list per tick, no network.
+  whichever the head is about to do ("Queue MR" -> "Push automatically"). It is
+  consumed only on failure, so a push that can never succeed (bad credentials, a
+  protected branch) cannot retry every 30s forever. A linked armed head with
+  nothing to push is a no-op: one local rev-list per tick, no network.
+
+  **"when green" is the code's name for this, never the user's.** The UI says
+  "Queue MR" / "Push automatically" / "...once tests pass", matching how the
+  merge button has always spelled its own arm ("Queue merge", not
+  "merge-when-green"). Keep new strings on that side of the line: the config key
+  and the Go identifiers stay `publish_when_green`, the labels do not.
 
   `[review] publish_when_green` arms new heads at spawn (`SpawnHead`), which is
   what the Settings toggle has always claimed to do - before this it was read
@@ -224,8 +230,8 @@ Two more tools ride the same `reviewq` channel, and are wired for **every** head
 linked or not (`internal/http/head_status.go` renders them):
 
 - `get_head_status` - each configured test runner's verdict for the head's branch
-  tip with the failing case names, each artifact set's state, and the project's
-  supervised services.
+  tip with the failing cases **and their failure messages**, each artifact set's
+  state, and the project's supervised services.
 - `get_test_logs` - the tail of one runner's captured output (default 200 lines,
   cap 2000), named by runner.
 
@@ -241,9 +247,15 @@ Design notes worth keeping:
 - **Read-only by construction.** Every lookup is a `Peek` (`tests.Manager.Peek` /
   `PeekCases`, and a new `artifacts.Manager.Peek`), so a status call never starts
   a run or a generation. A status call that causes the thing it reports is a trap.
-- **Split, not one big tool.** The common call stays a few hundred tokens; only a
-  real failure pays for a log. `get_head_status` names the failing cases (capped
-  at 15, remainder counted) and points at `get_test_logs` for the rest.
+- **Split, but the summary must stand alone.** The common call stays cheap and
+  only a real failure pays for a log - yet a status that just said "FAILING" and
+  pointed at another tool would make the split a tax, not a saving. So the
+  failure messages are inlined with their cases, bounded three ways (8 lines and
+  600 chars per message, 4000 chars across the answer) and kept multi-line, since
+  an expected/actual diff flattened to one line is unreadable. When a runner
+  fails with no case-level detail at all - a build that died before producing a
+  report, an `exit`-format runner - the last 25 log lines stand in for it.
+  `get_test_logs` is then for the surrounding output, not for the basics.
 - **The daemon renders the text**, not the sandbox: it owns the state, so the
   wording lives next to the managers it describes and the in-sandbox side is a
   thin relay. Services state exists ONLY in daemon memory, so there is nothing in

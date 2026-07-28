@@ -1655,14 +1655,15 @@ export function AgentDetail({
     setSavingDownstream(false)
   }
 
-  // armPublish / disarmPublish toggle publish/sync-when-green: an unlinked head
-  // auto-opens a draft MR, a linked one auto-pushes, and the arm is sticky, so it
-  // keeps doing that for every later commit (docs/non-local-integration.md). The
-  // toast names whichever the head is actually armed for.
+  // armPublish / disarmPublish toggle the publish-when-green arm: an unlinked head
+  // opens a draft MR, a linked one pushes, and the arm is sticky, so it keeps
+  // doing that for every later commit (docs/non-local-integration.md). The toast
+  // names whichever the head is actually armed for, in the same plain terms the
+  // menu uses - "when green" is the code's word for this, not the user's.
   async function armPublish() {
     const linkedNow = !!agent.review
     const res = await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id), {
-      success: linkedNow ? 'Will push to the MR when green' : 'Will open a draft MR when green',
+      success: linkedNow ? 'Will push to the MR once tests pass' : 'Will open a draft MR once tests pass',
       errorPrefix: 'Failed to arm',
     })
     // The arm endpoint returns no body, so refresh to repaint the menu's toggle.
@@ -1671,8 +1672,8 @@ export function AgentDetail({
   async function disarmPublish() {
     const linkedNow = !!agent.review
     const res = await runWithToast(() => api.default.disarmPublishWhenGreen(projectId ?? '', agent.id), {
-      success: linkedNow ? 'No longer syncing when green' : 'Publish when green disarmed',
-      errorPrefix: 'Failed to disarm',
+      success: linkedNow ? 'No longer pushing automatically' : 'MR no longer queued',
+      errorPrefix: 'Failed to cancel',
     })
     if (res.ok) onRefresh?.()
   }
@@ -1774,23 +1775,25 @@ export function AgentDetail({
     tone: 'neutral' as const,
     disabled: busy || publishing,
   }
-  // Sync-when-green is one armed state with two faces: before the MR exists it
-  // opens a draft one, after it keeps pushing. Same flag, so the label follows
-  // whichever the head is about to do rather than inventing a second toggle.
+  // One armed state with two faces: before the MR exists it opens a draft one,
+  // after it keeps pushing. Same flag, so the label follows whichever the head is
+  // about to do rather than inventing a second toggle. Worded like the merge
+  // button's "Queue merge" - "publish-when-green" is the code's name for this,
+  // and it means nothing to someone reading a menu.
   const syncWhenGreenItem = agent.publish_when_green
     ? {
-        label: linked ? 'Stop syncing when green' : 'Disarm publish-when-green',
-        description: linked ? 'Stop pushing new commits to the MR when tests pass.' : 'Stop auto-opening a draft MR when tests pass.',
+        label: linked ? 'Stop pushing automatically' : 'Cancel queued MR',
+        description: linked ? `New commits will no longer go to the ${mrNoun} on their own.` : 'No MR will be opened automatically.',
         icon: <Clock className="w-4 h-4" />,
         onClick: () => void disarmPublish(),
         tone: 'neutral' as const,
         disabled: busy,
       }
     : {
-        label: linked ? 'Sync when green' : 'Publish when green',
+        label: linked ? 'Push automatically' : 'Queue MR',
         description: linked
-          ? `Push each new commit to the ${mrNoun} on its own, once local tests pass and the head finishes.`
-          : 'Auto-open a draft MR once local tests pass and the head finishes, then keep it in sync.',
+          ? `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`
+          : 'Opens a draft MR on its own once tests pass, then keeps it up to date.',
         icon: <Clock className="w-4 h-4" />,
         onClick: () => void armPublish(),
         tone: 'emerald' as const,
@@ -1808,7 +1811,8 @@ export function AgentDetail({
     ? { label: 'Publishing...', icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
     : linked
       ? {
-          label: leadWithPush ? `Push to ${mrNoun} (${ahead})` : `View ${mrNoun}`,
+          label: leadWithPush ? `Push to ${mrNoun}` : `View ${mrNoun}`,
+          count: leadWithPush ? ahead : undefined,
           icon: leadWithPush ? <Upload className="w-4 h-4" /> : <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
           onClick: leadWithPush ? () => void handlePushToMR() : () => window.open(agent.review!.url, '_blank', 'noreferrer'),
           variant: leadWithPush ? 'blue' : 'segment',
