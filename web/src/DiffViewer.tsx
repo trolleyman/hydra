@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
-import { highlightLines } from './lib/highlightCore'
+import { highlightHtml, highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
 import { hasLanguage } from './lib/prism'
@@ -36,12 +36,12 @@ import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
 import {
   UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS,
   SBS_ROW, SBS_HALF, SBS_LINE_NUM, SBS_MARKER, SBS_CODE,
-  EXPANDER_ROW, EXPANDER_BTN, NOTICE_BLOCK, HIDDEN_BLOCK,
+  EXPANDER_ROW, EXPANDER_BTN, EXPANDER_BTNS, EXPANDER_COUNT, EXPANDER_CONTEXT, NOTICE_BLOCK, HIDDEN_BLOCK,
   measureBodyHeight, queueMeasure,
 } from './lib/diffMetrics'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
-  hunkContext, regionKey, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
+  hunkContext, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
 } from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
@@ -810,6 +810,30 @@ function extractSides(lines: DiffLine[]): { oldLines: SideLine[]; newLines: Side
   return { oldLines, newLines }
 }
 
+// contiguousRuns joins a side's lines into one string per unbroken run of line
+// numbers - the units highlighting is done in.
+//
+// A windowed (`-U3`) diff shows fragments of a file with the rest hidden, and
+// gluing those fragments into one string invents code that isn't there. What
+// that costs is not theoretical: a JSX comment opened on the last visible line
+// of a hunk (`{/* ... */}` continuing into the collapsed gap) left the block
+// comment unterminated, so Prism read every remaining fragment of the file as
+// comment - hundreds of lines of AgentChat.tsx rendered italic and grey. The
+// same trap exists for a template literal or a string opened before a gap.
+// Highlighting each run on its own confines the damage to the run that actually
+// contains the truncated construct - the rest of the file is unaffected, and a
+// whole-file (expanded) diff is one run, so nothing changes there.
+function contiguousRuns(ls: SideLine[]): string[] {
+  const runs: string[][] = []
+  let prev: number | null = null
+  for (const l of ls) {
+    if (prev != null && l.lineNum === prev + 1) runs[runs.length - 1].push(l.content)
+    else runs.push([l.content])
+    prev = l.lineNum
+  }
+  return runs.map((r) => r.join('\n'))
+}
+
 // mapFromHtml zips a side's lines back together with the per-line highlighted
 // HTML returned by the highlighter into a line-number → HTML map.
 function mapFromHtml(ls: SideLine[], html: string[] | null): Map<number, string> {
@@ -826,7 +850,7 @@ function mapFromHtml(ls: SideLine[], html: string[] | null): Map<number, string>
 function buildHighlightMaps(lines: DiffLine[], lang: string) {
   const { oldLines, newLines } = extractSides(lines)
   const highlight = (ls: SideLine[]): Map<number, string> =>
-    mapFromHtml(ls, ls.length ? highlightLines(ls.map((l) => l.content).join('\n'), lang) : null)
+    mapFromHtml(ls, ls.length ? contiguousRuns(ls).flatMap((run) => highlightLines(run, lang)) : null)
   return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
 }
 
@@ -901,27 +925,38 @@ function estimateVisibleRows(file: DiffFile): number {
 }
 
 
-// The enclosing function/section git computed for the hunk below an expander,
-// shown muted at the row's right edge (same row, so it adds no height). Truncates
-// from the left tail rather than wrapping, keeping the expander one line tall.
-function HunkContextLabel({ text }: { text: string | undefined }) {
-  if (!text) return null
-  return (
-    <span
-      className="ml-auto pl-3 min-w-0 shrink truncate text-right text-xs font-mono text-gray-400 dark:text-gray-500 select-none"
-      title={text}
-    >
-      {text}
-    </span>
-  )
+// The declaration enclosing the code an expander hides, with the highlighting it
+// carries in the file itself - `html` when we have it, plain text otherwise.
+interface ContextLabel { text: string; html: string | null }
+
+// contextLabel highlights a label the same way the file's own lines are. The
+// whole-file path hands us the actual DiffLine, so its already-computed
+// per-line HTML is reused verbatim (no second Prism pass, and the label cannot
+// disagree with the line it names); the windowed path only has git's `@@` string,
+// which gets highlighted on its own - it is one short line, so this is cheap
+// enough to run during render.
+function contextLabel(src: DiffLine | string, lang: string, hlOld: Map<number, string>, hlNew: Map<number, string>): ContextLabel | undefined {
+  if (typeof src === 'string') return src ? { text: src, html: highlightHtml(src, lang) } : undefined
+  const fromFile = (src.new_line_num != null ? hlNew.get(src.new_line_num) : undefined)
+    ?? (src.old_line_num != null ? hlOld.get(src.old_line_num) : undefined)
+  return { text: src.content, html: fromFile ?? highlightHtml(src.content, lang) }
+}
+
+// The context label sits beside the count, reading like the tail of a git hunk
+// header. It used to be pushed out to the row's right edge, which put it a long
+// way from the count on a wide pane and made every expander's layout depend on
+// how long its label happened to be. Truncates rather than wrapping, keeping the
+// expander one line tall.
+function HunkContextLabel({ label }: { label: ContextLabel | undefined }) {
+  if (!label) return null
+  return label.html
+    ? <span className={EXPANDER_CONTEXT} title={label.text} dangerouslySetInnerHTML={{ __html: label.html }} />
+    : <span className={EXPANDER_CONTEXT} title={label.text}>{label.text}</span>
 }
 
 function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="flex-1 text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 hover:bg-blue-100/50 dark:hover:bg-blue-900/30 rounded cursor-pointer"
-    >
+    <button onClick={onClick} className={EXPANDER_COUNT}>
       ···  {hidden} line{hidden !== 1 ? 's' : ''}  ···
     </button>
   )
@@ -930,12 +965,12 @@ function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) 
 // GapExpander sits between two changes. Both ⌄ (reveal more after the upper
 // change) and ⌃ (reveal more before the lower change) live together on the left;
 // the "··· N lines ···" label reveals the whole gap.
-function GapExpander({ seg, onDown, onUp, onAll }: {
-  seg: RenderSeg; onDown: () => void; onUp: () => void; onAll: () => void
+function GapExpander({ seg, label, onDown, onUp, onAll }: {
+  seg: RenderSeg; label: ContextLabel | undefined; onDown: () => void; onUp: () => void; onAll: () => void
 }) {
   return (
     <div className={EXPANDER_ROW}>
-      <div className="flex items-center gap-0.5 shrink-0 mr-1">
+      <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
           <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
         </Tooltip>
@@ -944,7 +979,7 @@ function GapExpander({ seg, onDown, onUp, onAll }: {
         </Tooltip>
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
-      <HunkContextLabel text={seg.context} />
+      <HunkContextLabel label={label} />
     </div>
   )
 }
@@ -952,19 +987,21 @@ function GapExpander({ seg, onDown, onUp, onAll }: {
 // EdgeExpander reveals the file's hidden top (⌃, toward line 1) or bottom (⌄,
 // toward EOF). It is only rendered while lines remain hidden, so it disappears
 // once the file's first/last line is reached.
-function EdgeExpander({ seg, onStep, onAll }: {
-  seg: RenderSeg; onStep: () => void; onAll: () => void
+function EdgeExpander({ seg, label, onStep, onAll }: {
+  seg: RenderSeg; label: ContextLabel | undefined; onStep: () => void; onAll: () => void
 }) {
   const up = seg.kind === 'topedge'
   return (
     <div className={EXPANDER_ROW}>
-      <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
-        <button onClick={onStep} className={`${EXPANDER_BTN} mr-1`}>
-          {up ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        </button>
-      </Tooltip>
+      <div className={EXPANDER_BTNS}>
+        <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
+          <button onClick={onStep} className={EXPANDER_BTN}>
+            {up ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        </Tooltip>
+      </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
-      <HunkContextLabel text={seg.context} />
+      <HunkContextLabel label={label} />
     </div>
   )
 }
@@ -1179,8 +1216,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     const { oldLines, newLines } = extractSides(highlightSource)
     highlightSides(
       lang,
-      oldLines.length ? oldLines.map((l) => l.content).join('\n') : null,
-      newLines.length ? newLines.map((l) => l.content).join('\n') : null,
+      oldLines.length ? contiguousRuns(oldLines) : null,
+      newLines.length ? contiguousRuns(newLines) : null,
     ).then((res) => {
       if (cancelled) return
       setAsyncHighlight({
@@ -1265,21 +1302,29 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // rename) has nothing to collapse - render its lines plainly rather than
   // folding the entire body behind one expander.
   const noChanges = file.additions === 0 && file.deletions === 0
-  // git already worked out each hunk's enclosing function (the `@@ ... @@ <ctx>`
-  // trailer); key it by the hunk's first changed line so buildSegments can label
-  // the matching collapsed gap with it. Cheap and derived from hunksSig only.
-  const hunkFuncByKey = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const h of file.hunks ?? []) {
-      const ctx = hunkContext(h.header)
-      if (!ctx) continue
-      const first = h.lines.find(isChangeLine)
-      if (first) m.set(regionKey(first), ctx)
+  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
+
+  // Each expander's context label, highlighted. Keyed by segment key (whole-file
+  // path) / hunk header (windowed path) and rebuilt only when the segments, the
+  // highlighting or the language move, so Prism isn't re-run for every render of
+  // a file whose labels haven't changed.
+  const contextLabels = useMemo(() => {
+    const m = new Map<string, ContextLabel>()
+    for (const seg of segments ?? []) {
+      const label = seg.context && contextLabel(seg.context, lang, highlightedOld, highlightedNew)
+      if (label) m.set(seg.key, label)
+    }
+    // The windowed path has no full content to search, so it falls back to the
+    // `@@ -a,b +c,d @@ <context>` trailer git already computed for each hunk.
+    if (!segments) {
+      for (const h of file.hunks ?? []) {
+        const label = contextLabel(hunkContext(h.header), lang, highlightedOld, highlightedNew)
+        if (label) m.set(h.header, label)
+      }
     }
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hunksSig])
-  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal, hunkFuncByKey) : null), [fullLines, reveal, noChanges, hunkFuncByKey])
+  }, [segments, hunksSig, lang, highlightedOld, highlightedNew])
 
   const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
     setReveal((prev) => {
@@ -1519,7 +1564,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               {segments.map((seg) => {
                 if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
                 if (seg.kind === 'gap') return (
-                  <GapExpander key={seg.key} seg={seg}
+                  <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                     onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
                     onUp={() => revealUpward(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
                     onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
@@ -1528,7 +1573,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 // below the gap; botedge reveals downward and anchors the top.
                 const revealEdge = seg.kind === 'topedge' ? revealUpward : setRegion
                 return (
-                  <EdgeExpander key={seg.key} seg={seg}
+                  <EdgeExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                     onStep={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
                       ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
                     onAll={() => revealEdge(seg.regionId!, seg.kind === 'topedge'
@@ -1551,17 +1596,19 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                   <Fragment key={hunk.header}>
                     {isFirst && !atTopOfFile && (
                       <div className={EXPANDER_ROW}>
-                        <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                          <button onClick={() => expand(currentContext + EXPAND_STEP)} className={`${EXPANDER_BTN} mr-1`}>
-                            <ChevronUp className="w-3 h-3" />
-                          </button>
-                        </Tooltip>
-                        <HunkContextLabel text={hunkContext(hunk.header)} />
+                        <div className={EXPANDER_BTNS}>
+                          <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                          </Tooltip>
+                        </div>
+                        <HunkContextLabel label={contextLabels.get(hunk.header)} />
                       </div>
                     )}
                     {!isFirst && gapSize > 0 && (
                       <div className={EXPANDER_ROW}>
-                        <div className="flex items-center gap-0.5 shrink-0 mr-1">
+                        <div className={EXPANDER_BTNS}>
                           <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
                             <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
                               <ChevronDown className="w-3 h-3" />
@@ -1574,7 +1621,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                           </Tooltip>
                         </div>
                         <GapCount hidden={gapSize} onClick={() => expand(currentContext + Math.max(gapSize, EXPAND_STEP))} />
-                        <HunkContextLabel text={hunkContext(hunk.header)} />
+                        <HunkContextLabel label={contextLabels.get(hunk.header)} />
                       </div>
                     )}
                     {sideBySide
@@ -1589,11 +1636,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
-                        <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                          <button onClick={() => expand(currentContext + EXPAND_STEP)} className={`${EXPANDER_BTN} mr-1`}>
-                            <ChevronDown className="w-3 h-3" />
-                          </button>
-                        </Tooltip>
+                        <div className={EXPANDER_BTNS}>
+                          <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </Tooltip>
+                        </div>
                       </div>
                     )}
                   </Fragment>
