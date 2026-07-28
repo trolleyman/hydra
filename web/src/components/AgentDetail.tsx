@@ -20,7 +20,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, ArrowRight, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -516,11 +516,19 @@ function metaRowSignature(a: AgentResponse) {
   }
 }
 
-// The agent-page metadata row: the type/status/test badges, network + branch
-// tags, base-branch selector, terminal/chat toggle, downstream editor and MR
-// chip, plus a self-ticking "created X ago". Memoized (see metaRowSignature) so a
-// running head's constant refreshes don't churn it; the handlers are stabilized
-// by the caller so only real display changes get through.
+// Whether the head's identity line (its id + "created X ago") sits ABOVE the
+// chip strip or below it. Above reads better: the id is the head's NAME, so it
+// belongs where a title goes, with the chips as the detail line under it - the
+// other way round leaves the id looking orphaned at the bottom of the block.
+// Flip this to compare the two.
+const IDENTITY_LINE_FIRST = true
+
+// The agent-page metadata row: two lines. The chip strip carries the type/status
+// /test badges, network + git-isolation tags, base-branch selector, terminal/chat
+// toggle, downstream editor and MR chip; the identity line carries the head id
+// and a self-ticking "created X ago", right-aligned. Memoized (see
+// metaRowSignature) so a running head's constant refreshes don't churn it; the
+// handlers are stabilized by the caller so only real display changes get through.
 const AgentMetaRow = memo(function AgentMetaRow({
   agent,
   projectId,
@@ -559,7 +567,33 @@ const AgentMetaRow = memo(function AgentMetaRow({
       onConfirm: () => onSaveChatMode(next),
     })
   }
-  return (
+  // The head's own line: its id (the branch minus the `hydra/` prefix - the
+  // prefix is on every head, so it's noise) on the left, and how long ago it was
+  // created on the right. The full branch name is still what the copy button
+  // (and the title on hover) gives you.
+  const headId = agent.branch_name?.replace(/^hydra\//, '') || agent.id
+  const identityLine = (
+    // min-h-7 (the height of the pane's collapse toggle, and of the inspector
+    // bar's "Changes" row across the divider) so this line's contents centre on
+    // the same baseline as both - the toolbar rows line up across the split.
+    <div className="flex items-center gap-3 min-w-0 min-h-7">
+      {agent.branch_name && (
+        <BranchTag
+          branch={agent.branch_name}
+          label={headId}
+          icon={false}
+          className="text-sm font-mono text-gray-700 dark:text-gray-200"
+        />
+      )}
+      {agent.created_at !== 0 && agent.created_at !== undefined && (
+        // ml-auto: pinned to the right edge of the row, whatever is on the left.
+        <span className="ml-auto shrink-0 text-xs text-gray-400 dark:text-gray-500">
+          created <RelativeTime createdAt={agent.created_at} />
+        </span>
+      )}
+    </div>
+  )
+  const chipLine = (
     // The chip strip: no interpunct separators; wraps on desktop, scrolls on
     // mobile (see MetaStrip). Dropdown children (the base selector) are
     // portalled, so the mobile overflow clipping can't swallow them.
@@ -597,13 +631,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
       {projectId && agent.branch_name && !agent.archived && (
         <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
       )}
-      {/* Branch -> base as one compact control: the head's branch, an arrow
-          (it merges into / diffs against), then the editable base. Editing the
-          base is metadata-only: it changes what update-from-base merges in and
-          what the diff compares against, but does not rebase commits. */}
-      {agent.branch_name && <span className="shrink-0"><BranchTag branch={agent.branch_name} /></span>}
+      {/* The base branch this head merges into / diffs against. The head's own
+          branch lives on the identity line above, so there's no arrow pairing
+          the two here. Editing the base is metadata-only: it changes what
+          update-from-base merges in and what the diff compares against, but
+          does not rebase commits. */}
       <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
-        <ArrowRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" aria-label="merges into" />
         {branches !== null && !savingBase ? (
           <BranchSelector
             // An agent can't be its own base, so drop its own branch from
@@ -623,12 +656,16 @@ const AgentMetaRow = memo(function AgentMetaRow({
         )}
       </span>
       {/* Downstream branch (the name this head is pushed AS) - editable
-          until first publish, then soft-locked. Only shown once set. */}
-      <span className="shrink-0 inline-flex items-center">
+          until first publish, then soft-locked. Only shown once set.
+          empty:hidden on both wrappers below: their child renders nothing for a
+          head with no downstream branch / no linked MR, and a zero-width span
+          still eats the row's gap on either side of it - 16px that pushed the
+          terminal/chat toggle onto a line of its own. */}
+      <span className="shrink-0 inline-flex items-center empty:hidden">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
       </span>
       {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <span className="shrink-0 inline-flex items-center">
+      <span className="shrink-0 inline-flex items-center empty:hidden">
         <MRStateChip agent={agent} />
       </span>
       {/* Terminal/chat mode toggle for agents with structured chat transports.
@@ -673,12 +710,15 @@ const AgentMetaRow = memo(function AgentMetaRow({
           </span>
         </Tooltip>
       )}
-      {agent.created_at !== 0 && agent.created_at !== undefined && (
-        <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500">
-          created <RelativeTime createdAt={agent.created_at} />
-        </span>
-      )}
     </MetaStrip>
+  )
+  return (
+    // Two lines: the head's identity + age, and the chip strip. Which one comes
+    // first is IDENTITY_LINE_FIRST below.
+    <div className="flex flex-col gap-1.5 min-w-0">
+      {IDENTITY_LINE_FIRST ? identityLine : chipLine}
+      {IDENTITY_LINE_FIRST ? chipLine : identityLine}
+    </div>
   )
 }, (prev, next) =>
   prev.agentTypeClass === next.agentTypeClass &&

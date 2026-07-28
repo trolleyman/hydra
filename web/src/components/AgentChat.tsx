@@ -53,6 +53,7 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
@@ -4870,6 +4871,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
     return rows * 20 + 14
   })
+  // Mirror of composerHeight the auto-grow effect compares against, so a
+  // keystroke that doesn't change the height schedules no update at all (see
+  // the effect for why React's own same-value bailout can't be relied on here).
+  const composerHeightRef = useRef(composerHeight)
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const normalizedAvailableRef = useRef(false)
@@ -4897,6 +4902,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // The previous scroll event's scrollHeight, so a content SHRINK that clamps
   // scrollTop down isn't misread as the user scrolling up - see onScroll.
   const prevScrollHeightRef = useRef(0)
+  // Likewise the previous clientHeight: the pane growing (the composer shrinking
+  // back down after a multi-line draft is deleted) also clamps scrollTop.
+  const prevClientHeightRef = useRef(0)
   // Latest scroll offset + pin, mirrored on every scroll so deactivation (the
   // pane going display:none loses its scroll geometry) and unmount can persist
   // it (item 20).
@@ -7362,11 +7370,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4
     // Only a genuine UPWARD user move unpins. A content SHRINK (a card
     // collapsing, a streamed block replaced by something shorter) clamps
-    // scrollTop down on its own, so don't misread that as a scroll-up.
-    const shrank = el.scrollHeight < prevScrollHeightRef.current - 1
+    // scrollTop down on its own, so don't misread that as a scroll-up - and
+    // neither is the pane GROWING taller: the composer shrinking back after a
+    // few lines are deleted hands its height to the scroll pane, which lowers
+    // the max scroll offset and clamps scrollTop down exactly the same way.
+    // Without this the chat came unmoored from the bottom whenever you typed a
+    // multi-line message and then deleted it again.
+    const shrank =
+      el.scrollHeight < prevScrollHeightRef.current - 1 ||
+      el.clientHeight > prevClientHeightRef.current + 1
     const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
     prevScrollHeightRef.current = el.scrollHeight
+    prevClientHeightRef.current = el.clientHeight
     // Unpin on an upward move; otherwise HOLD the pin if we already had it, and
     // (re)acquire it only on reaching the bottom. Holding via pinnedRef is what
     // keeps content growing faster than the follow effects re-pin (a card
@@ -7559,8 +7575,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
     // best, a feedback loop with any height-driven layout at worst.
+    //
+    // The guard is a REF compare, not `setComposerHeight(cur => cur)`. React only
+    // skips a same-value update when it can evaluate the updater eagerly, which
+    // it cannot once the hook already has a queued update - and during a fast
+    // typing burst it always does. Every keystroke then scheduled another render
+    // from inside this effect, i.e. a nested update per commit, and after 50 of
+    // them React threw "Maximum update depth exceeded" (error #185) out of the
+    // next keystroke's handler - dropping that character. Comparing here means
+    // the steady state schedules nothing at all.
     const nextH = rows * lineHeight + pad
-    setComposerHeight((cur) => (Math.abs(cur - nextH) < 0.5 ? cur : nextH))
+    if (Math.abs(composerHeightRef.current - nextH) >= 0.5) {
+      composerHeightRef.current = nextH
+      setComposerHeight(nextH)
+    }
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -7777,15 +7805,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
+  // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
+  // they carry the same markdown list continuation the shared textarea handler
+  // gives Shift+Enter - the box shouldn't behave differently depending on which
+  // newline key you reached for.
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
-    commit(
-      (prev) => makeSnapshot(prev.prompt.slice(0, start) + '\n' + prev.prompt.slice(end), prev.attachments, start + 1, start + 1),
-      false,
-    )
+    const edit = enterEdit(ta.value, start, end)
+    const next = edit ?? {
+      value: ta.value.slice(0, start) + '\n' + ta.value.slice(end),
+      caret: start + 1,
+    }
+    commit((prev) => makeSnapshot(next.value, prev.attachments, next.caret, next.caret), false)
     requestAnimationFrame(() => {
-      ta.selectionStart = ta.selectionEnd = start + 1
+      ta.selectionStart = ta.selectionEnd = next.caret
+      ensureCaretVisible(ta)
     })
   }
 
@@ -8392,6 +8427,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             pin/follow logic owns bottom-following instead. */}
         <div
           ref={scrollRef}
+          data-chat-scroll
           onScroll={onScroll}
           onCopy={copyTranscriptAsMarkdown}
           className="h-full overflow-y-auto [overflow-anchor:none]"

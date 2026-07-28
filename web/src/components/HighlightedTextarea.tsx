@@ -8,6 +8,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react'
 import { renderMarkdownSource } from '../lib/markdown'
+import { applyEdit, enterEdit, ensureCaretVisible, moveCaret, visualLineTarget } from '../lib/textareaEdit'
 
 type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'> & {
   value: string
@@ -38,6 +39,12 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
 // (same box model, same wrapped text) and is scroll-synced to it; the textarea
 // keeps a visible caret but transparent text so only the highlighted backdrop
 // shows through.
+//
+// It also carries the editing behaviours every composer shares (lib/textareaEdit):
+// Enter continues a markdown list, Home/End walk VISUAL lines, and the caret's
+// line is kept fully in view (padding included) when the box scrolls. The
+// consumer's own onKeyDown runs first and wins - a handler that calls
+// preventDefault (Enter-to-send, Ctrl+Enter-to-submit) is left alone.
 export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTextareaProps>(
   function HighlightedTextarea(
     {
@@ -49,6 +56,8 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       caretClassName = 'caret-gray-800 dark:caret-gray-100',
       renderContent = renderMarkdownSource,
       onScroll,
+      onKeyDown,
+      onInput,
       style,
       ...rest
     },
@@ -64,6 +73,30 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       if (!ta || !bd) return
       bd.scrollTop = ta.scrollTop
       bd.scrollLeft = ta.scrollLeft
+    }
+
+    // The shared editing keys, run only after the consumer's own onKeyDown has
+    // passed on the keystroke (see the component comment).
+    function editingKeys(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+      const ta = e.currentTarget
+      if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const edit = enterEdit(ta.value, ta.selectionStart ?? 0, ta.selectionEnd ?? 0)
+        if (edit) {
+          e.preventDefault()
+          applyEdit(ta, edit)
+          requestAnimationFrame(() => ensureCaretVisible(ta))
+        }
+        return
+      }
+      if ((e.key === 'End' || e.key === 'Home') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const caret = ta.selectionDirection === 'backward' ? ta.selectionStart : ta.selectionEnd
+        const to = visualLineTarget(ta, caret ?? 0, e.key === 'End' ? 'end' : 'start')
+        if (to != null) {
+          e.preventDefault()
+          moveCaret(ta, to, e.shiftKey)
+          ensureCaretVisible(ta)
+        }
+      }
     }
 
     // Re-sync after every render, on the next frame: the textarea's scroll
@@ -102,6 +135,19 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           onScroll={(e) => {
             syncScroll()
             onScroll?.(e)
+          }}
+          onKeyDown={(e) => {
+            onKeyDown?.(e)
+            if (!e.defaultPrevented) editingKeys(e)
+          }}
+          // Typing that pushes the caret onto a new line scrolls it barely into
+          // frame, clipping the box's bottom padding (and with it the bottom
+          // edge of anything the backdrop draws around the line, e.g. a fenced
+          // code block). Re-do the scroll properly once the edit has laid out.
+          onInput={(e) => {
+            onInput?.(e)
+            const ta = e.currentTarget
+            requestAnimationFrame(() => ensureCaretVisible(ta))
           }}
           // Match the backdrop's reserved scrollbar gutter so both layers wrap
           // text at the same width (see the backdrop above).
