@@ -36,7 +36,7 @@ export type TestRunResult = {
      */
     ref?: string | null;
     /**
-     * Report format parsed (junit | hydra | exit).
+     * Report format parsed (junit | hydra | stdout | exit). Never set while running - which format a run settles with is only known once its report has been parsed.
      */
     format?: string | null;
     /**

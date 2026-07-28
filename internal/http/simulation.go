@@ -947,13 +947,45 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 	api.WriteJSON(w, http.StatusOK, api.TestsResponse{Runners: simTestRunners(id)})
 }
 
+// simTestLogURL mirrors the real server's testLogURL: an opaque (runner, key)
+// URL a SETTLED runner hands out, which the "Show build log" toggle resolves.
+// Without it a settled card's log button would sit permanently disabled in the
+// simulation, which is not what a real settled run looks like.
+func simTestLogURL(runner string) string {
+	return "/tests/projects/sim-project/log?runner=" + runner + "&key=commit/a1b2c3d"
+}
+
+// HandleTestLog serves the persisted build log ({lines:[...]}) for a settled
+// runner, mirroring the real server's non-OpenAPI route (Server.HandleTestLog).
+// The failing runner resolves to a failing log, so the red-bordered terminal
+// treatment is exercised too.
+func (s *SimulationServer) HandleTestLog(w http.ResponseWriter, r *http.Request) {
+	lines := []api.ArtifactLogLine{
+		{Text: "$ go test ./... -json", Stream: api.Stdout},
+		{Text: "ok  \tinternal/heads\t0.42s", Stream: api.Stdout},
+		{Text: "ok  \tinternal/sandbox\t1.15s", Stream: api.Stdout},
+		{Text: "ok  \tinternal/tests\t0.88s", Stream: api.Stdout},
+	}
+	if r.URL.Query().Get("runner") == "vitest" {
+		lines = []api.ArtifactLogLine{
+			{Text: "$ vitest run --reporter=junit", Stream: api.Stdout},
+			{Text: " \u2713 diff/onion.test.ts (1)", Stream: api.Stdout},
+			{Text: " \u2717 auth/rotation.test.ts (2 failed)", Stream: api.Stderr},
+			{Text: "Test Files  1 failed | 12 passed (13)", Stream: api.Stderr},
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, struct {
+		Lines []api.ArtifactLogLine `json:"lines"`
+	}{Lines: lines})
+}
+
 // simTestRunners returns fixture test verdicts so --simulation and the
 // tests-panel screenshot exercise both a clean run and a regression (PLAN #68).
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
 		Total: ptr(152), Passed: ptr(145), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
-		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"), LogUrl: ptr(simTestLogURL("go")),
 		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
 		// Structured locations (path + line/col + scope) exercise the CaseTree. The
 		// two Go cases carry a `func TestXxx` subtest parent → ScopeKinds "function"
@@ -983,7 +1015,7 @@ func simTestRunners(id string) []api.TestRunResult {
 		return []api.TestRunResult{{
 			Name: "vitest", Status: api.TestStatusFailing,
 			Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3),
-			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"), LogUrl: ptr(simTestLogURL("vitest")),
 			Cases: &[]api.TestCase{
 				// Scope levels are vitest describe blocks → ScopeKinds "module".
 				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
@@ -1036,7 +1068,7 @@ func simTestRunners(id string) []api.TestRunResult {
 				// No Total: a streamed runner that never declared ::hydra:test:total::,
 				// so the panel shows a sliding barber pole instead of a fill percentage.
 				Passed: ptr(213), Warnings: ptr(3),
-				StartedAt: ptr(simNow().Add(-3 * time.Second).Unix()), Progress: ptr("216"), Format: ptr("stdout"),
+				StartedAt: ptr(simNow().Add(-3 * time.Second).Unix()), Progress: ptr("216"),
 				Log: &[]api.ArtifactLogLine{
 					{Text: "$ eslint -f junit .", Stream: "stdout"},
 					{Text: "web/src/DiffViewer.tsx", Stream: "stdout"},
@@ -1049,7 +1081,7 @@ func simTestRunners(id string) []api.TestRunResult {
 				// denominator (48). TotalEstimated flags it approximate → the panel shows
 				// a determinate bar and the count reads "31/~48".
 				Total: ptr(48), TotalEstimated: ptr(true), Passed: ptr(31), Failed: ptr(0),
-				StartedAt: ptr(simNow().Add(-6 * time.Second).Unix()), Progress: ptr("31/~48"), Format: ptr("stdout"),
+				StartedAt: ptr(simNow().Add(-6 * time.Second).Unix()), Progress: ptr("31/~48"),
 				Log: &[]api.ArtifactLogLine{
 					{Text: "$ playwright test", Stream: "stdout"},
 					{Text: "Running 48 tests using 4 workers", Stream: "stdout"},
