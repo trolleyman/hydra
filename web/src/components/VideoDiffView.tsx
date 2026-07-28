@@ -18,7 +18,7 @@
 import { useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
-  checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
+  checkerStyle, IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
@@ -393,14 +393,14 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
         </div>
       )}
       <div
-        className="relative w-full cursor-pointer select-none"
+        className={`relative w-full cursor-pointer select-none ${STACK_CLASS}`}
         onClick={flip}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
         <VideoSizer url={sizer} aspect={aspect} />
         <VideoLayer url={right} attach={controller.attachRight} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
         <VideoLayer url={left} attach={controller.attachLeft} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
-        {showHighlight && <canvas ref={canvasRef} className={`${OVERLAY_CLASS} pointer-events-none border-0`} />}
+        {showHighlight && <canvas ref={canvasRef} className={`${OVERLAY_CLASS} pointer-events-none`} />}
       </div>
     </div>
   )
@@ -449,7 +449,7 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
   return (
     <div
       ref={ref}
-      className="relative w-full select-none"
+      className={`relative w-full select-none ${STACK_CLASS}`}
       onAuxClick={makeAuxOpen((e) => {
         // Use the event target's rect (not the ref) so no ref is read at render.
         const r = e.currentTarget.getBoundingClientRect()
@@ -496,7 +496,7 @@ function VideoOnion({ controller, left, right, aspect }: { controller: Controlle
   return (
     <div className="min-w-0">
       <div
-        className="relative w-full select-none"
+        className={`relative w-full select-none ${STACK_CLASS}`}
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
         <VideoSizer url={sizer} aspect={aspect} />

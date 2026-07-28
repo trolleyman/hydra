@@ -2691,6 +2691,8 @@ const ToolCard = memo(function ToolCard({
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // The thumbnail clicked, so the lightbox flies the picture out of it.
+  const [imgOrigin, setImgOrigin] = useState<Element | null>(null)
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
@@ -3098,7 +3100,7 @@ const ToolCard = memo(function ToolCard({
                             width={logical?.w}
                             height={logical?.h}
                             alt="Tool output image"
-                            onClick={() => setImgLightbox(i)}
+                            onClick={(e) => { setImgOrigin(e.currentTarget); setImgLightbox(i) }}
                             // A ring, NOT a border: with border-box sizing (the
                             // Tailwind default) a 1px border eats 2px out of the
                             // content box the width attr set, so a 420px shot was
@@ -3144,6 +3146,7 @@ const ToolCard = memo(function ToolCard({
         <ImageLightbox
           images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          origin={imgOrigin}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
         />
@@ -3441,7 +3444,7 @@ function SubagentTimeline({
         }
         if (it.kind === 'assistant')
           return (
-            <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
               <Markdown text={it.text} />
             </div>
           )
@@ -3604,7 +3607,7 @@ function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }
       {report.isError ? (
         <OutputPanel text={report.text} lang="" isError />
       ) : (
-        <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
           <Markdown text={report.text} />
         </div>
       )}
@@ -3680,7 +3683,7 @@ function FinishedReportCard({
           report.isError ? (
             <OutputPanel text={report.text} lang="" isError />
           ) : (
-            <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
               <Markdown text={report.text} />
             </div>
           )
@@ -3809,7 +3812,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <div className={`break-words chat-leading-xs ${serif ? 'font-serif' : ''}`}>
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -3893,10 +3896,13 @@ function SubagentChatView({
         <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
+      {/* whitespace-nowrap for the same reason as the main working line: the
+          label swaps between "Working..." and the longer "Waiting on
+          sub-agents...", and a wrap there would shift the mark. */}
       {(running || waiting) && (
-        <div className="flex items-center gap-1.5 text-[11px] select-none">
+        <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap">
           <WorkSpark />
-          <span className="chat-text-shimmer font-medium optical-center">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
+          <span className="chat-text-shimmer font-medium min-w-0 truncate optical-center">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -4518,6 +4524,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
@@ -4535,7 +4543,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
             attachments={attachments}
             size="sm"
             className={body ? 'mt-2' : ''}
-            onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+            onOpenImage={(id, origin) => {
+              setLightboxOrigin(origin)
+              setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+            }}
           />
         )}
       </div>
@@ -4546,6 +4557,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
@@ -5277,6 +5289,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Current model, fed live by the event stream (system:init / set_model
@@ -7487,6 +7501,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // the user opted out of motion, and when the gap is more than a couple of
     // viewports - that size of jump is a bulk render, not "a new thing
     // arrived", and gliding it would just fling unreadable text past.
+    //
+    // Streamed growth is deliberately NOT special-cased into an instant match:
+    // the glide is the intended feel for everything that lands, streamed text
+    // included. What used to look like jitter on top of it was two separate
+    // layout bugs - the indicator row wrapping to two lines, and fractional
+    // line boxes moving the bottom by a sub-pixel every line - both fixed at
+    // the source (whitespace-nowrap on the row, .chat-leading in index.css).
     if (
       instant ||
       !liveUiRef.current ||
@@ -7666,7 +7687,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // dep so a sub-agent view follows its own live growth too. followBottom
   // glides rather than teleports; the first render of a replayed history is
   // far enough from the bottom to fall into its instant path.
-  useEffect(() => {
+  //
+  // LAYOUT effect, not a passive one: a passive effect runs AFTER the browser
+  // has painted, so the glide only STARTED a frame after the content grew - the
+  // view sat at the old offset for one frame, then began easing. Running before
+  // paint means the growth and the first step of the glide land in the same
+  // frame, which is what makes it read as one continuous slide rather than a
+  // stutter then a slide (most visible where a streamed thinking block settles
+  // into its card, a ~22px step).
+  useLayoutEffect(() => {
     if (pinnedRef.current) followBottom()
     // followBottom only touches refs, so it isn't a meaningful dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8662,7 +8691,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool': {
@@ -9016,7 +9045,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               either one makes reparsed Markdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>
               <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
             </div>
           )}
@@ -9026,13 +9055,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               thinking block streams, "Thinking..." rides inside the brackets here
               (after the duration and tokens) rather than as a separate line above,
               so the reasoning<->working transition doesn't shift the layout. */}
+          {/* One line, always. The bracket grows and shrinks as the turn runs
+              (tokens appear, "Thinking..." comes and goes), and on a narrow pane
+              that made the row wrap to two lines and back. The view is anchored
+              to the BOTTOM, so a second line pushes the row's top - and the mark
+              on it - up ~17px and then back down: exactly the wobble the eased
+              follow was blamed for. Truncating the secondary text instead keeps
+              the mark on one fixed line at any width. */}
           {isTurnRunning && replayDone && !lastIsResult && (
-            <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
+            <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap animate-chat-item-in">
               <WorkSpark />
-              <span className="chat-text-shimmer font-medium optical-center">{turnVerb}...</span>
+              <span className="chat-text-shimmer font-medium shrink-0 optical-center">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
-              <span className="text-stone-400 dark:text-stone-500 tabular-nums optical-center">
+              <span className="min-w-0 truncate text-stone-400 dark:text-stone-500 tabular-nums optical-center">
                 ({formatDuration(elapsed * 1000)}
                 {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
                 {stream?.kind === 'thinking' ? ' · Thinking...' : ''})
@@ -9155,7 +9191,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               size="sm"
               className="px-3 pt-2.5"
               onRemove={removeAttachment}
-              onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+              onOpenImage={(id, origin) => {
+                setLightboxOrigin(origin)
+                setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+              }}
             />
             <HighlightedTextarea
               ref={textareaRef}
@@ -9297,6 +9336,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />

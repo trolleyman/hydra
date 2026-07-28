@@ -24,7 +24,15 @@ export const checkerStyle: React.CSSProperties = {
 // wide screenshot no longer balloons to a large width just because the height was
 // the constraint.
 export const IMG_CLASS = 'block w-full h-auto rounded-md border border-gray-200 dark:border-gray-700'
-export const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
+export const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md'
+// STACK_CLASS frames the box the overlay layers stack inside. The frame lives HERE
+// rather than on each layer for a sub-pixel reason with a visible result: a border on
+// a layer eats 2px out of the box the picture is contained in, and since that changes
+// the box's aspect ratio, `object-contain` then letterboxes the picture by a further
+// border x (aspect - 1) - a 1-3px band of backdrop (or checkerboard) down one pair of
+// edges, which read as the image sitting slightly small inside its tile. Framing the
+// container instead leaves each layer's content box exactly the box.
+export const STACK_CLASS = 'rounded-md border border-gray-200 dark:border-gray-700'
 export const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
 
 // Open media in a new tab - the fallback affordance for video frames (which the

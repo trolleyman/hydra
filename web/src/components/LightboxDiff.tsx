@@ -3,6 +3,7 @@ import { ImageDiffView, SegmentedToggle, type ArtifactABControls, type ImageDiff
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
+import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the image
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
@@ -96,7 +97,10 @@ export function LightboxDiff({ left, right, name, mode, view, onViewChange, high
             wrapper so the comparator stays laid out at its fit size while the frame
             around it grows (feeding it the frame width instead would reflow the diff,
             not magnify it). */}
-        <ZoomPan minimapSrc={right ?? left} className="max-w-[94vw]" maxWidth="94vw" maxHeight="80vh">
+        {/* LIGHTBOX_MEDIA_CLASS marks the frame as the comparator's own box (it hugs
+            the fit-sized content exactly at rest), so the lightbox's open/navigate
+            flights measure the picture rather than the wrapper around it. */}
+        <ZoomPan minimapSrc={right ?? left} className={`${LIGHTBOX_MEDIA_CLASS} max-w-[94vw]`} maxWidth="94vw" maxHeight="80vh">
           <div style={{ width }}>
             <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
           </div>

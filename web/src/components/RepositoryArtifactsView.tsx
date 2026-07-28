@@ -6,6 +6,7 @@ import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
+import { CheckerLayer } from './CheckerLayer'
 import { VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { isVideoArtifact, isDownloadArtifact } from '../lib/artifactFilter'
 import { formatBytes } from '../lib/formatBytes'
@@ -92,18 +93,20 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
           // column width.
           <button
             type="button"
-            onClick={() => {
+            onClick={(e) => {
               const i = gallery.findIndex((g) => g.url === url)
-              openImage(gallery, i >= 0 ? i : 0)
+              // The button (the lightbox digs out the <img> inside it) is the open
+              // origin, so the picture flies from this tile instead of fading in.
+              openImage(gallery, i >= 0 ? i : 0, e.currentTarget)
             }}
-            className="block w-full cursor-zoom-in"
+            className="relative block w-full cursor-zoom-in"
           >
+            <CheckerLayer />
             <img
               src={url}
               loading="lazy"
               draggable={false}
-              style={checkerStyle}
-              className={IMG_CLASS}
+              className={`relative ${IMG_CLASS}`}
             />
           </button>
         )}
