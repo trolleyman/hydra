@@ -1123,7 +1123,9 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
             <>
               <LiveLogPanes set={set} />
               {visibleFiles.length > 0 && (
-                <FileGrid files={visibleFiles} mode={mode} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
+                <div className="mt-2">
+                  <FileGrid files={visibleFiles} mode={mode} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
+                </div>
               )}
             </>
           )}

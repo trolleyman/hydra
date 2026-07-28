@@ -42,6 +42,33 @@ encoder/metadata differences are ignored and only real visual changes surface.
 The script still pins the clock and freezes timers/animation (see its header) to
 keep diffs clean, but minor encoding nondeterminism is tolerated.
 
+**A shot's `click`/`hover` selector must key on something stable.** These are the
+only part of the generator that silently rots: a UI change moves a control, the
+selector matches nothing, Playwright waits its full 30s, and the shot is dropped
+with one `✗` line in a log nobody reads. Two selector styles have broken this
+way already, both from legitimate UI changes weeks apart:
+
+- **`button[title="..."]`** - the tooltip convention (see CLAUDE.md) moved native
+  `title=` off interactive controls, so every title-keyed selector stopped
+  matching. Took out `repository-branches` and both `spawn-branch-selector` shots.
+- **`svg.lucide-<icon>`** - swapping `GitCompare` for `GitCompareArrows` renames
+  the class, and a CSS class selector matches whole tokens, so `.lucide-git-compare`
+  no longer matches `lucide-git-compare-arrows`. Took out every `repository-diff*`
+  shot. `.lucide-settings` vs `Settings2` is the same trap.
+
+Prefer, in order: **`aria-label`** (it is the control's accessible name, so the
+a11y rule keeps it honest), a **`data-*` hook** added for the purpose
+(`data-branch-selector`, like `data-main-scroll`), then visible text. Never a
+native `title`, never a lucide class.
+
+Note that a failed shot does NOT fail the run, and should not: the generator
+reports `✗` and carries on, because `internal/artifacts` returns before
+`scanOutputs` on a non-zero exit, so failing hard would throw away every shot
+that DID render. The cost is that the failure is quiet - it shows up as a removed
+tile on the diff's right-hand side. A preflight that walks these selectors in the
+e2e suite (which already boots the same simulation server) would catch a stale
+one at test time instead; not built.
+
 **Chromium needs the egress proxy handed to it explicitly.** Every browser launch
 here spreads `proxyLaunchOptions()` (`web/scripts/lib/browserProxy.ts`) into its
 options, and it must. curl, node and git read `HTTPS_PROXY` from the environment;
