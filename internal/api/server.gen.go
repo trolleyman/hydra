@@ -1130,6 +1130,27 @@ type RepositoryUncommittedFile struct {
 	Status string `json:"status"`
 }
 
+// ResolvedPathResponse defines model for ResolvedPathResponse.
+type ResolvedPathResponse struct {
+	// DisplayPath The same path with the server's home directory abbreviated to "~"
+	DisplayPath string `json:"display_path"`
+
+	// Exists Whether anything exists at the resolved path
+	Exists bool `json:"exists"`
+
+	// IsDir Whether the resolved path is a directory
+	IsDir bool `json:"is_dir"`
+
+	// IsGitRepo Whether the resolved path is inside a git repository
+	IsGitRepo bool `json:"is_git_repo"`
+
+	// Path The absolute path the input resolves to ("~/x" and relative paths both resolve against the server's home directory)
+	Path string `json:"path"`
+
+	// RepoRoot Root of the git repository containing the path, when is_git_repo (the project would be added at this path)
+	RepoRoot *string `json:"repo_root,omitempty"`
+}
+
 // ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 type ResourceLimits struct {
 	// CpuQuota Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null/0 = no cap.
@@ -1929,6 +1950,11 @@ type ListReviewsParams struct {
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ResolvePathParams defines parameters for ResolvePath.
+type ResolvePathParams struct {
+	Path string `form:"path" json:"path"`
+}
+
 // GetClaudeUsageParams defines parameters for GetClaudeUsage.
 type GetClaudeUsageParams struct {
 	// Refresh Bypass the cache and re-probe the CLI.
@@ -2165,6 +2191,9 @@ type ServerInterface interface {
 	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
 	// (POST /api/projects/{project_id}/track-remote)
 	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string)
+	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
+	// (GET /api/resolve-path)
+	ResolvePath(w http.ResponseWriter, r *http.Request, params ResolvePathParams)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -4548,6 +4577,40 @@ func (siw *ServerInterfaceWrapper) EnsureTrackRemote(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ResolvePath operation middleware
+func (siw *ServerInterfaceWrapper) ResolvePath(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ResolvePathParams
+
+	// ------------- Required query parameter "path" -------------
+
+	if paramValue := r.URL.Query().Get("path"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "path", r.URL.Query(), &params.Path)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolvePath(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -4786,6 +4849,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/track-remote", wrapper.EnsureTrackRemote)
+	m.HandleFunc("GET "+options.BaseURL+"/api/resolve-path", wrapper.ResolvePath)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
@@ -7194,6 +7258,41 @@ func (response EnsureTrackRemote500JSONResponse) VisitEnsureTrackRemoteResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ResolvePathRequestObject struct {
+	Params ResolvePathParams
+}
+
+type ResolvePathResponseObject interface {
+	VisitResolvePathResponse(w http.ResponseWriter) error
+}
+
+type ResolvePath200JSONResponse ResolvedPathResponse
+
+func (response ResolvePath200JSONResponse) VisitResolvePathResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResolvePath400JSONResponse ErrorResponse
+
+func (response ResolvePath400JSONResponse) VisitResolvePathResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResolvePath500JSONResponse ErrorResponse
+
+func (response ResolvePath500JSONResponse) VisitResolvePathResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -7453,6 +7552,9 @@ type StrictServerInterface interface {
 	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
 	// (POST /api/projects/{project_id}/track-remote)
 	EnsureTrackRemote(ctx context.Context, request EnsureTrackRemoteRequestObject) (EnsureTrackRemoteResponseObject, error)
+	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
+	// (GET /api/resolve-path)
+	ResolvePath(ctx context.Context, request ResolvePathRequestObject) (ResolvePathResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -9262,6 +9364,32 @@ func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnsureTrackRemoteResponseObject); ok {
 		if err := validResponse.VisitEnsureTrackRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResolvePath operation middleware
+func (sh *strictHandler) ResolvePath(w http.ResponseWriter, r *http.Request, params ResolvePathParams) {
+	var request ResolvePathRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResolvePath(ctx, request.(ResolvePathRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResolvePath")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResolvePathResponseObject); ok {
+		if err := validResponse.VisitResolvePathResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

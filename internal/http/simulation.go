@@ -11,12 +11,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 )
 
@@ -55,6 +57,13 @@ type SimulationServer struct {
 	approvalMu   sync.Mutex
 	approvalKind string
 	approvalGen  int
+
+	// askRunning is true while agent-ask's answered turn is streaming. The chat's
+	// live "working" indicator keys off the AGENT RECORD's status (the store's
+	// list), not the WS status frame, so a fixture pinned to needs_input can
+	// never show it - even mid-stream. Flipping this makes ListAgents/GetAgent
+	// report `running` for exactly as long as the turn is in flight.
+	askRunning atomic.Bool
 }
 
 // setSimApproval parks (or with "" clears) the picked approval kind.
@@ -225,6 +234,27 @@ func (s *SimulationServer) PreviewConfigToml(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false})
 }
 
+// ResolvePath answers for real (unlike AddProject) - it only reads path
+// metadata, and the add-project input's live "this is where that lands" hint is
+// worth exercising against the actual filesystem.
+func (s *SimulationServer) ResolvePath(w http.ResponseWriter, r *http.Request, params api.ResolvePathParams) {
+	resolved := resolveProjectPath(params.Path)
+	if resolved == "" {
+		api.WriteError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	resp := api.ResolvedPathResponse{Path: resolved, DisplayPath: *displayPathPtr(resolved)}
+	if st, err := os.Stat(resolved); err == nil {
+		resp.Exists = true
+		resp.IsDir = st.IsDir()
+	}
+	if root, err := paths.GetProjectRoot(resolved); err == nil {
+		resp.IsGitRepo = true
+		resp.RepoRoot = &root
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -328,9 +358,32 @@ func simAgentCodex() api.AgentResponse {
 const simAgentAskPrompt = "Refactor the config loader to support per-environment overrides."
 
 // simAgentAsk is the AskUserQuestion demo agent, shared by ListAgents and
-// GetAgent.
-func simAgentAsk() api.AgentResponse {
+// GetAgent. It reports needs_input while parked on its question and running
+// while the answered turn streams (see askRunning), so the chat's live working
+// indicator - which reads this record, not the WS status frame - lights up for
+// that stretch and settles when the result footer lands.
+func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 	createdAt := simNow().Add(-20 * time.Minute).Unix()
+	if s.askRunning.Load() {
+		return api.AgentResponse{
+			Id:            "agent-ask",
+			Title:         ptr("Per-environment config overrides"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-config-overrides"),
+			SessionPid:    1007,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        simAgentAskPrompt,
+			ChatMode:      ptr(true),
+			Model:         ptr("claude-opus-4-8"),
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wiring the per-environment overlay into `Load`"),
+			},
+		}
+	}
 	return api.AgentResponse{
 		Id:            "agent-ask",
 		Title:         ptr("Per-environment config overrides"),
@@ -347,6 +400,39 @@ func simAgentAsk() api.AgentResponse {
 			Status:      api.NeedsInput,
 			Timestamp:   simNow().Format(time.RFC3339),
 			LastMessage: ptr("Which override layering should I implement?"),
+		},
+	}
+}
+
+// simAgentWorkingPrompt seeds the mid-turn demo agent (agent-working), whose
+// chat never reaches a result: it parks with a turn in flight (see
+// handleSimWorkingWS).
+const simAgentWorkingPrompt = "Trace how a preview server gets its port and write up the allocation rules."
+
+// simAgentWorking is the only simulated head that is parked MID-TURN. Every
+// other chat agent's canned stream ends with a result footer, which settles the
+// turn - so the live chrome that only exists while a turn is in flight (the
+// working spark + shimmering verb, the ticking elapsed/token counter, the
+// streaming thinking card, the composer's queue-instead-of-send path) had no
+// home in simulation and could only be seen against a real running head.
+func simAgentWorking() api.AgentResponse {
+	createdAt := simNow().Add(-6 * time.Minute).Unix()
+	return api.AgentResponse{
+		Id:            "agent-working",
+		Title:         ptr("Document preview port allocation"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/sim-working"),
+		SessionPid:    1009,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentWorkingPrompt,
+		ChatMode:      ptr(true),
+		Model:         ptr("claude-opus-4-8"),
+		AgentStatus: &api.AgentStatusInfo{
+			Status:    api.Running,
+			Timestamp: simNow().Format(time.RFC3339),
+			Activity:  ptr("Reading `internal/preview/ports.go`"),
 		},
 	}
 }
@@ -469,7 +555,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		simAgentCodex(),
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.
-		simAgentAsk(),
+		s.simAgentAsk(),
+		// Chat-mode agent parked mid-turn: the only place the live working
+		// indicator is visible in simulation.
+		simAgentWorking(),
 		// The approval picker: its question card raises any one of the gate's
 		// approval cards on demand (nothing is parked until you pick).
 		s.simAgentApprovals(),
@@ -569,13 +658,14 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		if resp[i].Id == "agent-md" || resp[i].Id == "agent-queued" {
 			resp[i].MergeWhenGreen = ptr(true)
 		}
-		// agent-approval demonstrates a linked MR (View MR + state chip); agent-1 a
-		// linked, ahead-by-1 head (Push to MR); agent-2 an unlinked head with a
-		// seeded downstream branch (Create MR).
+		// agent-approval demonstrates a linked MR that is BEHIND its remote branch
+		// (View MR + the amber pull chip); agent-1 a linked, ahead-by-1 head (the
+		// button leads with Push to MR and the sidebar row shows the up-arrow);
+		// agent-2 an unlinked head with a seeded downstream branch (Create MR).
 		switch resp[i].Id {
 		case "agent-approval":
 			resp[i].DownstreamBranch = ptr("feat/mcp-github")
-			resp[i].Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+			resp[i].Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 2)
 		case "agent-1":
 			resp[i].DownstreamBranch = ptr("feat/rate-limit")
 			resp[i].Review = simReviewLink("open", forge.CISuccess, 2, 0, 1, 0)
@@ -702,7 +792,11 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if id == "agent-ask" {
-		write(simAgentAsk())
+		write(s.simAgentAsk())
+		return
+	}
+	if id == "agent-working" {
+		write(simAgentWorking())
 		return
 	}
 	if id == "agent-approvals" {
@@ -4824,7 +4918,7 @@ var simAskEvents = []string{
 // handleSimAskWS speaks the chat framing for agent-ask: replay the pending
 // question, then answer the control_response with the tool_result +
 // assistant acknowledgement the real CLI would produce.
-func handleSimAskWS(conn *safeConn) {
+func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	sendStatusUpdate(conn, "needs_input")
 	for _, line := range simAskEvents {
 		sendSimChatEvent(conn, line)
@@ -4865,8 +4959,12 @@ func handleSimAskWS(conn *safeConn) {
 			sendSimChatEvent(conn, string(toolResult))
 			// Answering the question kicks off the big streamed implementation turn
 			// (interleaved tools + thinking, then a long markdown block typed in
-			// slowly) so the demo shows a large chat streaming in live.
+			// slowly) so the demo shows a large chat streaming in live. The head's
+			// RECORD has to say running for that stretch too, or the live working
+			// line above the stream never appears (see askRunning).
+			s.askRunning.Store(true)
 			streamSimAskImplementation(conn, "sim-ask")
+			s.askRunning.Store(false)
 			sendStatusUpdate(conn, "waiting")
 		case "set_model":
 			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
@@ -4881,6 +4979,114 @@ func handleSimAskWS(conn *safeConn) {
 			})
 			sendSimChatEvent(conn, string(userEv))
 			streamSimReply(conn, "sim-ask", fmt.Sprintf("msg_ask_reply_%d", turn), "Simulated reply: noted. The pending question card above stays answerable.")
+		}
+	}
+}
+
+// --- Simulated mid-turn agent (agent-working) ---------------------------------
+
+// simWorkingEvents is the settled part of agent-working's turn: the prompt, an
+// opening paragraph and one finished tool step. Everything after this is
+// streamed live by handleSimWorkingWS and never settles into a result.
+var simWorkingEvents = []string{
+	`{"type":"system","subtype":"init","session_id":"sim-working","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentWorkingPrompt + `"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_working_1","content":[{"type":"text","text":"Starting from the allocator - the range and the retry behaviour on a busy port are the two things worth writing down precisely."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_working_2","content":[{"type":"tool_use","id":"toolu_working_grep","name":"Grep","input":{"pattern":"26601|previewPortBase","path":"internal/preview"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_working_grep","content":"internal/preview/ports.go:18: const previewPortBase = 26601\ninternal/preview/ports.go:19: const previewPortCount = 99"}]}}`,
+}
+
+// simWorkingThoughts is the trickle of thinking text the parked turn keeps
+// producing, cycled forever a line at a time.
+var simWorkingThoughts = []string{
+	"ports.go hands out 26601-26699, so 99 slots shared across every project on the box. ",
+	"The allocator walks the range and probes each candidate with a listen, which means a port held by a non-Hydra process is skipped rather than fought over. ",
+	"Worth stating explicitly that the web UI itself sits on 26600, just below the range - people keep reading it as part of the pool. ",
+	"Exhaustion is the interesting case: the spawn fails with a clear error instead of blocking, and nothing is reserved, so a retry can succeed the moment a head is killed. ",
+	"A head that dies without cleanup leaves no reservation behind either - the probe is the only source of truth. ",
+}
+
+// handleSimWorkingWS speaks the chat framing for agent-working: replay the
+// settled part of the turn, then stay in flight forever - a tool card left
+// running, a thinking block that keeps streaming, and a token count that keeps
+// climbing. It deliberately never emits a result, so the live working line
+// stays up for as long as the page is open.
+func handleSimWorkingWS(conn *safeConn) {
+	sendStatusUpdate(conn, "running")
+	for _, line := range simWorkingEvents {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+
+	// The client still sends (queued messages, model switches, interrupts); drain
+	// them so the socket stays healthy, and stop streaming when it goes away.
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		for {
+			msg, ok := readSimChatClientMsg(conn)
+			if !ok {
+				return
+			}
+			// An interrupt is the one thing that legitimately ends this turn.
+			if msg.Type == "interrupt" {
+				sendSimUserText(conn, "sim-working", "[Request interrupted by user]")
+				sendSimChatEvent(conn, `{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":387000,"session_id":"sim-working"}`)
+				sendStatusUpdate(conn, "waiting")
+				return
+			}
+		}
+	}()
+
+	// sleep returns false once the client is gone, so every pause below doubles
+	// as a shutdown check.
+	sleep := func(d time.Duration) bool {
+		select {
+		case <-closed:
+			return false
+		case <-time.After(d):
+			return true
+		}
+	}
+	streamEv := func(event map[string]any) {
+		line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": event, "session_id": "sim-working"})
+		sendSimChatEvent(conn, string(line))
+	}
+
+	// A tool call with no tool_result: its card stays in the running state under
+	// the live indicator, which is what a real head looks like mid-step.
+	if !sleep(1200 * time.Millisecond) {
+		return
+	}
+	sendSimChatEvent(conn, `{"type":"assistant","message":{"id":"msg_working_3","content":[{"type":"tool_use","id":"toolu_working_read","name":"Read","input":{"file_path":"internal/preview/ports.go"}}]}}`)
+	if !sleep(1500 * time.Millisecond) {
+		return
+	}
+	sendSimChatEvent(conn, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_working_read","content":"func allocPort(taken map[int]bool) (int, error) {\n\tfor p := previewPortBase; p < previewPortBase+previewPortCount; p++ {\n\t\tif !taken[p] && probeFree(p) {\n\t\t\treturn p, nil\n\t\t}\n\t}\n\treturn 0, errNoFreePreviewPort\n}"}]}}`)
+	if !sleep(900 * time.Millisecond) {
+		return
+	}
+
+	// An open thinking block, extended a line at a time forever: the streamed
+	// thinking card stays live, "Thinking..." rides in the working line, and the
+	// output-token count keeps ticking up. Slow on purpose - the point is the
+	// resting state of a working head, not a stress test.
+	streamEv(map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_working_4", "usage": map[string]any{"input_tokens": 24800, "output_tokens": 1}}})
+	streamEv(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking"}})
+	tokens := 1
+	for i := 0; ; i++ {
+		thought := simWorkingThoughts[i%len(simWorkingThoughts)]
+		// Type it out word by word so the card visibly grows.
+		for chunk := range strings.SplitSeq(thought, " ") {
+			if !sleep(90 * time.Millisecond) {
+				return
+			}
+			streamEv(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": chunk + " "}})
+			tokens += 2
+			streamEv(map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": tokens}})
+		}
+		if !sleep(2500 * time.Millisecond) {
+			return
 		}
 	}
 }
@@ -4907,8 +5113,12 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 		handleSimCodexChatWS(conn)
 		return
 	}
+	if agentID == "agent-working" && r.URL.Query().Get("shell") != "true" {
+		handleSimWorkingWS(conn)
+		return
+	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {
-		handleSimAskWS(conn)
+		s.handleSimAskWS(conn)
 		return
 	}
 	if agentID == "agent-approvals" && r.URL.Query().Get("shell") != "true" {
@@ -4984,6 +5194,10 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 		}
 	}()
 	_, gen := s.simApproval()
+	// agent-ask's record flips running <-> needs_input around its answered turn,
+	// and the chat's live working indicator reads that record - so the list has
+	// to be refetched when it moves, exactly like the approval picker.
+	asking := s.askRunning.Load()
 	ticker := time.NewTicker(simEventPollInterval)
 	defer ticker.Stop()
 	for {
@@ -4991,11 +5205,14 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 		case <-done:
 			return
 		case <-ticker.C:
-			if _, current := s.simApproval(); current != gen {
-				gen = current
-				if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
-					return
-				}
+			_, current := s.simApproval()
+			live := s.askRunning.Load()
+			if current == gen && live == asking {
+				continue
+			}
+			gen, asking = current, live
+			if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
+				return
 			}
 		}
 	}
