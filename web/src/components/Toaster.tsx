@@ -7,7 +7,7 @@ import { ApprovalCard } from './ApprovalToast'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
-import { TILE_TONE, TILE_BAR, type TileTone } from '../lib/tileTone'
+import { TILE_TONE, TILE_BAR, TILE_GLYPH, type TileTone } from '../lib/tileTone'
 import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 
 // Per-type visual identity: the icon and its tinted rounded square. The tint and
@@ -129,7 +129,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       )}
       <div className={size.pad}>
         <div className={`flex items-start ${size.row}`}>
-          <div className={`shrink-0 flex items-center justify-center ${size.tile} ${wrap}`}>
+          <div className={`shrink-0 flex items-center justify-center ${TILE_GLYPH} ${size.tile} ${wrap}`}>
             {iconNode}
           </div>
           <div className={`min-w-0 flex-1 ${isStringMessage ? 'self-center' : ''}`}>

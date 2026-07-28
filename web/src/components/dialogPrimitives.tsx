@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { TILE_TONE } from '../lib/tileTone'
+import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
 
 // Shared building blocks for the app's rich confirmation dialogs (the merge /
 // kill confirmations in Dialog.tsx and the merge-conflict panel in DiffViewer).
@@ -35,7 +35,7 @@ export function DialogIconTile({
 }) {
   const box = size === 'sm' ? 'w-9 h-9' : 'w-10 h-10'
   return (
-    <span className={`${box} shrink-0 rounded-xl flex items-center justify-center ${TILE_TONE[tone]}`}>
+    <span className={`${box} shrink-0 rounded-xl flex items-center justify-center ${TILE_GLYPH} ${TILE_TONE[tone]}`}>
       {children}
     </span>
   )

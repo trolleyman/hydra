@@ -1061,7 +1061,7 @@ export function AgentDetail({
           await api.default.killAgent(projectId ?? '', agent.id)
           useToastStore.getState().show({
             type: 'info',
-            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' }),
+            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: 'was' }),
           })
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next

@@ -24,7 +24,7 @@ export function AgentTransitionRow({ agentName, agentId, projectId, status, befo
           row. Without putting that back the two lines read as one cramped block
           - the trim fixes the title's alignment against its Bot but must not
           also close the gap to the status line. */}
-      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
         {lead && <span>{withBranchPills(lead)}</span>}
         {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
         {after && <span>{withBranchPills(after)}</span>}

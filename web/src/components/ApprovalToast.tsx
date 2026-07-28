@@ -4,7 +4,7 @@ import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { AgentNameLink } from './AgentNameLink'
-import { TILE_TONE } from '../lib/tileTone'
+import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
 import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
@@ -305,7 +305,7 @@ export const ApprovalCard: React.FC<{
       {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">
         <div className="flex items-start gap-3">
-          <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${iconWrap}`}>
+          <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${TILE_GLYPH} ${iconWrap}`}>
             <Icon className="w-[18px] h-[18px]" />
           </div>
           {/* flex-col: the agent link is wrapped in a Tooltip, whose inline-flex

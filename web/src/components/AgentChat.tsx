@@ -9449,8 +9449,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </>
                   )}
                 </div>
+                {/* self-center on these icon buttons: the group is baseline-aligned
+                    for its three runs of text, and a button has no text baseline -
+                    it would be aligned by its bottom margin edge instead, hanging
+                    the round send button off the labels' baseline. */}
                 {isTurnRunning && (
-                  <Tooltip content="Interrupt (Ctrl+C)" side="top">
+                  <Tooltip content="Interrupt (Ctrl+C)" side="top" className="self-center">
                     <button
                       onClick={interrupt}
                       className="p-1.5 rounded-lg text-red-500/90 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
@@ -9460,7 +9464,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top">
+                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top" className="self-center">
                   <button
                     onClick={send}
                     disabled={!canSend}
