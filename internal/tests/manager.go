@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,8 +33,20 @@ const (
 	defaultTimeout  = 10 * time.Minute // test suites run longer than artifact renders
 	maxLogLines     = 5000
 	reportFile      = "report.json"
+	casesFile       = "cases.json"  // per-case array, split out of report.json
+	latestFile      = "latest.json" // per-runner pointer to the newest entry (see latestPointer)
 	logFile         = "build.log"
 	branchTotalFile = "total.json" // per-branch denominator estimate (see recordBranchTotal)
+)
+
+const (
+	// DefaultMaxAge and DefaultMaxBytes bound the on-disk test cache, mirroring
+	// the artifact cache's limits. A verdict is keyed to a commit, so once that
+	// commit is weeks behind the branch nothing will ever ask for it again: the
+	// entries accumulate one per tested commit per runner and, left alone, grow
+	// without limit (the cache that motivated the split was 800 MB).
+	DefaultMaxAge   = 14 * 24 * time.Hour
+	DefaultMaxBytes = int64(512) << 20 // 512 MiB
 )
 
 // ProgressMarker prefixes a stdout line a test command emits to set the live
@@ -213,16 +226,23 @@ func (m *Manager) slotsDir() string { return filepath.Join(m.root(), "slots") }
 // ephemeral subdir here, removed when its launch is cleaned up.
 func (m *Manager) cowDir() string { return filepath.Join(m.root(), "cow") }
 
+// runnerDir holds every cache entry for one runner, plus its latest.json
+// pointer: out/<runner>/.
+func (m *Manager) runnerDir(runner string) string {
+	return filepath.Join(m.outDir(), sanitizeName(runner))
+}
+
 func (m *Manager) entryDir(runner, key string) string {
-	return filepath.Join(m.outDir(), sanitizeName(runner), filepath.FromSlash(key))
+	return filepath.Join(m.runnerDir(runner), filepath.FromSlash(key))
 }
 
 // branchTotalDir is where a runner's per-branch total sidecar lives:
 // out/<runner>/branch/<sanitized-branch>/. Kept beside the commit/worktree entry
-// dirs but under its own kind so it never collides with a report.json entry (and
-// Latest, which only reads report.json files, ignores it).
+// dirs but under its own kind so it never collides with a report.json entry -
+// which is also why scanLatest and PruneStale, both of which walk only the
+// commit/worktree kinds, pass over it.
 func (m *Manager) branchTotalDir(runner, branch string) string {
-	return filepath.Join(m.outDir(), sanitizeName(runner), keyKindBranch, sanitizeName(branch))
+	return filepath.Join(m.runnerDir(runner), keyKindBranch, sanitizeName(branch))
 }
 
 const (
@@ -275,29 +295,76 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 		return rep, true, nil
 	}
 	m.mu.Unlock()
-	rep, ok := readReport(dir)
+	// Summary only: every Peek caller (merge gate, publish gate, the per-head
+	// verdict chip) reads counts and status, never the cases.
+	rep, ok := readReportSummary(dir)
 	return rep, ok, nil
 }
 
 // Latest returns the most-recently-updated cached report for a runner across all
 // commits, ignoring which version it was computed for. Used to detect a "stale"
 // verdict (a cached result that predates the head's current commit) for the head
-// summary chip. Returns (Report{}, false) when nothing is cached.
+// summary chip. Returns (Report{}, false) when nothing is cached. Only the
+// summary is loaded - callers here want counts, not cases.
+//
+// Answered from the runner's latest.json pointer, falling back to a scan that
+// rewrites it. Reading every entry to find the newest, as this used to, meant
+// parsing the runner's whole cache on a request-path call.
 func (m *Manager) Latest(runner string) (Report, bool) {
-	base := filepath.Join(m.outDir(), sanitizeName(runner))
-	var best Report
-	found := false
-	// Layout: out/<runner>/<kind>/<id>/report.json
-	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || d.Name() != reportFile {
-			return nil
+	runnerDir := m.runnerDir(runner)
+	if ptr, ok := readLatestPointer(runnerDir); ok {
+		if rep, ok := readReportSummary(m.entryDir(runner, ptr.Key)); ok {
+			return rep, true
 		}
-		if rep, ok := readReport(filepath.Dir(path)); ok && rep.UpdatedAt >= best.UpdatedAt {
-			best, found = rep, true
+		// The entry it names is gone - pruned, or invalidated for a re-run. Fall
+		// through and rebuild the pointer from whatever is left on disk.
+	}
+	rep, ok := m.scanLatest(runner)
+	if ok && keyRe.MatchString(rep.Key) {
+		// Written directly rather than through updateLatest: we are here because
+		// whatever the pointer said is unusable, so its (possibly newer) timestamp
+		// must not veto the repair.
+		writeLatestPointer(runnerDir, latestPointer{Key: rep.Key, UpdatedAt: rep.UpdatedAt})
+	}
+	return rep, ok
+}
+
+// scanLatest finds a runner's newest cached report by listing its entry dirs
+// newest-first (by directory mtime, which writing a report bumps) and taking the
+// first that parses. It reads one report in the normal case; the pointer above
+// means it only runs for a cache written before the pointer existed, or one
+// whose pointed-at entry has just been pruned.
+func (m *Manager) scanLatest(runner string) (Report, bool) {
+	type candidate struct {
+		key string
+		mod time.Time
+	}
+	var candidates []candidate
+	// Layout: out/<runner>/<kind>/<id>/. keyKindBranch holds total.json sidecars
+	// rather than entries, so it is not a source of reports.
+	for _, kind := range []string{keyKindCommit, keyKindWorktree} {
+		entries, err := os.ReadDir(filepath.Join(m.runnerDir(runner), kind))
+		if err != nil {
+			continue
 		}
-		return nil
-	})
-	return best, found
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			candidates = append(candidates, candidate{key: kind + "/" + e.Name(), mod: info.ModTime()})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].mod.After(candidates[j].mod) })
+	for _, c := range candidates {
+		if rep, ok := readReportSummary(m.entryDir(runner, c.key)); ok {
+			return rep, true
+		}
+	}
+	return Report{}, false
 }
 
 func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error) {
@@ -346,6 +413,8 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 			_ = os.RemoveAll(dir)
 		} else if err := writeReport(dir, rep); err != nil {
 			_ = err
+		} else {
+			m.updateLatest(rep)
 		}
 		if !cancelled {
 			// Attribute this run's case count to its branch so the next run of the
@@ -400,6 +469,128 @@ func (m *Manager) Invalidate(runner string, v Version) error {
 		return nil
 	}
 	return errtrace.Wrap(os.RemoveAll(dir))
+}
+
+// PruneStale removes cache entries older than maxAge, then evicts the oldest
+// remaining entries until the cache is under maxBytes. Entries with an in-flight
+// generation are never touched. Mirrors artifacts.Manager.PruneStale; a test
+// verdict is keyed to a commit, so an entry the branch has moved past is dead
+// weight - nothing will ever ask for that key again.
+//
+// The per-branch total.json sidecars (out/<runner>/branch/) are deliberately
+// left alone: they are a few bytes each and are the denominator estimate for the
+// branch's *next* run, which has nothing to do with how old the last one was.
+func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
+	type entry struct {
+		dir     string
+		modTime time.Time
+		size    int64
+	}
+	var entries []entry
+
+	runnerDirs, err := os.ReadDir(m.outDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errtrace.Wrap(err)
+	}
+
+	m.mu.Lock()
+	inFlight := make(map[string]struct{}, len(m.gens))
+	for d := range m.gens {
+		inFlight[d] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	for _, rd := range runnerDirs {
+		if !rd.IsDir() {
+			continue // latest.json and other stray files
+		}
+		runnerPath := filepath.Join(m.outDir(), rd.Name())
+		for _, kind := range []string{keyKindCommit, keyKindWorktree} {
+			kindPath := filepath.Join(runnerPath, kind)
+			idDirs, err := os.ReadDir(kindPath)
+			if err != nil {
+				continue
+			}
+			for _, id := range idDirs {
+				if !id.IsDir() {
+					continue
+				}
+				dir := filepath.Join(kindPath, id.Name())
+				if _, busy := inFlight[dir]; busy {
+					continue
+				}
+				size, modTime := dirStats(dir)
+				if maxAge > 0 && modTime.Before(cutoff) {
+					_ = os.RemoveAll(dir)
+					continue
+				}
+				entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
+			}
+		}
+	}
+
+	if maxBytes > 0 {
+		var total int64
+		for _, e := range entries {
+			total += e.size
+		}
+		if total > maxBytes {
+			// Evict oldest-first until under the cap.
+			sort.Slice(entries, func(i, j int) bool { return entries[i].modTime.Before(entries[j].modTime) })
+			for _, e := range entries {
+				if total <= maxBytes {
+					break
+				}
+				_ = os.RemoveAll(e.dir)
+				total -= e.size
+			}
+		}
+	}
+
+	// Drop any latest.json left pointing at an entry this pass deleted. Latest
+	// copes with a dangling pointer by rescanning, but clearing it here saves
+	// every later call that scan.
+	for _, rd := range runnerDirs {
+		if !rd.IsDir() {
+			continue
+		}
+		runnerPath := filepath.Join(m.outDir(), rd.Name())
+		ptr, ok := readLatestPointer(runnerPath)
+		if !ok {
+			continue
+		}
+		// Stat rather than parse: all we need to know is whether this pass took
+		// the entry out from under the pointer.
+		if _, err := os.Stat(filepath.Join(runnerPath, filepath.FromSlash(ptr.Key), reportFile)); os.IsNotExist(err) {
+			_ = os.Remove(filepath.Join(runnerPath, latestFile))
+		}
+	}
+	return nil
+}
+
+// dirStats returns a directory's total size and the newest mtime within it.
+func dirStats(dir string) (size int64, newest time.Time) {
+	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			size += info.Size()
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	return size, newest
 }
 
 // CancelStaleBackground cancels the in-flight generation at dir if no foreground
@@ -578,7 +769,7 @@ func (m *Manager) fallbackTotal(runner string, refs []string) int {
 			continue
 		}
 		if sha, err := git.ResolveRef(m.projectRoot, ref); err == nil {
-			if rep, ok := readReport(m.entryDir(runner, keyKindCommit+"/"+sha)); ok && rep.Total > 0 {
+			if rep, ok := readReportSummary(m.entryDir(runner, keyKindCommit+"/"+sha)); ok && rep.Total > 0 {
 				return rep.Total
 			}
 		}
@@ -1023,7 +1214,17 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 
 // --- persistence ---
 
-func readReport(dir string) (Report, bool) {
+// A settled entry is split across two files: report.json carries the summary
+// (status, counts, timings - a kilobyte or so) and cases.json the parsed
+// per-case array, which for a large suite runs to hundreds of kilobytes. Every
+// hot reader - the merge gate, the per-head verdict chip, Latest - wants only
+// the summary, so holding the cases inline made those reads parse two orders of
+// magnitude more JSON than they had any use for. Entries written before the
+// split keep their cases inline and are still read correctly (see readReport).
+
+// readReportSummary reads an entry's report.json. Cases is empty for an entry
+// written since the cases split - use readReport when the cases are wanted.
+func readReportSummary(dir string) (Report, bool) {
 	data, err := os.ReadFile(filepath.Join(dir, reportFile))
 	if err != nil {
 		return Report{}, false
@@ -1038,15 +1239,114 @@ func readReport(dir string) (Report, bool) {
 	return rep, true
 }
 
+// readReport reads a whole entry: the summary plus its cases sidecar.
+func readReport(dir string) (Report, bool) {
+	rep, ok := readReportSummary(dir)
+	if !ok {
+		return Report{}, false
+	}
+	// Non-empty only for a pre-split entry, whose cases are already inline.
+	if len(rep.Cases) == 0 {
+		rep.Cases = readCases(dir)
+	}
+	return rep, true
+}
+
+func readCases(dir string) []TestCase {
+	data, err := os.ReadFile(filepath.Join(dir, casesFile))
+	if err != nil {
+		return nil
+	}
+	var cases []TestCase
+	if err := json.Unmarshal(data, &cases); err != nil {
+		return nil
+	}
+	return cases
+}
+
+// writeReport persists rep as its summary + cases sidecar. rep is taken by
+// value, so the caller's copy keeps its cases.
 func writeReport(dir string, rep Report) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errtrace.Wrap(err)
 	}
+	cases := rep.Cases
+	rep.Cases = nil
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	// Cases first, summary last: report.json is what makes an entry readable at
+	// all, so a crash between the two writes leaves the entry unreadable (and
+	// regenerated) rather than readable-but-caseless.
+	casesPath := filepath.Join(dir, casesFile)
+	if len(cases) == 0 {
+		_ = os.Remove(casesPath) // a re-run that parsed nothing must not inherit stale cases
+	} else {
+		// Not indented - this is the file the split exists to keep cheap.
+		casesData, err := json.Marshal(cases)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if err := os.WriteFile(casesPath, casesData, 0o644); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, reportFile), data, 0o644))
+}
+
+// latestPointer is out/<runner>/latest.json: the entry holding the runner's
+// most recently settled report. It exists so Latest is a two-file read rather
+// than a walk of every entry the runner has ever cached - with a thousand
+// cached commits that walk cost ~600ms of JSON parsing per call, on a path the
+// agent-list request hits once per head per runner.
+type latestPointer struct {
+	Key       string `json:"key"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+func readLatestPointer(runnerDir string) (latestPointer, bool) {
+	data, err := os.ReadFile(filepath.Join(runnerDir, latestFile))
+	if err != nil {
+		return latestPointer{}, false
+	}
+	var ptr latestPointer
+	if err := json.Unmarshal(data, &ptr); err != nil {
+		return latestPointer{}, false
+	}
+	// The key is joined onto a path, so only ever trust a well-formed one.
+	if !keyRe.MatchString(ptr.Key) {
+		return latestPointer{}, false
+	}
+	return ptr, true
+}
+
+func writeLatestPointer(runnerDir string, ptr latestPointer) {
+	data, err := json.Marshal(ptr)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(runnerDir, 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(runnerDir, latestFile), data, 0o644)
+}
+
+// updateLatest points a runner's latest.json at a freshly settled entry.
+// Best-effort: a missing or stale pointer only costs Latest one scan, which
+// rewrites it.
+func (m *Manager) updateLatest(rep Report) {
+	if rep.Runner == "" || !keyRe.MatchString(rep.Key) {
+		return
+	}
+	runnerDir := m.runnerDir(rep.Runner)
+	// Runs settle out of order (a queued background prefetch of an older commit
+	// can finish after a foreground run of a newer one), so never move the
+	// pointer backwards in time.
+	if cur, ok := readLatestPointer(runnerDir); ok && cur.UpdatedAt > rep.UpdatedAt {
+		return
+	}
+	writeLatestPointer(runnerDir, latestPointer{Key: rep.Key, UpdatedAt: rep.UpdatedAt})
 }
 
 // branchTotal is the per-branch denominator sidecar: the case count of the last
