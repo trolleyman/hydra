@@ -111,10 +111,25 @@ it doesn't have (~1.7px high at top-bar size). Put `.optical-center`
 what gets centred is the cap-to-baseline box you actually see. Browsers without
 `text-box` support ignore it and render as before, so it can't regress anything.
 
-Use it on **labels**, not prose: trimming a multi-line block's box collapses the
-leading between its lines. Reach for it whenever you add an icon+label button,
-rather than nudging with `relative top-[Npx]` - a hardcoded nudge is tuned to
-whichever font happened to load when you measured it.
+**It shrinks the label's box, so it is only safe when nothing depends on that
+box's height.** An audit of every icon+label row in the app found exactly two
+ways this bites, and between them they ruled out every site outside the top bar:
+
+1. **The label truncates.** Tailwind's `truncate` sets `overflow: hidden`, which
+   on a cap-trimmed box slices the descenders clean off - "project" renders as
+   "proiect". This covers the sidebar project row, the repository file tree, the
+   diff file tree, and the preview/service rows.
+2. **The row's height comes from the label.** A row with only `py-*` shrinks and
+   reflows everything under it (the Settings headings go 20px -> 16px).
+
+So: use it on a label inside a container with its OWN height (`h-7`/`h-8` like
+the top-bar buttons) whose label does not clip its overflow - `whitespace-nowrap`
+is fine, `truncate` is not. Not on prose either: trimming a multi-line block
+collapses the leading between its lines.
+
+Where it does apply, reach for it rather than nudging with `relative top-[Npx]` -
+a hardcoded nudge is tuned to whichever font happened to load when you measured
+it, and this UI's font stack resolves differently per OS.
 
 ### No raw control bytes in source
 

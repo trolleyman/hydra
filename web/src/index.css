@@ -34,8 +34,13 @@
    centred is the part you actually see.
    Progressive enhancement: unsupported browsers (Firefox as of writing) simply
    ignore it and render exactly as before, so this can never make things worse.
-   Use it only where a label is centred against an icon - NOT on running prose,
-   where trimming the line box would collapse the leading between lines. */
+
+   It SHRINKS the label's box, so only use it where nothing depends on that box's
+   height (see CLAUDE.md for the audit): the container must set its own height
+   (h-7/h-8, like the top-bar buttons), and the label must not clip its overflow -
+   `whitespace-nowrap` is fine, `truncate` is not, because `overflow: hidden` on a
+   cap-trimmed box slices the descenders off ("project" -> "proiect"). Not on
+   running prose either: trimming collapses the leading between lines. */
 .optical-center {
   text-box: trim-both cap alphabetic;
 }
