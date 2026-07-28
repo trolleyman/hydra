@@ -573,7 +573,10 @@ const AgentMetaRow = memo(function AgentMetaRow({
   // (and the title on hover) gives you.
   const headId = agent.branch_name?.replace(/^hydra\//, '') || agent.id
   const identityLine = (
-    <div className="flex items-center gap-3 min-w-0">
+    // min-h-7 (the height of the pane's collapse toggle, and of the inspector
+    // bar's "Changes" row across the divider) so this line's contents centre on
+    // the same baseline as both - the toolbar rows line up across the split.
+    <div className="flex items-center gap-3 min-w-0 min-h-7">
       {agent.branch_name && (
         <BranchTag
           branch={agent.branch_name}
@@ -653,12 +656,16 @@ const AgentMetaRow = memo(function AgentMetaRow({
         )}
       </span>
       {/* Downstream branch (the name this head is pushed AS) - editable
-          until first publish, then soft-locked. Only shown once set. */}
-      <span className="shrink-0 inline-flex items-center">
+          until first publish, then soft-locked. Only shown once set.
+          empty:hidden on both wrappers below: their child renders nothing for a
+          head with no downstream branch / no linked MR, and a zero-width span
+          still eats the row's gap on either side of it - 16px that pushed the
+          terminal/chat toggle onto a line of its own. */}
+      <span className="shrink-0 inline-flex items-center empty:hidden">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
       </span>
       {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <span className="shrink-0 inline-flex items-center">
+      <span className="shrink-0 inline-flex items-center empty:hidden">
         <MRStateChip agent={agent} />
       </span>
       {/* Terminal/chat mode toggle for agents with structured chat transports.

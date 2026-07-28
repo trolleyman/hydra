@@ -1,3 +1,4 @@
+import { ClipboardCheck, ClipboardX } from 'lucide-react'
 import { useToastStore } from '../stores/toastStore'
 import { copyText } from './clipboard'
 
@@ -55,6 +56,9 @@ export function copyWithToast(text: string, opts: CopyToastOptions): Promise<boo
 // as a side effect of a key handler).
 export function showCopyToast(ok: boolean, text: string, opts: CopyToastOptions) {
   useToastStore.getState().show({
+    // A clipboard glyph rather than the type's tick/cross: the toast is about
+    // the clipboard, and the icon says so at a glance.
+    icon: ok ? <ClipboardCheck className="w-[18px] h-[18px]" /> : <ClipboardX className="w-[18px] h-[18px]" />,
     message: ok ? `Copied ${opts.what}` : `Failed to copy ${opts.what}`,
     code: clampPreview(opts.preview ?? text),
     codeLang: opts.lang,

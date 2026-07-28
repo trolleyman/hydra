@@ -195,35 +195,29 @@ function segmentsOfLine(ta: HTMLTextAreaElement, pos: number): Array<[number, nu
 
 // visualLineTarget computes where Home/End should put the caret (item 5):
 // End goes to the end of the caret's visual line, or - when the caret is
-// ALREADY there - to the end of the next visual line; Home is the mirror image,
-// jumping to the previous visual line's start once the caret is at its own.
+// ALREADY there and the line WRAPS on - to the end of the next wrapped
+// segment; Home is the mirror image. The walk stays inside one hard line: at
+// the real end (or start) of a line, End/Home do nothing, so the keys never
+// carry the caret onto a different line of the text.
 // Returns null when there is nothing to measure or nowhere to go, and the
 // caller should leave the keystroke to the browser.
 export function visualLineTarget(ta: HTMLTextAreaElement, caret: number, edge: 'start' | 'end'): number | null {
   if (!syncMirror(ta)) return null
   const segs = segmentsOfLine(ta, caret)
   if (!segs) return null
-  const value = ta.value
   if (edge === 'end') {
     const i = segs.findIndex(([, e]) => e >= caret)
     if (i === -1) return null
     if (segs[i][1] > caret) return segs[i][1]
-    if (i + 1 < segs.length) return segs[i + 1][1]
-    // Past the last visual line of this hard line: the next hard line's first.
-    const [, le] = lineBounds(value, caret)
-    if (le >= value.length) return null
-    const next = segmentsOfLine(ta, le + 1)
-    return next ? next[0][1] : null
+    // Already at this segment's end: on to the next wrapped one, if the hard
+    // line has one. If it doesn't, this is the end of the line - stay put.
+    return i + 1 < segs.length ? segs[i + 1][1] : null
   }
   let i = -1
   for (let k = 0; k < segs.length; k++) if (segs[k][0] <= caret) i = k
   if (i === -1) return null
   if (segs[i][0] < caret) return segs[i][0]
-  if (i > 0) return segs[i - 1][0]
-  const [ls] = lineBounds(value, caret)
-  if (ls === 0) return null
-  const prev = segmentsOfLine(ta, ls - 1)
-  return prev ? prev[prev.length - 1][0] : null
+  return i > 0 ? segs[i - 1][0] : null
 }
 
 // moveCaret places the caret at `to`, extending the selection instead when the

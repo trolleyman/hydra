@@ -4870,6 +4870,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
     return rows * 20 + 14
   })
+  // Mirror of composerHeight the auto-grow effect compares against, so a
+  // keystroke that doesn't change the height schedules no update at all (see
+  // the effect for why React's own same-value bailout can't be relied on here).
+  const composerHeightRef = useRef(composerHeight)
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const normalizedAvailableRef = useRef(false)
@@ -7570,8 +7574,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
     // best, a feedback loop with any height-driven layout at worst.
+    //
+    // The guard is a REF compare, not `setComposerHeight(cur => cur)`. React only
+    // skips a same-value update when it can evaluate the updater eagerly, which
+    // it cannot once the hook already has a queued update - and during a fast
+    // typing burst it always does. Every keystroke then scheduled another render
+    // from inside this effect, i.e. a nested update per commit, and after 50 of
+    // them React threw "Maximum update depth exceeded" (error #185) out of the
+    // next keystroke's handler - dropping that character. Comparing here means
+    // the steady state schedules nothing at all.
     const nextH = rows * lineHeight + pad
-    setComposerHeight((cur) => (Math.abs(cur - nextH) < 0.5 ? cur : nextH))
+    if (Math.abs(composerHeightRef.current - nextH) >= 0.5) {
+      composerHeightRef.current = nextH
+      setComposerHeight(nextH)
+    }
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {

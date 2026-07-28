@@ -10,6 +10,9 @@ import { Tooltip } from './Tooltip'
 import { DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ResizeHandle } from '../lib/ResizeHandle'
+import { CopyStateIcon } from './CopyStateIcon'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { copyWithToast } from '../lib/copyToast'
 
 // FieldLabel is the Create MR dialog's field caption: sentence case (like the
 // DialogSectionLabel) and tight to the input below it.
@@ -172,21 +175,54 @@ export function DownstreamBranchEditor({
   return (
     <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
       <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
-      <Tooltip content={linked ? 'Locked: renaming would orphan the open MR' : 'Edit downstream branch name'}>
-        <button
-          type="button"
-          disabled={linked || saving}
-          onClick={() => {
-            if (linked) return
-            setDraft(value)
-            setEditing(true)
-          }}
-          className={`px-1.5 py-0.5 rounded ${linked ? 'cursor-default' : 'hover:bg-gray-100 dark:hover:bg-gray-800 cursor-text'}`}
-        >
-          {value}
-        </button>
-      </Tooltip>
+      {/* select-text on both spellings: the name is something you want to grab
+          (a `git fetch` needs it), and a <button> is not selectable by default.
+          A locked (linked) MR renders it as a plain span rather than a disabled
+          button - a disabled button can't be selected from at all. */}
+      {linked ? (
+        <Tooltip content="Locked: renaming would orphan the open MR">
+          <span className="px-1.5 py-0.5 select-text cursor-text">{value}</span>
+        </Tooltip>
+      ) : (
+        <Tooltip content="Edit downstream branch name">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => { setDraft(value); setEditing(true) }}
+            className="px-1.5 py-0.5 rounded select-text hover:bg-gray-100 dark:hover:bg-gray-800 cursor-text"
+          >
+            {value}
+          </button>
+        </Tooltip>
+      )}
+      <CopyBranchButton branch={value} what="MR branch name" />
     </span>
+  )
+}
+
+// CopyBranchButton is the small copy affordance beside a branch name: it flashes
+// a tick/X on the icon and raises the shared copy toast (title + the name in a
+// code block), like every other copy in the app.
+function CopyBranchButton({ branch, what }: { branch: string; what: string }) {
+  const { state, flash } = useCopyFlash(1200)
+  return (
+    <Tooltip
+      content={
+        <>
+          <div>Copy {what}</div>
+          <div className="text-gray-500 dark:text-gray-400">{branch}</div>
+        </>
+      }
+    >
+      <button
+        type="button"
+        aria-label={`Copy ${what}`}
+        className="cursor-pointer shrink-0 text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
+        onClick={() => { void copyWithToast(branch, { what }).then(flash) }}
+      >
+        <CopyStateIcon state={state} size="w-3 h-3" />
+      </button>
+    </Tooltip>
   )
 }
 

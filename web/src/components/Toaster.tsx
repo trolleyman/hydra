@@ -1,5 +1,5 @@
 import React from 'react'
-import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { Check, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
 import { useToastStore, ToastDismissContext, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
@@ -9,9 +9,11 @@ import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
-// approval card's kind icon so the two toast styles read as one family.
+// approval card's kind icon so the two toast styles read as one family. Success
+// is a bare tick - the tile is already a rounded square, so a tick-in-a-circle
+// inside it read as a badge within a badge.
 const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; wrap: string; bar: string }> = {
-  success: { Icon: CheckCircle, wrap: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-300', bar: 'bg-green-500' },
+  success: { Icon: Check, wrap: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-300', bar: 'bg-green-500' },
   error: { Icon: AlertCircle, wrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', bar: 'bg-red-500' },
   warning: { Icon: AlertTriangle, wrap: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300', bar: 'bg-amber-500' },
   info: { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', bar: 'bg-blue-500' },
