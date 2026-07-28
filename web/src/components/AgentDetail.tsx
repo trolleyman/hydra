@@ -39,6 +39,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
+import { pillText } from '../lib/branchPills'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -1258,7 +1259,7 @@ export function AgentDetail({
         ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` }),
       })
     } catch (err) {
-      useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
+      useToastStore.getState().show({ message: pillText`Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
     }
   }
   async function cancelMerge() {
@@ -1266,7 +1267,7 @@ export function AgentDetail({
       await api.default.disarmMergeWhenGreen(projectId ?? '', agent.id)
       useToastStore.getState().show({ message: 'Auto-merge cancelled', type: 'info' })
     } catch (err) {
-      useToastStore.getState().show({ message: `Couldn't cancel auto-merge: ${formatError(err)}`, type: 'error' })
+      useToastStore.getState().show({ message: pillText`Couldn't cancel auto-merge: ${formatError(err)}`, type: 'error' })
     }
   }
 

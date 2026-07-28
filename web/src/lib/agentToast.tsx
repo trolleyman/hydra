@@ -68,6 +68,7 @@ export interface AgentTransitionSpec {
 //   show({ ...agentTransitionToast(spec), duration: 0 })
 export function agentTransitionToast(spec: AgentTransitionSpec): {
   message: ToastContent
+  richMessage: true
   icon: ReactNode
   accent: ToastAccent
   projectContext?: ToastProjectContext
@@ -79,6 +80,9 @@ export function agentTransitionToast(spec: AgentTransitionSpec): {
   const Icon = queued ? Clock : (spec.status ? STATUS_TILE[spec.status] : undefined) ?? CircleDot
   return {
     message: <AgentTransitionRow {...spec} />,
+    // A layout, not a sentence: it brings its own two rows and type scale, and
+    // tops out with the tile rather than centring against it.
+    richMessage: true,
     icon: <Icon className="w-[18px] h-[18px]" />,
     accent: { wrap: TILE_TONE[tone], bar: TILE_BAR[tone] },
     projectContext: spec.projectName

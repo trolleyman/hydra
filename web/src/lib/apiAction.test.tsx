@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { render } from '@testing-library/react'
 import { runWithToast } from './apiAction'
 import { useToastStore } from '../stores/toastStore'
 import { ApiError } from '../api'
 import type { ApiRequestOptions } from '../api/core/ApiRequestOptions'
 import type { ApiResult } from '../api/core/ApiResult'
+
+// An error message is a ReactNode now, not a string: the untrusted half is
+// spliced in through pillText so a backtick in the server's text can't open a
+// branch pill (see lib/branchPills). Assert on what it renders.
+const text = (node: React.ReactNode) => render(<span>{node}</span>).container.textContent
 
 function apiError(body: unknown, message = '', status = 500, statusText = ''): ApiError {
   const request = {} as ApiRequestOptions
@@ -40,13 +46,14 @@ describe('runWithToast', () => {
     expect(res).toEqual({ ok: false, error: err })
     const toasts = useToastStore.getState().toasts
     expect(toasts).toHaveLength(1)
-    expect(toasts[0]).toMatchObject({ message: 'pull conflicts', type: 'error' })
+    expect(toasts[0].type).toBe('error')
+    expect(text(toasts[0].message)).toBe('pull conflicts')
   })
 
   it('prefixes the error message when `errorPrefix` is provided', async () => {
     const res = await runWithToast(() => Promise.reject(new Error('boom')), { errorPrefix: 'Failed to rename agent' })
     expect(res.ok).toBe(false)
-    expect(useToastStore.getState().toasts[0].message).toBe('Failed to rename agent: boom')
+    expect(text(useToastStore.getState().toasts[0].message)).toBe('Failed to rename agent: boom')
     expect(useToastStore.getState().toasts[0].code).toBeUndefined()
   })
 
@@ -66,7 +73,11 @@ describe('runWithToast', () => {
     const res = await runWithToast(() => Promise.reject(err), { errorPrefix: 'Failed to switch mode' })
     expect(res.ok).toBe(false)
     const toast = useToastStore.getState().toasts[0]
-    expect(toast.message).toBe('Failed to switch mode `501 Not Implemented`')
+    expect(text(toast.message)).toBe('Failed to switch mode 501 Not Implemented')
+    // The status keeps its mono chip - those backticks are ours, so pillText
+    // still turns them into a pill even though the status text is the server's.
+    const { container } = render(<span>{toast.message}</span>)
+    expect(container.querySelector('span.font-mono')?.textContent).toBe('501 Not Implemented')
     expect(toast.code).toBe(JSON.stringify(body, null, 2))
     expect(toast.codeLang).toBe('json')
   })
@@ -76,7 +87,7 @@ describe('runWithToast', () => {
     const res = await runWithToast(() => Promise.reject(err), { errorPrefix: 'Failed to set base branch' })
     expect(res.ok).toBe(false)
     const toast = useToastStore.getState().toasts[0]
-    expect(toast.message).toBe('Failed to set base branch: branch already exists')
+    expect(text(toast.message)).toBe('Failed to set base branch: branch already exists')
     expect(toast.code).toBeUndefined()
   })
 })

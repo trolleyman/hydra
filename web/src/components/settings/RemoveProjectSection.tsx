@@ -7,6 +7,7 @@ import { formatError } from '../../api/format_error'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useToastStore } from '../../stores/toastStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { pillText } from '../../lib/branchPills'
 
 // RemoveProjectSection is the "danger zone" at the bottom of a project's settings:
 // it unregisters the project from Hydra. Removal is deliberately non-destructive
@@ -25,7 +26,7 @@ export function RemoveProjectSection({ project }: { project: ProjectInfo }) {
       await api.default.removeProject(project.id)
       setProjects(projects.filter((p) => p.id !== project.id))
       if (selectedProjectId === project.id) setSelectedProjectId(null)
-      useToastStore.getState().show({ message: `Removed "${project.name}" from Hydra.`, type: 'success' })
+      useToastStore.getState().show({ message: pillText`Removed "${project.name}" from Hydra.`, type: 'success' })
       navigate({ to: '/' })
     } catch (err) {
       useDialogStore.getState().show({

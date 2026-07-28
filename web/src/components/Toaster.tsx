@@ -105,9 +105,14 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   const iconNode = toast.icon ?? <base.Icon className={toast.compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} />
   const wrap = toast.accent?.wrap ?? TILE_TONE[base.tone]
   const bar = toast.accent?.bar ?? TILE_BAR[base.tone]
-  // A plain string message is a single line, vertically centred against the tile;
-  // a rich node (e.g. the two-line agent-transition row) tops out with the tile.
-  const isStringMessage = typeof toast.message === 'string'
+  // A SENTENCE is vertically centred against the tile and wears the toast's prose
+  // paragraph; a LAYOUT (the two-line agent-transition row) tops out with the tile
+  // and styles itself. Keyed on the explicit flag, not on `typeof message`: a
+  // sentence with untrusted text spliced into it arrives as a ReactNode from
+  // pillText (lib/branchPills) and still wants the paragraph and the centring.
+  // Only a string is scanned for backtick pills - a node has already been through
+  // that, on the authored half only.
+  const isProse = !toast.richMessage
   const hasActions = toast.actions && toast.actions.length > 0
   // A tagged code block (e.g. a `json` API error body) is syntax-coloured through
   // the shared highlighter; an unknown/absent language falls back to plain text.
@@ -132,9 +137,13 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           <div className={`shrink-0 flex items-center justify-center ${TILE_GLYPH} ${size.tile} ${wrap}`}>
             {iconNode}
           </div>
-          <div className={`min-w-0 flex-1 ${isStringMessage ? 'self-center' : ''}`}>
-            {isStringMessage
-              ? <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>{withBranchPills(toast.message as string)}</p>
+          <div className={`min-w-0 flex-1 ${isProse ? 'self-center' : ''}`}>
+            {isProse
+              ? (
+                <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>
+                  {typeof toast.message === 'string' ? withBranchPills(toast.message) : toast.message}
+                </p>
+              )
               : toast.message}
             {toast.code && (
               // w-fit: the block hugs its content instead of stretching to the

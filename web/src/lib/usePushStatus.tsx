@@ -6,6 +6,7 @@ import { useToastStore, type ToastProjectContext } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useServerData } from './useServerData'
 import { EVENT_FALLBACK_MS } from './visibilityPolling'
+import { pillText } from './branchPills'
 import type { RepositoryPushStatus } from '../api'
 
 export interface PushStatus {
@@ -86,7 +87,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
       toast.show({
         message: conflict
           ? `Sync failed: pull conflicts - resolve in the repository, then retry`
-          : `Sync failed: ${formatError(err)}`,
+          : pillText`Sync failed: ${formatError(err)}`,
         type: 'error',
         duration: 6000,
         projectContext,
@@ -115,7 +116,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
       })
       return true
     } catch (err) {
-      toast.show({ message: `Commit failed: ${formatError(err)}`, type: 'error', duration: 6000 })
+      toast.show({ message: pillText`Commit failed: ${formatError(err)}`, type: 'error', duration: 6000 })
       return false
     } finally {
       setCommittingProjects((prev) => {

@@ -10,6 +10,7 @@ import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { PanelError } from './PanelError'
 import { useToastStore } from '../stores/toastStore'
+import { pillText } from '../lib/branchPills'
 
 // How eagerly the panel re-polls GET /previews, by the most active instance
 // state it can see. There is no WebSocket for previews (deliberately - the
@@ -34,7 +35,7 @@ function pollDelay(previews: PreviewStatus[]): number | null {
 // reads as a broken button rather than "the daemon said no". A toast (not the
 // panel's error box) because the panel is still showing a perfectly good list.
 function previewFailed(name: string, reason: string) {
-  useToastStore.getState().show({ message: `Couldn't start preview "${name}": ${reason}`, type: 'error' })
+  useToastStore.getState().show({ message: pillText`Couldn't start preview "${name}": ${reason}`, type: 'error' })
 }
 
 // stateChip renders the colored dot + label for an instance state.
