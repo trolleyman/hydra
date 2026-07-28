@@ -3268,6 +3268,13 @@ components:
           type: string
           nullable: true
           description: How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+        archived_at:
+          type: integer
+          format: int64
+          description: >-
+            Unix timestamp (seconds) when an archived agent was killed or merged;
+            absent for active agents (and for a legacy archived record with no
+            recorded archive time). The archived history list is ordered by this.
         tests:
           $ref: '#/components/schemas/TestSummary'
         merge_when_green:

@@ -12,30 +12,85 @@ import type { AgentTypeIconName } from '../components/AgentTypeIcon'
 // whose dot falls back to the raw session status. `killing`/`stopped` have no
 // badge of their own, so they reuse the dim `faint` fill (matching the previous
 // default-case behavior) while keeping their distinct dot color.
-const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> = {
-  pending: { label: 'pending', badge: 'neutral', dot: 'neutral' },
-  building: { label: 'building', badge: 'blue', dot: 'blue' },
-  deploying: { label: 'deploying', badge: 'indigo' },
-  running: { label: 'running', badge: 'green', dot: 'green' },
-  starting: { label: 'starting', badge: 'blue', dot: 'blue' },
-  needs_input: { label: 'needs_input', badge: 'red', dot: 'red' },
+//
+// `help` is the one-or-two-sentence explainer behind the status chip's hover card
+// on the agent page (agentStatusHelp): what the state means, and what - if
+// anything - it wants from you. Written for someone who has just met the word.
+const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone; help?: string }> = {
+  pending: {
+    label: 'pending', badge: 'neutral', dot: 'neutral',
+    help: 'Queued. The head exists, but its sandbox has not started yet.',
+  },
+  building: {
+    label: 'building', badge: 'blue', dot: 'blue',
+    help: "Preparing the head's sandbox and worktree. The agent has not started work yet.",
+  },
+  deploying: {
+    label: 'deploying', badge: 'indigo',
+    help: "Bringing the head's environment up.",
+  },
+  running: {
+    label: 'running', badge: 'green', dot: 'green',
+    help: 'The agent is working right now - reading, editing files or running commands.',
+  },
+  starting: {
+    label: 'starting', badge: 'blue', dot: 'blue',
+    help: 'The agent process is launching. It picks up the task in a moment.',
+  },
+  needs_input: {
+    label: 'needs_input', badge: 'red', dot: 'red',
+    help: 'The agent asked you something and is blocked until you answer.',
+  },
   // A turn that failed mid-response (Claude "API Error: ... response above may be
   // incomplete."). Like needs_input it wants your eyes now, so it reads red.
-  errored: { label: 'errored', badge: 'red', dot: 'red' },
-  waiting: { label: 'waiting', badge: 'yellow', dot: 'yellow' },
-  finished: { label: 'finished', badge: 'violet', dot: 'violet' },
-  merging: { label: 'merging', badge: 'green', dot: 'green' },
+  errored: {
+    label: 'errored', badge: 'red', dot: 'red',
+    help: 'The last turn failed part-way through (an API error), so its reply may be incomplete. Send a message to carry on.',
+  },
+  waiting: {
+    label: 'waiting', badge: 'yellow', dot: 'yellow',
+    help: 'The agent is idle, waiting for your next message.',
+  },
+  finished: {
+    label: 'finished', badge: 'violet', dot: 'violet',
+    help: 'The agent finished its task and stopped. Review the diff, then merge it or send follow-up work.',
+  },
+  merging: {
+    label: 'merging', badge: 'green', dot: 'green',
+    help: "This head's branch is being merged into its base branch.",
+  },
   // Not a live agent status - the end-state pill on the "merged into <base>"
   // toasts. Green (success), unlike the sidebar's muted archived chip
   // (archivedEndStateBadge), which deliberately stays quiet.
-  merged: { label: 'merged', badge: 'green' },
+  merged: {
+    label: 'merged', badge: 'green',
+    help: "This head's branch was merged into its base branch.",
+  },
   // Not live statuses either - the pills on the restart / kill action toasts.
-  restarting: { label: 'restarting', badge: 'blue' },
-  killed: { label: 'killed', badge: 'red' },
-  ended: { label: 'ended', badge: 'muted' },
-  exited: { label: 'exited', badge: 'red' },
-  killing: { label: 'killing', badge: 'faint', dot: 'redSoft' },
-  stopped: { label: 'stopped', badge: 'faint', dot: 'neutral' },
+  restarting: {
+    label: 'restarting', badge: 'blue',
+    help: 'The agent process is being restarted. The conversation is preserved.',
+  },
+  killed: {
+    label: 'killed', badge: 'red',
+    help: 'This head was stopped and archived. Its session, worktree and branch were removed.',
+  },
+  ended: {
+    label: 'ended', badge: 'muted',
+    help: "The agent's session ended.",
+  },
+  exited: {
+    label: 'exited', badge: 'red',
+    help: 'The agent process exited. Restarting it continues from the saved conversation.',
+  },
+  killing: {
+    label: 'killing', badge: 'faint', dot: 'redSoft',
+    help: 'Stopping the agent and tearing this head down.',
+  },
+  stopped: {
+    label: 'stopped', badge: 'faint', dot: 'neutral',
+    help: 'The agent process is not running. Sending it a message revives it from the saved conversation.',
+  },
 }
 
 // Raw session (PTY) status → dot tone, used as the fallback for statuses that
@@ -156,6 +211,13 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
 // different colours for one status.
 export function agentStatusTone(status: string | undefined): Tone {
   return (status ? AGENT_STATUS[status]?.badge : undefined) ?? 'faint'
+}
+
+// agentStatusHelp is the prose behind a status chip's hover card - what the state
+// means in plain words. Empty for an unknown status, so a caller can fall back to
+// no tooltip at all rather than an empty box.
+export function agentStatusHelp(status: string | undefined): string {
+  return (status ? AGENT_STATUS[status]?.help : undefined) ?? ''
 }
 
 // Playful placeholders shown while an agent is running but hasn't reported a

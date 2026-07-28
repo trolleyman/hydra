@@ -292,13 +292,15 @@ export const useAgentStore = create<AgentState>((set) => ({
       if (deepEqual(existing, agent)) return {}
       return { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
     }
-    // Insert in created-at order (newest first), tie-breaking by id to match the
-    // backend's stable ordering, so an optimistically-archived agent lands in the
-    // same slot the server would place it on the next fetch.
+    // Insert in archived-at order (newest first), falling back to created_at for
+    // a legacy row with no archive time and tie-breaking by id - the same key
+    // db.ListArchivedAgents orders by, so an optimistically-archived agent lands
+    // in the slot the server would put it in on the next fetch.
+    const sortKey = (a: AgentResponse) => a.archived_at ?? a.created_at ?? 0
     const next = [...state.archived]
-    const at = agent.created_at ?? 0
+    const at = sortKey(agent)
     let i = next.findIndex((a) => {
-      const t = a.created_at ?? 0
+      const t = sortKey(a)
       return t < at || (t === at && a.id > agent.id)
     })
     if (i < 0) i = next.length
