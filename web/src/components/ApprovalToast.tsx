@@ -1,10 +1,10 @@
 import React, { Fragment } from 'react'
-import { Link } from '@tanstack/react-router'
-import { Server, SquareTerminal, Globe, Network, Bot, Shield, Check, X, TriangleAlert } from 'lucide-react'
+import { Server, SquareTerminal, Globe, Network, Shield, Check, X, TriangleAlert } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
-import { Tooltip } from './Tooltip'
+import { AgentNameLink } from './AgentNameLink'
+import { TILE_TONE } from '../lib/tileTone'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
 import { useChatBashIndentStore, useChatCodeLinesStore } from '../lib/chatPrefs'
@@ -23,6 +23,9 @@ const Badge: React.FC<{ text: string; tone: BadgeTone }> = ({ text, tone }) => (
 )
 
 type BadgeTone = 'blue' | 'violet' | 'teal' | 'amber' | 'gray' | 'red'
+// Deliberately the QUIET tints, not the tile's (lib/tileTone): this pill sits
+// beside the card title as a secondary label, so it stays a step back from the
+// icon tile that carries the card's identity.
 const BADGE_TONES: Record<BadgeTone, string> = {
   blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300',
   violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
@@ -69,12 +72,12 @@ function kindVisual(data: ApprovalToastData): {
 } {
   switch (data.kind) {
     case 'mcp':
-      return { Icon: Server, iconWrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', title: 'Allow MCP server', badge: { text: 'MCP', tone: 'blue' } }
+      return { Icon: Server, iconWrap: TILE_TONE.blue, title: 'Allow MCP server', badge: { text: 'MCP', tone: 'blue' } }
     case 'mcp_tool': {
       const read = data.rw === 'read'
       return {
         Icon: SquareTerminal,
-        iconWrap: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
+        iconWrap: TILE_TONE.violet,
         title: 'Run MCP tool',
         // WRITE is the risky one - flag it in the amber/warning tone; READ stays a
         // calm teal.
@@ -82,13 +85,13 @@ function kindVisual(data: ApprovalToastData): {
       }
     }
     case 'webfetch':
-      return { Icon: Globe, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Web fetch', badge: { text: 'Network', tone: 'teal' } }
+      return { Icon: Globe, iconWrap: TILE_TONE.teal, title: 'Web fetch', badge: { text: 'Network', tone: 'teal' } }
     case 'egress':
-      return { Icon: Network, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Allow network host', badge: { text: 'Network', tone: 'teal' } }
+      return { Icon: Network, iconWrap: TILE_TONE.teal, title: 'Allow network host', badge: { text: 'Network', tone: 'teal' } }
     case 'tool':
       // A tool Hydra's gate doesn't recognize (not a known built-in, no mcp__
       // prefix) - flagged amber because it could be an un-vetted MCP/connector tool.
-      return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'Tool', tone: 'amber' } }
+      return { Icon: Shield, iconWrap: TILE_TONE.amber, title: 'Allow unrecognized tool', badge: { text: 'Tool', tone: 'amber' } }
     case 'host_command':
       // The sandbox escape hatch: the agent is asking to run a command OUTSIDE its
       // sandbox, on the host. Deliberately identical to the chat's host-run tool
@@ -96,9 +99,9 @@ function kindVisual(data: ApprovalToastData): {
       // sandbox" badge beside a "Run on host" heading - because the two are two
       // views of ONE request, and a user who answers it in either place should
       // not have to work out that they are looking at the same thing.
-      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host', badge: { text: 'outside sandbox', tone: 'red' }, surface: HOST_SURFACE }
+      return { Icon: TriangleAlert, iconWrap: TILE_TONE.red, title: 'Run on host', badge: { text: 'outside sandbox', tone: 'red' }, surface: HOST_SURFACE }
     default:
-      return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'Shell', tone: 'gray' } }
+      return { Icon: SquareTerminal, iconWrap: TILE_TONE.neutral, title: 'Run command', badge: { text: 'Shell', tone: 'gray' } }
   }
 }
 
@@ -311,26 +314,15 @@ export const ApprovalCard: React.FC<{
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-50">{title}</h3>
               {badge && <Badge text={badge.text} tone={badge.tone} />}
             </div>
+            {/* AgentNameLink renders the name as plain, non-interactive text
+                when there is no known location for the agent. */}
             {data.agentName && (
-              agentTarget ? (
-                <Tooltip content="Open this agent" className="max-w-full">
-                  <Link
-                    to="/project/$projectId/agent/$agentId"
-                    params={agentTarget}
-                    className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 transition-colors cursor-pointer hover:text-gray-800 hover:underline dark:hover:text-gray-200"
-                  >
-                    <Bot className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{data.agentName}</span>
-                  </Link>
-                </Tooltip>
-              ) : (
-                // No known location for the agent - render the name as plain,
-                // non-interactive text (no link, no hover affordance).
-                <span className="flex max-w-full items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
-                  <Bot className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{data.agentName}</span>
-                </span>
-              )
+              <AgentNameLink
+                agentName={data.agentName}
+                agentId={agentTarget?.agentId}
+                projectId={agentTarget?.projectId}
+                size="subtitle"
+              />
             )}
           </div>
           <IconButton onClick={onDismiss}>

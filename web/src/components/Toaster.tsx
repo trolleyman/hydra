@@ -7,16 +7,18 @@ import { ApprovalCard } from './ApprovalToast'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
+import { TILE_TONE, TILE_BAR, type TileTone } from '../lib/tileTone'
 
-// Per-type visual identity: the icon and its tinted rounded square, mirroring the
-// approval card's kind icon so the two toast styles read as one family. Success
-// is a bare tick - the tile is already a rounded square, so a tick-in-a-circle
-// inside it read as a badge within a badge.
-const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; wrap: string; bar: string }> = {
-  success: { Icon: Check, wrap: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-300', bar: 'bg-green-500' },
-  error: { Icon: AlertCircle, wrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', bar: 'bg-red-500' },
-  warning: { Icon: AlertTriangle, wrap: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300', bar: 'bg-amber-500' },
-  info: { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', bar: 'bg-blue-500' },
+// Per-type visual identity: the icon and its tinted rounded square. The tint and
+// the countdown bar come from the shared tile table (lib/tileTone), which the
+// approval card and the confirmation dialogs also draw from - so every icon tile
+// in the app is the same object. Success is a bare tick: the tile is already a
+// rounded square, so a tick-in-a-circle inside it read as a badge within a badge.
+const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; tone: TileTone }> = {
+  success: { Icon: Check, tone: 'green' },
+  error: { Icon: AlertCircle, tone: 'red' },
+  warning: { Icon: AlertTriangle, tone: 'amber' },
+  info: { Icon: Info, tone: 'blue' },
 }
 
 // Per-variant button styling for a toast action - matched to the approval card's
@@ -98,8 +100,8 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   // identity; a toast may override the glyph (`icon`, e.g. a Bot for agent rows)
   // and the tint+bar pair (`accent`, e.g. the emerald "merge queued" card).
   const iconNode = toast.icon ?? <base.Icon className={toast.compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} />
-  const wrap = toast.accent?.wrap ?? base.wrap
-  const bar = toast.accent?.bar ?? base.bar
+  const wrap = toast.accent?.wrap ?? TILE_TONE[base.tone]
+  const bar = toast.accent?.bar ?? TILE_BAR[base.tone]
   // A plain string message is a single line, vertically centred against the tile;
   // a rich node (e.g. the two-line agent-transition row) tops out with the tile.
   const isStringMessage = typeof toast.message === 'string'

@@ -149,6 +149,15 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
   return { label: status ?? '', className: TONE_BADGE.faint }
 }
 
+// The raw tone behind agentStatusBadge, for surfaces that paint a status in
+// something other than a pill - the notification tile above the pill on an
+// agent toast (see lib/tileTone + lib/agentToast). Reading it from the same
+// AGENT_STATUS table is what keeps the tile and the pill from naming two
+// different colours for one status.
+export function agentStatusTone(status: string | undefined): Tone {
+  return (status ? AGENT_STATUS[status]?.badge : undefined) ?? 'faint'
+}
+
 // Playful placeholders shown while an agent is running but hasn't reported a
 // concrete activity yet (e.g. just after starting, or between tool calls). One
 // is picked per agent and stays stable so it doesn't flicker between renders.

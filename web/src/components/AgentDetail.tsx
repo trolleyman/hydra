@@ -1128,7 +1128,7 @@ export function AgentDetail({
       if (body?.error === 'uncommitted_changes') {
         const files = body.conflicting_files ?? []
         const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
-        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
+        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target \`${agent.base_branch}\` has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
         // The soft gate blocked it (the verdict moved since the button rendered).
         // Surface the same Force / Queue choice dialog the button opens proactively
@@ -1191,7 +1191,7 @@ export function AgentDetail({
     const n = agent.tests?.failed ?? 0
     showMergeConfirm({
       force: true,
-      title: `Force merge into ${toBranch}?`,
+      title: `Force merge into \`${toBranch}\`?`,
       confirmLabel: 'Force merge',
       caution: kind === 'failing'
         ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
@@ -1302,7 +1302,7 @@ export function AgentDetail({
       showMergeConfirm({
         force: true,
         keepOpen: true,
-        title: `Force merge into ${toBranch} and continue?`,
+        title: `Force merge into \`${toBranch}\` and continue?`,
         confirmLabel: 'Force merge',
         caution,
       })
@@ -1335,11 +1335,11 @@ export function AgentDetail({
     // will refuse on push - the MR path is the intended route.
     const reviewCfg = useProjectStore.getState().reviewConfigs[projectId ?? '']
     const protectedWarning = reviewCfg?.protected_branches?.includes(toBranch)
-      ? `${toBranch} is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
+      ? `\`${toBranch}\` is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
       : undefined
     const lead = parent
-      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
-      : `Merges this agent’s work into ${toBranch}${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
+      ? `Merges this agent’s work into agent "${parent.id}"'s branch (\`${toBranch}\`)${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
+      : `Merges this agent’s work into \`${toBranch}\`${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
     // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
     // uncommitted-changes note the background check would otherwise add.
     const caution = opts.caution ?? protectedWarning ?? parentWarning
@@ -1348,7 +1348,7 @@ export function AgentDetail({
     // The diff stats + uncommitted-changes check run in the background and fold
     // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: opts.title ?? (keepOpen ? `Merge into ${toBranch} and continue?` : `Merge into ${toBranch}?`),
+      title: opts.title ?? (keepOpen ? `Merge into \`${toBranch}\` and continue?` : `Merge into \`${toBranch}\`?`),
       message: lead,
       type: caution ? 'warning' : 'confirm',
       variant: 'merge',

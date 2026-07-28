@@ -1,43 +1,23 @@
-import { useContext } from 'react'
-import { Link } from '@tanstack/react-router'
-import { ToastDismissContext } from '../stores/toastStore'
-import { useProjectStore } from '../stores/projectStore'
 import { Badge } from './Badge'
-import { Tooltip } from './Tooltip'
+import { AgentNameLink } from './AgentNameLink'
 import { agentStatusBadge } from '../lib/agentDisplay'
 import { withBranchPills } from '../lib/branchPills'
 import type { AgentTransitionSpec } from '../lib/agentToast'
 
 // AgentTransitionRow is the body of an agent status-transition / merge-lifecycle
 // toast: the agent's name as a link to it, then a "<before> <status pill> <after>"
-// line. It reads the bound dismiss from ToastDismissContext so clicking the name
-// navigates AND closes the toast. Rendered via agentTransitionToast (lib/agentToast).
+// line. The name row is the shared AgentNameLink, which also closes the toast on
+// click. Rendered via agentTransitionToast (lib/agentToast).
 export function AgentTransitionRow({ agentName, agentId, projectId, status, before, after }: AgentTransitionSpec) {
-  const dismiss = useContext(ToastDismissContext)
   const badge = status ? agentStatusBadge(status) : undefined
   const lead = before ?? 'transitioned to'
-  const openAgent = () => {
-    // Match a cross-project View: select the project (a no-op for the current one)
-    // before the link routes, then tear the toast down.
-    useProjectStore.getState().setSelectedProjectId(projectId)
-    dismiss()
-  }
   return (
     <>
       {/* The flex row keeps the tooltip's inline-flex wrapper off a line box (an
           inline child of the block toast body would pick up the parent's taller
           strut and grow the row); min-w-0 keeps the name truncating. */}
       <div className="flex min-w-0">
-        <Tooltip content="Open this agent" className="min-w-0">
-          <Link
-            to="/project/$projectId/agent/$agentId"
-            params={{ projectId, agentId }}
-            onClick={openAgent}
-            className="block max-w-full truncate text-left text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
-          >
-            {agentName}
-          </Link>
-        </Tooltip>
+        <AgentNameLink agentName={agentName} agentId={agentId} projectId={projectId} size="title" />
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
         {lead && <span>{withBranchPills(lead)}</span>}
