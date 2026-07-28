@@ -9361,24 +9361,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <Plus className="w-4 h-4" />
                 </button>
               </Tooltip>
-              {/* items-BASELINE, not items-center. This group holds three runs of
-                  text at three different sizes - "Enter to queue" at 10px, the
-                  context percentage at 11px, the model name at 12px - and
-                  centring aligns each one's LINE BOX. A bigger line box reserves
-                  more room above the cap and below the baseline, so centring
-                  three different ones puts three different baselines on screen
-                  and the row reads as slightly jumbled. Aligning the baselines
-                  is what makes them read as one line of text.
-                  The model control keeps its own padding and hit area; baseline
-                  alignment moves the button box, not its contents, so only where
-                  it sits changes. */}
-              <div className="ml-auto flex items-baseline gap-1.5">
+              {/* This group holds three runs of text at three different sizes -
+                  "Enter to queue" at 10px, the context percentage at 11px, the
+                  model name at 12px - plus two icon buttons. Plain items-center
+                  aligns each item's LINE BOX, and a bigger line box reserves more
+                  room above the cap, so three sizes centred put three different
+                  baselines on screen.
+                  The fix is NOT items-baseline. That aligns the text but breaks
+                  the buttons: a button has no text baseline, so it falls back to
+                  its bottom margin edge and hangs off the labels; and the line's
+                  cross-centre (max-ascent over max-descent) sits above the text's
+                  ink, so a `self-center` button then reads high.
+                  Instead every label carries `.optical-center`, which trims its
+                  box to the cap-to-baseline ink. Once each item's box IS its ink,
+                  plain items-center aligns the ink - the baselines land within
+                  ~0.7px (half the cap-height difference between 10px and 12px)
+                  and the buttons centre on the same ink the text does. */}
+              <div className="ml-auto flex items-center gap-1.5">
                 {/* Item 6: surface what Enter will do only when it isn't the
                     obvious thing - i.e. the message will queue, draining into
                     the running turn at its next step (terminal-style
                     steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
-                  <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                  <span className="optical-center hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
                     Enter to queue
                   </span>
                 )}
@@ -9392,7 +9397,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     side="top"
                   >
                     <span
-                      className={`hidden sm:inline text-[11px] tabular-nums select-none ${
+                      className={`optical-center hidden sm:inline text-[11px] tabular-nums select-none ${
                         contextPct < 10
                           ? 'text-red-500 dark:text-red-400'
                           : contextPct < 20
@@ -9409,24 +9414,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     <button
                       onClick={() => setModelMenuOpen((o) => !o)}
                       disabled={!connected}
-                      // items-baseline, not items-center: per Flexbox 8.3 a flex
-                      // container only exposes a baseline to ITS parent if at
-                      // least one of its own items takes part in baseline
-                      // alignment. With items-center none do, so this button
-                      // synthesized a baseline from its border box and landed
-                      // 4px above the labels beside it however the group was
-                      // aligned. Letting the label participate is what lets the
-                      // row line up; the chevron keeps its own centring below.
-                      className={`flex items-baseline gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
+                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
                         modelMenuOpen
                           ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
                           : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
                       }`}
                     >
-                      {modelLabel}
-                      {/* self-center: the button is baseline-aligned (above), and
-                          a chevron sitting ON the text baseline hangs high. */}
-                      <ChevronDown className="w-3 h-3 self-center" />
+                      {/* Trimmed like the labels beside it, so the button's
+                          symmetric py-1 makes its box centre the label's ink
+                          centre - which is what the group then aligns on. */}
+                      <span className="optical-center">{modelLabel}</span>
+                      <ChevronDown className="w-3 h-3" />
                     </button>
                   </Tooltip>
                   {modelMenuOpen && (
@@ -9449,12 +9447,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </>
                   )}
                 </div>
-                {/* self-center on these icon buttons: the group is baseline-aligned
-                    for its three runs of text, and a button has no text baseline -
-                    it would be aligned by its bottom margin edge instead, hanging
-                    the round send button off the labels' baseline. */}
                 {isTurnRunning && (
-                  <Tooltip content="Interrupt (Ctrl+C)" side="top" className="self-center">
+                  <Tooltip content="Interrupt (Ctrl+C)" side="top">
                     <button
                       onClick={interrupt}
                       className="p-1.5 rounded-lg text-red-500/90 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
@@ -9464,7 +9458,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top" className="self-center">
+                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top">
                   <button
                     onClick={send}
                     disabled={!canSend}

@@ -32,10 +32,10 @@ export type TileTone =
 // Shared geometry for the tile's glyph. A lucide mark is drawn at stroke-width 2
 // by default, which is tuned for a dark line on a light background; reversed out
 // in white on a saturated fill the same stroke reads thin and the mark loses its
-// shape at 18px. 2.25 puts the weight back without turning the glyph into a
+// shape at 18px. 3 puts the weight back without turning the glyph into a
 // blob. Applied to the tile rather than to each icon so every call site gets it
 // - a tile's glyph arrives as `children` from a dozen different places.
-export const TILE_GLYPH = '[&_svg]:[stroke-width:2.25]'
+export const TILE_GLYPH = '[&_svg]:[stroke-width:3]'
 
 export const TILE_TONE: Record<TileTone, string> = {
   green:
