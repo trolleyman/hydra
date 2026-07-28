@@ -36,12 +36,19 @@ export function AgentNameLink({
   const dismiss = useContext(ToastDismissContext)
   const title = size === 'title'
 
-  // The name carries the weight; the glyph is a marker, so it sits a step back
-  // in both sizes rather than matching the text colour.
-  const iconCls = `${title ? 'w-3.5 h-3.5' : 'w-3 h-3'} shrink-0 text-gray-400 dark:text-gray-500`
+  // Violet, not grey. The tile beside it is now a solid block of the event's
+  // colour, so a grey Bot read as a disabled control next to it; violet is the
+  // one hue the tile vocabulary doesn't spend on an agent lifecycle event
+  // (green/emerald merge, red kill+error, amber warn, blue restart), so the
+  // marker can own it without ever colliding with the tile it sits next to.
+  const iconCls = `${title ? 'w-3.5 h-3.5' : 'w-3 h-3'} shrink-0 text-violet-500 dark:text-violet-400`
+  // The title is an agent TITLE - a human phrase someone (or the agent) wrote,
+  // like "Add uploader retry with backoff" - so it takes the serif that already
+  // means "an agent is speaking" on the chat surface. The subtitle stays sans:
+  // there it is attribution in small print, not the headline.
   const rowCls = `flex max-w-full items-center ${title ? 'gap-1.5' : 'gap-1'} ${
     title
-      ? 'text-sm font-semibold text-gray-900 dark:text-gray-100'
+      ? 'font-serif text-[15px] font-semibold text-gray-900 dark:text-gray-100'
       : 'text-[11px] text-gray-500 dark:text-gray-400'
   }`
   // hover:underline on the row, not the name span: the row is a flex box whose
@@ -54,7 +61,12 @@ export function AgentNameLink({
   const body = (
     <>
       <Bot className={iconCls} />
-      <span className="truncate">{agentName}</span>
+      {/* A title wraps to a second line rather than clipping: it is the headline
+          of the card, agent titles are arbitrary-length human phrases, and at a
+          fixed card width most of them would otherwise end in an ellipsis. The
+          subtitle stays single-line - there the name is attribution, and a
+          two-line one would out-weigh the title above it. */}
+      <span className={title ? 'line-clamp-2' : 'truncate'}>{agentName}</span>
     </>
   )
 

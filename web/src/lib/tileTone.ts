@@ -5,15 +5,18 @@ import type { Tone } from '../components/Badge'
 // colours come from one table rather than three hand-rolled ones (the toast's
 // old TYPE_VISUAL, the dialog's old TILE_TONE, the approval card's own map).
 //
-// The fills are deliberately stronger than the `Badge` tints in badgeTones.ts.
-// A badge is a word on a busy row and has to stay quiet; the tile is the one
-// piece of colour on an otherwise white/near-black card and is what tells you at
-// a glance whether something merged or something broke. The old `-50`/`-900/30`
-// fills read as a smudge at that size - especially in dark mode, where a
-// `900/30` green is nearly the card background. So: a mid-hue fill at low alpha
-// (alive in both themes, no separate light/dark hue to keep in sync), a matching
-// inset ring to give the square an edge, and a glyph two steps brighter than the
-// badge's so it carries against the fill.
+// The tile is SOLID - a saturated fill with a white glyph on it, not a tint with
+// a coloured glyph. A badge is a word on a busy row and has to stay quiet, so it
+// keeps the soft tints in badgeTones.ts; the tile is the one piece of colour on
+// an otherwise white/near-black card and is what tells you at a glance whether
+// something merged or something broke. At that size a tint reads as a smudge -
+// especially in dark mode, where the old `900/30` green was nearly the card
+// background. A solid square reads as an object.
+//
+// Light mode takes the `-600` step, dark the brighter `-500`, so the fill sits
+// the same distance from its background in both themes. Yellow and amber stay at
+// `-600` in dark too: white on a `-500` yellow is barely legible, and the point
+// of the white glyph is that you can see it.
 export type TileTone =
   | 'green'
   | 'emerald'
@@ -28,25 +31,25 @@ export type TileTone =
 
 export const TILE_TONE: Record<TileTone, string> = {
   green:
-    'bg-green-500/20 text-green-700 ring-1 ring-inset ring-green-600/25 dark:bg-green-500/25 dark:text-green-200 dark:ring-green-400/30',
+    'bg-green-600 text-white dark:bg-green-500',
   emerald:
-    'bg-emerald-500/20 text-emerald-700 ring-1 ring-inset ring-emerald-600/25 dark:bg-emerald-500/25 dark:text-emerald-200 dark:ring-emerald-400/30',
+    'bg-emerald-600 text-white dark:bg-emerald-500',
   blue:
-    'bg-blue-500/20 text-blue-700 ring-1 ring-inset ring-blue-600/25 dark:bg-blue-500/25 dark:text-blue-200 dark:ring-blue-400/30',
+    'bg-blue-600 text-white dark:bg-blue-500',
   indigo:
-    'bg-indigo-500/20 text-indigo-700 ring-1 ring-inset ring-indigo-600/25 dark:bg-indigo-500/25 dark:text-indigo-200 dark:ring-indigo-400/30',
+    'bg-indigo-600 text-white dark:bg-indigo-500',
   violet:
-    'bg-violet-500/20 text-violet-700 ring-1 ring-inset ring-violet-600/25 dark:bg-violet-500/25 dark:text-violet-200 dark:ring-violet-400/30',
+    'bg-violet-600 text-white dark:bg-violet-500',
   teal:
-    'bg-teal-500/20 text-teal-700 ring-1 ring-inset ring-teal-600/25 dark:bg-teal-500/25 dark:text-teal-200 dark:ring-teal-400/30',
+    'bg-teal-600 text-white dark:bg-teal-500',
   yellow:
-    'bg-yellow-500/20 text-yellow-700 ring-1 ring-inset ring-yellow-600/25 dark:bg-yellow-500/25 dark:text-yellow-200 dark:ring-yellow-400/30',
+    'bg-yellow-600 text-white',
   amber:
-    'bg-amber-500/20 text-amber-700 ring-1 ring-inset ring-amber-600/25 dark:bg-amber-500/25 dark:text-amber-200 dark:ring-amber-400/30',
+    'bg-amber-600 text-white',
   red:
-    'bg-red-500/20 text-red-700 ring-1 ring-inset ring-red-600/25 dark:bg-red-500/25 dark:text-red-200 dark:ring-red-400/30',
+    'bg-red-600 text-white dark:bg-red-500',
   neutral:
-    'bg-gray-500/20 text-gray-700 ring-1 ring-inset ring-gray-600/25 dark:bg-gray-400/25 dark:text-gray-100 dark:ring-gray-300/30',
+    'bg-gray-600 text-white dark:bg-gray-500',
 }
 
 // The solid companion fill, used for the toast's countdown bar so the bar and

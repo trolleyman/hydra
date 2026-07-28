@@ -8,6 +8,7 @@ import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
 import { TILE_TONE, TILE_BAR, type TileTone } from '../lib/tileTone'
+import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 
 // Per-type visual identity: the icon and its tinted rounded square. The tint and
 // the countdown bar come from the shared tile table (lib/tileTone), which the
@@ -44,9 +45,11 @@ const codeClass = 'max-h-40 overflow-auto text-[11px] font-mono text-gray-600 da
 // tile and the gaps all step down so a two-word title over a one-line value
 // doesn't sit in a card that is mostly whitespace. Everything else keeps the
 // roomier default, where the body is text you actually stop to read.
+// Both scales are a FIXED width, not a min/max range - see lib/toastLayout for
+// why, and why the default shares its width with the approval card.
 const SIZE = {
   default: {
-    card: 'min-w-[17rem] max-w-[22rem] rounded-2xl',
+    card: `${TOAST_CARD_WIDTH} rounded-2xl`,
     pad: 'p-4',
     row: 'gap-3',
     tile: 'w-9 h-9 rounded-xl',
@@ -57,7 +60,7 @@ const SIZE = {
     actions: 'mt-3 pl-12',
   },
   compact: {
-    card: 'max-w-[20rem] rounded-xl',
+    card: 'w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl',
     pad: 'p-2.5',
     row: 'gap-2.5',
     tile: 'w-7 h-7 rounded-lg',
@@ -96,9 +99,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
   const base = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
   const size = toast.compact ? SIZE.compact : SIZE.default
-  // The tile glyph, tile tint and countdown-bar colour all default to the type
-  // identity; a toast may override the glyph (`icon`, e.g. a Bot for agent rows)
-  // and the tint+bar pair (`accent`, e.g. the emerald "merge queued" card).
+  // The tile glyph, tile fill and countdown-bar colour all default to the type
+  // identity; a toast may override the glyph (`icon`) and the fill+bar pair
+  // (`accent`) - an agent toast does both, from its status (see lib/agentToast).
   const iconNode = toast.icon ?? <base.Icon className={toast.compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} />
   const wrap = toast.accent?.wrap ?? TILE_TONE[base.tone]
   const bar = toast.accent?.bar ?? TILE_BAR[base.tone]

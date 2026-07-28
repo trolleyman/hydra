@@ -5,6 +5,7 @@ import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { AgentNameLink } from './AgentNameLink'
 import { TILE_TONE } from '../lib/tileTone'
+import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
 import { useChatBashIndentStore, useChatCodeLinesStore } from '../lib/chatPrefs'
@@ -290,15 +291,16 @@ export const ApprovalCard: React.FC<{
   const agentTarget = data.agentId && data.projectId
     ? { projectId: data.projectId, agentId: data.agentId }
     : undefined
-  // Wider than a plain toast (which caps at 22rem): an approval is read, not
-  // glanced at - a command, a URL or a JSON argument list needs the room, and
-  // fewer wrapped lines is fewer places for something nasty to hide. Clamped to
-  // the viewport so it still fits a phone.
+  // Exactly as wide as a plain toast (TOAST_CARD_WIDTH), so the two card shapes
+  // stack as one column rather than a ragged pile - the width was chosen to keep
+  // the room an approval needs, since an approval is read, not glanced at, and a
+  // command or URL over fewer wrapped lines is fewer places for something nasty
+  // to hide. Clamped to the viewport so it still fits a phone.
   return (
     <div
       role="alertdialog"
       aria-label={title}
-      className={`relative w-[28rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border shadow-xl ${surface ?? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
+      className={`relative ${TOAST_CARD_WIDTH} overflow-hidden rounded-2xl border shadow-xl ${surface ?? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
     >
       {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">
