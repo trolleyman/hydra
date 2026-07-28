@@ -5082,32 +5082,10 @@ export function stepSummary(items: ChatItem[]): {
   return { label: `${total} step${total === 1 ? '' : 's'}`, tools: shown.join(' · '), thinkingMs, failed, running }
 }
 
-// FoldingRows plays the "collapsing away" half of a fold: it mounts OPEN with
-// the rows still at full height, then closes on the next frame, so a step that
-// just finished shrinks up into the count instead of blinking out of existence.
-// Expandable drops the content once the animation has run.
-function FoldingRows({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(true)
-  useEffect(() => {
-    markSelfReflow()
-    // A frame, not zero: Expandable's first layout effect has to commit the open
-    // state before the close can transition from a measured height.
-    const t = setTimeout(() => setOpen(false), 16)
-    return () => clearTimeout(t)
-  }, [])
-  return (
-    <Expandable open={open}>
-      <div data-step-fold className="flex flex-col gap-2 pt-2">
-        {children}
-      </div>
-    </Expandable>
-  )
-}
-
-// GrowIn is the opening half of the same gesture: it mounts CLOSED and opens on
-// the next frame, so the "N steps" line grows into the space the cards below it
-// are vacating rather than popping in above them. Together with FoldingRows the
-// two heights cancel out and the transcript below never jumps.
+// GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
+// into place rather than popping in above the steps it now owns. It is the only
+// motion a group makes on its own: nothing ever folds itself while you are
+// looking at it (see StepGroup).
 function GrowIn({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
@@ -5142,15 +5120,19 @@ function useGroupApproval(items: ChatItem[]): boolean {
   )
 }
 
-// StepGroup is the folded run itself: one line while closed, the rows it holds
-// while open (rendered by the caller through renderRow). Its open state is its
-// own - the group is keyed by its first item's id, so a run that grows as the
-// turn proceeds keeps whatever the reader chose.
+// StepGroup is the run itself: one line while closed, the rows it holds while
+// open (rendered by the caller through renderRow).
 //
-// liveFrom (the transcript's first live item id) drives the fold animation: a
-// step that lands while you are watching collapses into the count, while a
-// transcript replayed on load renders folded from the first frame - a reload
-// should not replay every fold.
+// It NEVER folds itself while you are looking at it. A group born while you are
+// watching a turn starts open - you are here to watch the work, and a collapse
+// under your eyes moves the text you are reading (a long run is a 1000px shrink,
+// and the pane deliberately has no browser scroll anchoring). It stays open for
+// the rest of the visit unless you close it yourself.
+//
+// The tidying happens on the way back in: fold state is per-mount, so leaving
+// the page and returning - or a reload - renders every group folded, which is
+// what liveFrom (the transcript's first live item id) distinguishes. A replayed
+// transcript has no live items, so it comes back quiet.
 function StepGroup({
   items,
   liveFrom,
@@ -5160,27 +5142,25 @@ function StepGroup({
   liveFrom: number | null
   renderRow: (item: ChatItem) => ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-  // The cards the group swallowed when it was BORN, folding away. Only those:
-  // they were on screen a moment ago as loose rows, so they have to be seen to
-  // leave. A step that joins an existing group was never rendered outside it
-  // (the running one folds in too now), so it just ticks the count - no card
-  // appears, nothing below moves.
-  const [arriving] = useState(() =>
-    liveFrom == null ? [] : items.filter((it) => it.id >= liveFrom),
-  )
   // Whether the group came into being while the reader was watching, rather than
-  // arriving already folded with a replayed transcript. Its header then grows
-  // and fades in as the cards fold away beneath it, so a group being BORN is one
-  // gesture rather than a line popping in above a collapse.
+  // arriving with a replayed transcript. That decides both how it enters (the
+  // header grows in above steps already on screen) and how it starts: open for a
+  // live run, folded for history.
   const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
+  const [open, setOpen] = useState(bornLive)
   const { label, tools, thinkingMs, failed, running } = stepSummary(items)
   // A parked approval overrides the fold: the row you have to answer is inside.
   const needsApproval = useGroupApproval(items)
   const shown = open || needsApproval
   const header = (
     <button
-      onClick={() => setOpen((o) => !o)}
+      // Closing the group shrinks the transcript, which clamps scrollTop down
+      // and reads like a scroll-up to the pin logic - the same false positive a
+      // fold used to cause (see markSelfReflow).
+      onClick={() => {
+        markSelfReflow()
+        setOpen((o) => !o)
+      }}
       className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
       aria-expanded={shown}
     >
@@ -5222,8 +5202,6 @@ function StepGroup({
       <Expandable open={shown}>
         <div className="flex flex-col gap-2 pt-2">{items.map(renderRow)}</div>
       </Expandable>
-      {/* The cards the group was born holding, folding away beneath it. */}
-      {!shown && arriving.length > 0 && <FoldingRows>{arriving.map(renderRow)}</FoldingRows>}
     </div>
   )
 }
@@ -5692,10 +5670,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   else if (openedUnread.unread == null && unreadNow != null) setOpenedUnread({ key: unreadKey, unread: unreadNow })
   // Whether agent prose renders serif (item 9, the default) - a Browser setting.
   const serif = useChatFontStore((s) => s.serif)
-  // Whether runs of steps fold into a count (a Browser setting, default on).
-  // The list itself reads this too; the pane needs it for the live thought tail,
-  // which folds away with them.
-  const groupSteps = useChatStepsStore((s) => s.grouped)
   // Which head the tool cards below can answer parked approvals for. Null with no
   // project (nothing to POST a decision to), which just leaves the toast.
   const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
@@ -9359,13 +9333,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
             </div>
           )}
-          {/* The live thought tail (the last couple of lines, updating as tokens
-              arrive) is the other thing that made a live turn move: a two-line
-              italic block that appears, grows and vanishes between every pair of
-              steps. With folding on it goes the same way as the steps - the
-              thought lands in the group a moment later, and the working line
-              below already says "Thinking...". */}
-          {stream && stream.kind === 'thinking' && !groupSteps && <ThinkingCard text={stream.text} streaming />}
+          {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
               and the running output-token count when the CLI reports it. While a
               thinking block streams, "Thinking..." rides inside the brackets here
