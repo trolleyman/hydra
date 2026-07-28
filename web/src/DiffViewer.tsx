@@ -2145,14 +2145,14 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 {/* Resolution instructions */}
                 <div>
                   <DialogSectionLabel>Resolving locally</DialogSectionLabel>
-                  <div className="bg-gray-900 dark:bg-gray-950 rounded-xl p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
-                    <p className="text-gray-400"># Navigate to the agent's worktree</p>
-                    <p className="text-green-400 break-all">cd {worktreePath}</p>
-                    <p className="text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
-                    <p className="text-green-400">git merge {baseBranch}</p>
-                    <p className="text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
-                    <p className="text-green-400">git add {'<resolved-files>'}</p>
-                    <p className="text-green-400">git commit</p>
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
+                    <p className="text-gray-500 dark:text-gray-400"># Navigate to the agent's worktree</p>
+                    <p className="text-green-600 dark:text-green-400 break-all">cd {worktreePath}</p>
+                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
+                    <p className="text-green-600 dark:text-green-400">git merge {baseBranch}</p>
+                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
+                    <p className="text-green-600 dark:text-green-400">git add {'<resolved-files>'}</p>
+                    <p className="text-green-600 dark:text-green-400">git commit</p>
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
                     The worktree at <span className="font-mono">{worktreePath}</span> is isolated - changes only affect this agent's branch.
