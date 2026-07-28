@@ -61,6 +61,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { ToolApproval } from './ToolApproval'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
+import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
@@ -3586,7 +3587,7 @@ function SubagentChatView({
       {report && <SubagentReport report={report} serif={serif} />}
       {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
-          <WorkSpark className="text-[#c96442]" />
+          <WorkSpark />
           <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
@@ -8317,7 +8318,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )
           return (
             <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
-              <WorkSpark className="text-[#c96442]" still />
+              <WorkSpark still />
               {segs.map((s, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
@@ -8439,7 +8440,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
-    // head and grow its own Allow/Deny row (see ToolApproval).
+    // head and grow its own Allow/Deny row (see ToolApproval). The agent type
+    // rides alongside it so chat chrome (the working spark) can take this head's
+    // brand accent instead of Claude's unconditionally.
+    <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
@@ -8556,7 +8560,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               so the reasoning<->working transition doesn't shift the layout. */}
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
-              <WorkSpark className="text-[#c96442]" />
+              <WorkSpark />
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
@@ -8831,5 +8835,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )}
     </div>
     </ChatApprovalContext.Provider>
+    </ChatAgentTypeContext.Provider>
   )
 }

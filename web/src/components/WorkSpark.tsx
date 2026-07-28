@@ -11,8 +11,17 @@
 // a plain even asterisk), the whole thing turning slowly while a pulse of
 // brightness/length travels around the spokes. `still` drops both animations
 // for the settled result line, where nothing is in flight any more.
+//
+// It paints itself in the head's brand accent - Claude clay in a Claude chat,
+// Gemini violet in a Gemini one, and so on - read from ChatAgentTypeContext so
+// it matches that agent's logo mark elsewhere in the UI without every call site
+// threading the type down.
+import { useContext } from 'react'
+import { ChatAgentTypeContext } from '../lib/chatAgentType'
+import { agentTypeColor } from '../lib/agentDisplay'
+
 type WorkSparkProps = {
-  /** Extra classes - colour, mostly. Size and optical offset are baked in. */
+  /** Extra classes. Size, colour and optical offset are all baked in. */
   className?: string
   still?: boolean
 }
@@ -29,6 +38,7 @@ const LONG_Y = 3.3
 const SHORT_Y = 5.7
 
 export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
+  const accent = agentTypeColor(useContext(ChatAgentTypeContext))
   return (
     <svg
       viewBox="0 0 24 24"
@@ -39,7 +49,7 @@ export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
       // glyphs, whose cap-height centre sits ~0.6px higher at 11px/16.5px.
       // Under align-items:center a negative top margin shrinks the margin box,
       // so this nudges the mark up by half of it - which is the amount wanted.
-      className={`shrink-0 w-3.5 h-3.5 -mt-px ${still ? '' : 'work-spark'} ${className}`}
+      className={`shrink-0 w-3.5 h-3.5 -mt-px ${accent} ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0
