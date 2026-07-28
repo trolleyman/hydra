@@ -5007,6 +5007,25 @@ function FoldingRows({ children }: { children: ReactNode }) {
   )
 }
 
+// GrowIn is the opening half of the same gesture: it mounts CLOSED and opens on
+// the next frame, so the "N steps" line grows into the space the cards below it
+// are vacating rather than popping in above them. Together with FoldingRows the
+// two heights cancel out and the transcript below never jumps.
+function GrowIn({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setOpen(true), 16)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <Expandable open={open}>
+      <div data-step-grow className="animate-chat-item-in">
+        {children}
+      </div>
+    </Expandable>
+  )
+}
+
 // StepGroup is the folded run itself: one line while closed, the rows it holds
 // while open (rendered by the caller through renderRow). Its open state is its
 // own - the group is keyed by its first item's id, so a run that grows as the
@@ -5046,33 +5065,41 @@ function StepGroup({
     setFold({ seen: fold.seen, arriving: [] })
   }
   const arriving = open ? [] : fold.arriving
+  // Whether the group came into being while the reader was watching, rather than
+  // arriving already folded with a replayed transcript. Its header then grows
+  // and fades in as the cards fold away beneath it, so a group being BORN is one
+  // gesture rather than a line popping in above a collapse.
+  const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
   const { label, tools, thinkingMs, failed } = stepSummary(items)
+  const header = (
+    <button
+      onClick={() => setOpen((o) => !o)}
+      className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
+      aria-expanded={open}
+    >
+      <ChevronRight
+        className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+      />
+      <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+        {label}
+      </span>
+      {!open && tools && <span className="truncate text-stone-400/80 dark:text-stone-500/80">{tools}</span>}
+      {!open && thinkingMs > 0 && (
+        <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
+          · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
+        </span>
+      )}
+      {failed > 0 && (
+        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
+          {open ? '' : '· '}
+          {failed} failed
+        </span>
+      )}
+    </button>
+  )
   return (
     <div className="text-xs">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
-        aria-expanded={open}
-      >
-        <ChevronRight
-          className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-        <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
-          {label}
-        </span>
-        {!open && tools && <span className="truncate text-stone-400/80 dark:text-stone-500/80">{tools}</span>}
-        {!open && thinkingMs > 0 && (
-          <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
-            · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
-          </span>
-        )}
-        {failed > 0 && (
-          <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
-            {open ? '' : '· '}
-            {failed} failed
-          </span>
-        )}
-      </button>
+      {bornLive ? <GrowIn>{header}</GrowIn> : header}
       {/* The rows sit tighter than the transcript's gap-3 so an expanded run
           still reads as one block rather than as loose messages. */}
       <Expandable open={open}>
