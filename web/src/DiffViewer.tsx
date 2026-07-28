@@ -4,8 +4,8 @@ import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
-import hljs from './lib/hljs'
-import { ensureLanguage } from './lib/hljsLazy'
+import { hasLanguage } from './lib/prism'
+import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
@@ -1114,18 +1114,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // Small files highlight inline (no flash, no worker round-trip). Larger files
   // would block the main thread if every one highlighted during the same render,
   // so they paint as plain text and colourise from the Web Worker pool - the
-  // hljs work runs fully off the UI thread. Whole-file input keeps the
+  // Prism work runs fully off the UI thread. Whole-file input keeps the
   // highlighting correct regardless of which path runs.
   // Fetch a not-yet-bundled grammar on demand (the worker path does this itself);
   // langReady flips false→true once it lands, re-running the sync highlight below.
   const [, bumpGrammar] = useState(0)
   useEffect(() => {
-    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    if (hasLanguage(lang)) return
     let cancelled = false
     ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpGrammar((n) => n + 1) })
     return () => { cancelled = true }
   }, [lang])
-  const langReady = lang === 'plaintext' || !!hljs.getLanguage(lang)
+  const langReady = lang === 'plaintext' || hasLanguage(lang)
   const syncHighlight = useMemo(
     () => (highlightSource && highlightSource.length <= HL_SYNC_MAX
       ? buildHighlightMaps(highlightSource, langReady ? lang : 'plaintext')

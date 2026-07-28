@@ -198,9 +198,9 @@ const CODE_CLASS =
 // chip but block-level, with a near-black warm background in dark mode and a
 // quiet light one in light mode. Body text stays the default colour (blocks are
 // syntax-coloured, not tinted); when the info string names a language
-// highlight.js recognises, its tokens are coloured by the shared `.hljs-*`
-// theme. The `.hljs-*` token classes carry their own colours, so we
-// deliberately do NOT add the `.hljs` root class - that would also pull in
+// Prism recognises, its tokens are coloured by the shared `.token` theme.
+// The `.token` classes carry their own colours, so we deliberately do NOT add
+// any root class - a highlighter theme's root class would also pull in
 // github.css's white background.
 const CODEBLOCK_CLASS =
   'block my-1 rounded-md border border-gray-200 dark:border-gray-600/40 bg-gray-50 dark:bg-[#1d1c1a] px-2.5 py-1.5 font-mono text-[0.85em] text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words'

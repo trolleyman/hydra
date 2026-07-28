@@ -337,8 +337,8 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
       // data-md-code-block / data-md-lang let copy-as-markdown (lib/copyMarkdown)
       // put the fence and its info string back when this block is copied.
       if (html != null) {
-        // No `.hljs` root class: the token `.hljs-*` spans carry their own
-        // colours, while `.hljs` would also pull in github.css's white bg.
+        // No highlighter root class: the `.token` spans carry their own
+        // colours, while a root class would also pull in a theme's white bg.
         return (
           <code
             className={s.codeBlock}

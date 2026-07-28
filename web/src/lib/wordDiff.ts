@@ -421,7 +421,7 @@ function escapeHtml(s: string): string {
 // character ranges of already syntax-highlighted line HTML. It walks the HTML
 // counting plain-text characters (an entity like &amp; counts as one), so the
 // ranges - which index the raw content - line up. The highlight span is kept
-// strictly innermost and is never allowed to straddle an hljs <span>/</span>
+// strictly innermost and is never allowed to straddle a token <span>/</span>
 // boundary: it is closed before every tag and (re)opened lazily just before the
 // next highlighted character, so the markup stays well nested with no stray
 // empty spans.

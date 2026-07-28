@@ -1,33 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
-import { highlightHtml } from '../lib/highlightCore'
+import { highlightLines } from '../lib/highlightCore'
 import { ResizeHandle } from '../lib/ResizeHandle'
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-// Split highlight.js HTML into one fragment per source line, re-opening any
-// <span> tokens that stay open across a newline so each line is independently
-// valid markup. This lets us render a row per logical line (with a line-number
-// gutter) while keeping multi-line constructs (heredocs, `\` continuations,
-// quoted strings) correctly coloured.
-function splitHighlightedLines(html: string): string[] {
-  const open: string[] = []
-  const tag = /<span\b[^>]*>|<\/span>/g
-  return html.split('\n').map((line) => {
-    const prefix = open.join('')
-    tag.lastIndex = 0
-    let m: RegExpExecArray | null
-    while ((m = tag.exec(line))) {
-      if (m[0] === '</span>') open.pop()
-      else open.push(m[0])
-    }
-    return prefix + line + '</span>'.repeat(open.length)
-  })
-}
 
 // ShellEditor is a small textarea with live bash syntax highlighting and a
 // line-number gutter. A transparent textarea sits on top of a highlighted <pre>
@@ -36,7 +9,7 @@ function splitHighlightedLines(html: string): string[] {
 // Both layers reserve the line-number column with the same `padding-left:
 // var(--shell-gutter)`, so their text wraps in a pixel-identical box; the line
 // numbers are absolutely positioned into that reserved gutter, out of the text
-// flow. Reuses the highlight.js `.hljs-*` token theme already defined in index.css.
+// flow. Reuses the Prism `.token` theme already defined in index.css.
 export function ShellEditor({
   value,
   onChange,
@@ -53,10 +26,11 @@ export function ShellEditor({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
 
-  const lines = useMemo(() => {
-    const src = value ?? ''
-    return splitHighlightedLines(highlightHtml(src, 'bash') ?? escapeHtml(src))
-  }, [value])
+  // One HTML fragment per source line, so a row per logical line can carry a
+  // line-number gutter while multi-line constructs (heredocs, `\` continuations,
+  // quoted strings) stay correctly coloured across the breaks. highlightLines
+  // falls back to escaped plain text when bash can't be highlighted at all.
+  const lines = useMemo(() => highlightLines(value ?? '', 'bash'), [value])
 
   // Reserve room for the widest line number plus left/right breathing room. In
   // the monospace font 1ch is one digit, so `${digits}ch` fits the gutter text.

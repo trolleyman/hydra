@@ -9,7 +9,7 @@
 // joined old/new side source (or null), and the worker replies with the same
 // `id` plus `old`/`new` as per-line highlighted HTML (string[] or null).
 import { highlightLines } from './highlightCore'
-import { ensureLanguage } from './hljsLazy'
+import { ensureLanguage } from './prismLazy'
 
 export interface HighlightRequest {
   id: number

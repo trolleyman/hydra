@@ -73,7 +73,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   const hasActions = toast.actions && toast.actions.length > 0
   // A tagged code block (e.g. a `json` API error body) is syntax-coloured through
   // the shared highlighter; an unknown/absent language falls back to plain text.
-  // Only the `.hljs-*` token classes are used, not the `.hljs` root - that would
+  // Only the `.token` classes are used, not a highlighter root class - that would
   // drag github.css's own background over the block's tint (see lib/markdown).
   const codeHtml = toast.code && toast.codeLang ? highlightCode(toast.code, toast.codeLang) : null
   return (

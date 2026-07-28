@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "highlight.js/styles/github.css";
 
 @tailwind base;
 @tailwind components;
@@ -213,42 +212,48 @@ body {
   .animate-barber-pole { animation: none; }
 }
 
-/* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
-   repository file view renders one `<code class="hljs">` per line, so that
-   vertical padding pushed each line below its line-number gutter (numbers looked
-   off-centre / too high) and added extra row spacing. Reset it for per-line code
-   while leaving markdown's `pre code.hljs` (1em padding) untouched. */
-code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
+/* Prism token theme (highlighting goes through lib/highlightCore -> refractor).
+   Two palettes over one set of `.token` classes: GitHub light, and the One Dark
+   we already used, so the switch between them is a colour change and nothing
+   else. Prism ships themes as whole stylesheets that assume they own `pre`/`code`
+   (background, padding, font) - we only want the token colours, so the palette
+   lives here rather than as an @import. */
+.token.comment, .token.prolog, .token.doctype, .token.cdata { color: #6a737d; font-style: italic; }
+.token.punctuation { color: #24292e; }
+.token.namespace { opacity: 0.7; }
+.token.keyword, .token.atrule, .token.rule, .token.important, .token.operator,
+.token.entity, .token.url { color: #d73a49; }
+.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted { color: #032f62; }
+.token.number, .token.boolean, .token.constant, .token.symbol, .token.property { color: #005cc5; }
+.token.function, .token.class-name, .token.function-variable { color: #6f42c1; }
+.token.tag, .token.selector, .token.deleted { color: #22863a; }
+.token.attr-name, .token.variable, .token.parameter, .token.builtin,
+.token.interpolation { color: #e36209; }
+.token.bold { font-weight: bold; }
+.token.italic { font-style: italic; }
 
-/* Highlight.js dark mode overrides (used within .dark class context) */
-.dark .hljs { color: #abb2bf; background: transparent; }
-.dark .hljs-comment, .dark .hljs-quote { color: #5c6370; font-style: italic; }
-.dark .hljs-doctag, .dark .hljs-keyword, .dark .hljs-formula { color: #c678dd; }
-.dark .hljs-section, .dark .hljs-name, .dark .hljs-selector-tag,
-.dark .hljs-deletion, .dark .hljs-subst { color: #e06c75; }
-.dark .hljs-literal { color: #56b6c2; }
-.dark .hljs-string, .dark .hljs-regexp, .dark .hljs-addition,
-.dark .hljs-attribute, .dark .hljs-meta .hljs-string { color: #98c379; }
-.dark .hljs-attr, .dark .hljs-variable, .dark .hljs-template-variable,
-.dark .hljs-type, .dark .hljs-selector-class, .dark .hljs-selector-attr,
-.dark .hljs-selector-pseudo, .dark .hljs-number { color: #d19a66; }
-.dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-link,
-.dark .hljs-meta, .dark .hljs-selector-id, .dark .hljs-title { color: #61aeee; }
-.dark .hljs-built_in, .dark .hljs-title.class_, .dark .hljs-class .hljs-title { color: #e6c07b; }
-/* github.css hardcodes color:#24292e (near-black) on these; in dark mode keep
-   the inherited foreground so an unclosed markdown `*`/`**` doesn't render the
-   emphasized run near-black on a dark background. */
-.dark .hljs-emphasis { color: inherit; font-style: italic; }
-.dark .hljs-strong { color: inherit; font-weight: bold; }
-.dark .hljs-link { text-decoration: underline; }
-/* github.css (light) paints diff additions/deletions with pale near-white
-   backgrounds (#f0fff4 / #ffeef0); the dark overrides above only change the token
-   COLOUR, so those light backgrounds otherwise survive into dark mode and wash
-   out ```diff code blocks in rendered markdown (e.g. the diff-context blocks the
-   review comments embed). Repaint them with the same translucent green/red the
-   diff viewer's own rows use (bg-green-500/15 / bg-red-500/15). */
-.dark .hljs-addition { background-color: rgba(34, 197, 94, 0.15); }
-.dark .hljs-deletion { background-color: rgba(239, 68, 68, 0.15); }
+/* Dark: One Dark, matching the palette this UI used before the Prism switch. */
+.dark .token.comment, .dark .token.prolog, .dark .token.doctype, .dark .token.cdata { color: #5c6370; }
+.dark .token.punctuation { color: #abb2bf; }
+.dark .token.keyword, .dark .token.atrule, .dark .token.rule, .dark .token.important { color: #c678dd; }
+.dark .token.operator, .dark .token.entity, .dark .token.url { color: #56b6c2; }
+.dark .token.string, .dark .token.char, .dark .token.attr-value, .dark .token.regex,
+.dark .token.inserted { color: #98c379; }
+.dark .token.number, .dark .token.boolean, .dark .token.constant, .dark .token.symbol,
+.dark .token.property, .dark .token.attr-name, .dark .token.variable,
+.dark .token.parameter, .dark .token.interpolation { color: #d19a66; }
+.dark .token.function, .dark .token.function-variable { color: #61aeee; }
+.dark .token.class-name, .dark .token.builtin { color: #e6c07b; }
+.dark .token.tag, .dark .token.selector, .dark .token.deleted { color: #e06c75; }
+
+/* ```diff blocks in rendered markdown (e.g. the diff-context a review comment
+   embeds): tint the changed lines with the same translucent green/red the diff
+   viewer's own rows use, in both themes. Prism's diff grammar puts the whole
+   line inside .token.inserted/.token.deleted, so this paints the row. */
+.token.inserted { background-color: rgba(34, 197, 94, 0.12); }
+.token.deleted { background-color: rgba(239, 68, 68, 0.12); }
+.dark .token.inserted { background-color: rgba(34, 197, 94, 0.15); }
+.dark .token.deleted { background-color: rgba(239, 68, 68, 0.15); }
 
 /* On Linux the OS-native scrollbar carries increment/decrement arrow buttons,
    and `color-scheme` paints it dark. Inside short boxes (e.g. the build-log

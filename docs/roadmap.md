@@ -109,19 +109,19 @@ before starting. Grouped by area.
 ## Web
 
 - [ ] **Async markdown renderer so fenced code blocks pick up on-demand syntax
-  highlighting.** The syntax-highlighting refactor split highlight.js into a small
-  eager set (~43 common languages, `web/src/lib/hljs.ts`) plus ~149 grammars loaded
-  on demand (`web/src/lib/hljsLazy.ts` `ensureLanguage` + generated
-  `hljsLazyRegistry.ts`). The three *code* surfaces were wired to lazy-load a
+  highlighting.** The syntax-highlighting refactor split Prism (via refractor)
+  into a small eager set (~47 common languages, `web/src/lib/prism.ts`) plus ~250
+  grammars loaded on demand (`web/src/lib/prismLazy.ts` `ensureLanguage` +
+  generated `prismLazyRegistry.ts`). The three *code* surfaces were wired to lazy-load a
   missing grammar and re-highlight once it lands: the diff worker
   (`highlight.worker.ts`, async already), the diff small-file fast path
   (`DiffViewer.tsx`), and the repo file viewer (`RepositoryView.tsx` `CodeView`).
   **Markdown code fences were deliberately left on the eager set** - a fenced block
-  in a language outside the eager ~43 (e.g. ` ```ocaml `/` ```clojure `) renders as
+  in a language outside the eager ~47 (e.g. ` ```ocaml `/` ```clojure `) renders as
   plain text instead of highlighted. The reason: `renderMarkdown`
   (`web/src/lib/markdown.tsx`, and the parallel inline renderer in
   `RepositoryView.tsx`) is a **synchronous, pure `string -> ReactNode` function**
-  that calls `hljs.getLanguage(lang)` and skips highlighting when the grammar isn't
+  that calls `prism.hasLanguage(lang)` and skips highlighting when the grammar isn't
   registered; it has no way to `await ensureLanguage(lang)` and re-render, and it's
   consumed in many places (`AgentDetail`, `RepositoryView`, `settings/ConfigForm`).
   Fix: give markdown the same lazy-load-then-re-highlight treatment the code

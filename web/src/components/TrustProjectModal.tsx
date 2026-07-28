@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
-import hljs from '../lib/hljs'
+import { highlightToHtml } from '../lib/prismHtml'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
@@ -72,18 +72,10 @@ export const TrustProjectModal = memo(function TrustProjectModal({
     }
   }, [path])
 
-  // highlight.js token HTML for the config, coloured by the shared `.hljs-*`
-  // theme (see index.css). Memoized on content so it isn't recomputed on every
-  // re-render. TOML is highlighted via highlight.js's `ini` grammar (aliased
-  // `toml`). Falls back to null (plain text) if highlighting fails.
-  const highlighted = useMemo(() => {
-    if (!content) return null
-    try {
-      return hljs.highlight(content, { language: 'toml', ignoreIllegals: true }).value
-    } catch {
-      return null
-    }
-  }, [content])
+  // Prism token HTML for the config, coloured by the shared `.token` theme (see
+  // index.css). Memoized on content so it isn't recomputed on every re-render.
+  // Falls back to null (plain text) if highlighting fails.
+  const highlighted = useMemo(() => (content ? highlightToHtml(content, 'toml') : null), [content])
 
   return (
     // z-[120]: a trust decision sits ABOVE the approval toasts (z-[110]).

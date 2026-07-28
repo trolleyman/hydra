@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useLocation, useSearch, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
-import hljs from '../lib/hljs'
+import { hasLanguage } from '../lib/prism'
+import { highlightLines } from '../lib/highlightCore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { formatBytes } from '../lib/formatBytes'
-import { ensureLanguage } from '../lib/hljsLazy'
+import { ensureLanguage } from '../lib/prismLazy'
 import { getLanguage } from '../lib/language'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
@@ -136,42 +137,6 @@ function isImage(filePath: string): boolean {
   return IMAGE_EXT_RE.test(filePath)
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-// splitHighlightedLines splits highlight.js HTML output into an array of
-// per-line HTML strings, re-opening any <span> left open across a newline so
-// each line is independently valid HTML. Rendering each logical line as its own
-// element is what lets line numbers stay aligned even when wrapping is on
-//.
-function splitHighlightedLines(html: string): string[] {
-  const lines: string[] = []
-  const stack: string[] = [] // currently-open tag strings
-  let cur = ''
-  for (const tok of html.split(/(<[^>]+>)/g)) {
-    if (!tok) continue
-    if (tok[0] === '<') {
-      cur += tok
-      if (tok[1] === '/') stack.pop()
-      else if (tok[tok.length - 2] !== '/') stack.push(tok) // not self-closing
-    } else {
-      const parts = tok.split('\n')
-      for (let p = 0; p < parts.length; p++) {
-        cur += parts[p]
-        if (p < parts.length - 1) {
-          lines.push(cur + '</span>'.repeat(stack.length))
-          cur = stack.join('')
-        }
-      }
-    }
-  }
-  lines.push(cur)
-  return lines
-}
 
 // formatBytes now lives in ../lib/formatBytes, shared with the artifact
 // download tiles.
@@ -556,27 +521,25 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
   // its worker), then re-highlight: hasGrammar flips false→true once it lands.
   const [, bumpLoaded] = useState(0)
   useEffect(() => {
-    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    if (hasLanguage(lang)) return
     let cancelled = false
     ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
     return () => { cancelled = true }
   }, [lang])
 
-  const hasGrammar = lang !== 'plaintext' && !!hljs.getLanguage(lang)
+  const hasGrammar = hasLanguage(lang)
+  // One HTML string per line - rendering each logical line as its own element is
+  // what keeps the line numbers aligned when wrapping is on. highlightLines also
+  // falls back to escaped plain text for an unhighlightable file, and carries the
+  // resync guard, so a grammar that derails mid-file still colours the rest.
   const lines = useMemo(() => {
-    let highlighted: string
-    try {
-      highlighted = hasGrammar
-        ? hljs.highlight(content, { language: lang }).value
-        : escapeHtml(content)
-    } catch {
-      highlighted = escapeHtml(content)
-    }
-    const split = splitHighlightedLines(highlighted)
+    const split = highlightLines(content, lang)
     // Drop the trailing empty line produced by a final newline, so the gutter
     // count matches the file's real line count.
     if (split.length > 1 && split[split.length - 1] === '' && content.endsWith('\n')) split.pop()
     return split
+    // hasGrammar: re-run once a lazily-loaded grammar lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, lang, hasGrammar])
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
@@ -605,7 +568,7 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
               {ln}
             </span>
             <code
-              className={`hljs hljs-line bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+              className={`bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
               dangerouslySetInnerHTML={{ __html: html || ' ' }}
             />
           </div>

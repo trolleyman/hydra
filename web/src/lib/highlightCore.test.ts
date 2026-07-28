@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { highlightLines, splitHighlightedLines } from './highlightCore'
+import { highlightHtml, highlightLines, resyncDeadTail, splitHighlightedLines } from './highlightCore'
 
-// The shape that loses highlight.js: an angle-bracketed word inside a JSX
-// element - here in a `//` comment in the opening tag, which hljs reads as XML
-// and so not as a comment at all. `<n>` opens a nested tag whose end regex
-// (`/Tag>` or `/>`) matches the element's own `</span>`, so the element never
-// closes and everything after it comes back untokenized. Reduced from
-// web/src/DiffViewer.tsx's LineNumCell, where it cost 3,596 lines.
+// The shape that used to lose highlight.js: an angle-bracketed word inside a JSX
+// element - here in a `//` comment in the opening tag, which hljs read as XML and
+// so not as a comment at all. `<n>` opened a nested tag whose end regex matched
+// the element's own `</span>`, so the element never closed and the rest of the
+// file came back untokenized. Reduced from web/src/DiffViewer.tsx's LineNumCell,
+// where it cost 3,596 lines. Prism's tsx grammar handles it; this is the
+// regression test for the switch.
 const JSX_TRAP = `const LineNumCell = ({ num, side, baseClass, selected, onSelectLine }) => {
   const clickable = !!onSelectLine && num != null
   return (
@@ -23,47 +24,94 @@ const JSX_TRAP = `const LineNumCell = ({ num, side, baseClass, selected, onSelec
   )
 }`
 
-// Enough real code after the trap to be worth resyncing for (RESYNC_MIN_TAIL).
 const TAIL = Array.from({ length: 30 }, (_, i) =>
   `export function after${i}(value: string): number { return value.length + ${i} }`).join('\n')
 
 const tokened = (lines: string[]) => lines.filter((l) => l.includes('<span')).length
 const strip = (s: string) => s.replace(/<[^>]*>/g, '')
   .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
 
 describe('highlightLines', () => {
-  it('keeps highlighting after a construct that derails the grammar', () => {
-    const code = `${JSX_TRAP}\n${TAIL}`
-    const out = highlightLines(code, 'typescript')
+  it('keeps highlighting the code after a JSX element', () => {
+    const out = highlightLines(`${JSX_TRAP}\n${TAIL}`, 'tsx')
     const tailStart = JSX_TRAP.split('\n').length
-    // Every line of the tail is a plain function declaration, so all of them
-    // should carry tokens. Before the resync, none of them did.
+    // Every tail line is a plain function declaration, so all of them carry
+    // tokens. Under highlight.js none of them did.
     expect(tokened(out.slice(tailStart))).toBe(30)
   })
 
-  it('keeps each line of HTML aligned with its source line while resyncing', () => {
+  it('reads a `//` comment inside a JSX opening tag as a comment', () => {
+    const out = highlightLines(JSX_TRAP, 'tsx')
+    expect(out[6]).toContain('token comment')
+    expect(out[7]).toContain('token comment')
+  })
+
+  it('returns exactly one entry per source line, with the text intact', () => {
     const src = `${JSX_TRAP}\n${TAIL}`.split('\n')
-    const out = highlightLines(src.join('\n'), 'typescript')
+    const out = highlightLines(src.join('\n'), 'tsx')
     expect(out.length).toBe(src.length)
     out.forEach((html, i) => expect(strip(html)).toBe(src[i]))
   })
 
-  it('returns a genuinely token-free tail as aligned plain lines', () => {
-    // Prose after code: there is nothing to tokenize, so the resync loop finds
-    // no improvement and leaves the lines as they are (rather than rescanning
-    // them up to the pass limit, or dropping them).
-    const src = ['const a = 1', ...Array.from({ length: 40 }, () => 'alpha bravo charlie delta')]
-    const out = highlightLines(src.join('\n'), 'typescript')
-    expect(out.length).toBe(src.length)
-    expect(tokened(out)).toBe(1)
-    out.forEach((html, i) => expect(strip(html)).toBe(src[i]))
+  it('falls back to escaped plain lines for a language it cannot highlight', () => {
+    const src = ['a < b && c > d', 'x & y']
+    const out = highlightLines(src.join('\n'), 'plaintext')
+    expect(out).toEqual(['a &lt; b &amp;&amp; c &gt; d', 'x &amp; y'])
   })
 
-  it('leaves an already well-highlighted file alone', () => {
-    const code = Array.from({ length: 40 }, (_, i) => `const value${i} = ${i}`).join('\n')
-    const out = highlightLines(code, 'typescript')
-    expect(tokened(out)).toBe(40)
+  it('routes zsh and ksh - names Prism does not know - through the bash grammar', () => {
+    for (const lang of ['zsh', 'ksh']) {
+      expect(highlightHtml('echo hi', lang), lang).toContain('token')
+    }
+  })
+})
+
+// No Prism grammar we can find derails, so the recovery path is driven here with
+// a highlighter that gives up on purpose - the loop's real logic (where it
+// resumes, when it stops, that it always terminates) is what these check.
+describe('resyncDeadTail', () => {
+  const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`)
+  // Tokenizes `stopAfter` lines and then gives up, like a derailed grammar.
+  const givesUpAfter = (stopAfter: number) => (code: string) =>
+    code.split('\n').map((l, i) => (i < stopAfter ? `<span class="token">${l}</span>` : l))
+
+  it('restarts on the dead tail until the whole run is tokened', () => {
+    const out = resyncDeadTail(lines, givesUpAfter(20)(lines.join('\n')), givesUpAfter(20))
+    expect(tokened(out)).toBe(100)
+    expect(out.length).toBe(100)
+  })
+
+  it('recovers what it can within the pass cap rather than looping forever', () => {
+    // 10 lines per pass, capped at 6 retries: 10 + 6*10 of 100. Partial colour
+    // beats an unbounded rescan of a file that keeps derailing.
+    const out = resyncDeadTail(lines, givesUpAfter(10)(lines.join('\n')), givesUpAfter(10))
+    expect(tokened(out)).toBe(70)
+    expect(out.length).toBe(100)
+  })
+
+  it('stops when the tail comes back with no tokens at all', () => {
+    let calls = 0
+    const plain = (code: string) => { calls++; return code.split('\n') }
+    const out = resyncDeadTail(lines, plain(lines.join('\n')), plain)
+    expect(calls).toBe(2) // the first pass, then one retry that finds nothing
+    expect(out.length).toBe(100)
+  })
+
+  it('leaves an already fully-tokened run untouched, without retrying', () => {
+    let calls = 0
+    const all = (code: string) => { calls++; return code.split('\n').map((l) => `<span class="token">${l}</span>`) }
+    const first = all(lines.join('\n'))
+    calls = 0
+    expect(resyncDeadTail(lines, first, all)).toEqual(first)
+    expect(calls).toBe(0)
+  })
+
+  it('gives up rather than looping when every pass keeps derailing', () => {
+    let calls = 0
+    const stuck = (code: string) => { calls++; return code.split('\n').map((l, i) => (i < 1 ? `<span class="token">${l}</span>` : l)) }
+    const out = resyncDeadTail(lines, stuck(lines.join('\n')), stuck)
+    expect(calls).toBeLessThanOrEqual(7) // first pass + the pass cap
+    expect(out.length).toBe(100)
   })
 })
 

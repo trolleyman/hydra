@@ -14,8 +14,8 @@ Grounding, because it changes the cost/benefit of everything below.
 | Concern | Status |
 |---|---|
 | Line diff | Server-side `git diff -U<n>` in `internal/git/diff.go:190`, parsed by `parseDiff` into structured `DiffFile{hunks:[{header, old_start, new_start, lines:[{type,content,old_line_num,new_line_num}]}]}` JSON - not a patch string on the wire. |
-| Intra-line diff | Hand-rolled `web/src/lib/wordDiff.ts`: **character-level** by default (a tokenization ladder drops to identifier-run / whitespace-clumped tokens only when the O(n*m) grid would exceed `MAX_CELLS=160_000`) -> trim common prefix/suffix -> `Uint32Array` LCS -> contiguous ranges -> coalesce stray confetti (<=2 char gaps) -> snap to camelCase/snake_case subword boundaries -> HTML overlay onto highlight.js output. A both-sides-mostly-changed pair (`REWRITE_FRACTION`) drops its ranges as noise. Caps `MAX_LINE_LEN=3000`. Built - see below. |
-| Diff libraries | None. `web/package.json` has only `highlight.js`. No `diff`/`diff-match-patch`/`react-diff-view`/`@git-diff-view`/`shiki`/`web-tree-sitter`. |
+| Intra-line diff | Hand-rolled `web/src/lib/wordDiff.ts`: **character-level** by default (a tokenization ladder drops to identifier-run / whitespace-clumped tokens only when the O(n*m) grid would exceed `MAX_CELLS=160_000`) -> trim common prefix/suffix -> `Uint32Array` LCS -> contiguous ranges -> coalesce stray confetti (<=2 char gaps) -> snap to camelCase/snake_case subword boundaries -> HTML overlay onto the highlighter's token output. A both-sides-mostly-changed pair (`REWRITE_FRACTION`) drops its ranges as noise. Caps `MAX_LINE_LEN=3000`. Built - see below. |
+| Diff libraries | None. `web/package.json` has only `refractor` (Prism's grammars as ESM) for highlighting. No `diff`/`diff-match-patch`/`react-diff-view`/`@git-diff-view`/`shiki`/`web-tree-sitter`. |
 | Ignore whitespace | Built - server flag `--ignore-space-change` (toggle in the Files settings cog). |
 | Hunk collapse / expand | Built - `GapExpander`/`EdgeExpander`, `EXPAND_STEP=20`, re-fetch with larger `context`. |
 | Side-by-side / unified | Built. |
@@ -206,10 +206,11 @@ line is under, and drive a sticky bar off the IntersectionObserver machinery
 
 ### 9. Shiki token-level decorations (only if the overlay bites)
 
-`applyWordRanges` hand-parses highlight.js HTML character-by-character to avoid
-straddling `<span>` boundaries - correct but brittle. Shiki's Decorations API does
-range overlays at the token level natively. Cost: shiki's grammar/theme payload is
-much bigger than highlight.js and you'd rewrite the `language.ts` +
+`applyWordRanges` hand-parses the highlighter's HTML character-by-character to
+avoid straddling `<span>` boundaries - correct but brittle. Shiki's Decorations API
+does range overlays at the token level natively. Cost: measured over this repo,
+shiki is ~7x slower per file than Prism and its grammars are ~30x bigger (tsx: 17 kB
+gzipped against 0.55 kB), and you'd rewrite the `language.ts` +
 `buildHighlightMaps`/`syncHighlight`/`asyncHighlight` path. Only worth it if the
 HTML overlay produces real bugs.
 

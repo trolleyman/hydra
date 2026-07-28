@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import hljs from './hljs'
+import { highlightToHtml } from './prismHtml'
 import { highlightShell, isShellLanguage, scanShellEmbeds } from './shellEmbed'
 import { highlightHtml, highlightLines } from './highlightCore'
 
 // text strips the markup back off highlighted HTML, so a test can assert on what
-// the reader sees. Entities are decoded in the same order highlight.js escapes
-// them (& last would double-decode).
+// the reader sees. Entities are decoded in the same order they are escaped
+// (& last would double-decode).
 function text(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')
@@ -16,7 +16,7 @@ function text(html: string): string {
     .replace(/&amp;/g, '&')
 }
 
-// tokensOf returns the highlight.js classes covering a substring of the source,
+// tokensOf returns the Prism token classes covering a substring of the source,
 // which is how these tests ask "what colour is this bit?".
 function tokensAround(html: string, needle: string): string[] {
   const out: string[] = []
@@ -137,46 +137,46 @@ describe('highlightShell', () => {
 
   it('renders a heredoc body as inert text, not as bash keywords', () => {
     const html = highlightShell("cat << 'EOF'\nThis is not code: if echo printf fi\nEOF\n")
-    expect(tokensAround(html, 'if echo printf fi')).toEqual(['hljs-string'])
+    expect(tokensAround(html, 'if echo printf fi')).toEqual(['token string'])
     // The fence lines themselves are still shell.
-    expect(tokensAround(html, 'cat')).toContain('hljs-built_in')
+    expect(tokensAround(html, 'cat')).toContain('token function')
   })
 
   it('picks out expansions inside an interpolating heredoc', () => {
     const html = highlightShell('cat <<EOF\nhome is $HOME today\nEOF\n')
-    expect(tokensAround(html, '$HOME')).toEqual(['hljs-variable'])
-    expect(tokensAround(html, 'home is ')).toEqual(['hljs-string'])
+    expect(tokensAround(html, '$HOME')).toEqual(['token variable'])
+    expect(tokensAround(html, 'home is ')).toEqual(['token string'])
   })
 
   it('highlights an inline python program as python', () => {
     const html = highlightShell('python3 -c "import json\nprint(json.dumps({}))"')
-    expect(tokensAround(html, 'import')).toContain('hljs-keyword')
-    expect(tokensAround(html, 'print')).toContain('hljs-built_in')
+    expect(tokensAround(html, 'import')).toContain('token keyword')
+    expect(tokensAround(html, 'print')).toContain('token keyword')
     // The quotes stay part of the shell string that holds the program.
-    expect(tokensAround(html, '"')).toContain('hljs-string')
+    expect(tokensAround(html, '"')).toContain('token string')
   })
 
   it('highlights a python heredoc as python', () => {
     const html = highlightShell("python3 << 'EOF'\nimport os\nEOF\n")
-    expect(tokensAround(html, 'import')).toContain('hljs-keyword')
+    expect(tokensAround(html, 'import')).toContain('token keyword')
   })
 
   it('recurses into a shell-in-shell embed', () => {
     const html = highlightShell("bash -c 'cat <<EOF\nnot bash: if fi\nEOF'\n")
-    expect(tokensAround(html, 'not bash: if fi')).toEqual(['hljs-string'])
+    expect(tokensAround(html, 'not bash: if fi')).toEqual(['token string'])
   })
 
-  it('leaves an ordinary script exactly as highlight.js had it', () => {
+  it('leaves an ordinary script exactly as the bash grammar had it', () => {
     const script = 'set -e\nfor f in *.txt; do\n  echo "$f"\ndone\n'
     expect(scanShellEmbeds(script)).toEqual([])
-    expect(highlightShell(script)).toBe(hljs.highlight(script, { language: 'bash', ignoreIllegals: true }).value)
+    expect(highlightShell(script)).toBe(highlightToHtml(script, 'bash'))
   })
 
   it('colours a heredoc operator line without bleeding into the redirect', () => {
-    // highlight.js' own heredoc rule would paint `PY > /tmp/x.py` as one string.
+    // The bash grammar's own heredoc rule would paint `PY > /tmp/x.py` as one string.
     const html = highlightShell('cat <<PY > /tmp/x.py\nimport os\nPY\n')
     // Both ends of the heredoc - opening delimiter and terminator - are strings.
-    expect(tokensAround(html, 'PY')).toEqual(['hljs-string', 'hljs-string'])
+    expect(tokensAround(html, 'PY')).toEqual(['token string', 'token string'])
     expect(tokensAround(html, '/tmp/x.py')).toEqual([])
   })
 })
@@ -185,12 +185,12 @@ describe('highlightHtml routing', () => {
   it('sends every shell alias through the embed-aware path', () => {
     const code = "cat <<'EOF'\nif echo fi\nEOF\n"
     for (const lang of ['bash', 'sh', 'zsh']) {
-      expect(tokensAround(highlightHtml(code, lang) ?? '', 'if echo fi'), lang).toEqual(['hljs-string'])
+      expect(tokensAround(highlightHtml(code, lang) ?? '', 'if echo fi'), lang).toEqual(['token string'])
     }
   })
 
-  it('leaves non-shell languages to highlight.js', () => {
-    expect(highlightHtml('print(1)', 'python')).toContain('hljs-built_in')
+  it('leaves non-shell languages to the plain grammar', () => {
+    expect(highlightHtml('print(1)', 'python')).toContain('token keyword')
     expect(highlightHtml('x', 'plaintext')).toBeNull()
     expect(highlightHtml('', 'bash')).toBeNull()
   })

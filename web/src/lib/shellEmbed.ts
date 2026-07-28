@@ -23,11 +23,12 @@
 // for character. The textarea overlay in lib/markdown renders a fenced block
 // with this HTML directly behind a transparent textarea, so a single added or
 // dropped character would drift the caret away from the visible text.
-import hljs from './hljs'
+import { hasLanguage } from './prism'
+import { highlightToHtml } from './prismHtml'
 import { getLanguage, interpreterLanguage } from './language'
 
 // Fence info strings / file languages this module takes over from plain bash.
-// `shell` and `console` are deliberately excluded: those name highlight.js'
+// `shell` and `console` are deliberately excluded: those name the
 // prompt-transcript grammar (`$ cmd` / output), not a script.
 const SHELL_LANGS = new Set(['bash', 'sh', 'zsh', 'ksh'])
 
@@ -369,37 +370,41 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#x27;')
 }
 
+const TOK_STRING = 'token string'
+const TOK_VARIABLE = 'token variable'
+const TOK_SUBST = 'token interpolation'
+
 function span(cls: string, text: string): string {
   return text === '' ? '' : `<span class="${cls}">${escapeHtml(text)}</span>`
 }
 
 function highlightWith(code: string, lang: string): string {
-  try {
-    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-  } catch {
-    return escapeHtml(code)
-  }
+  return highlightToHtml(code, lang) ?? escapeHtml(code)
 }
 
 // Expansions the shell performs inside an unquoted heredoc body. Coloured like
-// highlight.js' own bash grammar colours them, so an interpolating heredoc reads
-// as "text with holes in it" rather than a uniform block.
+// Prism's own bash grammar colours them, so an interpolating heredoc reads as
+// "text with holes in it" rather than a uniform block.
+//
+// Token classes are Prism's: `string` for the inert text, `variable` for a bare
+// $NAME and `interpolation` for a command substitution, matching what Prism's
+// bash and template-string grammars emit for the same shapes.
 const EXPANSION = /\$\{[^}\n]*\}|\$\([^)\n]*\)|\$[A-Za-z_][A-Za-z0-9_]*|`[^`\n]*`/g
 
 // stringBody renders a body we have no language for: one string run, with the
 // shell's own expansions picked out when they would actually be expanded.
 function stringBody(text: string, expand: boolean): string {
-  if (!expand) return span('hljs-string', text)
+  if (!expand) return span(TOK_STRING, text)
   let out = ''
   let pos = 0
   EXPANSION.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = EXPANSION.exec(text))) {
-    out += span('hljs-string', text.slice(pos, m.index))
-    out += span(m[0].startsWith('$(') || m[0].startsWith('`') ? 'hljs-subst' : 'hljs-variable', m[0])
+    out += span(TOK_STRING, text.slice(pos, m.index))
+    out += span(m[0].startsWith('$(') || m[0].startsWith('`') ? TOK_SUBST : TOK_VARIABLE, m[0])
     pos = m.index + m[0].length
   }
-  return out + span('hljs-string', text.slice(pos))
+  return out + span(TOK_STRING, text.slice(pos))
 }
 
 function embedBody(body: string, e: ShellEmbed): string {
@@ -409,11 +414,11 @@ function embedBody(body: string, e: ShellEmbed): string {
   if (isShellLanguage(e.lang)) return highlightShell(body)
   // An unregistered language (a lazy grammar the worker hasn't loaded) falls
   // back to inert text - still better than colouring Python as bash.
-  if (!hljs.getLanguage(e.lang)) return stringBody(body, e.expand)
+  if (!hasLanguage(e.lang)) return stringBody(body, e.expand)
   return highlightWith(body, e.lang)
 }
 
-// highlightShell returns highlight.js-compatible token HTML for a shell snippet,
+// highlightShell returns Prism-compatible token HTML for a shell snippet,
 // with heredoc bodies and inline interpreter code highlighted as the language
 // they really are. The shell between those regions is highlighted as bash, one
 // chunk at a time - a construct that straddles an embedded region (rare: the
@@ -430,7 +435,7 @@ export function highlightShell(code: string): string {
     // The quotes around an inline-code argument stay string-coloured, so the
     // embedded code reads as something held inside a shell string; the `<<-`
     // operator in front of a heredoc delimiter is plain shell punctuation.
-    const delims = e.kind === 'delimiter' ? '' : 'hljs-string'
+    const delims = e.kind === 'delimiter' ? '' : TOK_STRING
     out += delims ? span(delims, code.slice(e.start, e.bodyStart)) : escapeHtml(code.slice(e.start, e.bodyStart))
     out += embedBody(code.slice(e.bodyStart, e.bodyEnd), e)
     out += delims ? span(delims, code.slice(e.bodyEnd, e.end)) : escapeHtml(code.slice(e.bodyEnd, e.end))
