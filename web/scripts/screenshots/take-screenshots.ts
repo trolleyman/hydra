@@ -364,10 +364,10 @@ async function ensureVideosPainted(page: import('playwright').Page, seek?: numbe
 console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
-//    must happen before the go build. We invoke vite + the routes-regex
-//    generator directly rather than `npm run build` to skip the tsc typecheck
-//    (a type error in some checkout shouldn't block a screenshot) and the
-//    openapi/router codegen (their outputs are committed).
+//    must happen before the go build. We invoke vite + the font and
+//    routes-regex generators directly rather than `npm run build` to skip the
+//    tsc typecheck (a type error in some checkout shouldn't block a screenshot)
+//    and the openapi/router codegen (their outputs are committed).
 //
 //    Install with aube when it is on PATH (much faster), else npm. Both read the
 //    committed package-lock.json, so node_modules comes out the same either way.
@@ -378,6 +378,11 @@ progress('building frontend')
 run(pm, ['install'], webDir)
 // aubx / npx here resolve the locally-installed vite bin (install just ran);
 // neither needs to fetch from the registry.
+// The Iosevka webfonts are gitignored and cut at build time, so a checkout that
+// has never been built has none - and the code/terminal defaults would silently
+// fall back to the system monospace in every shot. No-ops once the cache stamp
+// matches (see scripts/build-fonts.ts).
+run('node', ['scripts/build-fonts.ts'], webDir)
 run(pm === 'aube' ? 'aubx' : 'npx', ['vite', 'build'], webDir)
 run('node', ['scripts/generate-routes-regex.ts'], webDir)
 

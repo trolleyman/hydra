@@ -47,19 +47,69 @@
   size-adjust: 110%;
 }
 
-/* Pin the serif family to Merriweather (loaded in index.html) so every `serif`
-   surface - `.chat-serif` prose and the Tailwind `font-serif` utility used for
-   subagent prose / the settings preview - renders the same font on every OS.
-   Georgia and the system serif stay as graceful fallbacks.
+/* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
+   are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream
+   release: four faces each, subset to Latin + punctuation + box drawing + the
+   symbols this UI and a TUI actually draw (~200KB a face instead of ~1MB).
 
-   'Hydra Arrows' goes FIRST, ahead of Merriweather, and this order matters.
-   Its `unicode-range` means it is only ever consulted for arrows, so every
-   letter still falls straight through to Merriweather - but Google's Merriweather
+   The .woff2 files these point at are NOT in the repo. They are gitignored and
+   fetched + subset at build time (`npm run build-fonts`, which `npm run build`
+   runs first and which no-ops once its cache stamp matches), so the checkout
+   stays free of 1.7MB of binaries. A build with no network and no cache leaves
+   them missing, and the stacks in src/lib/fonts.ts fall through to the system
+   monospace - degraded, but not broken.
+
+   See src/lib/fonts.ts for the catalogue and public/fonts/OFL.txt for the licence.
+
+   Term differs from the default release in one way that matters here: its wide
+   symbols are drawn one character cell across rather than two, which is what
+   keeps a terminal's columns lined up. Plain Iosevka is the default for code;
+   the terminal defaults to Fira Code instead, for the emoji-width reason
+   spelled out on FONT_ROLE_SPEC.terminal in src/lib/fonts.ts.
+
+   Only 400 and 700 are cut. A weight in between (font-semibold, 600) is
+   synthesised by the browser rather than downloaded, which is the right trade
+   for a code font read at one weight plus bold. */
+@font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+
+/* Hand Tailwind's two font utilities over to the font selector (Settings ->
+   Browser -> Fonts). `font-sans` - which is to say the whole app shell, since
+   `body` carries no family of its own - follows the Interface choice, and every
+   `font-mono` (code blocks, diffs, the repository view, the line-number gutters)
+   follows the Code choice. Nothing else had to change for that: the utilities
+   were already everywhere, they just resolved to a fixed stack.
+
+   lib/fontPrefs.ts writes --app-font-* onto <html> from the stored preference.
+   The fallback in each var() is the same system stack Tailwind shipped, so the
+   first frames - before any script runs - render exactly as they always did, and
+   a browser with the preference unset or JS broken still gets a sane font.
+
+   --font-serif stays a fixed Merriweather pin: it is no longer what chat prose
+   uses (that is --app-font-chat now), only the `font-serif` utility, which wants
+   a known serif rather than the user's choice.
+
+   'Hydra Arrows' goes FIRST in the serif stack, and the order matters. Its
+   `unicode-range` means it is only ever consulted for arrows, so every letter
+   still falls straight through to Merriweather - but Google's Merriweather
    `latin` subset does ship two arrows, U+2191 and U+2193. Behind Merriweather the
    arrow face would therefore never be reached for ↑ and ↓: those two would keep
    Merriweather's small drawing while the other eight got the new one, which reads
    worse than the bug did. In front, all ten come from the same face. */
 @theme {
+  --font-sans: var(--app-font-ui, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji');
+  --font-sans--font-feature-settings: var(--app-font-ui-features, normal);
+  --font-mono: var(--app-font-code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Noto Color Emoji');
+  --font-mono--font-feature-settings: var(--app-font-code-features, normal);
   --font-serif: 'Hydra Arrows', 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
 }
 
@@ -435,6 +485,16 @@ body {
   background-color: rgba(107, 114, 128, 0.8);
 }
 
+/* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
+   writes font-family onto its row elements itself and has no option for
+   features, so they are set here on the container and inherit down - which is
+   also why they live on a class rather than in the Terminal options object.
+   Iosevka's ligation and character-variant tags are what this carries; every
+   other offered mono family sets `normal` and renders exactly as before. */
+.xterm {
+  font-feature-settings: var(--app-font-terminal-features, normal);
+}
+
 /* xterm v6 ships its own overlay scrollbar (the VS Code "scrollable-element"
    slider — a thin, button-less bar that fades in on hover). But its legacy
    `.xterm-viewport` still declares `overflow-y: scroll`, so on platforms with
@@ -454,13 +514,26 @@ body {
 
 /* --- Chat mode (AgentChat) ------------------------------------------------ */
 
-/* Serif agent prose (item 9/29). Pinned to Merriweather via --font-serif (see
-   index.html) so bold and regular share exact metrics on every OS. Merriweather
-   is a variable font, so its bold is a real weight that keeps the same size and
-   line box as the body - no synthesized-weight bloat, which is what made bold
-   read as bigger text under the old system-serif fallback. A touch larger than
-   the 13px pane base, with its own line-height. Code inside keeps its own mono
-   class + em sizing. */
+/* The chat font (Settings -> Browser -> Fonts). Every run of agent/user prose in
+   the chat pane carries .chat-font, so one variable moves all of it; code inside
+   keeps its own mono class + em sizing and so follows the Code font instead.
+   The fallback is the serif default, matching lib/fonts.ts. */
+.chat-font {
+  font-family: var(--app-font-chat, 'Hydra Arrows', 'Merriweather', ui-serif, Georgia, Cambria,
+    'Times New Roman', Times, serif);
+  font-feature-settings: var(--app-font-chat-features, normal);
+}
+
+/* Serif agent prose (item 9/29). A serif wants to be a touch larger and looser
+   than the 13px pane base to read well, and its bold wants to be a real
+   intermediate weight rather than a synthesised one - so picking a serif chat
+   font swaps in this whole treatment, not just the family. Picking a sans keeps
+   the pane's own metrics (.chat-leading below). That switch is what the old
+   boolean serif/sans toggle did; it now follows the font's category.
+
+   The pinned webfonts are variable, so their bold is a real weight that keeps
+   the same size and line box as the body - no synthesized-weight bloat, which is
+   what made bold read as bigger text under a system-serif fallback. */
 /* Whole-pixel leading for prose that GROWS while a turn streams (agent text at
    the 13px pane base, sub-agent text in its 12px cards, and .chat-serif below).
    A ratio-based line box is fractional at these sizes - 13px x 1.625 = 21.125,
@@ -482,7 +555,6 @@ body {
   line-height: 20px;
 }
 .chat-serif {
-  font-family: var(--font-serif);
   font-size: 14px;
   line-height: 22px;
 }
@@ -493,9 +565,10 @@ body {
 }
 .chat-serif strong,
 .chat-serif b {
-  /* Merriweather semibold - a real intermediate weight the same size as the
-     body, so bold reads as emphasis rather than bigger/heavier text (and
-     matches the sans-mode font-semibold). */
+  /* Semibold - a real intermediate weight the same size as the body, so bold
+     reads as emphasis rather than bigger/heavier text (and matches the sans-mode
+     font-semibold). Both offered serif webfonts carry it as a real weight; a
+     system serif that doesn't gets a synthesised one, same as before. */
   font-weight: 600;
 }
 

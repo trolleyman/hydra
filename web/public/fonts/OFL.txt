@@ -1,4 +1,14 @@
-Copyright 2022 The Noto Project Authors (https://github.com/notofonts/math)
+The fonts in this directory are all licensed under the SIL Open Font License,
+Version 1.1, reproduced in full below. Their copyright notices:
+
+  noto-sans-math-arrows.woff2
+    Copyright 2022 The Noto Project Authors (https://github.com/notofonts/math)
+    A subset (arrows only) of Noto Sans Math.
+
+  iosevka-*.woff2, iosevka-term-*.woff2
+    Copyright 2015-2025 Belleve Invis (https://github.com/be5invis/Iosevka)
+    Subsets of the Iosevka and Iosevka Term v34.8.0 webfont releases, cut by
+    web/scripts/build-fonts.ts.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

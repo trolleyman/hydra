@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Lock, LoaderCircle } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
+import { useApplyFonts } from '../lib/fontPrefs'
 
 interface AuthStatus {
   auth_required: boolean
@@ -16,8 +17,10 @@ type Phase = 'checking' | 'login' | 'ready'
 // show a login screen. A successful login sets an HttpOnly cookie that every
 // subsequent API and WebSocket request carries automatically.
 export function AuthGate({ children }: { children: ReactNode }) {
-  // Keep the login screen on-theme even though it renders before the router.
+  // Keep the login screen on-theme, and in the chosen fonts, even though it
+  // renders before the router.
   useApplyTheme()
+  useApplyFonts()
 
   const [phase, setPhase] = useState<Phase>('checking')
   const [key, setKey] = useState('')
