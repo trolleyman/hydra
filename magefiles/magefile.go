@@ -1690,14 +1690,71 @@ func Demo() error {
 	}
 }
 
+// removeDirContents removes everything inside dir except the named entries,
+// leaving dir itself in place. A missing dir is not an error. Any kept entry that
+// is already absent is restored from git if it is tracked - so a `mage clean` run
+// by an older version (which removed the whole directory) is repaired rather than
+// left broken.
+func removeDirContents(dir string, keep ...string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(dir, 0o755)
+		}
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+
+	kept := make(map[string]bool, len(keep))
+	for _, name := range keep {
+		kept[name] = false
+	}
+	for _, entry := range entries {
+		if _, ok := kept[entry.Name()]; ok {
+			kept[entry.Name()] = true
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+
+	for name, present := range kept {
+		if present {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		// `git show`, not `git checkout` - restoring the file needs no index write, so
+		// this also works against a read-only .git (a head running under
+		// git_isolation=readonly).
+		// exec directly rather than sh.Output, which trims trailing whitespace - the
+		// restored file has to be byte-identical to the committed one to keep
+		// `git status` clean.
+		content, err := exec.Command("git", "show", "HEAD:./"+filepath.ToSlash(path)).Output()
+		if err != nil {
+			fmt.Printf("warning: %s is missing and could not be restored from git: %v\n", path, err)
+			continue
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
+}
+
 // Clean removes the build cache and build files
 func Clean() error {
 	if err := os.RemoveAll(".mage"); err != nil {
 		return errtrace.Wrap(fmt.Errorf("failed to remove .mage directory: %w", err))
 	}
 
-	if err := os.RemoveAll("web/dist"); err != nil {
-		return errtrace.Wrap(fmt.Errorf("failed to remove web/dist directory: %w", err))
+	// Empty web/dist rather than removing it: the committed dist/.gitkeep holds the
+	// directory open for web/embed.go's `//go:embed all:dist`, so deleting it breaks
+	// `go build` until the frontend is rebuilt (see web/vite.config.ts
+	// keepDistGitkeep). Keeping the file untouched also keeps `git status` clean.
+	if err := removeDirContents("web/dist", ".gitkeep"); err != nil {
+		return errtrace.Wrap(fmt.Errorf("failed to clean web/dist directory: %w", err))
 	}
 
 	if err := os.RemoveAll("web/node_modules"); err != nil {
