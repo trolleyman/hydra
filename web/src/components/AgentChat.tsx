@@ -61,6 +61,7 @@ import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { ToolApproval } from './ToolApproval'
+import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -3058,7 +3059,7 @@ const ToolCard = memo(function ToolCard({
               ) : isGlob ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
               ) : isWebFetch ? (
-                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline">{input!.url as string}</a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline"><UrlText url={input!.url as string} /></a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
               ) : isFileChanges ? (
                 <FileChangesPanel changes={input?.changes} worktree={worktree} />
               ) : isWrite ? (
