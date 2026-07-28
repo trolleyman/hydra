@@ -2689,6 +2689,8 @@ const ToolCard = memo(function ToolCard({
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // The thumbnail clicked, so the lightbox flies the picture out of it.
+  const [imgOrigin, setImgOrigin] = useState<Element | null>(null)
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
@@ -3096,7 +3098,7 @@ const ToolCard = memo(function ToolCard({
                             width={logical?.w}
                             height={logical?.h}
                             alt="Tool output image"
-                            onClick={() => setImgLightbox(i)}
+                            onClick={(e) => { setImgOrigin(e.currentTarget); setImgLightbox(i) }}
                             // A ring, NOT a border: with border-box sizing (the
                             // Tailwind default) a 1px border eats 2px out of the
                             // content box the width attr set, so a 420px shot was
@@ -3142,6 +3144,7 @@ const ToolCard = memo(function ToolCard({
         <ImageLightbox
           images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          origin={imgOrigin}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
         />
@@ -4487,6 +4490,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
@@ -4504,7 +4509,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
             attachments={attachments}
             size="sm"
             className={body ? 'mt-2' : ''}
-            onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+            onOpenImage={(id, origin) => {
+              setLightboxOrigin(origin)
+              setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+            }}
           />
         )}
       </div>
@@ -4515,6 +4523,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
@@ -5241,6 +5250,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Current model, fed live by the event stream (system:init / set_model
@@ -9065,7 +9076,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               size="sm"
               className="px-3 pt-2.5"
               onRemove={removeAttachment}
-              onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+              onOpenImage={(id, origin) => {
+                setLightboxOrigin(origin)
+                setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+              }}
             />
             <HighlightedTextarea
               ref={textareaRef}
@@ -9207,6 +9221,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
