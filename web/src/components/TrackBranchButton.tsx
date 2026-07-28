@@ -1,7 +1,10 @@
 import { useState } from 'react'
-import { MonitorDown, Check, Copy } from 'lucide-react'
+import { MonitorDown } from 'lucide-react'
 import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
 import { api } from '../stores/apiClient'
+import { copyWithToast } from '../lib/copyToast'
+import { useCopyFlash } from '../lib/useCopyFlash'
+import { CopyStateIcon } from './CopyStateIcon'
 
 // TrackBranchButton is the small icon+chevron button in the agent header that
 // opens a popover explaining how to check out and follow this head's branch from
@@ -13,7 +16,7 @@ import { api } from '../stores/apiClient'
 // machine", not "look at a branch".
 export function TrackBranchButton({ projectId, agentId }: { projectId: string; agentId: string }) {
   const [remote, setRemote] = useState('hydra-agents')
-  const [copied, setCopied] = useState(false)
+  const { state, flash } = useCopyFlash()
   const cmd = `git checkout -t ${remote}/${agentId}`
 
   // Set up the remote lazily when the popover opens. If it fails, the default
@@ -25,10 +28,12 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
     } catch { /* leave the default remote name */ }
   }
 
+  // Copy via the shared toast helper: the icon flashes a tick/X, and the toast
+  // shows the command that landed on the clipboard. copyWithToast goes through
+  // copyText, so this also works on the insecure LAN origins where
+  // navigator.clipboard is undefined and the old writeText silently no-opped.
   function copy() {
-    void navigator.clipboard?.writeText(cmd)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    void copyWithToast(cmd, { what: 'checkout command', lang: 'bash' }).then(flash)
   }
 
   return (
@@ -52,7 +57,7 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
           aria-label="Copy command"
           className="p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer shrink-0"
         >
-          {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+          <CopyStateIcon state={state} />
         </button>
       </div>
     </SettingsPopover>

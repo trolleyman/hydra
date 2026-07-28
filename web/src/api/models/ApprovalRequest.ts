@@ -40,6 +40,10 @@ export type ApprovalRequest = {
      */
     args_preview?: string | null;
     /**
+     * The agent's own explanation of what it is asking for and why it needs to happen outside the sandbox (`hydra host-run --why`). Shown above the command in the approval card, so the user judges a stated intent rather than reverse-engineering one from a shell script.
+     */
+    description?: string | null;
+    /**
      * ISO 8601 timestamp the request was raised
      */
     ts?: string;

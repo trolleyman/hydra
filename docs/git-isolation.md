@@ -128,10 +128,33 @@ own own-branch guard, so they're safe on codex/gemini without it.
   in progress on conflict; **`git_rebase_continue`** / **`git_rebase_abort`** drive it
   from there (they validate the in-progress rebase's `head-name` is the head's branch,
   since HEAD is detached mid-rebase).
+- **`git_merge`** - merge a ref INTO the head's branch (typically its base, to update
+  the head). The own-branch guard fixes the direction: HEAD is pinned to the head's
+  branch, so a merge can only ever move that branch, never main or a sibling.
+  Fast-forwards by default, `no_ff` forces a merge commit, `message` overrides the
+  `Merge branch '<ref>'` subject. Unlike revert/cherry-pick this **leaves a conflict in
+  progress** - updating from base is precisely the case the agent is meant to resolve -
+  and **`git_merge_continue`** / **`git_merge_abort`** finish it. `continue` stages the
+  still-unmerged paths itself (git won't conclude a merge while any remain) but refuses
+  if any of them still contain `<<<<<<<` markers, so a conflict can't be committed raw.
+- **`git_stash`** (`op`: push / pop / apply / list / drop) - park uncommitted work and
+  bring it back; the way out of "your local changes would be overwritten by merge"
+  without discarding them or committing something half-done. **Entries are per-head.**
+  git's own `refs/stash` lives in the *common* dir, so every worktree shares one stash -
+  head A could push and head B pop, silently handing over the work and losing it for A
+  (verified: a stash pushed in one linked worktree is listed by another). These entries
+  hang off `refs/worktree/hydra-stash`, one of the few namespaces git keeps per-worktree,
+  so a sibling can't see or pop them. The mechanism is otherwise git's own: `git stash
+  create` builds the same commit, the ref's reflog is the same stack (addressed as the
+  familiar `stash@{N}`), and `git stash apply` reads it back. `include_untracked` stages
+  the untracked files rather than passing `-u` to `create`, which bails out entirely when
+  the tracked side is clean - so an untracked-only worktree would otherwise stash nothing;
+  they come back staged. Refused mid-merge/rebase, where the captured conflict state
+  would not restore cleanly.
 
 ### Readonly gate redirect
 
-In `readonly`, a raw `git reset`/`add`/`revert`/`rebase`/`cherry-pick`/`commit` would
+In `readonly`, a raw `git reset`/`add`/`revert`/`rebase`/`cherry-pick`/`merge`/`stash`/`commit` would
 fail at the OS with a cryptic read-only-filesystem error. The gate (seeded with
 `HostMediatedGit`, from `gitIso.HostMediatedCommit`) instead **denies those
 subcommands with a message pointing at the matching `mcp__hydra__git_*` tool**. This
@@ -158,12 +181,13 @@ either route the setup through host-run (below) or set
 
 lfs and submodules need the actual file/submodule *content* to build and run, so they
 can't just be skipped. The intended escape valve is the existing **host-run** hatch
-(`/tmp/hydra-internal host-run -- <cmd>`): `host-run -- git submodule update --init`
-runs host-side against the real writable `.git`, approval-gated. That covers the
-once-per-head setup without building submodule/lfs-specific tooling. Caveats: it is
-approval-gated (a click per op, fine for setup, wrong for a hot loop), and it runs
-**unsandboxed** - so avoid `host-run -- bun install` (that runs all npm postinstall
-scripts on the host, a supply-chain vector); prefer narrow git-only commands.
+(the `mcp__hydra__host_run` tool, or `/tmp/hydra-internal host-run` for agents without
+it): `git submodule update --init` runs host-side against the real writable `.git`,
+approval-gated. That covers the once-per-head setup without building submodule/lfs
+-specific tooling. Caveats: it is approval-gated (a click per op, fine for setup, wrong
+for a hot loop), and it runs **unsandboxed** - so avoid asking for `bun install` (that
+runs all npm postinstall scripts on the host, a supply-chain vector); prefer narrow
+git-only commands.
 
 Do **not** try to fix this by carving `.git/config` read-write out of the readonly
 bind. `.git/config` is a code-execution surface (`core.hooksPath`, `core.fsmonitor`,

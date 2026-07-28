@@ -1,5 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   Bot,
@@ -53,6 +54,7 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
@@ -930,6 +932,17 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
       const plan = Array.isArray(obj.plan) ? obj.plan : []
       return { text: `${plan.length} step${plan.length === 1 ? '' : 's'} above ${str('base')}`, prose: true }
     }
+    case 'git_merge':
+      // The --no-ff flag is in the heading, so the summary is just what came in.
+      return { text: str('ref'), prose: false }
+    case 'git_stash': {
+      // The operation is in the heading; the summary is what it acted on - the
+      // label being saved, or the entry being restored/dropped.
+      const op = str('op') || 'push'
+      if (op === 'push') return str('message') ? { text: str('message'), prose: true } : null
+      if (op === 'list') return null
+      return { text: str('ref') || 'stash@{0}', prose: false }
+    }
     default:
       return null
   }
@@ -1089,6 +1102,10 @@ const GIT_TOOL_LABELS: Record<string, string> = {
   git_rebase: 'git rebase',
   git_rebase_continue: 'git rebase --continue',
   git_rebase_abort: 'git rebase --abort',
+  git_merge: 'git merge',
+  git_merge_continue: 'git merge --continue',
+  git_merge_abort: 'git merge --abort',
+  git_stash: 'git stash',
 }
 
 // gitToolHeading is GIT_TOOL_LABELS plus the flags this particular call used, so
@@ -1107,6 +1124,13 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
     return `${label} --${mode}`
   }
   if (tool === 'git_commit' && input.amend === true) return `${label} --amend`
+  if (tool === 'git_merge' && input.no_ff === true) return `${label} --no-ff`
+  if (tool === 'git_stash') {
+    // The sub-operation IS the command here - "git stash" alone says nothing
+    // about whether work was parked or restored.
+    const op = typeof input.op === 'string' && input.op ? input.op : 'push'
+    return `${label} ${op}`
+  }
   return label
 }
 
@@ -2221,6 +2245,35 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
     )
   }
 
+  if (tool === 'git_stash') {
+    const op = str('op') || 'push'
+    const entry = str('ref') || 'stash@{0}'
+    const note2 = {
+      push: <>Set the uncommitted changes aside; the worktree is now clean</>,
+      pop: <>Restored {entry} and removed the entry</>,
+      apply: <>Restored {entry}, keeping the entry</>,
+      drop: <>Discarded {entry}</>,
+      list: <>Listed this head&rsquo;s stash entries</>,
+    }[op]
+    return (
+      <div className={note}>
+        {note2 ?? <>Stash {op}</>}
+        {op !== 'list' ? <> &middot; private to this head</> : null}
+      </div>
+    )
+  }
+
+  if (tool === 'git_merge') {
+    // Direction is the thing worth stating: the tool only ever merges INTO this
+    // head's branch, never the other way, so name both ends.
+    return (
+      <div className={note}>
+        Merged {sha(str('ref'))} into this branch
+        {input.no_ff === true ? <> &middot; forced a merge commit</> : null}
+      </div>
+    )
+  }
+
   if (tool === 'git_rebase') {
     const plan = Array.isArray(input.plan) ? input.plan : []
     return (
@@ -2398,6 +2451,10 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   mcp__hydra__git_rebase: GitCommitHorizontal,
   mcp__hydra__git_rebase_continue: GitCommitHorizontal,
   mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_merge: GitMerge,
+  mcp__hydra__git_merge_continue: GitMerge,
+  mcp__hydra__git_merge_abort: GitMerge,
+  mcp__hydra__git_stash: Archive,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -2448,12 +2505,19 @@ const ToolCard = memo(function ToolCard({
 	}, [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
-  const isBash = item.name === 'Bash' && command !== ''
-  // `hydra host-run` is the sandbox escape hatch: the agent is not running this
-  // itself, it is asking the USER to run it on the host. Show the command it is
-  // asking for rather than the CLI wrapper it typed, and give the card its own
-  // host identity (see the header) so it never reads as an ordinary Bash step.
-  const hostRunScript = isBash ? parseHostRunScript(command) : null
+  // The host_run MCP tool is the escape hatch's first-class form: its `command`
+  // IS the host command, with no shell of the agent's in between (which is what
+  // the `hydra host-run` CLI spelling could never guarantee). It renders as a
+  // Bash-shaped card because that is what it is - one shell command - it just
+  // runs somewhere else.
+  const isHostRunTool = item.name === 'mcp__hydra__host_run' && command !== ''
+  const isBash = (item.name === 'Bash' && command !== '') || isHostRunTool
+  // `hydra host-run` is the same escape hatch typed into Bash: the agent is not
+  // running this itself, it is asking the USER to run it on the host. Show the
+  // command it is asking for rather than the CLI wrapper it typed, and give the
+  // card its own host identity (see the header) so it never reads as an
+  // ordinary Bash step.
+  const hostRunScript = isHostRunTool ? command : item.name === 'Bash' ? parseHostRunScript(command) : null
   const isHostRun = hostRunScript !== null
   // The host command runs in the head's worktree whatever the agent's own cwd
   // was, so a `cd` preamble would be a lie - drop it for a host run.
@@ -2461,10 +2525,16 @@ const ToolCard = memo(function ToolCard({
   const bashIndent = useChatBashIndentStore((s) => s.indent)
   const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
   const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
-  const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
+  const interactiveTranscript = isBash && !isHostRunTool && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult
-  const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
+  const description = isHostRunTool
+    ? typeof input?.why === 'string'
+      ? (input.why as string)
+      : ''
+    : isBash && typeof input?.description === 'string'
+      ? (input.description as string)
+      : ''
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is
@@ -4870,6 +4940,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
     return rows * 20 + 14
   })
+  // Mirror of composerHeight the auto-grow effect compares against, so a
+  // keystroke that doesn't change the height schedules no update at all (see
+  // the effect for why React's own same-value bailout can't be relied on here).
+  const composerHeightRef = useRef(composerHeight)
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const normalizedAvailableRef = useRef(false)
@@ -4897,6 +4971,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // The previous scroll event's scrollHeight, so a content SHRINK that clamps
   // scrollTop down isn't misread as the user scrolling up - see onScroll.
   const prevScrollHeightRef = useRef(0)
+  // Likewise the previous clientHeight: the pane growing (the composer shrinking
+  // back down after a multi-line draft is deleted) also clamps scrollTop.
+  const prevClientHeightRef = useRef(0)
   // Latest scroll offset + pin, mirrored on every scroll so deactivation (the
   // pane going display:none loses its scroll geometry) and unmount can persist
   // it (item 20).
@@ -7362,11 +7439,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 4
     // Only a genuine UPWARD user move unpins. A content SHRINK (a card
     // collapsing, a streamed block replaced by something shorter) clamps
-    // scrollTop down on its own, so don't misread that as a scroll-up.
-    const shrank = el.scrollHeight < prevScrollHeightRef.current - 1
+    // scrollTop down on its own, so don't misread that as a scroll-up - and
+    // neither is the pane GROWING taller: the composer shrinking back after a
+    // few lines are deleted hands its height to the scroll pane, which lowers
+    // the max scroll offset and clamps scrollTop down exactly the same way.
+    // Without this the chat came unmoored from the bottom whenever you typed a
+    // multi-line message and then deleted it again.
+    const shrank =
+      el.scrollHeight < prevScrollHeightRef.current - 1 ||
+      el.clientHeight > prevClientHeightRef.current + 1
     const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
     prevScrollHeightRef.current = el.scrollHeight
+    prevClientHeightRef.current = el.clientHeight
     // Unpin on an upward move; otherwise HOLD the pin if we already had it, and
     // (re)acquire it only on reaching the bottom. Holding via pinnedRef is what
     // keeps content growing faster than the follow effects re-pin (a card
@@ -7559,8 +7644,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
     // best, a feedback loop with any height-driven layout at worst.
+    //
+    // The guard is a REF compare, not `setComposerHeight(cur => cur)`. React only
+    // skips a same-value update when it can evaluate the updater eagerly, which
+    // it cannot once the hook already has a queued update - and during a fast
+    // typing burst it always does. Every keystroke then scheduled another render
+    // from inside this effect, i.e. a nested update per commit, and after 50 of
+    // them React threw "Maximum update depth exceeded" (error #185) out of the
+    // next keystroke's handler - dropping that character. Comparing here means
+    // the steady state schedules nothing at all.
     const nextH = rows * lineHeight + pad
-    setComposerHeight((cur) => (Math.abs(cur - nextH) < 0.5 ? cur : nextH))
+    if (Math.abs(composerHeightRef.current - nextH) >= 0.5) {
+      composerHeightRef.current = nextH
+      setComposerHeight(nextH)
+    }
   }, [input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
@@ -7777,15 +7874,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
+  // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
+  // they carry the same markdown list continuation the shared textarea handler
+  // gives Shift+Enter - the box shouldn't behave differently depending on which
+  // newline key you reached for.
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
-    commit(
-      (prev) => makeSnapshot(prev.prompt.slice(0, start) + '\n' + prev.prompt.slice(end), prev.attachments, start + 1, start + 1),
-      false,
-    )
+    const edit = enterEdit(ta.value, start, end)
+    const next = edit ?? {
+      value: ta.value.slice(0, start) + '\n' + ta.value.slice(end),
+      caret: start + 1,
+    }
+    commit((prev) => makeSnapshot(next.value, prev.attachments, next.caret, next.caret), false)
     requestAnimationFrame(() => {
-      ta.selectionStart = ta.selectionEnd = start + 1
+      ta.selectionStart = ta.selectionEnd = next.caret
+      ensureCaretVisible(ta)
     })
   }
 
@@ -8392,6 +8496,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             pin/follow logic owns bottom-following instead. */}
         <div
           ref={scrollRef}
+          data-chat-scroll
           onScroll={onScroll}
           onCopy={copyTranscriptAsMarkdown}
           className="h-full overflow-y-auto [overflow-anchor:none]"

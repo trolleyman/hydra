@@ -359,6 +359,11 @@ const simAgentApprovalsPrompt = "Check what the daemon is listening on, then sho
 // its card by the command itself).
 const simApprovalsHostRun = "echo '== listeners 26600-26699 =='; ss -Hltnp | grep -E ':266[0-9][0-9]' | sort -t: -k2 | head -60; echo; echo '== count =='; ss -Hltn | grep -cE ':266[0-9][0-9]'; echo; echo '== tailscale serve status =='; tailscale serve status 2>&1 | head -30"
 
+// simApprovalsHostRunWhy is the `host-run --why` explanation that goes with it:
+// the agent's account of what it wants and which sandbox limit blocks it, shown
+// above the command in the card.
+const simApprovalsHostRunWhy = "I need to see which ports the daemon and its previews are actually listening on, and whether tailscale serve is up. My sandbox has its own network namespace, so ss/tailscale inside it only ever see my own namespace - the host's listener table isn't visible from in here at all. Read-only inspection; it changes nothing."
+
 // simAgentApprovals is the approval-picker head, shared by ListAgents and
 // GetAgent. While a kind is parked it reports the policy_approval wait a real
 // gated head would, which is what makes the client fetch the approval and raise
@@ -4607,7 +4612,8 @@ func simApprovalRequest(kind string) (api.ApprovalRequest, bool) {
 		req.Tool = "host-run"
 		req.Target = simApprovalsHostRun
 		req.Reason = ptr("the agent asked to run a command outside its sandbox, on the host")
-		req.Summary = "wants to run a command on the host"
+		req.Description = ptr(simApprovalsHostRunWhy)
+		req.Summary = "wants to run a command on the host: I need to see which ports the daemon and its previews are..."
 	case "mcp_tool":
 		req.Tool = "mcp__linear__create_issue"
 		req.Target = "linear__create_issue"
@@ -4668,10 +4674,10 @@ func simApprovalsEvents(questionToolID, requestID string) []string {
 		"message": map[string]any{"id": "msg_approvals_hostrun", "content": []map[string]any{{
 			"type": "tool_use",
 			"id":   "toolu_approvals_hostrun",
-			"name": "Bash",
+			"name": "mcp__hydra__host_run",
 			"input": map[string]any{
-				"command":     `/tmp/hydra-internal host-run -- bash -c "` + simApprovalsHostRun + `"`,
-				"description": "Check the daemon's listeners on the host",
+				"command": simApprovalsHostRun,
+				"why":     simApprovalsHostRunWhy,
 			},
 		}}},
 	})

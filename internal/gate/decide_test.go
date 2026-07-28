@@ -433,3 +433,16 @@ func TestGitReadonlyAdvice(t *testing.T) {
 		t.Errorf("non-git read-only error should get no git advice, got %q", got)
 	}
 }
+
+// A raw `git merge` that hit the read-only .git is pointed at the merge tools,
+// so the agent's next move is the sanctioned one rather than another retry.
+func TestGitReadonlyAdviceNamesMergeTool(t *testing.T) {
+	roErr := "fatal: update_ref failed for ref 'ORIG_HEAD': cannot lock ref 'ORIG_HEAD': Unable to create '/x/.git/ORIG_HEAD.lock': Read-only file system"
+	got := GitReadonlyAdvice("git merge main --no-edit", roErr)
+	if !strings.Contains(got, "git_merge") {
+		t.Errorf("merge advice should name git_merge, got %q", got)
+	}
+	if !strings.Contains(got, "git_merge_abort") {
+		t.Errorf("merge advice should mention the continue/abort pair, got %q", got)
+	}
+}

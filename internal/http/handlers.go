@@ -186,6 +186,14 @@ func (s *Server) GetSandboxError() string {
 func NewHandler(s *Server) http.Handler {
 	opts := api.StrictHTTPServerOptions{
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			// A failed response *write* (the client hung up mid-body) surfaces here
+			// like any handler error, but the status line is already on the wire:
+			// writing an error body now only earns a "superfluous WriteHeader"
+			// warning and logs a phantom 500 for a request that was served fine.
+			// LoggingMiddleware notes the disconnect from the recorder instead.
+			if isClientDisconnect(err) {
+				return
+			}
 			RecordError(r, err)
 			code := http.StatusInternalServerError
 			errType := api.ErrorResponseErrorInternalError

@@ -8,7 +8,7 @@ import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
-import { copyText } from '../lib/clipboard'
+import { copyWithToast } from '../lib/copyToast'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { buildRepoSplat } from '../lib/repoSplat'
@@ -77,11 +77,6 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // replay is in we clear this and refit to our own layout (a clean reflow).
   const replaySizingRef = useRef(false)
   const replayFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [showCopiedAt, setShowCopiedAt] = useState(0)
-  // Whether the last copy landed - picks the green "Copied" vs red "Copy failed"
-  // toast (setShowCopiedAt drives the timing, this drives the wording/colour).
-  const [copyOk, setCopyOk] = useState(true)
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // True while a file is dragged over the terminal, driving the drop overlay.
@@ -470,16 +465,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (isCopyShortcut) {
         const selection = term.getSelection()
         if (selection) {
-          // copyText works on insecure LAN origins (undefined navigator.clipboard)
-          // and resolves whether the text actually landed - so the toast reflects
-          // the true outcome: "Copied to clipboard!" on success, "Copy failed" if
-          // even the execCommand fallback couldn't write.
-          void copyText(selection).then((ok) => {
-            if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
-            setCopyOk(ok)
-            setShowCopiedAt(Date.now())
-            copyTimeoutRef.current = setTimeout(() => setShowCopiedAt(0), 2000)
-          })
+          // The same copy toast every other copy action raises (title + the
+          // copied text in a code block, clamped to a few lines). copyWithToast
+          // goes through copyText, which works on insecure LAN origins
+          // (undefined navigator.clipboard) and reports whether the text
+          // actually landed - so the toast reflects the true outcome rather
+          // than assuming the write succeeded.
+          void copyWithToast(selection, { what: 'terminal selection' })
           term.clearSelection()
           return false
         }
@@ -627,9 +619,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       setDragActive(false)
       closeWebSocket(ws)
       term.dispose()
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
-      // Drop any visible/pending toast so it doesn't linger on the agent we
+      // Drop any visible/pending notice so it doesn't linger on the agent we
       // switch (or reconnect) to - the pane is reused across agents.
       setNotice(null)
       termRef.current = null
@@ -647,18 +638,6 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         ref={containerRef}
         className="flex-1 min-h-0 overflow-hidden"
       />
-      {showCopiedAt > 0 && (
-        <div
-          key={showCopiedAt}
-          className={`absolute top-2 right-2 px-2 py-1 text-[10px] rounded border shadow-lg pointer-events-none animate-fade-in-out z-10 ${
-            copyOk
-              ? 'bg-green-800/90 text-gray-200 border-green-700'
-              : 'bg-red-800/90 text-gray-100 border-red-700'
-          }`}
-        >
-          {copyOk ? 'Copied to clipboard!' : 'Copy failed'}
-        </div>
-      )}
       {notice && (
         <div className="absolute top-2 left-2 px-2 py-1 bg-blue-900/90 text-gray-100 text-[10px] rounded border border-blue-700 shadow-lg pointer-events-none z-10 max-w-[80%] truncate">
           {notice}

@@ -119,6 +119,45 @@ func gitToolDefs() []map[string]any {
 			"description": "Abort an in-progress rebase and restore YOUR branch to its state before the rebase.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 		},
+		{
+			"name":        "git_merge",
+			"description": "Merge a ref INTO your branch - typically your base branch, to bring your head up to date with it. The direction is fixed: it only ever moves YOUR branch, so it can't merge you into main or a sibling head. Fast-forwards when it can. Unlike git_cherry_pick, a conflict is LEFT in progress: resolve the conflict markers in your worktree, then call git_merge_continue (or git_merge_abort to back out).",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"ref"},
+				"properties": map[string]any{
+					"ref":     map[string]any{"type": "string", "description": "The ref to merge in, e.g. \"main\" (your base branch)."},
+					"message": map[string]any{"type": "string", "description": "Merge-commit subject. Defaults to \"Merge branch '<ref>'\"."},
+					"no_ff":   map[string]any{"type": "boolean", "description": "Force a merge commit even when the merge could fast-forward."},
+				},
+			},
+		},
+		{
+			"name":        "git_merge_continue",
+			"description": "Conclude a merge that stopped on conflicts, after you have resolved them in your worktree. It stages the still-conflicted files and commits the merge; it refuses if any of them still contain conflict markers.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			"name":        "git_merge_abort",
+			"description": "Abort an in-progress merge and restore YOUR branch to its state before the merge.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			"name":        "git_stash",
+			"description": "Set uncommitted work aside and bring it back. `push` (default) parks your changes and leaves the worktree clean - the way out of \"your local changes would be overwritten by merge\" without discarding them or committing something half-done; `pop` restores and removes the entry, `apply` restores and keeps it, `list` shows what is stashed, `drop` throws an entry away. Stashing is refused mid-merge/rebase, where the captured conflict state would not restore cleanly.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"op":      map[string]any{"type": "string", "enum": []string{"push", "pop", "apply", "list", "drop"}, "description": "Default push."},
+					"message": map[string]any{"type": "string", "description": "push only: a label for the entry, so `list` is readable later."},
+					"ref":     map[string]any{"type": "string", "description": "pop/apply/drop only: which entry, as \"stash@{N}\" from `list`. Omit for the most recent."},
+					"include_untracked": map[string]any{
+						"type":        "boolean",
+						"description": "push only: also stash untracked files. Off by default - a plain push leaves them in the worktree.",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -196,6 +235,30 @@ func parseGitOp(name string, raw json.RawMessage) (GitOpRequest, string) {
 		return GitOpRequest{Op: "rebase_continue"}, ""
 	case "git_rebase_abort":
 		return GitOpRequest{Op: "rebase_abort"}, ""
+	case "git_merge":
+		var a struct {
+			Ref     string `json:"ref"`
+			Message string `json:"message"`
+			NoFF    bool   `json:"no_ff"`
+		}
+		_ = json.Unmarshal(raw, &a)
+		if strings.TrimSpace(a.Ref) == "" {
+			return GitOpRequest{}, "git_merge requires a \"ref\" to merge in (e.g. \"main\")."
+		}
+		return GitOpRequest{Op: "merge", Ref: a.Ref, Message: a.Message, NoFF: a.NoFF}, ""
+	case "git_merge_continue":
+		return GitOpRequest{Op: "merge_continue"}, ""
+	case "git_merge_abort":
+		return GitOpRequest{Op: "merge_abort"}, ""
+	case "git_stash":
+		var a struct {
+			Op               string `json:"op"`
+			Message          string `json:"message"`
+			Ref              string `json:"ref"`
+			IncludeUntracked bool   `json:"include_untracked"`
+		}
+		_ = json.Unmarshal(raw, &a)
+		return GitOpRequest{Op: "stash", Stash: a.Op, StashRef: a.Ref, Message: a.Message, IncludeUntracked: a.IncludeUntracked}, ""
 	}
 	return GitOpRequest{}, "unknown git tool: " + name
 }

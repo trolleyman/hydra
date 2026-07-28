@@ -132,6 +132,13 @@ export function useAgentNotifications(
   // agentIds with an in-flight listAgentApprovals fetch, so overlapping ticks
   // don't double-fetch (matters for lingering cards, which refetch every tick).
   const approvalFetching = useRef<Set<string>>(new Set())
+  // agentId → toast id of its live "needs input" transition toast, so an approval
+  // card raised for the SAME agent can retract it (see supersedeNeedsInput). A
+  // head parked at the gate is already covered by the notification_type check in
+  // section 1, but that only holds if the type is visible in the same poll that
+  // first shows needs_input - the approval is written by a separate process, so
+  // a tick landing in between raises a transition toast the card then duplicates.
+  const needsInputToasts = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     // The store's agent list belongs to `agentsProjectId`; ignore runs where it
@@ -174,6 +181,7 @@ export function useAgentNotifications(
       // any "needs input" OS notification we fired so it doesn't outlive the wait.
       if (before === 'needs_input' && status !== 'needs_input') {
         dismissNotification(`needs-input:${agent.id}`)
+        needsInputToasts.current.delete(agent.id)
       }
 
       const notifType = agent.agent_status?.notification_type
@@ -184,11 +192,12 @@ export function useAgentNotifications(
       const isSelected = agent.id === selectedAgentId
       if (status === 'needs_input' && notifType !== 'policy_approval') {
         if (!isSelected) {
-          toast.show({
+          const id = toast.show({
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
             ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: currentProjectId, status }),
           })
+          needsInputToasts.current.set(agent.id, id)
         }
         if (!pageActive) {
           fireNotification({
@@ -427,6 +436,7 @@ export function useAgentNotifications(
               reason: a.reason,
               url: a.url,
               argsPreview: a.args_preview,
+              description: a.description,
             },
             // X / Deny / any non-silent dismiss denies the parked call.
             onDismiss: () => {
@@ -435,6 +445,16 @@ export function useAgentNotifications(
             },
           })
           reqMap.set(a.reqid, id)
+          // One toast per interruption: this card says everything the generic
+          // "needs input" toast for the same head was saying, and more, so
+          // retract that one rather than stacking two prompts for one wait.
+          // Silent - the transition toast has no deny-on-dismiss.
+          const staleId = needsInputToasts.current.get(agentId)
+          if (staleId !== undefined) {
+            toast.dismiss(staleId, { silent: true })
+            needsInputToasts.current.delete(agentId)
+            dismissNotification(`needs-input:${agentId}`)
+          }
           if (isNewApproval && !pageActive) {
             fireNotification({
               title: `Hydra agent in ${currentProjectId} needs approval`,

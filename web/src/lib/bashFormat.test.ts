@@ -212,4 +212,30 @@ describe('parseHostRunScript', () => {
   it('keeps a plain multi-word command as written', () => {
     expect(parseHostRunScript('/tmp/hydra-internal host-run -- git count-objects -vH')).toBe('git count-objects -vH')
   })
+
+  // The sandbox shell parses the agent's line first, so an unquoted pipe or
+  // redirection never reaches host-run's argv - and so must not appear in the
+  // chat as part of the host command. The approval card, built from the real
+  // argv, has always shown only the left-hand side; this keeps the two in step.
+  it('drops shell syntax the sandbox consumes', () => {
+    expect(parseHostRunScript('/tmp/hydra-internal host-run --help 2>&1 | head -20')).toBe('--help')
+    expect(parseHostRunScript('hydra host-run -- ss -Hltn | head')).toBe('ss -Hltn')
+    expect(parseHostRunScript('hydra host-run -- ss -Hltn > /tmp/out')).toBe('ss -Hltn')
+    expect(parseHostRunScript('hydra host-run -- ss -Hltn && echo done')).toBe('ss -Hltn')
+    expect(parseHostRunScript('hydra host-run -- ss -Hltn; echo done')).toBe('ss -Hltn')
+  })
+
+  it('keeps shell syntax that was quoted, which does reach the host', () => {
+    expect(parseHostRunScript(`hydra host-run -- 'ss -Hltn | head'`)).toBe('ss -Hltn | head')
+    expect(parseHostRunScript(`hydra host-run -- bash -c "a && b | c"`)).toBe('a && b | c')
+    // A pipe inside quotes is the host's; one after the closing quote is not.
+    expect(parseHostRunScript(`hydra host-run -- 'a | b' | tee log`)).toBe('a | b')
+  })
+
+  it('strips the --why explanation, which is prose and not part of the command', () => {
+    expect(parseHostRunScript(`hydra host-run --why "git needs .git writable" -- git merge main`)).toBe('git merge main')
+    expect(parseHostRunScript(`hydra host-run --why=short -- git merge main`)).toBe('git merge main')
+    expect(parseHostRunScript(`hydra host-run --description 'why this' -- ls -la`)).toBe('ls -la')
+    expect(parseHostRunScript(`hydra host-run --why "quoted -- dashes" -- bash -c 'a | b'`)).toBe('a | b')
+  })
 })

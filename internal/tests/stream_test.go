@@ -196,10 +196,19 @@ echo "plain log line"
 	if rep.Passed != 1 || rep.Failed != 1 || rep.Skipped != 1 || rep.Warnings != 1 || rep.Total != 4 {
 		t.Errorf("summary = %d/%d/%d/%d total %d, want 1/1/1/1 total 4", rep.Passed, rep.Failed, rep.Skipped, rep.Warnings, rep.Total)
 	}
+	// Peek is summary-only; the cases live in their own sidecar and come back
+	// through a full read (what the tests panel does).
+	full, err := m.Get(spec, v)
+	if err != nil {
+		t.Fatalf("Get after settle: %v", err)
+	}
+	if len(full.Cases) != 4 {
+		t.Fatalf("cases after settle = %d, want 4", len(full.Cases))
+	}
 	var warn *TestCase
-	for i := range rep.Cases {
-		if rep.Cases[i].Status == CaseWarning {
-			warn = &rep.Cases[i]
+	for i := range full.Cases {
+		if full.Cases[i].Status == CaseWarning {
+			warn = &full.Cases[i]
 		}
 	}
 	if warn == nil || warn.Path != "web/x.ts" || warn.Line != 3 || warn.Col != 1 || warn.Name != "no-console" || warn.Message != "tut tut" {

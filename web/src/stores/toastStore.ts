@@ -49,6 +49,10 @@ export interface ApprovalToastData {
   url?: string | null
   // mcp_tool: a compact one-line preview of the call's arguments.
   argsPreview?: string | null
+  // host_command: the agent's own explanation of what it is asking for and why it
+  // has to happen outside the sandbox (`hydra host-run --why`), shown above the
+  // command so the user judges a stated intent rather than a bare shell script.
+  description?: string | null
   // When the requesting agent runs in a DIFFERENT project, its project name - the
   // card shows an amber "running in another project" banner and hides "always allow".
   crossProject?: string | null
