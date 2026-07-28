@@ -501,14 +501,15 @@ function GitIsolationBadge({ mode }: { mode?: string }) {
 // from you. A card (not a hint): it's a sentence you're meant to read, it opens
 // instantly, and it can be pinned open by clicking - the only way to read it on a
 // touch device. An unmapped status has no prose, so it stays a bare chip rather
-// than opening an empty box.
+// than opening an empty box. No card heading: it would be the status word, which
+// the chip an inch above the card already says.
 function AgentStatusChip({ status }: { status: string }) {
   const badge = agentStatusBadge(status)
   const help = agentStatusHelp(status)
   const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
   if (!help) return chip
   return (
-    <Tooltip variant="card" width={300} title={badge.label} content={help} className="shrink-0">
+    <Tooltip variant="card" width={300} content={help} className="shrink-0">
       {/* The chip is a plain span, so the card needs a focusable trigger of its
           own for keyboard parity (Tooltip only opens a card on focus-visible). */}
       <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
