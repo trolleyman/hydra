@@ -40,6 +40,12 @@ allow it. This is an escape hatch of last resort - almost everything belongs
 inside the sandbox. Use it only when a task genuinely cannot proceed otherwise,
 and expect most requests to be denied.
 
+If you have the mcp__hydra__host_run TOOL, use that instead of this command. It
+takes the same request as structured arguments, so your own shell never gets to
+mangle the command on the way through (see "How the command is parsed" below,
+which is the trap this CLI cannot close). This CLI exists for agents with no
+Hydra MCP server, and for humans.
+
 Pass --why "<text>" to say what you are doing and why it cannot run inside the
 sandbox. It is shown at the top of the approval card, above the command, and is
 the main thing the user judges the request on - a request that only shows a shell
@@ -119,20 +125,53 @@ func runHostRun(args []string) int {
 
 	fmt.Fprintln(os.Stderr, "host-run: waiting for the user to approve running this command on the host...")
 	outcome := requestHostRun(command, why)
-	if outcome.Refused != "" {
-		fmt.Fprintln(os.Stderr, "host-run: "+outcome.Refused)
+	if outcome.Refusal != hostRunRan {
+		fmt.Fprintln(os.Stderr, "host-run: "+outcome.Refused())
 		return hostRunExitDenied
 	}
 	return relayHostRunResult(outcome.Result)
 }
 
-// hostRunOutcome is one host-command request's result. Refused is a non-empty,
-// agent-readable explanation when the command never ran at all (no approval
-// channel, denied, timed out, or the submission itself failed); otherwise Result
-// carries what the host command did.
+// hostRunRefusal says WHY a request never produced a host command run. The
+// distinctions matter to the caller: a denial is the user's answer and must not
+// be retried, a timeout is nobody's answer and might be worth raising again, and
+// a missing channel is an environment fault the agent can do nothing about.
+type hostRunRefusal string
+
+const (
+	hostRunRan        hostRunRefusal = ""            // it ran; see Result
+	hostRunDenied     hostRunRefusal = "denied"      // the user said no
+	hostRunNoDecision hostRunRefusal = "no_decision" // nobody answered in time
+	hostRunNoChannel  hostRunRefusal = "no_channel"  // no approval channel in this session
+	hostRunSubmitFail hostRunRefusal = "submit_failed"
+	hostRunNoResult   hostRunRefusal = "no_result" // allowed, but never came back
+)
+
+// hostRunOutcome is one host-command request's result. Refusal is hostRunRan
+// when the command actually ran (Result then carries what it did); otherwise it
+// says why it did not, with Detail carrying any extra explanation.
 type hostRunOutcome struct {
-	Refused string
+	Refusal hostRunRefusal
+	Detail  string
 	Result  gate.HostRunResult
+}
+
+// Refused renders the refusal as one line for the CLI's stderr.
+func (o hostRunOutcome) Refused() string {
+	switch o.Refusal {
+	case hostRunRan:
+		return ""
+	case hostRunDenied:
+		return "the user denied this command; it did not run."
+	case hostRunNoDecision:
+		return "the request timed out without a decision, so it was withdrawn; nothing ran."
+	case hostRunNoChannel:
+		return "no approval channel is available, so a host command can't be requested right now."
+	case hostRunNoResult:
+		return "approved, but the host command did not return in time."
+	default:
+		return "the request could not be submitted: " + o.Detail
+	}
 }
 
 // requestHostRun parks a host-command approval and blocks for the outcome. It is
@@ -142,7 +181,7 @@ type hostRunOutcome struct {
 func requestHostRun(command, why string) hostRunOutcome {
 	dir := os.Getenv(gate.EnvApprovalDir)
 	if dir == "" {
-		return hostRunOutcome{Refused: "no approval channel is available, so a host command can't be requested right now."}
+		return hostRunOutcome{Refusal: hostRunNoChannel}
 	}
 
 	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -164,7 +203,7 @@ func requestHostRun(command, why string) hostRunOutcome {
 		TS:          time.Now().Format(time.RFC3339Nano),
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
-		return hostRunOutcome{Refused: "failed to submit the request: " + err.Error()}
+		return hostRunOutcome{Refusal: hostRunSubmitFail, Detail: err.Error()}
 	}
 	// Retire the request/decision/result files once we're done, so a resolved
 	// approval stops being surfaced and the dir doesn't accumulate.
@@ -178,13 +217,13 @@ func requestHostRun(command, why string) hostRunOutcome {
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision != gate.Allow {
 				writeRunningStatus("host command denied")
-				return hostRunOutcome{Refused: "the user denied this command."}
+				return hostRunOutcome{Refusal: hostRunDenied}
 			}
 			return awaitHostRunResult(dir, reqid, deadline)
 		}
 		if time.Now().After(deadline) {
 			writeRunningStatus("host command request timed out")
-			return hostRunOutcome{Refused: "the request timed out without a decision."}
+			return hostRunOutcome{Refusal: hostRunNoDecision}
 		}
 		time.Sleep(askPollInterval)
 	}
@@ -331,7 +370,7 @@ func awaitHostRunResult(dir, reqid string, deadline time.Time) hostRunOutcome {
 		}
 		if time.Now().After(deadline) {
 			writeRunningStatus("host command did not return in time")
-			return hostRunOutcome{Refused: "approved, but the host command did not return in time."}
+			return hostRunOutcome{Refusal: hostRunNoResult}
 		}
 		time.Sleep(askPollInterval)
 	}

@@ -134,3 +134,31 @@ func TestFirstLine(t *testing.T) {
 		t.Errorf("firstLine = %q, want %q", got, "only")
 	}
 }
+
+// Every refusal must say WHY in its own words: what the agent does next differs
+// per cause, and a denial in particular must read as the user's answer rather
+// than a glitch to route around.
+func TestHostRunOutcomeRefusedNamesTheCause(t *testing.T) {
+	for _, tc := range []struct {
+		refusal hostRunRefusal
+		want    string
+	}{
+		{hostRunDenied, "denied"},
+		{hostRunNoDecision, "timed out"},
+		{hostRunNoChannel, "no approval channel"},
+		{hostRunNoResult, "did not return in time"},
+		{hostRunSubmitFail, "could not be submitted"},
+	} {
+		got := hostRunOutcome{Refusal: tc.refusal, Detail: "disk on fire"}.Refused()
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s renders as %q, want it to mention %q", tc.refusal, got, tc.want)
+		}
+	}
+	if got := (hostRunOutcome{}).Refused(); got != "" {
+		t.Errorf("a command that ran should have no refusal text, got %q", got)
+	}
+	// The submission failure is the one that carries a cause worth relaying.
+	if got := (hostRunOutcome{Refusal: hostRunSubmitFail, Detail: "disk on fire"}).Refused(); !strings.Contains(got, "disk on fire") {
+		t.Errorf("a submission failure should relay its detail, got %q", got)
+	}
+}
