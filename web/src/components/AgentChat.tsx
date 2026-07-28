@@ -71,7 +71,7 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
@@ -3411,40 +3411,56 @@ function SubagentTimeline({
   links?: SubagentLinks
 }) {
   const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
+  // A sub-agent's own steps fold exactly like the main transcript's (see
+  // planStepRows) - its inner runs are the same wall, one level down.
+  const grouped = useChatStepsStore((s) => s.grouped)
+  const rows = planStepRows(
+    sub.items.filter((it) => it.id !== skipId),
+    links?.subByToolUse ?? {},
+    grouped,
+  )
+  const renderItem = (it: ChatItem) => {
+    if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+    if (it.kind === 'tool') {
+      // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
+      // spawn): upgrade it into the spawned agent's own card, exactly like
+      // the main flow upgrades its Task cards - instead of leaking the raw
+      // prompt JSON + launch boilerplate as a plain tool card.
+      const nested = links?.subByToolUse[it.toolUseId]
+      if (links && nested && nested.agentId !== sub.agentId)
+        return (
+          <SubagentCard
+            key={it.id}
+            sub={nested}
+            tool={it}
+            worktree={worktree}
+            serif={serif}
+            links={links}
+            onOpenChat={() => links.openSubView(nested.agentId)}
+          />
+        )
+      if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
+      return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
+    }
+    if (it.kind === 'assistant')
+      return (
+        <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={it.text} />
+        </div>
+      )
+    return null
+  }
   return (
     <>
-      {sub.items.map((it) => {
-        if (it.id === skipId) return null
-        if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-        if (it.kind === 'tool') {
-          // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
-          // spawn): upgrade it into the spawned agent's own card, exactly like
-          // the main flow upgrades its Task cards - instead of leaking the raw
-          // prompt JSON + launch boilerplate as a plain tool card.
-          const nested = links?.subByToolUse[it.toolUseId]
-          if (links && nested && nested.agentId !== sub.agentId)
-            return (
-              <SubagentCard
-                key={it.id}
-                sub={nested}
-                tool={it}
-                worktree={worktree}
-                serif={serif}
-                links={links}
-                onOpenChat={() => links.openSubView(nested.agentId)}
-              />
-            )
-          if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
-          return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
-        }
-        if (it.kind === 'assistant')
-          return (
-            <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
-              <Markdown text={it.text} />
-            </div>
-          )
-        return null
-      })}
+      {rows.map((r) =>
+        r.row === 'item' ? (
+          renderItem(r.item)
+        ) : (
+          <StepGroup key={`steps-${r.id}`} items={r.items}>
+            {r.items.map(renderItem)}
+          </StepGroup>
+        ),
+      )}
     </>
   )
 }
@@ -4890,6 +4906,131 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
   return items
 }
 
+// ── Step folding ────────────────────────────────────────────────────────────
+// A turn's machinery - the thoughts it had and the tool calls it made - is what
+// turns a long transcript into a wall: a dozen one-line cards around each thing
+// the agent actually SAID. So a run of consecutive SETTLED machinery items folds
+// into one quiet line ("12 steps · Bash, Read, Edit") that expands in place.
+//
+// Only settled items fold. A tool with no result yet - running, or parked on a
+// security-gate approval - breaks the run and renders as its own card, so a live
+// turn always shows what it is doing right now, directly under a step count that
+// ticks up behind it. A Task card that upgraded into a SubagentCard is a
+// conversation of its own rather than a step, so it breaks the run too.
+function isFoldableStep(it: ChatItem, subByToolUse: Record<string, SubagentView>): boolean {
+  if (it.kind === 'thinking') return true
+  if (it.kind !== 'tool') return false
+  if (subByToolUse[it.toolUseId]) return false
+  // Two tools are addressed to the READER rather than to the machine: a plan
+  // put up for approval, and a command run outside the sandbox on the user's
+  // own machine. Neither is a step to skim past, so neither folds.
+  if (it.name === 'ExitPlanMode' || it.name === 'mcp__hydra__host_run') return false
+  return it.result !== undefined || it.ended === true
+}
+
+// A row of the transcript: either one item as before, or a folded run of them.
+export type StepRow = { row: 'item'; item: ChatItem } | { row: 'group'; id: number; items: ChatItem[] }
+
+// planStepRows splits the item list into rows, folding each qualifying run.
+// A run earns a group only once it holds two or more tool calls: one card (with
+// or without the thought that led to it) is not a wall, and hiding it behind
+// "1 step" costs more than it saves.
+// eslint-disable-next-line react-refresh/only-export-components
+export function planStepRows(items: ChatItem[], subByToolUse: Record<string, SubagentView>, grouped: boolean): StepRow[] {
+  if (!grouped) return items.map((item) => ({ row: 'item', item }))
+  const rows: StepRow[] = []
+  let run: ChatItem[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    if (run.filter((it) => it.kind === 'tool').length >= 2) rows.push({ row: 'group', id: run[0].id, items: run })
+    else for (const it of run) rows.push({ row: 'item', item: it })
+    run = []
+  }
+  for (const it of items) {
+    if (isFoldableStep(it, subByToolUse)) {
+      run.push(it)
+      continue
+    }
+    flush()
+    rows.push({ row: 'item', item: it })
+  }
+  flush()
+  return rows
+}
+
+// stepSummary describes a folded run in the collapsed header: how many tool
+// calls, which tools (most-used first, so the shape of the run reads at a
+// glance), how long it spent thinking, and how many steps failed. The tool list
+// is capped at three names - past that it stops being a summary.
+//
+// The failure count is the one thing a fold must not swallow: a red card that
+// scrolled past is how you notice the agent hit a wall and went around it, so
+// the header says so and expanding shows which.
+// eslint-disable-next-line react-refresh/only-export-components
+export function stepSummary(items: ChatItem[]): { label: string; tools: string; thinkingMs: number; failed: number } {
+  const counts = new Map<string, number>()
+  let thinkingMs = 0
+  let failed = 0
+  for (const it of items) {
+    if (it.kind === 'thinking') {
+      thinkingMs += it.durationMs ?? 0
+      continue
+    }
+    if (it.kind !== 'tool') continue
+    if (it.isError) failed++
+    const name = displayToolName(it.name)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const total = [...counts.values()].reduce((a, b) => a + b, 0)
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const shown = ranked.slice(0, 3).map(([name, n]) => (n > 1 ? `${name} x${n}` : name))
+  if (ranked.length > shown.length) shown.push(`+${ranked.length - shown.length} more`)
+  return { label: `${total} step${total === 1 ? '' : 's'}`, tools: shown.join(' · '), thinkingMs, failed }
+}
+
+// StepGroup is the folded run itself: one line while closed, the rows it holds
+// (rendered by the caller and handed in as children) while open. Its open state
+// is its own - the group is keyed by its first item's id, so a run that grows as
+// the turn proceeds keeps whatever the reader chose.
+function StepGroup({ items, children }: { items: ChatItem[]; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const { label, tools, thinkingMs, failed } = stepSummary(items)
+  return (
+    <div className="text-xs">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+        />
+        <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+          {label}
+        </span>
+        {!open && tools && <span className="truncate text-stone-400/80 dark:text-stone-500/80">{tools}</span>}
+        {!open && thinkingMs > 0 && (
+          <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
+            · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
+          </span>
+        )}
+        {failed > 0 && (
+          <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
+            {open ? '' : '· '}
+            {failed} failed
+          </span>
+        )}
+      </button>
+      {/* pb keeps the last card clear of the next row when open; the rows sit
+          tighter than the transcript's gap-3 so an expanded run still reads as
+          one block rather than as loose messages. */}
+      <Expandable open={open}>
+        <div className="flex flex-col gap-2 pt-2">{children}</div>
+      </Expandable>
+    </div>
+  )
+}
+
 // The settled message list, memoized so the live token stream (which updates
 // once per delta, many times a second) doesn't re-render every prior message.
 // While a turn streams, only `stream` changes in ChatPane - none of these props
@@ -4970,22 +5111,36 @@ const SettledRow = memo(
 
 const SettledMessages = memo(
   function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
+    // Read straight from the store rather than as a prop: a zustand subscription
+    // re-renders this component on its own, so flipping the setting refreshes
+    // the list without threading the value through every memo comparator.
+    const grouped = useChatStepsStore((s) => s.grouped)
+    const rows = planStepRows(items, subByToolUse, grouped)
+    const row = (item: ChatItem) => (
+      <SettledRow
+        key={item.id}
+        item={item}
+        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        renderItem={renderItem}
+        shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
+        serif={serif}
+        connected={connected}
+        worktreePath={worktreePath}
+        subByToolUse={subByToolUse}
+        subagents={subagents}
+      />
+    )
     return (
       <>
-        {items.map((item) => (
-          <SettledRow
-            key={item.id}
-            item={item}
-            animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
-            renderItem={renderItem}
-            shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
-            serif={serif}
-            connected={connected}
-            worktreePath={worktreePath}
-            subByToolUse={subByToolUse}
-            subagents={subagents}
-          />
-        ))}
+        {rows.map((r) =>
+          r.row === 'item' ? (
+            row(r.item)
+          ) : (
+            <StepGroup key={`steps-${r.id}`} items={r.items}>
+              {r.items.map(row)}
+            </StepGroup>
+          ),
+        )}
       </>
     )
   },

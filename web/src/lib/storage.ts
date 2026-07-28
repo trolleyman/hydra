@@ -79,6 +79,12 @@ export const StorageKeys = {
   // = the built-in 4. Client-only, global (localStorage, like Theme). See
   // lib/chatPrefs + lib/bashFormat.
   chatBashIndent: 'hydra-chat-bash-indent',
+  // 'off' when the user has turned OFF step folding in the chat transcript.
+  // Default (absent) = on: a run of settled thoughts + tool calls collapses into
+  // one "N steps" line you can expand, so what the agent SAID stands out from
+  // the machinery it used getting there. Client-only, global (localStorage, like
+  // Theme). See lib/chatPrefs.
+  chatStepGroups: 'hydra-chat-step-groups',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
