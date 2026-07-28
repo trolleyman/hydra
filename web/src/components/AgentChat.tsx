@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -14,7 +14,6 @@ import {
   FilePen,
   FileText,
   GitCommitHorizontal,
-  GitCommitVertical,
   GitMerge,
   Globe,
   History,
@@ -37,6 +36,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
 import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
@@ -2765,8 +2765,18 @@ function SendMessageOutcome({
   )
 }
 
-// Per-tool icons for the card header; anything unlisted gets the wrench.
-const TOOL_ICONS: Record<string, typeof Wrench> = {
+// GitMark is git's own logo, which lucide does not carry - the simple-icons set
+// does (the same one the forge marks come from, see ProviderIcon). title=""
+// suppresses the SVG <title> ("Git") those marks render by default: that is a
+// native OS tooltip, and the card header it sits in is interactive.
+function GitMark({ className }: { className?: string }) {
+  return <SiGit className={className} title="" aria-hidden />
+}
+
+// Per-tool icons for the card header; anything unlisted gets the wrench. Typed
+// by the props actually passed below rather than as a lucide icon, so a
+// simple-icons mark (GitMark) fits the same map.
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Bash: SquareTerminal,
   Read: FileText,
   Edit: FilePen,
@@ -2784,14 +2794,14 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
   // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
   // gives no hint that the card rewrote the branch.
-  mcp__hydra__git_commit: GitCommitVertical,
-  mcp__hydra__git_add: GitCommitVertical,
-  mcp__hydra__git_reset: GitCommitVertical,
-  mcp__hydra__git_revert: GitCommitVertical,
-  mcp__hydra__git_cherry_pick: GitCommitVertical,
-  mcp__hydra__git_rebase: GitCommitVertical,
-  mcp__hydra__git_rebase_continue: GitCommitVertical,
-  mcp__hydra__git_rebase_abort: GitCommitVertical,
+  mcp__hydra__git_commit: GitMark,
+  mcp__hydra__git_add: GitMark,
+  mcp__hydra__git_reset: GitMark,
+  mcp__hydra__git_revert: GitMark,
+  mcp__hydra__git_cherry_pick: GitMark,
+  mcp__hydra__git_rebase: GitMark,
+  mcp__hydra__git_rebase_continue: GitMark,
+  mcp__hydra__git_rebase_abort: GitMark,
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
