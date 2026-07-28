@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Download, FileArchive } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Download, FileArchive, FileText, Maximize2 } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
@@ -8,14 +8,15 @@ import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { CheckerLayer } from './CheckerLayer'
 import { VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { isVideoArtifact, isDownloadArtifact } from '../lib/artifactFilter'
+import { isVideoArtifact, isPdfArtifact, isFileTileArtifact } from '../lib/artifactFilter'
+import { fileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
 import { MasonryGrid } from './ArtifactsPanel'
 import { ElapsedTime } from './ElapsedTime'
 import { useMediaDims } from '../lib/artifactDims'
 import { LogView } from './ArtifactLogView'
-import { useImageLightbox } from '../stores/imageLightboxStore'
-import type { LightboxImage } from './ImageLightbox'
+import { useLightbox } from '../stores/lightboxStore'
+import type { LightboxItem } from './Lightbox'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { computeVisibleFiles } from '../lib/artifactFilter'
 import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
@@ -31,15 +32,23 @@ import { Tooltip } from './Tooltip'
 
 const POLL_MS = 2500
 
-// MediaCell shows one generated file: its name, tags, and the image (click-to-open)
-// or video. Mirrors the diff viewer's FileRow, minus the before/after comparison
-// machinery; width-driven (w-full) so it fills its masonry column. `gallery` is the
-// full list of the grid's image files (videos excluded - the lightbox is images
-// only); clicking opens the lightbox at this file's place in it, so ←/→ walk the
-// whole grid rather than being stuck on the one image.
-function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: LightboxImage[] }) {
+// MediaCell shows one generated file: its name, tags, and its media. Mirrors the
+// diff viewer's FileRow, minus the before/after comparison machinery; width-driven
+// (w-full) so it fills its masonry column. `gallery` is every file in the grid -
+// pictures, recordings, PDFs and packages alike - and clicking ANY tile opens the
+// lightbox at this file's place in it, so ←/→ walk the whole grid.
+function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: LightboxItem[] }) {
   const url = file.url ?? undefined
-  const openImage = useImageLightbox()
+  const openLightbox = useLightbox()
+  // Open this tile's file in the lightbox. The index is found by url rather than
+  // passed down because the gallery is built once for the whole grid and every cell
+  // shares it; a file that didn't make the gallery (no url) has no tile to click.
+  const open = (e: React.MouseEvent) => {
+    const i = gallery.findIndex((g) => g.url === url)
+    openLightbox(gallery, i >= 0 ? i : 0, e.currentTarget)
+  }
+  const isCard = isFileTileArtifact(file.name)
+  const CardIcon = isPdfArtifact(file.name) ? FileText : FileArchive
   return (
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
@@ -59,46 +68,61 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             <ImageOff className="w-5 h-5" />
             <span className="text-[11px] font-medium">No file</span>
           </div>
-        ) : isDownloadArtifact(file.name) ? (
-          // Download-class file (an .apk, a .zip): no media to render, just a
-          // save link. The blob endpoint serves it as an attachment.
-          // w-full on both the wrapper and the link: the inline-flex wrapper would
-          // otherwise shrink the tile to its content width instead of filling the
-          // column the way the block-level link did.
-          <Tooltip content="Download" className="w-full">
-            <a
-              href={url}
-              download
-              className="w-full flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
-              <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
-                {file.size != null ? formatBytes(file.size) : 'download'}
-              </span>
-              <Download className="w-4 h-4 shrink-0" />
-            </a>
-          </Tooltip>
+        ) : isCard ? (
+          // A file with no inline preview - a package (an .apk, a .zip) or a PDF.
+          // The card opens the lightbox like every other tile (the PDF renders in
+          // the browser's viewer there; a package gets a card with its download
+          // link), and the save button on the right downloads it directly.
+          <div
+            onClick={open}
+            className="w-full flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 cursor-zoom-in hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <CardIcon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
+            <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
+              {file.size != null ? formatBytes(file.size) : isPdfArtifact(file.name) ? 'PDF' : 'download'}
+            </span>
+            <Tooltip content="Download">
+              <a href={url} download onClick={(e) => e.stopPropagation()} className="shrink-0 p-1 -m-1 rounded hover:text-gray-900 dark:hover:text-gray-100">
+                <Download className="w-4 h-4" />
+              </a>
+            </Tooltip>
+          </div>
         ) : isVideoArtifact(file.name) ? (
-          <video
-            src={url}
-            controls
-            muted
-            playsInline
-            preload="metadata"
-            className={`${IMG_CLASS} block`}
-            style={checkerStyle}
-          />
+          // The inline player keeps the browser's own controls (unlike the diff
+          // panel, there is no synced before/after transport to replace them with),
+          // and a click on the frame is already spoken for by them - it toggles
+          // playback. So the lightbox gets its own affordance instead: an expand
+          // button in the corner, revealed on hover, which can't be confused with
+          // the transport underneath it.
+          <div className="relative group/video">
+            <video
+              src={url}
+              controls
+              muted
+              playsInline
+              preload="metadata"
+              className={`${IMG_CLASS} block`}
+              style={checkerStyle}
+            />
+            <Tooltip content="Open fullscreen" className="absolute top-1.5 right-1.5">
+              <button
+                type="button"
+                onClick={open}
+                aria-label={`Open ${file.name} fullscreen`}
+                className="flex items-center justify-center w-7 h-7 rounded-md bg-black/55 text-white/90 opacity-0 group-hover/video:opacity-100 focus-visible:opacity-100 hover:bg-black/75 transition-opacity cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          </div>
         ) : (
           // A plain click opens the image in the fullscreen lightbox; it fills the
           // column width.
           <button
             type="button"
-            onClick={(e) => {
-              const i = gallery.findIndex((g) => g.url === url)
-              // The button (the lightbox digs out the <img> inside it) is the open
-              // origin, so the picture flies from this tile instead of fading in.
-              openImage(gallery, i >= 0 ? i : 0, e.currentTarget)
-            }}
+            // The button (the lightbox digs out the <img> inside it) is the open
+            // origin, so the picture flies from this tile instead of fading in.
+            onClick={open}
             className="relative block w-full cursor-zoom-in"
           >
             <CheckerLayer />
@@ -212,7 +236,7 @@ export function RepositoryArtifactsView({
   // server supplies width/height when it could measure them; useMediaDims only
   // downloads the rest to measure client-side.
   const dimSources = useMemo(
-    () => (data?.files ?? []).filter((f) => !isDownloadArtifact(f.name)).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height, dpi: f.dpi })),
+    () => (data?.files ?? []).filter((f) => !isFileTileArtifact(f.name)).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height, dpi: f.dpi })),
     [data?.files],
   )
   const dims = useMediaDims(dimSources)
@@ -221,14 +245,22 @@ export function RepositoryArtifactsView({
   // still measured over every file (keyed by name) so a re-show needs no remeasure.
   const allFiles = useMemo(() => data?.files ?? [], [data?.files])
   const visibleFiles = useMemo(() => computeVisibleFiles(allFiles, filter, search), [allFiles, filter, search])
-  // The lightbox gallery: every visible image (videos play inline, so they're
-  // excluded), in display order, so ←/→ steps through the grid. Built once and
-  // shared by every MediaCell, which opens it at its own image's index.
-  const gallery = useMemo<LightboxImage[]>(
+  // The lightbox gallery: every visible file, in display order, so ←/→ steps through
+  // the whole grid - recordings, PDFs and packages included, each opening into its own
+  // viewer. Built once and shared by every MediaCell, which opens it at its own index.
+  const gallery = useMemo<LightboxItem[]>(
     () => visibleFiles
-      .filter((f) => f.url && !isVideoArtifact(f.name) && !isDownloadArtifact(f.name))
+      .filter((f) => f.url)
       // width/height (when recorded) seed the lightbox caption dims on navigation.
-      .map((f) => ({ url: f.url as string, filename: f.name, size: 0, dpi: f.dpi ?? undefined, width: f.width ?? undefined, height: f.height ?? undefined })),
+      .map((f) => ({
+        url: f.url as string,
+        filename: f.name,
+        size: f.size ?? 0,
+        kind: fileKind(f.name),
+        dpi: f.dpi ?? undefined,
+        width: f.width ?? undefined,
+        height: f.height ?? undefined,
+      })),
     [visibleFiles],
   )
 
@@ -350,16 +382,16 @@ export function RepositoryArtifactsView({
               items={visibleFiles.map((f) => ({
                 key: f.name,
                 node: <MediaCell file={f} gallery={gallery} />,
-                // Downloads have no media dimensions; a flat wide aspect keeps
-                // their compact tile from being placed as a tall column.
-                aspect: isDownloadArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
+                // Card tiles (packages, PDFs) have no media dimensions; a flat wide
+                // aspect keeps their compact tile from being placed as a tall column.
+                aspect: isFileTileArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
                 pxWidth: dims[f.name]?.pxWidth,
                 dpi: dims[f.name]?.dpi,
                 // Videos need a minimum tile width for their transport controls.
                 minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
                 // Video uses horizontal drag for scrubbing, so it resizes via the edge
                 // handle only; images resize by dragging the media (see MasonryGrid).
-                bodyResizable: !isVideoArtifact(f.name) && !isDownloadArtifact(f.name),
+                bodyResizable: !isVideoArtifact(f.name) && !isFileTileArtifact(f.name),
               }))}
               spans={spans}
               onSpanChange={setSpanOverride}

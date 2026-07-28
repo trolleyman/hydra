@@ -8,7 +8,7 @@ import { highlightCode } from './markdown'
 import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
 import { UPLOAD_PATH_RE } from './uploadAttachments'
-import { useImageLightbox } from '../stores/imageLightboxStore'
+import { useLightbox } from '../stores/lightboxStore'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
@@ -155,7 +155,7 @@ function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
 // unservable path, or a scratch file that has since been reclaimed - degrades to
 // a muted chip naming it, rather than the browser's broken-image icon.
 function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
-  const openLightbox = useImageLightbox()
+  const openLightbox = useLightbox()
   // The source that failed to load, rather than a bare flag: a streamed message
   // rewrites the same node's src as more text arrives, and keying the failure to
   // the src means a new one is retried instead of inheriting the old verdict.

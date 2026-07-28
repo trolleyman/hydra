@@ -9,12 +9,13 @@ import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, Git
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
-import { ImageLightbox } from './ImageLightbox'
+import { Lightbox } from './Lightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -552,9 +553,11 @@ export const SpawnForm = memo(function SpawnForm({
   // the agent).
   function uploadAttachment(file: File): number {
     const id = nextAttachmentId()
-    const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-    if (previewUrl) objectUrlsRef.current.add(previewUrl)
-    const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+    // One object URL per file, whatever it is: it backs the lightbox for every
+    // attachment, and doubles as the thumbnail source for the images.
+    const objectUrl = URL.createObjectURL(file)
+    objectUrlsRef.current.add(objectUrl)
+    const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
     // Adding a chip is its own undo step.
     commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
     // The upload resolving isn't a user action, so patch this chip across the
@@ -627,11 +630,11 @@ export const SpawnForm = memo(function SpawnForm({
   }, [commit])
 
   // Stable lightbox opener: resolves the clicked chip to its index in the
-  // image-only list at click time (via the attachments mirror ref), so the
+  // openable list at click time (via the attachments mirror ref), so the
   // callback identity survives every attachment/typing change.
-  const openImageLightbox = useCallback((id: number, origin: Element) => {
+  const openLightbox = useCallback((id: number, origin: Element) => {
     setLightboxOrigin(origin)
-    setLightboxIndex(attachmentsRef.current.filter((a) => a.previewUrl).findIndex((img) => img.id === id))
+    setLightboxIndex(openableAttachments(attachmentsRef.current).findIndex((a) => a.id === id))
   }, [])
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -723,10 +726,9 @@ export const SpawnForm = memo(function SpawnForm({
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
-  // Image attachments (those with a preview), in chip order - the lightbox
-  // navigates this list, and each thumbnail opens its own index here.
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  // Every attachment that has bytes behind it, in chip order - the lightbox
+  // navigates this list, and each chip opens its own index here.
+  const lightboxItems = attachmentLightboxItems(attachments)
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -797,7 +799,7 @@ export const SpawnForm = memo(function SpawnForm({
         size={size}
         className={`mx-3 ${size === 'sm' ? 'mb-1.5' : 'mb-2'}`}
         onRemove={removeAttachment}
-        onOpenImage={openImageLightbox}
+        onOpen={openLightbox}
       />
     )
   }
@@ -972,10 +974,10 @@ export const SpawnForm = memo(function SpawnForm({
   // Shared across both layout variants. The index can fall out of range if an
   // image is removed while open, so clamp it and close when there are none left.
   const lightbox =
-    lightboxIndex !== null && lightboxImages.length > 0 ? (
-      <ImageLightbox
-        images={lightboxImages}
-        index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+    lightboxIndex !== null && lightboxItems.length > 0 ? (
+      <Lightbox
+        items={lightboxItems}
+        index={Math.min(lightboxIndex, lightboxItems.length - 1)}
         origin={lightboxOrigin}
         onIndexChange={setLightboxIndex}
         onClose={() => setLightboxIndex(null)}
