@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -36,6 +36,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
 import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
@@ -60,22 +61,30 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
-import { ImageLightbox } from './ImageLightbox'
+import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+// langFromPath (the extension -> Prism language map a Read tool's output is
+// highlighted by, item 3) now lives in lib/fileKind, beside the file-type
+// classifier, so the lightbox's text viewer highlights by the same table.
+import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
-import { parseUploadAttachments } from '../lib/uploadAttachments'
+import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatIsSerif } from '../lib/fontPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
+import { approvalMatchesTool } from '../lib/approvalMatch'
+import { useApprovalStore } from '../stores/approvalStore'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
 import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
@@ -1231,23 +1240,6 @@ function readLineInfo(input: Record<string, unknown> | null): string {
   return ''
 }
 
-// LANG_BY_EXT maps a file extension to a highlight.js language, so a Read tool's
-// output can be syntax highlighted by the file it read (item 3).
-const LANG_BY_EXT: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  mjs: 'javascript', cjs: 'javascript', json: 'json', go: 'go', py: 'python',
-  rb: 'ruby', rs: 'rust', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
-  hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin',
-  sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', yml: 'yaml', yaml: 'yaml',
-  toml: 'ini', ini: 'ini', md: 'markdown', markdown: 'markdown', html: 'xml',
-  xml: 'xml', svg: 'xml', css: 'css', scss: 'scss', sql: 'sql', lua: 'lua',
-  dockerfile: 'dockerfile', diff: 'diff', patch: 'diff',
-}
-function langFromPath(path: string): string {
-  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase()
-  return ext ? (LANG_BY_EXT[ext] ?? '') : ''
-}
-
 // parseToolResult flattens a tool_result block's content into displayable text
 // plus any inline images (an image-read returns image blocks, not text - item
 // 4). Base64 sources become data URLs; url sources are used verbatim.
@@ -1759,6 +1751,23 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
   return open || mounted
 }
 
+// A step folding away shrinks the transcript by its own height, which clamps
+// scrollTop down - and a scrollTop that drops on its own is exactly what a user
+// scrolling up looks like. onScroll already forgives a shrink it can SEE
+// (scrollHeight went down between two scroll events), but a fold overlaps with
+// the next step arriving, so the two height changes can coalesce into one event
+// where the height is unchanged and only scrollTop moved: read as a scroll-up,
+// which unpinned the view and stopped the chat following a live turn from the
+// first fold onwards. So a fold declares itself for the length of its animation
+// and onScroll trusts that over the geometry.
+let selfReflowUntil = 0
+function markSelfReflow(ms = 400) {
+  selfReflowUntil = Math.max(selfReflowUntil, Date.now() + ms)
+}
+function inSelfReflow(): boolean {
+  return Date.now() < selfReflowUntil
+}
+
 // Expandable animates its child open/closed by transitioning a MEASURED
 // max-height (0 <-> content height). We moved off the grid-rows 0fr/1fr trick
 // because, with a nested scroll container inside (a CodePanel's max-h-64 <pre>),
@@ -1963,7 +1972,7 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
   )
 }
 
-function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
+function WebSearchOutput({ text }: { text: string }) {
   const parsed = (() => {
     const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
     if (!match) return { body: text, links: [] as { title: string; url: string }[] }
@@ -1978,7 +1987,7 @@ function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
     }
   })()
   return (
-    <div className={`space-y-2 break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+    <div className="space-y-2 break-words leading-relaxed chat-font">
       {parsed.links.length > 0 && (
         <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
           <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
@@ -2407,7 +2416,6 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 // frontmatter as a highlighted code box, and the body as normal markdown prose -
 // no line-number gutter.
 function MemoryPanel({ text }: { text: string }) {
-  const serif = useChatFontStore((s) => s.serif)
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
   const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
@@ -2425,7 +2433,7 @@ function MemoryPanel({ text }: { text: string }) {
           : <pre className={codeCls}>{yaml}</pre>
       )}
       {body && (
-        <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className="break-words leading-relaxed chat-font">
           <Markdown text={body} />
         </div>
       )}
@@ -2447,12 +2455,12 @@ function LabeledField({ label, children }: { label: string; children: ReactNode 
 // TaskToolFields renders a TaskCreate / TaskUpdate input as labeled fields -
 // subject and description as markdown prose - instead of raw JSON. A TaskUpdate's
 // id/status ride on a compact line above.
-function TaskToolFields({ input, serif }: { input: Record<string, unknown>; serif: boolean }) {
+function TaskToolFields({ input }: { input: Record<string, unknown> }) {
   const taskId = typeof input.taskId === 'string' || typeof input.taskId === 'number' ? String(input.taskId) : ''
   const status = typeof input.status === 'string' ? (input.status as string) : ''
   const subject = typeof input.subject === 'string' ? (input.subject as string) : ''
   const description = typeof input.description === 'string' ? (input.description as string) : ''
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {(taskId || status) && (
@@ -2495,7 +2503,7 @@ function gitAddSpecs(input: Record<string, unknown>): { path: string; lines: str
 // stated outright, because "which of my changes did that actually capture?" is
 // the question the JSON never answered: `git add -A` is the default, so the
 // interesting cases (a path list, or a pre-built index) have to be visible.
-function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: Record<string, unknown>; serif: boolean; worktree: string | null }) {
+function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<string, unknown>; worktree: string | null }) {
   const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
   const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
   const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
@@ -2530,7 +2538,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
             and the panel already frames it. Rendered as markdown with paragraph
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
-        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
           <Markdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
@@ -2635,7 +2643,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
               <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
                 <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
                 {sha(String(step.commit ?? ''))}
-                {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
+                {message && <span className="truncate text-stone-500 dark:text-stone-400 chat-font">{message}</span>}
               </span>,
             )
           })}
@@ -2688,14 +2696,12 @@ function AgentChip({
 // duplicates) said the same thing three times and buried the actual message.
 function SendMessageFields({
   input,
-  serif,
   recipientLabel,
   recipientId,
   recipientRunning,
   onOpenChat,
 }: {
   input: Record<string, unknown>
-  serif: boolean
   recipientLabel: string
   recipientId: string
   recipientRunning?: boolean
@@ -2710,7 +2716,7 @@ function SendMessageFields({
       ([key]) => !SEND_MESSAGE_ECHO_KEYS.has(key) && key !== 'to' && key !== 'summary' && key !== 'message' && !key.startsWith('_'),
     ),
   )
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {recipientId && (
@@ -2771,8 +2777,18 @@ function SendMessageOutcome({
   )
 }
 
-// Per-tool icons for the card header; anything unlisted gets the wrench.
-const TOOL_ICONS: Record<string, typeof Wrench> = {
+// GitMark is git's own logo, which lucide does not carry - the simple-icons set
+// does (the same one the forge marks come from, see ProviderIcon). title=""
+// suppresses the SVG <title> ("Git") those marks render by default: that is a
+// native OS tooltip, and the card header it sits in is interactive.
+function GitMark({ className }: { className?: string }) {
+  return <SiGit className={className} title="" aria-hidden />
+}
+
+// Per-tool icons for the card header; anything unlisted gets the wrench. Typed
+// by the props actually passed below rather than as a lucide icon, so a
+// simple-icons mark (GitMark) fits the same map.
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Bash: SquareTerminal,
   Read: FileText,
   Edit: FilePen,
@@ -2790,14 +2806,14 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
   // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
   // gives no hint that the card rewrote the branch.
-  mcp__hydra__git_commit: GitCommitHorizontal,
-  mcp__hydra__git_add: GitCommitHorizontal,
-  mcp__hydra__git_reset: GitCommitHorizontal,
-  mcp__hydra__git_revert: GitCommitHorizontal,
-  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
-  mcp__hydra__git_rebase: GitCommitHorizontal,
-  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
-  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_commit: GitMark,
+  mcp__hydra__git_add: GitMark,
+  mcp__hydra__git_reset: GitMark,
+  mcp__hydra__git_revert: GitMark,
+  mcp__hydra__git_cherry_pick: GitMark,
+  mcp__hydra__git_rebase: GitMark,
+  mcp__hydra__git_rebase_continue: GitMark,
+  mcp__hydra__git_rebase_abort: GitMark,
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
@@ -2843,7 +2859,6 @@ const ToolCard = memo(function ToolCard({
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
-  const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
 	const visibleResult = item.result ?? item.runningOutput
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -3225,16 +3240,15 @@ const ToolCard = memo(function ToolCard({
               ) : isSendMessage && input ? (
                 <SendMessageFields
                   input={input}
-                  serif={serif}
                   recipientLabel={recipientName}
                   recipientId={messageTo}
                   recipientRunning={recipientRunning}
                   onOpenChat={openRecipientChat}
                 />
               ) : isTaskTool && input ? (
-                <TaskToolFields input={input} serif={serif} />
+                <TaskToolFields input={input} />
               ) : gitTool && input && !hideInput ? (
-                <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
+                <GitToolFields tool={gitTool} input={input} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
@@ -3287,11 +3301,11 @@ const ToolCard = memo(function ToolCard({
                     : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+							? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
-                          ? <WebSearchOutput text={renderedResult} serif={serif} />
+                          ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
-                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                          ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : fileViewSections
                           ? <FileViewSections sections={fileViewSections} />
                         : scriptSections
@@ -3309,8 +3323,8 @@ const ToolCard = memo(function ToolCard({
       {/* Read of an image returns image blocks (item 4); clicking one opens it
           full-size in the shared lightbox, like an attachment image. */}
       {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
-        <ImageLightbox
-          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
+        <Lightbox
+          items={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
           origin={imgOrigin}
           onIndexChange={setImgLightbox}
@@ -3571,51 +3585,69 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
 function SubagentTimeline({
   sub,
   worktree,
-  serif,
   skipId,
   links,
+  // Whether this timeline may fold its own runs of steps. Off inside a folded
+  // SubagentCard: that card ALREADY hides the whole timeline behind its own
+  // "N steps" disclosure, so grouping inside it stacked a second fold with the
+  // same word on it - you clicked "4 steps" and were handed "3 steps". One fold
+  // per level. The full sub-agent chat view has no outer fold, so it groups.
+  fold = false,
 }: {
   sub: SubagentView
   worktree: string | null
-  serif: boolean
   skipId?: number
   links?: SubagentLinks
+  fold?: boolean
 }) {
   const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
+  // A sub-agent's own steps fold exactly like the main transcript's (see
+  // planStepRows) - its inner runs are the same wall, one level down.
+  const grouped = useChatStepsStore((s) => s.grouped)
+  const rows = planStepRows(
+    sub.items.filter((it) => it.id !== skipId),
+    links?.subByToolUse ?? {},
+    fold && grouped,
+  )
+  const renderItem = (it: ChatItem) => {
+    if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+    if (it.kind === 'tool') {
+      // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
+      // spawn): upgrade it into the spawned agent's own card, exactly like
+      // the main flow upgrades its Task cards - instead of leaking the raw
+      // prompt JSON + launch boilerplate as a plain tool card.
+      const nested = links?.subByToolUse[it.toolUseId]
+      if (links && nested && nested.agentId !== sub.agentId)
+        return (
+          <SubagentCard
+            key={it.id}
+            sub={nested}
+            tool={it}
+            worktree={worktree}
+            links={links}
+            onOpenChat={() => links.openSubView(nested.agentId)}
+          />
+        )
+      if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
+      return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
+    }
+    if (it.kind === 'assistant')
+      return (
+        <div key={it.id} className="chat-leading-xs chat-font">
+          <Markdown text={it.text} />
+        </div>
+      )
+    return null
+  }
   return (
     <>
-      {sub.items.map((it) => {
-        if (it.id === skipId) return null
-        if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-        if (it.kind === 'tool') {
-          // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
-          // spawn): upgrade it into the spawned agent's own card, exactly like
-          // the main flow upgrades its Task cards - instead of leaking the raw
-          // prompt JSON + launch boilerplate as a plain tool card.
-          const nested = links?.subByToolUse[it.toolUseId]
-          if (links && nested && nested.agentId !== sub.agentId)
-            return (
-              <SubagentCard
-                key={it.id}
-                sub={nested}
-                tool={it}
-                worktree={worktree}
-                serif={serif}
-                links={links}
-                onOpenChat={() => links.openSubView(nested.agentId)}
-              />
-            )
-          if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
-          return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
-        }
-        if (it.kind === 'assistant')
-          return (
-            <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
-              <Markdown text={it.text} />
-            </div>
-          )
-        return null
-      })}
+      {rows.map((r) =>
+        r.row === 'item' ? (
+          renderItem(r.item)
+        ) : (
+          <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={null} renderRow={renderItem} />
+        ),
+      )}
     </>
   )
 }
@@ -3764,7 +3796,7 @@ function reportSkipId(sub: SubagentView, report: SubReport | null): number | und
 
 // SubagentReport renders a sub-agent's final report (an error result as an error
 // panel), under a small "Report" heading.
-function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
+function SubagentReport({ report }: { report: SubReport }) {
   return (
     <div>
       <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -3773,7 +3805,7 @@ function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }
       {report.isError ? (
         <OutputPanel text={report.text} lang="" isError />
       ) : (
-        <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+        <div className="chat-leading-xs chat-font">
           <Markdown text={report.text} />
         </div>
       )}
@@ -3807,14 +3839,12 @@ function FinishedReportCard({
   label,
   desc,
   report,
-  serif,
   onOpenChat,
   openLabel,
 }: {
   label: string
   desc?: string
   report: SubReport | null
-  serif: boolean
   onOpenChat?: () => void
   openLabel?: string
 }) {
@@ -3849,7 +3879,7 @@ function FinishedReportCard({
           report.isError ? (
             <OutputPanel text={report.text} lang="" isError />
           ) : (
-            <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+            <div className="chat-leading-xs chat-font">
               <Markdown text={report.text} />
             </div>
           )
@@ -3874,7 +3904,6 @@ const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
   worktree,
-  serif,
   onOpenChat,
   finishedBadge,
   links,
@@ -3882,7 +3911,6 @@ const SubagentCard = memo(function SubagentCard({
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   onOpenChat?: () => void
   finishedBadge?: boolean
   links?: SubagentLinks
@@ -3978,7 +4006,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`break-words chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+              <div className="break-words chat-leading-xs chat-font">
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -3996,12 +4024,12 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+                  <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} />
                 </div>
               </Expandable>
             </div>
           )}
-          {report && <SubagentReport report={report} serif={serif} />}
+          {report && <SubagentReport report={report} />}
         </div>
       </Expandable>
     </div>
@@ -4016,13 +4044,11 @@ function SubagentChatView({
   sub,
   tool,
   worktree,
-  serif,
   links,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
@@ -4053,15 +4079,15 @@ function SubagentChatView({
           full view only - the folded SubagentCard keeps its labelled Prompt. */}
       {sub.prompt && (
         <div className="flex flex-col items-end gap-1">
-          <div className={`${USER_BUBBLE_CLASS} leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <div className={`${USER_BUBBLE_CLASS} leading-relaxed chat-font`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+        <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} fold />
       </div>
-      {report && <SubagentReport report={report} serif={serif} />}
+      {report && <SubagentReport report={report} />}
       {/* whitespace-nowrap for the same reason as the main working line: the
           label swaps between "Working..." and the longer "Waiting on
           sub-agents...", and a wrap there would shift the mark. */}
@@ -4329,6 +4355,9 @@ interface QuestionSpec {
   multiSelect: boolean
   options: QuestionOption[]
 }
+// The free-text notes riding alongside the picked options, keyed by question
+// text - the shape AskUserQuestion's own `annotations` input field takes.
+type QuestionAnnotations = Record<string, { notes: string }>
 
 // parseQuestionSpecs validates a {questions: [...]} value (a native
 // AskUserQuestion input, or a fenced block's parsed JSON), returning null for
@@ -4366,28 +4395,99 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
-// deriveAnswered reconstructs which options (and any free-text "Other") each
-// question resolved to, from the recorded tool_result text. On a resume the
-// card's local selection state is gone - all we have is the durable result,
-// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
-// shape the real CLI's AskUserQuestion result produces, mirrored by the
-// simulation). Matching those labels back to option indices lets a replayed
-// card highlight the chosen options just as it did right after answering.
-function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+// What the CLI writes in place of the quoted value for a question the user
+// left unpicked but attached a note to, and the marker introducing that note.
+const NO_OPTION_PICKED = '(no option selected)'
+const NOTE_MARKER = ' notes: '
+// The sentences the CLI wraps the answer list in. A note is the last thing in
+// its entry, so recovering one means knowing where the list stops.
+const ANSWER_TAILS = ['. You can now continue with these answers in mind.', '. Read the answers carefully']
+
+// deriveAnswered reconstructs which options (and any free-text "Other", and any
+// note) each question resolved to, from the recorded tool_result text. On a
+// resume the card's local selection state is gone - all we have is the durable
+// result, which embeds the answers as `"<question>"="<comma-joined labels>"`
+// pairs, each optionally trailed by ` notes: <note>` (the shape the real CLI's
+// AskUserQuestion result produces, mirrored by the simulation). Matching those
+// labels back to option indices lets a replayed card highlight the chosen
+// options just as it did right after answering.
+// A question's notes, keyed by the row each belongs to: an option's index as a
+// string, or "other". A key being present is what makes the note box open, so
+// an empty string is a note being written and a missing key is no note at all.
+type NoteMap = Record<string, string>
+const noteKey = (at: number | 'other') => String(at)
+
+// The protocol carries ONE note per question, so several are merged into one
+// string as "<label>: <text>" segments (a single note stays plain, which is
+// what most answers are). splitNotes is the inverse, for a replayed card: it
+// looks for those labels at a segment boundary, and hands the whole string to
+// the last selected row if it can't find any - a note is display-only by then,
+// so a graceful miss beats a wrong split.
+const NOTE_JOIN = '; '
+function splitNotes(slots: { key: string; label: string }[], merged: string): NoteMap {
+  if (slots.length === 0 || merged === '') return {}
+  const fallback = () => ({ [slots[slots.length - 1].key]: merged })
+  if (slots.length === 1) return fallback()
+  const marks = slots
+    .map(({ key, label }) => {
+      if (merged.startsWith(label + ': ')) return { key, start: 0, text: label.length + 2 }
+      const at = merged.indexOf(NOTE_JOIN + label + ': ')
+      if (at === -1) return null
+      return { key, start: at, text: at + NOTE_JOIN.length + label.length + 2 }
+    })
+    .filter((m) => m !== null)
+    .sort((a, b) => a.start - b.start)
+  if (marks.length === 0) return fallback()
+  const out: NoteMap = {}
+  marks.forEach((m, i) => {
+    out[m.key] = merged.slice(m.text, i + 1 < marks.length ? marks[i + 1].start : merged.length)
+  })
+  return out
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function deriveAnswered(
+  specs: QuestionSpec[],
+  answeredText: string,
+): { selected: Set<number>[]; other: string[]; notes: NoteMap[] } {
   const selected = specs.map(() => new Set<number>())
   const other = specs.map(() => '')
+  const notes: NoteMap[] = specs.map(() => ({}))
+  const merged = specs.map(() => '')
+  // Where every question's entry begins, so a note - which runs to the end of
+  // its entry - knows to stop at the next question rather than swallowing it.
+  const starts = specs.map((q) => answeredText.indexOf(`"${q.question}"=`))
   specs.forEach((q, qi) => {
-    const needle = `"${q.question}"="`
-    const start = answeredText.indexOf(needle)
+    const start = starts[qi]
     if (start === -1) return
-    const from = start + needle.length
-    const end = answeredText.indexOf('"', from)
-    if (end === -1) return
+    let pos = start + `"${q.question}"=`.length
+    let value = ''
+    if (answeredText[pos] === '"') {
+      const end = answeredText.indexOf('"', pos + 1)
+      if (end === -1) return
+      value = answeredText.slice(pos + 1, end)
+      pos = end + 1
+    } else if (answeredText.startsWith(NO_OPTION_PICKED, pos)) {
+      pos += NO_OPTION_PICKED.length
+    } else {
+      return
+    }
+    if (answeredText.startsWith(NOTE_MARKER, pos)) {
+      // The note ends at whichever comes first: the next question's entry, the
+      // sentence the CLI closes the list with, or the end of the text.
+      const bounds = [
+        ...starts.filter((s) => s > pos),
+        ...ANSWER_TAILS.map((t) => answeredText.indexOf(t, pos)).filter((i) => i !== -1),
+        answeredText.length,
+      ]
+      const end = Math.min(...bounds)
+      merged[qi] = answeredText.slice(pos + NOTE_MARKER.length, end).replace(/,\s*$/, '').trim()
+    }
     // The labels were joined with ", " (see submit()). Consume the value left to
     // right, matching whole option labels (longest first, so a label that itself
     // contains ", " isn't mistaken for two) and dropping anything else into the
     // free-text "Other" field.
-    let rest = answeredText.slice(from, end)
+    let rest = value
     const extras: string[] = []
     while (rest.length > 0) {
       const match = q.options
@@ -4404,11 +4504,24 @@ function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected
       }
     }
     if (extras.length) other[qi] = extras.join(', ')
+    // Now the selection is known, the merged note can be split back over the
+    // rows it came from, in the order submit() joined them.
+    const slots = [...selected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: q.options[oi].label }))
+    if (other[qi] !== '') slots.push({ key: noteKey('other'), label: other[qi] })
+    notes[qi] = splitNotes(slots, merged[qi])
   })
-  return { selected, other }
+  return { selected, other, notes }
 }
 
-function QuestionCard({
+// Pending "before" row positions for the note's slide, keyed by the row list
+// they were measured in. Module-level rather than a ref because this is
+// transient DOM measurement - written by the click that reorders the list and
+// consumed by the very next layout effect, never something a render reads.
+const questionFlipFrom = new Map<HTMLElement, Map<HTMLElement, number>>()
+
+export function QuestionCard({
   specs,
   disabled,
   expired,
@@ -4426,10 +4539,17 @@ function QuestionCard({
   // the card settled even across a reconnect, where local state is lost.
   answeredText?: string
   // Returns true when the answers were actually handed to the socket.
-  onSubmit: (answers: Record<string, string>) => boolean
+  onSubmit: (answers: Record<string, string>, annotations: QuestionAnnotations) => boolean
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // Free-text notes that ride ALONGSIDE the picked options rather than
+  // replacing them ("Postgres, but keep the schema in one file") - the CLI's
+  // AskUserQuestion takes these as `annotations[question].notes` and renders
+  // them into the tool result next to the answer. One per picked row, so a
+  // multi-select can qualify each of its choices separately; they are merged
+  // into the single string the protocol carries on the way out.
+  const [notes, setNotes] = useState<NoteMap[]>(() => specs.map(() => ({})))
   // Whether the "Other" row is selected, per question. Explicit state (not
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
@@ -4457,13 +4577,53 @@ function QuestionCard({
     [specs, answeredText],
   )
   const localEmpty =
-    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
+    selected.every((s) => s.size === 0) &&
+    other.every((v) => v.trim() === '') &&
+    otherSel.every((v) => !v) &&
+    notes.every((m) => Object.keys(m).length === 0)
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
   const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
+  const showNotes = derived && localEmpty ? derived.notes : notes
 
-  function toggleOption(qi: number, oi: number) {
+  // A note belongs with the choice it qualifies, so it trails whichever row you
+  // picked rather than sitting at the foot of the card. Moving it is a FLIP:
+  // every row keeps its size and only slides, so the question's height is the
+  // same before, during and after - nothing below it jumps. Positions are
+  // snapshotted in the click that reorders the list, so typing in the note
+  // (which regrows it on every keystroke) never sets an animation going.
+  function snapshotRows(origin: Element | null) {
+    const el = origin?.closest<HTMLElement>('[data-question-rows]')
+    if (!el) return
+    const from = new Map<HTMLElement, number>()
+    for (const row of Array.from(el.children)) from.set(row as HTMLElement, (row as HTMLElement).offsetTop)
+    questionFlipFrom.set(el, from)
+  }
+
+  useLayoutEffect(() => {
+    if (questionFlipFrom.size === 0) return
+    const pending = new Map(questionFlipFrom)
+    questionFlipFrom.clear()
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    for (const [el, from] of pending) {
+      for (const row of Array.from(el.children) as HTMLElement[]) {
+        const was = from.get(row)
+        if (was == null) continue
+        const delta = was - row.offsetTop
+        if (delta === 0) continue
+        // Element.animate is absent in jsdom, where the slide is untestable
+        // anyway - the reorder itself is what the tests assert.
+        row.animate?.([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+          duration: 200,
+          easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        })
+      }
+    }
+  })
+
+  function toggleOption(origin: Element | null, qi: number, oi: number) {
     if (answered) return
+    snapshotRows(origin)
     setSelected((prev) =>
       prev.map((s, i) => {
         if (i !== qi) return s
@@ -4479,93 +4639,240 @@ function QuestionCard({
       }),
     )
     // Picking a real option in a single-select takes over from "Other" (the
-    // typed text stays in the box, just deselected).
+    // typed text stays in the box, just deselected), and carries any note over
+    // with it - in a single-select there is only ever one answer for a note to
+    // belong to, so stranding it on the row you just moved off would lose it.
     if (!specs[qi].multiSelect) {
       setOtherSel((prev) => prev.map((v, i) => (i === qi ? false : v)))
+      moveNote(qi, noteKey(oi))
     }
   }
 
   // Select (or, when the dot itself is clicked, toggle) the "Other" row.
   // Clicking anywhere in the row and typing both select it; in a single-select
   // that clears the picked option, mirroring toggleOption's takeover.
-  function selectOther(qi: number, next = true) {
+  function selectOther(origin: Element | null, qi: number, next = true) {
     if (answered) return
+    if (next !== otherSel[qi]) snapshotRows(origin)
     setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
     if (next && !specs[qi].multiSelect) {
       setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
+      moveNote(qi, noteKey('other'))
     }
   }
 
+  // Re-key a single-select's one note onto the row now holding the answer.
+  function moveNote(qi: number, to: string) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const from = Object.keys(m)
+        if (from.length === 0 || (from.length === 1 && from[0] === to)) return m
+        return { [to]: m[from[0]] }
+      }),
+    )
+  }
+
+  function setNote(qi: number, at: number | 'other', value: string | null) {
+    setNotes((prev) =>
+      prev.map((m, i) => {
+        if (i !== qi) return m
+        const next = { ...m }
+        if (value === null) delete next[noteKey(at)]
+        else next[noteKey(at)] = value
+        return next
+      }),
+    )
+  }
+
+  // Whether `at` is part of the answer, and so whether a note on it counts.
+  function rowPicked(qi: number, at: number | 'other') {
+    return at === 'other' ? showOtherSel[qi] : showSelected[qi].has(at)
+  }
+
+  // The rows carrying a note, in the order submit() merges them.
+  function notedSlots(qi: number) {
+    const slots = [...showSelected[qi]]
+      .sort((a, b) => a - b)
+      .map((oi) => ({ key: noteKey(oi), label: specs[qi].options[oi].label }))
+    if (showOtherSel[qi]) slots.push({ key: noteKey('other'), label: showOther[qi].trim() || 'Other' })
+    return slots.filter((s) => (showNotes[qi][s.key] ?? '').trim() !== '')
+  }
+
+  // A note now always belongs to a picked row, so answering means picking
+  // something - except for "Other" selected with only a note in it, which the
+  // CLI records as `(no option selected) notes: ...` and handles fine.
   const complete = specs.every(
-    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+    (_, i) =>
+      selected[i].size > 0 ||
+      (otherSel[i] && (other[i].trim() !== '' || (notes[i][noteKey('other')] ?? '').trim() !== '')),
   )
+
+  // The corner trigger that opens (or discards) the note on a row. Hidden until
+  // the row is hovered or the trigger itself is focused, so an untouched card
+  // is still just a list of options - but it is a real button in the tab order
+  // either way, since a control that only exists on hover is unreachable by
+  // keyboard.
+  function noteTrigger(qi: number, at: number | 'other') {
+    if (answered) return null
+    const open = rowPicked(qi, at) && showNotes[qi][noteKey(at)] !== undefined
+    return (
+      <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top" className="absolute right-1 top-1">
+        <button
+          type="button"
+          aria-label={open ? 'Discard note' : 'Add a note'}
+          onClick={(e) => {
+            e.stopPropagation()
+            snapshotRows(e.currentTarget)
+            if (open) {
+              // Closing drops the note entirely: one left in state but out of
+              // sight would still be submitted.
+              setNote(qi, at, null)
+              return
+            }
+            // Opening from a row that is not picked picks it first, so the note
+            // lands where you asked for it. In a single-select that also moves
+            // any existing note here, which must not then be blanked.
+            if (at === 'other') selectOther(e.currentTarget, qi)
+            else if (!selected[qi].has(at)) toggleOption(e.currentTarget, qi, at)
+            setNotes((prev) =>
+              prev.map((m, i) =>
+                i !== qi || m[noteKey(at)] !== undefined ? m : { ...m, [noteKey(at)]: '' },
+              ),
+            )
+          }}
+          className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
+            open ? 'opacity-100' : ''
+          }`}
+        >
+          {open ? <X className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+        </button>
+      </Tooltip>
+    )
+  }
+
+  // The note itself, rendered inside the row it qualifies - under a hairline,
+  // and indented to the row's LABEL rather than its edge (ml-8 = the px-2.5
+  // padding plus the dot and its gap), so it reads as part of what that option
+  // says rather than as another row that happens to share the box.
+  function noteBody(qi: number, at: number | 'other') {
+    const value = showNotes[qi][noteKey(at)]
+    if (value === undefined || !rowPicked(qi, at)) return null
+    return (
+      <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+        {/* Auto-grows the same way the "Other" box does - an invisible span in
+            the same grid cell drives the height. */}
+        <div className="grid min-w-0 flex-1">
+          <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
+            {value + ' '}
+          </span>
+          <textarea
+            rows={1}
+            autoFocus={value === '' && !answered}
+            value={value}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setNote(qi, at, e.target.value)}
+            onKeyDown={(e) => {
+              // Enter submits, as in the "Other" box; shift+Enter is a newline,
+              // which a note wants more often than an option label does.
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              e.stopPropagation()
+              submit()
+            }}
+            disabled={answered}
+            placeholder="Note to go with your answer..."
+            aria-label="Note to go with your answer"
+            className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+          />
+        </div>
+      </div>
+    )
+  }
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
+    const annotations: QuestionAnnotations = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
+      // The protocol carries one note per question, so several are merged into
+      // "<label>: <text>" segments. A lone note stays plain - most answers have
+      // exactly one, and labelling it would only restate the answer.
+      const noted = notedSlots(i)
+      if (noted.length === 1) annotations[q.question] = { notes: notes[i][noted[0].key].trim() }
+      else if (noted.length > 1) {
+        annotations[q.question] = {
+          notes: noted.map((sl) => `${sl.label}: ${notes[i][sl.key].trim()}`).join(NOTE_JOIN),
+        }
+      }
     }
-    if (!onSubmit(answers)) return
+    if (!onSubmit(answers, annotations)) return
     if (expired) setSent(true)
     else setSubmitted(true)
   }
 
   return (
     <div className="max-w-xl rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.03] p-3 space-y-3">
-      {specs.map((q, qi) => (
-        <div key={qi} className="space-y-1.5">
-          <div className="flex items-baseline gap-1.5">
-            {q.header && (
-              <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
-                {q.header}
-              </span>
-            )}
-            <span className="font-medium">{q.question}</span>
-          </div>
-          <div className="space-y-1">
-            {q.options.map((o, oi) => {
+      {specs.map((q, qi) => {
+        // The note lives INSIDE the row you picked, so a caveat is visibly part
+        // of the answer it qualifies rather than a separate thing below it - and
+        // a multi-select can carry one per pick.
+        const rows: ReactNode[] = []
+        const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
+              // The border, background and rounding belong to a wrapper, not to
+              // the clickable button: a <textarea> cannot live inside a
+              // <button>, so the note has to be the button's SIBLING while
+              // still sitting inside the same box.
               return (
-                <button
+                <div
                   key={oi}
-                  onClick={() => toggleOption(qi, oi)}
-                  disabled={answered}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
-                    answered ? 'cursor-default' : 'cursor-pointer'
-                  } ${
+                  className={`group relative rounded-lg border transition-colors ${
                     isSel
                       ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
-                  <span
-                    className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
-                      q.multiSelect ? 'rounded' : 'rounded-full'
-                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                  <button
+                    onClick={(e) => toggleOption(e.currentTarget, qi, oi)}
+                    disabled={answered}
+                    className={`flex w-full items-start gap-2 px-2.5 py-1.5 pr-7 text-left ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
                   >
-                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium">{o.label}</span>
-                    {o.description && (
-                      <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
-                    )}
-                  </span>
-                </button>
+                    <span
+                      className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                        q.multiSelect ? 'rounded' : 'rounded-full'
+                      } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                    >
+                      {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">{o.label}</span>
+                      {o.description && (
+                        <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
+                      )}
+                    </span>
+                  </button>
+                  {noteTrigger(qi, oi)}
+                  {noteBody(qi, oi)}
+                </div>
               )
-            })}
-            {/* "Other" renders as one more option row: it has its own dot and
-                is selected by clicking the row, typing in it, or toggling the
-                dot - and a settled card highlights it like any picked option. */}
-            {(() => {
+            })
+        // "Other" renders as one more option row: it has its own dot and is
+        // selected by clicking the row, typing in it, or toggling the dot - and
+        // a settled card highlights it like any picked option.
+        const other = (() => {
               const isSel = showOtherSel[qi]
               return (
                 <div
-                  onClick={() => selectOther(qi)}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  key="other"
+                  onClick={(e) => selectOther(e.currentTarget, qi)}
+                  className={`group relative w-full rounded-lg border transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
                     isSel
@@ -4573,6 +4880,7 @@ function QuestionCard({
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
+                  <div className="flex items-start gap-2 px-2.5 py-1.5 pr-7">
                   <button
                     type="button"
                     disabled={answered}
@@ -4581,7 +4889,7 @@ function QuestionCard({
                     onClick={(e) => {
                       // The dot is the one spot that can also DEselect.
                       e.stopPropagation()
-                      selectOther(qi, !otherSel[qi])
+                      selectOther(e.currentTarget, qi, !otherSel[qi])
                     }}
                     className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                       q.multiSelect ? 'rounded' : 'rounded-full'
@@ -4610,9 +4918,9 @@ function QuestionCard({
                         const v = e.target.value
                         setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
                         // Typing claims the selection.
-                        selectOther(qi)
+                        selectOther(e.currentTarget, qi)
                       }}
-                      onFocus={() => selectOther(qi)}
+                      onFocus={(e) => selectOther(e.currentTarget, qi)}
                       onKeyDown={(e) => {
                         // Enter submits the card, like the composer (shift+Enter
                         // still inserts a newline). Ignored while an IME is
@@ -4628,12 +4936,30 @@ function QuestionCard({
                       className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
                     />
                   </div>
+                  </div>
+                  {noteTrigger(qi, 'other')}
+                  {noteBody(qi, 'other')}
                 </div>
               )
-            })()}
+            })()
+        options.forEach((row) => rows.push(row))
+        rows.push(other)
+        return (
+          <div key={qi} className="space-y-1.5">
+            <div className="flex items-baseline gap-1.5">
+              {q.header && (
+                <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
+                  {q.header}
+                </span>
+              )}
+              <span className="font-medium">{q.question}</span>
+            </div>
+            <div className="space-y-1" data-question-rows>
+              {rows}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
       {expired && !answered && (
         <div className="text-[11px] text-stone-500 dark:text-stone-400">
           This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
@@ -4695,8 +5021,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  const openable = openableAttachments(attachments)
+  const lightboxItems = attachmentLightboxItems(attachments)
   return (
     <div className="flex flex-col items-end gap-1">
       {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
@@ -4709,9 +5035,9 @@ const ChatUserMessage = memo(function ChatUserMessage({
             attachments={attachments}
             size="sm"
             className={body ? 'mt-2' : ''}
-            onOpenImage={(id, origin) => {
+            onOpen={(id, origin) => {
               setLightboxOrigin(origin)
-              setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+              setLightboxIndex(openable.findIndex((a) => a.id === id))
             }}
           />
         )}
@@ -4719,10 +5045,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
       {/* No "Sending..." row: the dimmed (opacity-75) bubble already signals the
           in-flight state, and a row that appears then vanishes on confirm shifted
           the whole transcript below it. */}
-      {lightboxIndex !== null && lightboxImages.length > 0 && (
-        <ImageLightbox
-          images={lightboxImages}
-          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <Lightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
@@ -4826,9 +5152,17 @@ const MetaCard = memo(function MetaCard({ text }: { text: string }) {
 // ChatItem: a skill body -> a SkillCard, anything else -> a generic MetaCard.
 // Shared by the live and history reducers so both agree. Returns null for empty
 // text (nothing to show).
+//
+// It also returns null for the CLI's image-downscale notice - a note to the
+// model about mapping coordinates back, useless to a reader. New conversations
+// never record it (the daemon drops it, see claudestream.IsHiddenChatMessage),
+// but it is already in existing event logs, and there it is worse than noise:
+// having missed the live stream it was backfilled at the very END of the log, so
+// it rendered as an "Injected context" card hanging off a finished answer, as if
+// something had been injected after it.
 function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
   const t = text.trim()
-  if (!t) return null
+  if (!t || isImageResizeNotice(t)) return null
   const skill = detectSkillBody(t)
   if (skill) return { kind: 'skill', name: skill.name, text: skill.body }
   return { kind: 'meta', text: t }
@@ -5107,6 +5441,255 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
   return items
 }
 
+// ── Step folding ────────────────────────────────────────────────────────────
+// A turn's machinery - the thoughts it had and the tool calls it made - is what
+// turns a long transcript into a wall: a dozen one-line cards around each thing
+// the agent actually SAID. So a run of consecutive machinery items folds into
+// one quiet line ("12 steps · Bash, Read, Edit") that expands in place.
+//
+// The RUNNING step folds in too, and that is what makes a live turn calm rather
+// than merely tidy: with it left outside, every step grew a card and then took
+// it away again a second later, so the transcript pulsed all turn. Folded in,
+// the group is one line from beginning to end - the count ticks up and the
+// header says what it is doing. Nothing below it moves.
+//
+// A Task card that upgraded into a SubagentCard is a conversation of its own
+// rather than a step, so it breaks the run.
+function isFoldableStep(it: ChatItem, subByToolUse: Record<string, SubagentView>): boolean {
+  if (it.kind === 'thinking') return true
+  if (it.kind !== 'tool') return false
+  if (subByToolUse[it.toolUseId]) return false
+  // Two tools are addressed to the READER rather than to the machine: a plan
+  // put up for approval, and a command run outside the sandbox on the user's
+  // own machine. Neither is a step to skim past, so neither folds.
+  if (it.name === 'ExitPlanMode' || it.name === 'mcp__hydra__host_run') return false
+  return true
+}
+
+// A row of the transcript: either one item as before, or a folded run of them.
+export type StepRow = { row: 'item'; item: ChatItem } | { row: 'group'; id: number; items: ChatItem[] }
+
+// planStepRows splits the item list into rows, folding each qualifying run.
+// A run earns a group only once it holds two or more tool calls: one card (with
+// or without the thought that led to it) is not a wall, and hiding it behind
+// "1 step" costs more than it saves.
+// eslint-disable-next-line react-refresh/only-export-components
+export function planStepRows(items: ChatItem[], subByToolUse: Record<string, SubagentView>, grouped: boolean): StepRow[] {
+  if (!grouped) return items.map((item) => ({ row: 'item', item }))
+  const rows: StepRow[] = []
+  let run: ChatItem[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    if (run.filter((it) => it.kind === 'tool').length >= 2) rows.push({ row: 'group', id: run[0].id, items: run })
+    else for (const it of run) rows.push({ row: 'item', item: it })
+    run = []
+  }
+  for (const it of items) {
+    if (isFoldableStep(it, subByToolUse)) {
+      run.push(it)
+      continue
+    }
+    flush()
+    rows.push({ row: 'item', item: it })
+  }
+  flush()
+  return rows
+}
+
+// stepSummary describes a folded run in the collapsed header: how many tool
+// calls, which tools (most-used first, so the shape of the run reads at a
+// glance), how long it spent thinking, and how many steps failed. The tool list
+// is capped at three names - past that it stops being a summary.
+//
+// The failure count is the one thing a fold must not swallow: a red card that
+// scrolled past is how you notice the agent hit a wall and went around it, so
+// the header says so and expanding shows which.
+// eslint-disable-next-line react-refresh/only-export-components
+export function stepSummary(items: ChatItem[]): {
+  label: string
+  tools: string
+  thinkingMs: number
+  failed: number
+  // The step in flight right now, named, so a folded group can say what it is
+  // doing instead of only that it is doing something.
+  running: string
+} {
+  const counts = new Map<string, number>()
+  let thinkingMs = 0
+  let failed = 0
+  let running = ''
+  for (const it of items) {
+    if (it.kind === 'thinking') {
+      thinkingMs += it.durationMs ?? 0
+      continue
+    }
+    if (it.kind !== 'tool') continue
+    if (it.isError) failed++
+    if (it.result === undefined && !it.ended) running = displayToolName(it.name)
+    const name = displayToolName(it.name)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const total = [...counts.values()].reduce((a, b) => a + b, 0)
+  // The WHOLE list, most-used first, and no "+N more": the header clips it with
+  // a CSS ellipsis instead. Two truncations stacked (a cap at three names, then
+  // `truncate` over the top) meant a narrow pane spent its last characters
+  // saying "+2 mo..." rather than naming another tool, and a wide one hid tools
+  // it had room for. Letting the list run costs no layout shift either - it is
+  // the one flexible cell in a row of shrink-0 ones, so its length never moves
+  // anything.
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const tools = ranked.map(([name, n]) => (n > 1 ? `${name} x${n}` : name)).join(' · ')
+  return { label: `${total} step${total === 1 ? '' : 's'}`, tools, thinkingMs, failed, running }
+}
+
+// GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
+// into place rather than popping in above the steps it now owns. It is the only
+// motion a group makes on its own: nothing ever folds itself while you are
+// looking at it (see StepGroup).
+function GrowIn({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    markSelfReflow()
+    const t = setTimeout(() => setOpen(true), 16)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <Expandable open={open}>
+      <div data-step-grow className="animate-chat-item-in">
+        {children}
+      </div>
+    </Expandable>
+  )
+}
+
+// useGroupApproval reports whether any step in the group is parked on a
+// security-gate approval. Folding the running step away is fine while it is just
+// working, but a step waiting on YOU must never be behind a count: the group
+// opens itself so the card's Allow/Deny row is on screen (see ToolApproval).
+function useGroupApproval(items: ChatItem[]): boolean {
+  const ctx = useContext(ChatApprovalContext)
+  const parked = useApprovalStore((s) => (ctx ? s.pending[ctx.agentId] : undefined))
+  if (!parked?.length) return false
+  return items.some(
+    (it) =>
+      it.kind === 'tool' &&
+      it.result === undefined &&
+      parked.some((a) =>
+        approvalMatchesTool(a, it.name, (typeof it.input === 'object' ? it.input : null) as Record<string, unknown> | null),
+      ),
+  )
+}
+
+// StepGroup is the run itself: one line while closed, the rows it holds while
+// open (rendered by the caller through renderRow).
+//
+// It NEVER folds itself while you are looking at it. A group born while you are
+// watching a turn starts open - you are here to watch the work, and a collapse
+// under your eyes moves the text you are reading (a long run is a 1000px shrink,
+// and the pane deliberately has no browser scroll anchoring). It stays open for
+// the rest of the visit unless you close it yourself.
+//
+// The tidying happens on the way back in: fold state is per-mount, so leaving
+// the page and returning - or a reload - renders every group folded, which is
+// what liveFrom (the transcript's first live item id) distinguishes. A replayed
+// transcript has no live items, so it comes back quiet.
+function StepGroup({
+  items,
+  liveFrom,
+  renderRow,
+}: {
+  items: ChatItem[]
+  liveFrom: number | null
+  renderRow: (item: ChatItem, animate: boolean) => ReactNode
+}) {
+  // Whether the group came into being while the reader was watching, rather than
+  // arriving with a replayed transcript. That decides both how it enters (the
+  // header grows in above steps already on screen) and how it starts: open for a
+  // live run, folded for history.
+  const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
+  const [open, setOpen] = useState(bornLive)
+  const { label, tools, thinkingMs, failed, running } = stepSummary(items)
+  // A parked approval overrides the fold: the row you have to answer is inside.
+  const needsApproval = useGroupApproval(items)
+  const shown = open || needsApproval
+  // Whether each step gets the entrance fade, decided ONCE - the first time the
+  // group sees it - and then held, so a later render can't strip the class
+  // mid-animation.
+  //
+  // A step fades in if it lands while the group is already open: that is a
+  // message arriving, exactly as it would outside a group. It does NOT fade if
+  // it is on screen because you just opened the group, or because the group was
+  // born around steps that were already there - both are old work being
+  // revealed, and a dozen cards fading in at once reads as a dozen things
+  // happening at once. A step that arrived while the group was folded is old by
+  // the time you open it, so it is settled here too.
+  const [entered, setEntered] = useState<Map<number, boolean>>(() => new Map(items.map((it) => [it.id, false])))
+  const fresh = items.filter((it) => !entered.has(it.id))
+  if (fresh.length > 0) {
+    // Render-phase adjustment (as in useDelayedUnmount): the decision has to be
+    // in place for this render, not a frame later.
+    const next = new Map(entered)
+    for (const it of fresh) next.set(it.id, shown)
+    setEntered(next)
+  }
+  const header = (
+    <button
+      // Closing the group shrinks the transcript, which clamps scrollTop down
+      // and reads like a scroll-up to the pin logic - the same false positive a
+      // fold used to cause (see markSelfReflow).
+      onClick={() => {
+        markSelfReflow()
+        setOpen((o) => !o)
+      }}
+      className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
+      aria-expanded={shown}
+    >
+      <ChevronRight
+        className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${shown ? 'rotate-90' : ''}`}
+      />
+      <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+        {label}
+      </span>
+      {!shown && tools && <span className="min-w-0 truncate text-stone-400/80 dark:text-stone-500/80">{tools}</span>}
+      {/* What it THOUGHT about is a settled-run detail: while the group is live
+          the right-hand chip below is saying what it is doing, and a narrow pane
+          has room for one of the two. */}
+      {!shown && thinkingMs > 0 && !running && !needsApproval && (
+        <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
+          · Thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
+        </span>
+      )}
+      {!shown && failed > 0 && (
+        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">· {failed} failed</span>
+      )}
+      {/* What the group is doing right now, in the ToolCard's own words and
+          colour so a folded step reads like the card it replaces.
+
+          Everything but the count is for the FOLDED state only. Open, the cards
+          are right there saying it themselves - the red one is red, the running
+          one says "running", the parked one carries its own Allow/Deny row - so
+          repeating any of it on the header is just a second voice. */}
+      {!shown && (needsApproval || running) && (
+        <span className="ml-auto pl-1.5 shrink-0 text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+          {needsApproval ? 'needs approval' : `running ${running}`}
+        </span>
+      )}
+    </button>
+  )
+  return (
+    <div className="text-xs">
+      {bornLive ? <GrowIn>{header}</GrowIn> : header}
+      {/* The rows sit tighter than the transcript's gap-3 so an expanded run
+          still reads as one block rather than as loose messages. */}
+      <Expandable open={shown}>
+        <div className="flex flex-col gap-2 pt-2">
+          {items.map((it) => renderRow(it, entered.get(it.id) ?? false))}
+        </div>
+      </Expandable>
+    </div>
+  )
+}
+
 // The settled message list, memoized so the live token stream (which updates
 // once per delta, many times a second) doesn't re-render every prior message.
 // While a turn streams, only `stream` changes in ChatPane - none of these props
@@ -5191,11 +5774,19 @@ const SettledRow = memo(
 
 const SettledMessages = memo(
   function SettledMessages({ items, liveItem, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
-    const row = (item: ChatItem) => (
+    // Read straight from the store rather than as a prop: a zustand subscription
+    // re-renders this component on its own, so flipping the setting refreshes
+    // the list without threading the value through every memo comparator.
+    const grouped = useChatStepsStore((s) => s.grouped)
+    // animate is the ENTRANCE fade, for a message arriving live. A row inside a
+    // step group is handed the group's own answer for it: a step that lands
+    // while the group is open fades in like any other message, one revealed by
+    // opening the group does not (see StepGroup).
+    const row = (item: ChatItem, animate = true) => (
       <SettledRow
         key={item.id}
         item={item}
-        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        animate={animate && liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
         renderItem={renderItem}
         shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
         serif={serif}
@@ -5211,8 +5802,18 @@ const SettledMessages = memo(
     // back lets it bail on each settled subtree instead of rebuilding an element
     // per row 60 times a second. The deps are exactly this component's memo keys
     // below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
-    const rows = useMemo(() => items.map(row), [items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds])
+    const rows = useMemo(
+      () =>
+        planStepRows(items, subByToolUse, grouped).map((r) =>
+          r.row === 'item' ? (
+            row(r.item)
+          ) : (
+            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
+          ),
+        ),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
+      [items, grouped, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds],
+    )
     // ONE keyed list, live row included. It has to be the same list the settled
     // row lands in: a separate slot beside it would be a separate position, and
     // React would tear the live node down to build the settled one - which is
@@ -5571,8 +6172,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const unreadKey = `${agentId}\0${projectId}`
   if (openedUnread.key !== unreadKey) setOpenedUnread({ key: unreadKey, unread: unreadNow })
   else if (openedUnread.unread == null && unreadNow != null) setOpenedUnread({ key: unreadKey, unread: unreadNow })
-  // Whether agent prose renders serif (item 9, the default) - a Browser setting.
-  const serif = useChatFontStore((s) => s.serif)
+  // Whether the chosen chat font (Settings -> Browser -> Fonts) is a serif. The
+  // family itself arrives through the .chat-font class; this only picks the
+  // serif TREATMENT - larger size, looser leading, real semibold - which reads
+  // better for a serif and wrong for a sans. Still threaded through the memo
+  // comparators below because it changes how every settled row renders.
+  const serif = useChatIsSerif()
   // Which head the tool cards below can answer parked approvals for. Null with no
   // project (nothing to POST a decision to), which just leaves the toast.
   const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
@@ -8200,9 +8805,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // the max scroll offset and clamps scrollTop down exactly the same way.
     // Without this the chat came unmoored from the bottom whenever you typed a
     // multi-line message and then deleted it again.
+    // inSelfReflow covers the case the geometry test cannot see: a step folding
+    // away while the next one arrives, where the shrink and the growth land in
+    // one event and only scrollTop looks like it moved (see markSelfReflow).
     const shrank =
       el.scrollHeight < prevScrollHeightRef.current - 1 ||
-      el.clientHeight > prevClientHeightRef.current + 1
+      el.clientHeight > prevClientHeightRef.current + 1 ||
+      inSelfReflow()
     const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
     prevScrollHeightRef.current = el.scrollHeight
@@ -8281,9 +8890,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         nextN++
       }
       const id = nextAttachmentId()
-      const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      if (previewUrl) objectUrlsRef.current.add(previewUrl)
-      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+      // One object URL per file, whatever it is: it backs the lightbox for every
+      // attachment, and doubles as the thumbnail source for the images.
+      const objectUrl = URL.createObjectURL(file)
+      objectUrlsRef.current.add(objectUrl)
+      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
       uploadFile(projectId, file)
         .then((res) => reconcile(id, { path: res.path, uploading: false }))
@@ -8302,13 +8913,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     )
   }
 
-  // Insert text into the composer at the caret, as its own undo step - used for
-  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
-  // paired with the chip's own step, walks the whole paste back).
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" paste markers into the composer at the caret, as their
+  // own undo step, so a single Ctrl+Z removes them (and, paired with the chip's
+  // own step, walks the whole paste back). The text before the caret decides
+  // whether they need a leading space; they never carry a trailing one, so the
+  // caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
+    const insert = pasteMarkerText(names, input.slice(0, start))
     const caret = start + insert.length
     commit(
       (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
@@ -8328,7 +8942,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -8340,8 +8954,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  // Every attachment is openable, in chip order - the lightbox navigates this list
+  // and each chip opens at its own index (see lib/attachmentLightbox).
+  const openable = openableAttachments(attachments)
+  const lightboxItems = attachmentLightboxItems(attachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
 
   // --- Composer: slash commands ----------------------------------------------
@@ -8568,18 +9184,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answerQuestion replies to a native AskUserQuestion via the control channel
-  // (control_response with the answers merged into updatedInput).
-  function answerQuestion(item: Extract<ChatItem, { kind: 'question' }>, answers: Record<string, string>): boolean {
+  // (control_response with the answers merged into updatedInput). Any notes go
+  // in the tool's own `annotations` field, which the CLI renders into the tool
+  // result next to the answer they qualify.
+  function answerQuestion(
+    item: Extract<ChatItem, { kind: 'question' }>,
+    answers: Record<string, string>,
+    annotations: QuestionAnnotations,
+  ): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN || !item.requestId) return false
     const input = typeof item.input === 'object' && item.input !== null ? (item.input as Record<string, unknown>) : {}
+    const updatedInput: Record<string, unknown> = { ...input, answers }
+    if (Object.keys(annotations).length > 0) updatedInput.annotations = annotations
     ws.send(
       JSON.stringify({
         type: 'control_response',
         response: {
           subtype: 'success',
           request_id: item.requestId,
-          response: { behavior: 'allow', updatedInput: { ...input, answers } },
+          response: { behavior: 'allow', updatedInput },
         },
       }),
     )
@@ -8587,9 +9211,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answersAsText renders an answers map as the plain-text reply used by the
-  // fenced ```question fallback (one "<question>: <labels>" line each).
-  function sendAnswersAsText(answers: Record<string, string>): boolean {
-    const lines = Object.entries(answers).map(([q, a]) => `${q}: ${a}`)
+  // fenced ```question fallback (one "<question>: <labels>" line each). There is
+  // no tool result to carry an `annotations` field here, so a note is spelled
+  // out inline instead.
+  function sendAnswersAsText(answers: Record<string, string>, annotations: QuestionAnnotations): boolean {
+    const lines = Object.entries(answers).map(([q, a]) => {
+      const note = annotations[q]?.notes
+      return `${q}: ${a || '(no option selected)'}${note ? ` - note: ${note}` : ''}`
+    })
     return sendUserText(lines.join('\n'))
   }
 
@@ -8967,7 +9596,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool': {
@@ -8976,7 +9605,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const sub = subByToolUse[item.toolUseId]
         if (sub)
           return (
-            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
@@ -8995,7 +9624,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 label={label}
                 desc={desc}
                 report={{ text: parsed.output!, isError: parsed.status !== undefined && parsed.status !== 'completed' }}
-                serif={serif}
                 onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
               />
             )
@@ -9031,7 +9659,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // another card renders this sub, the standalone copy is a duplicate.
         if (sub.parentAgentId) return null
         if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+        return <SubagentCard sub={sub} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question': {
         // Its control_request channel dies with the turn that raised it, and
@@ -9046,7 +9674,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             disabled={!connected || (!expired && item.requestId == null)}
             expired={expired}
             answeredText={item.result}
-            onSubmit={(answers) => (expired ? sendAnswersAsText(answers) : answerQuestion(item, answers))}
+            onSubmit={(answers, annotations) =>
+              expired ? sendAnswersAsText(answers, annotations) : answerQuestion(item, answers, annotations)
+            }
           />
         )
       }
@@ -9298,7 +9928,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         >
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
-            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
           <>
           {!replayDone && items.length === 0 && (
@@ -9481,9 +10111,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               size="sm"
               className="px-3 pt-2.5"
               onRemove={removeAttachment}
-              onOpenImage={(id, origin) => {
+              onOpen={(id, origin) => {
                 setLightboxOrigin(origin)
-                setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+                setLightboxIndex(openable.findIndex((a) => a.id === id))
               }}
             />
             <HighlightedTextarea
@@ -9641,10 +10271,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         </div>
       )}
 
-      {lightboxIndex !== null && lightboxImages.length > 0 && (
-        <ImageLightbox
-          images={lightboxImages}
-          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <Lightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}

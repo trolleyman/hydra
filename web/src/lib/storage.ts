@@ -48,10 +48,20 @@ export const StorageKeys = {
   // '1' when the Settings Resource limits section is collapsed (starts collapsed).
   settingsResourcesCollapsed: 'hydra-settings-resources-collapsed',
   spawnHeight: 'hydra-sidebar-spawn-height',
-  // 'sans' when the user has turned OFF the serif font for chat-mode agent
-  // messages (the default is serif, Claude-app style). User text stays sans
-  // either way. Client-only, global (localStorage, like Theme). See lib/chatPrefs.
+  // LEGACY, read-only: 'sans' when the user had turned OFF the serif font for
+  // chat-mode agent messages, back when that was a boolean toggle. Superseded by
+  // fontChat below, which reads this once as its fallback (so an existing
+  // sans-chat browser stays sans) and clears it on the first deliberate choice.
+  // See lib/fontPrefs.
   chatSerif: 'hydra-chat-serif',
+  // The chosen font id (see lib/fonts.ts FONT_OPTIONS) for each of the four
+  // roles: the app shell, chat-mode agent prose, code/diffs, and the terminal
+  // panes. Absent = that role's default. Client-only, global (localStorage, like
+  // Theme). See lib/fontPrefs.
+  fontUi: 'hydra-font-ui',
+  fontChat: 'hydra-font-chat',
+  fontCode: 'hydra-font-code',
+  fontTerminal: 'hydra-font-terminal',
   // '0' when the user turned OFF the paste markers: pasting an attachment
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
@@ -79,6 +89,12 @@ export const StorageKeys = {
   // = the built-in 4. Client-only, global (localStorage, like Theme). See
   // lib/chatPrefs + lib/bashFormat.
   chatBashIndent: 'hydra-chat-bash-indent',
+  // 'off' when the user has turned OFF step folding in the chat transcript.
+  // Default (absent) = on: a run of settled thoughts + tool calls collapses into
+  // one "N steps" line you can expand, so what the agent SAID stands out from
+  // the machinery it used getting there. Client-only, global (localStorage, like
+  // Theme). See lib/chatPrefs.
+  chatStepGroups: 'hydra-chat-step-groups',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an

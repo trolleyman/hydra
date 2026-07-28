@@ -38,6 +38,20 @@ export const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-
 
 export const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
 export const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
+// The chevron cluster is sized for TWO buttons whether it holds one or two, so a
+// file's edge expanders (one chevron) line their count up with the gap expanders
+// (two) instead of sitting 18px to the left of them.
+export const EXPANDER_BTNS = 'flex items-center gap-0.5 shrink-0 mr-1 w-[34px]'
+// The "··· N lines ···" count is a FIXED box rather than the row's leftover
+// space: as flex-1 it re-centred itself around whatever context label sat beside
+// it, so the counts wandered from one expander to the next down a file. w-44
+// holds a five-digit count; `shrink` lets a narrow pane squeeze it (truncating,
+// never wrapping) so the row stays exactly one line tall at any width.
+export const EXPANDER_COUNT = 'w-44 shrink truncate text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 rounded cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-900/30'
+// The context label carries the file's own token markup, so its colours come
+// from the highlight theme; the gray is only what untokenised text falls back
+// to, and the opacity keeps the whole thing behind the code it labels.
+export const EXPANDER_CONTEXT = 'flex-1 min-w-0 truncate pl-3 text-xs font-mono leading-5 text-gray-500 dark:text-gray-400 opacity-70'
 
 // The two fixed-height bodies a card can render instead of rows.
 export const NOTICE_BLOCK = 'px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic'
@@ -49,8 +63,8 @@ export interface SbsPair { old: string | null; new: string | null }
 
 // An expander row, described precisely enough to measure: how many chevron
 // buttons it carries, and the line count in its "··· N lines ···" label (null
-// for the button-only expanders the windowed-hunk path renders). Both matter
-// because a narrow pane wraps that label onto several rows.
+// for the button-only expanders the windowed-hunk path renders) - so the probe
+// lays out the row the component will actually render.
 export interface ExpanderShape { buttons: 1 | 2; hidden: number | null }
 
 // BodyShape is the render-path-agnostic description of a file body: which code
@@ -128,13 +142,15 @@ function buildProbe(): Probe | null {
 
   // Expander row: only its height matters, so the replica carries the same
   // padding/border chrome and the taller of its two children (the icon buttons
-  // and the "··· N lines ···" label, which wraps in a narrow pane).
+  // and the "··· N lines ···" count). Neither the count nor the context label
+  // beside it can wrap, so this is one line at any width - but it is still
+  // measured rather than assumed, since the chrome around it is free to change.
   const expander = mk('div', EXPANDER_ROW, host)
-  const btns = mk('div', 'flex items-center gap-0.5 shrink-0 mr-1', expander)
+  const btns = mk('div', EXPANDER_BTNS, expander)
   mk('span', `${EXPANDER_BTN} block`, btns).appendChild(mk('span', 'block w-3 h-3'))
   const expanderBtn2 = mk('span', `${EXPANDER_BTN} block`, btns)
   expanderBtn2.appendChild(mk('span', 'block w-3 h-3'))
-  const expanderLabel = mk('span', 'flex-1 text-center text-xs font-mono py-0.5 block', expander)
+  const expanderLabel = mk('span', `${EXPANDER_COUNT} block`, expander)
 
   const notice = mk('div', NOTICE_BLOCK, host)
   notice.textContent = 'Binary file changed'

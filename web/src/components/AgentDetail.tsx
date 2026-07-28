@@ -15,9 +15,10 @@ import { SeparatedRow } from './SeparatedRow'
 import { AgentTopBarContent, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { TopBarPortal } from './TopBarPortal'
 import { AttachmentChips } from './AttachmentChips'
-import { ImageLightbox } from './ImageLightbox'
+import { Lightbox } from './Lightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
+import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
@@ -63,12 +64,16 @@ function parsePrompt(prompt: string, projectId: string | null): { text: string; 
     if (seen.has(full)) continue
     seen.add(full)
     const base = full.split('/').pop() ?? full
+    const blob = uploadBlobUrl(projectId, base)
     attachments.push({
       id: id++,
       // Drop the "<unixnano>-" prefix uniqueUploadName adds, for a tidy label.
       filename: base.replace(/^\d+-/, ''),
       path: full,
-      previewUrl: IMAGE_EXT_RE.test(base) ? uploadBlobUrl(projectId, base) : undefined,
+      // Every stored upload can be served back, whatever it is - the thumbnail is
+      // the image-only part.
+      url: blob,
+      previewUrl: IMAGE_EXT_RE.test(base) ? blob : undefined,
       size: 0,
       uploading: false,
     })
@@ -90,13 +95,13 @@ function parsePrompt(prompt: string, projectId: string | null): { text: string; 
 // two never drift.
 const PromptContent = memo(function PromptContent({ prompt, projectId }: { prompt: string; projectId: string | null }) {
   const { text, attachments } = useMemo(() => parsePrompt(prompt, projectId), [prompt, projectId])
-  // Index into the image-only attachments while the lightbox is open; clicking a
-  // thumbnail opens it here, mirroring the spawn form.
+  // Index into the openable attachments while the lightbox is open; clicking any
+  // chip opens it here, mirroring the spawn form.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // The chip clicked, so the picture flies out of it instead of fading in.
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  const openable = openableAttachments(attachments)
+  const lightboxItems = attachmentLightboxItems(attachments)
   return (
     <>
       {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
@@ -104,15 +109,15 @@ const PromptContent = memo(function PromptContent({ prompt, projectId }: { promp
         attachments={attachments}
         size="md"
         className={text ? 'mt-3' : ''}
-        onOpenImage={(id, origin) => {
+        onOpen={(id, origin) => {
           setLightboxOrigin(origin)
-          setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+          setLightboxIndex(openable.findIndex((a) => a.id === id))
         }}
       />
-      {lightboxIndex !== null && lightboxImages.length > 0 && (
-        <ImageLightbox
-          images={lightboxImages}
-          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <Lightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}

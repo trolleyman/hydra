@@ -17,6 +17,21 @@ export function isVideoArtifact(name: string): boolean {
   return /\.webm$/i.test(name)
 }
 
+// A PDF, which the artifact pipeline collects (it is in the backend's mediaExts)
+// but which is not a picture: an <img> renders nothing for it. It gets a compact
+// tile that opens the browser's PDF viewer in the lightbox - see LightboxPdf.
+export function isPdfArtifact(name: string): boolean {
+  return /\.pdf$/i.test(name)
+}
+
+// Files with no inline preview at all: the download-class packages above plus
+// PDFs, which are shown as a card in the grid and only rendered full-size in the
+// lightbox. These share a tile, are excluded from dimension probing, and lay out
+// at a fixed flat aspect rather than one measured off media they don't have.
+export function isFileTileArtifact(name: string): boolean {
+  return isDownloadArtifact(name) || isPdfArtifact(name)
+}
+
 // Extensions rendered as download tiles (name + size + save link) instead of
 // media - packages and archives an artifact script may emit (e.g. an Android
 // build's .apk). Mirrors the backend's downloadExts allowlist
@@ -74,11 +89,13 @@ export const TYPE_CATEGORY = 'type'
 // lives in lib/artifactPrefs, which also seeds 'unchanged' hidden by default).
 export const CHANGE_TYPE_ORDER = ['added', 'removed', 'modified', 'unchanged']
 
-// fileMediaType classifies a file as 'video', 'download' or 'image' for the
-// built-in type filter, matching how the viewers route it (isVideoArtifact →
-// the video viewer, isDownloadArtifact → a download tile).
+// fileMediaType classifies a file for the built-in type filter, matching how the
+// viewers route it (isVideoArtifact → the video viewer, isPdfArtifact → the PDF
+// viewer, isDownloadArtifact → a download tile). A value only ever appears in the
+// filter bar when some file carries it, so 'pdf' is invisible in the common case.
 export function fileMediaType(file: FilterableArtifact): string {
   if (isVideoArtifact(file.name)) return 'video'
+  if (isPdfArtifact(file.name)) return 'pdf'
   if (isDownloadArtifact(file.name)) return 'download'
   return 'image'
 }

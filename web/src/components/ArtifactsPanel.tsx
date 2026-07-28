@@ -5,7 +5,7 @@ import { apiErrorBody, formatError } from '../api/format_error'
 import { PanelError } from './PanelError'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive, FileText } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
@@ -13,7 +13,8 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isDownloadArtifact } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isPdfArtifact, isFileTileArtifact } from '../lib/artifactFilter'
+import { fileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
@@ -23,8 +24,8 @@ import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from 
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
-import type { LightboxImage } from './ImageLightbox'
-import { useImageLightboxStore } from '../stores/imageLightboxStore'
+import type { LightboxItem } from './Lightbox'
+import { useLightboxStore } from '../stores/lightboxStore'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
@@ -112,9 +113,10 @@ function mediaAspect(file: ArtifactFile): number | undefined {
 
 function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
-  // The grid's diff gallery + this file's index in it, so opening an image lets ←/→
-  // walk the files and the lightbox shows the comparison (see ImageDiffView). Images only.
-  gallery?: LightboxImage[]; index?: number
+  // The grid's gallery + this file's index in it, so opening any file lets ←/→ walk
+  // the whole set and the lightbox shows the comparison (see ImageDiffView). Every
+  // file is in it - a picture, a recording, a PDF, an .apk - so no tile is a dead end.
+  gallery?: LightboxItem[]; index?: number
 }) {
   // The badge reflects the *effective* change type, so a modified file gated below
   // the "% changed" threshold shows as unchanged (no badge) - matching how it's
@@ -151,10 +153,10 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
           here grows the tile (see MasonryGrid.startBodyResize), so dragging on the
           header above just selects the file name. */}
       <div data-tile-drag>
-        {isDownloadArtifact(file.name) ? (
-          <DownloadTile file={file} />
+        {isFileTileArtifact(file.name) ? (
+          <FileTile file={file} gallery={gallery} index={index} />
         ) : isVideoArtifact(file.name) ? (
-          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} aspect={mediaAspect(file)} />
+          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} aspect={mediaAspect(file)} name={file.name} gallery={gallery} index={index} />
         ) : (
           <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} aspect={mediaAspect(file)} gallery={gallery} index={index} />
         )}
@@ -163,21 +165,44 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   )
 }
 
-// DownloadTile renders a download-class artifact (an .apk, a .zip - see
-// isDownloadArtifact): no media to show, so it's an icon, the byte size, and a
-// save link per side. The blob endpoint serves these with
-// Content-Disposition: attachment, so a click downloads rather than renders.
-function DownloadTile({ file }: { file: ArtifactFile }) {
+// FileTile renders an artifact with no inline preview - a download-class package
+// (an .apk, a .zip) or a PDF: an icon, the byte size, and a save link per side.
+// The blob endpoint serves the download-class ones with Content-Disposition:
+// attachment, so their links save rather than render.
+//
+// The tile itself is a click target that opens the file in the lightbox, like every
+// other tile in the grid: a PDF gets the browser's viewer there, and a package gets
+// a card naming it with its download links - which beats a click that does nothing.
+// The save links sit on top and stop the click from propagating, so hitting one
+// still downloads directly rather than opening the viewer first.
+function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: LightboxItem[]; index?: number }) {
+  const openLightbox = useLightboxStore((s) => s.open)
   const sides = [
     { label: 'before', url: file.left_url },
     { label: 'after', url: file.right_url },
   ].filter((s): s is { label: string; url: string } => !!s.url)
+  const url = file.right_url ?? file.left_url
+  const isPdf = isPdfArtifact(file.name)
+  const Icon = isPdf ? FileText : FileArchive
+  const open = url && gallery && index != null
+    ? (e: React.SyntheticEvent<HTMLDivElement>) => openLightbox(gallery, index, e.currentTarget)
+    : undefined
   return (
-    <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5">
-      <FileArchive className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
+    // role/tabIndex rather than a <button>: the save links live INSIDE the card,
+    // and interactive content nested in a button is invalid (and unreachable by
+    // keyboard). Same shape AttachmentChips uses for the same reason.
+    <div
+      onClick={open}
+      onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e) } } : undefined}
+      role={open ? 'button' : undefined}
+      tabIndex={open ? 0 : undefined}
+      aria-label={open ? `View ${file.name}` : undefined}
+      className={`flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 ${open ? 'cursor-zoom-in hover:bg-gray-50 dark:hover:bg-gray-800' : ''}`}
+    >
+      <Icon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-gray-400 dark:text-gray-500">
-          {file.size != null ? formatBytes(file.size) : 'download'}
+          {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : 'download'}
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           {sides.map((side) => (
@@ -185,10 +210,13 @@ function DownloadTile({ file }: { file: ArtifactFile }) {
               <a
                 href={side.url}
                 download
+                onClick={(e) => e.stopPropagation()}
                 className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <Download className="w-3 h-3" />
-                {side.label}
+                {/* optical-center on the label, not a nudge on the icon (see
+                    index.css); the h-6 keeps the row's height its own. */}
+                <span className="optical-center">{side.label}</span>
               </a>
             </Tooltip>
           ))}
@@ -751,9 +779,9 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
   const sources = useMemo(
-    // Download-class files have no loadable media, so they're excluded from
-    // dimension probing (their tile uses a fixed flat aspect below).
-    () => files.filter((f) => !isDownloadArtifact(f.name)).map((f) => ({
+    // Files shown as a card (packages, PDFs) have no loadable media, so they're
+    // excluded from dimension probing (their tile uses a fixed flat aspect below).
+    () => files.filter((f) => !isFileTileArtifact(f.name)).map((f) => ({
       key: f.name,
       url: f.right_url ?? f.left_url ?? null,
       video: isVideoArtifact(f.name),
@@ -764,18 +792,16 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
     [files],
   )
   const dims = useMediaDims(sources)
-  // The lightbox diff gallery: each visible image file (videos play inline, so they're
-  // excluded) contributes one entry, in display order, carrying its before/after pair
-  // and the current comparison mode - so opening any image lets ←/→ walk the files and
-  // the lightbox shows the same comparison. A file with no image at all is skipped, so
-  // it has no index and falls back to opening the single clicked image. `url` is the
-  // representative side, used for the lightbox's edge previews.
-  const imageFiles = useMemo(
-    () => files.filter((f) => !isVideoArtifact(f.name) && !isDownloadArtifact(f.name) && (f.left_url || f.right_url)),
-    [files],
-  )
-  const diffGallery = useMemo<LightboxImage[]>(
-    () => imageFiles.map((f) => {
+  // The lightbox gallery: EVERY visible file with something behind it contributes an
+  // entry, in display order, carrying its before/after pair and the current comparison
+  // mode - so opening any file lets ←/→ walk the whole set and the lightbox shows the
+  // same comparison. Video and download-class files used to be left out (the viewer
+  // could only show pictures), which made them dead ends in the middle of the strip;
+  // each now opens into its own viewer. `url` is the representative side, used for the
+  // lightbox's edge previews and its caption.
+  const galleryFiles = useMemo(() => files.filter((f) => f.left_url || f.right_url), [files])
+  const diffGallery = useMemo<LightboxItem[]>(
+    () => galleryFiles.map((f) => {
       // Same status the tile's badge shows - effectiveChangeType folds in the
       // "% changed" threshold, so a sub-threshold "modified" reads as unchanged
       // (no glyph) in both places.
@@ -783,8 +809,10 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
       return {
         url: (f.right_url ?? f.left_url) as string,
         filename: f.name,
-        size: 0,
+        size: f.size ?? 0,
+        kind: fileKind(f.name),
         diff: { left: f.left_url, right: f.right_url, mode },
+        fps: f.fps,
         dpi: f.dpi ?? undefined,
         // Known pixel size seeds the lightbox caption + comparator aspect on
         // navigation, so neither collapses and re-measures per image.
@@ -793,20 +821,20 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
         changeType: ct === 'added' || ct === 'removed' || ct === 'modified' ? ct : undefined,
       }
     }),
-    [imageFiles, mode, changeThreshold],
+    [galleryFiles, mode, changeThreshold],
   )
   const galleryIndex = useMemo(() => {
     const m = new Map<string, number>()
-    imageFiles.forEach((f, i) => m.set(f.name, i))
+    galleryFiles.forEach((f, i) => m.set(f.name, i))
     return m
-  }, [imageFiles])
+  }, [galleryFiles])
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
       node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
-      // Downloads have no media dimensions; a flat wide aspect keeps their
-      // compact tile from being placed as a tall column.
-      aspect: isDownloadArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
+      // Card tiles (packages, PDFs) have no media dimensions; a flat wide aspect
+      // keeps their compact tile from being placed as a tall column.
+      aspect: isFileTileArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       dpi: dims[f.name]?.dpi,
       // Videos need a minimum tile width for their transport controls (see
@@ -815,9 +843,9 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
       // Every tile - image AND video - resizes by dragging its media (data-tile-drag).
       // Controls that own their own horizontal drag (the slider divider, the onion
       // opacity range, the video transport bar) opt out with data-no-tile-drag /
-      // <input>, so the two gestures never fight. Download tiles' save links are
+      // <input>, so the two gestures never fight. A card tile's save links are
       // plain anchors: a click still navigates (drags are distinguished by
-      // threshold, like image clicks).
+      // threshold, like the click that opens the lightbox).
       bodyResizable: true,
     })),
     [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
@@ -1343,13 +1371,13 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   }), [artifactView, artifactHighlight, onArtifactViewChange])
 
   // Keyboard: the shared X/B/A/H comparator shortcuts (see applyABShortcut) - only in
-  // A/B mode. Suppressed while the image lightbox is open: the lightbox has its own
+  // A/B mode. Suppressed while the lightbox is open: the lightbox has its own
   // X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a single key
   // must not flip both the lightbox and the grid behind it at once.
   useEffect(() => {
     if (imageDiffMode !== 'ab') return
     const onKey = (e: KeyboardEvent) => {
-      if (useImageLightboxStore.getState().images) return
+      if (useLightboxStore.getState().items) return
       applyABShortcut(e, {
         view: artifactView,
         highlight: artifactHighlight,
@@ -1605,11 +1633,15 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
           <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>, configured in <code className="text-blue-300">.hydra/config.toml</code> under <code className="text-blue-300">[[artifacts]]</code>. Hydra runs it against both the base ref and the head ref (or your uncommitted working tree) and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The <strong>build log</strong> button (the scroll icon in the card header) shows both sides' output; <strong>refresh</strong> beside it re-runs that script, handy to retry a failure or re-render when nothing visibly changed.</p>
-          <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
+          <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video / pdf / download) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
           <p className="text-gray-500 dark:text-gray-400">Writing an artifact script - environment variables, streaming markers, tag sidecars, how each format is compared - is covered in <code className="text-blue-300">docs/artifacts.md</code>.</p>
         </InfoTooltip>
+        {/* leading-4, not the inherited 1.5: 11px * 1.5 = 16.5px, a half pixel,
+            which knocks whatever it is the tallest thing in (this bar once it
+            wraps) onto a fractional height - and a box on a fractional height
+            paints 1px taller or shorter depending on its subpixel offset. */}
         {generatingCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+          <span className="flex items-center gap-1.5 text-[11px] leading-4 font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>

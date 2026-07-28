@@ -1,24 +1,18 @@
-// Chat-mode client preferences (font + default window height), shared between
-// the chat pane / agent terminal and the Settings Browser tab that offers the
-// controls. Each is a zustand store - like the theme store - so both stay in
-// sync: the control writes the store, the readers react. Client-only
-// (localStorage), global.
+// Chat-mode client preferences (default window height, smooth streaming, code
+// line numbers, shell indent), shared between the chat pane and the Settings
+// Browser tab that offers the controls. Each is a zustand store - like the theme
+// store - so both stay in sync: the control writes the store, the readers react.
+// Client-only (localStorage), global.
 //
-// Font default is serif (the Claude-app look): agent prose reads as a serif
-// document, while the user's own messages and all code stay sans/mono. Turning
-// it off makes agent prose sans-serif too.
+// The chat FONT used to live here as a serif/sans boolean. It is now one role of
+// the font selector - see lib/fonts.ts + lib/fontPrefs.ts, which also reads this
+// module's old key once so an existing sans-chat browser stays sans.
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DEFAULT_BASH_INDENT, MAX_BASH_INDENT } from './bashFormat'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
-
-// Reads the persisted preference. Absent (or anything but 'sans') = serif, the
-// default. Exported for unit testing / non-React callers.
-export function loadChatSerif(): boolean {
-  return readLocal(StorageKeys.chatSerif) !== 'sans'
-}
 
 // Default height (pixels) a chat window opens at when the user hasn't dragged it
 // to a saved size. Deliberately taller than the terminal default (450px, see
@@ -108,6 +102,38 @@ export const useChatStreamStore = create<ChatSmoothState>()(
   ),
 )
 
+// Reads the persisted step-folding preference. Absent (or anything but 'off') =
+// on, the default. Exported for non-React callers / unit testing.
+export function loadChatStepGroups(): boolean {
+  return readLocal(StorageKeys.chatStepGroups) !== 'off'
+}
+
+interface ChatStepsState {
+  grouped: boolean
+  setGrouped: (grouped: boolean) => void
+}
+
+// Step folding in the chat transcript: a run of settled thoughts and finished
+// tool calls collapses into one "N steps" line that expands in place. On by
+// default - the reply the agent wrote is the thing you came back to read, and a
+// turn's dozen tool cards around it are what buried it. Stored as the bare 'off'
+// marker, like the smooth-streaming toggle.
+export const useChatStepsStore = create<ChatStepsState>()(
+  persist(
+    (set) => ({
+      grouped: loadChatStepGroups(),
+      setGrouped: (grouped) => set({ grouped }),
+    }),
+    {
+      name: StorageKeys.chatStepGroups,
+      storage: singleFieldStorage('grouped', loadChatStepGroups, (grouped) =>
+        writeLocal(StorageKeys.chatStepGroups, grouped ? null : 'off'),
+      ),
+      partialize: (s) => ({ grouped: s.grouped }),
+    },
+  ),
+)
+
 // Reads the persisted code line-number preference. Absent (or anything but
 // 'off') = on, the default. Exported for non-React callers / unit testing.
 export function loadChatCodeLineNumbers(): boolean {
@@ -170,30 +196,6 @@ export const useChatBashIndentStore = create<ChatBashIndentState>()(
         writeLocal(StorageKeys.chatBashIndent, indent === DEFAULT_BASH_INDENT ? null : String(indent)),
       ),
       partialize: (s) => ({ indent: s.indent }),
-    },
-  ),
-)
-
-interface ChatFontState {
-  serif: boolean
-  setSerif: (serif: boolean) => void
-}
-
-// singleFieldStorage keeps the stored value as the bare 'sans' marker (only
-// written when serif is turned off) rather than persist's JSON envelope, so the
-// key stays human-readable and loadChatSerif can read it directly.
-export const useChatFontStore = create<ChatFontState>()(
-  persist(
-    (set) => ({
-      serif: loadChatSerif(),
-      setSerif: (serif) => set({ serif }),
-    }),
-    {
-      name: StorageKeys.chatSerif,
-      storage: singleFieldStorage('serif', loadChatSerif, (serif) =>
-        writeLocal(StorageKeys.chatSerif, serif ? null : 'sans'),
-      ),
-      partialize: (s) => ({ serif: s.serif }),
     },
   ),
 )

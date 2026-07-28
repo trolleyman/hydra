@@ -507,7 +507,34 @@ func TestIsHiddenChatMessage(t *testing.T) {
 			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"(no content)"}]}}`,
 			true,
 		},
+		// The image-downscale notice, in both the shapes the CLI writes it: a bare
+		// string content (what the transcript holds) and a text block.
+		{
+			"image downscale notice (string content)",
+			`{"parentUuid":"02","isSidechain":false,"type":"user","message":{"role":"user","content":"[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]"},"isMeta":true,"uuid":"41"}`,
+			true,
+		},
+		{
+			"image downscale notice (text block)",
+			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Image: original 1384x3128, displayed at 885x2000. Multiply coordinates by 1.56 to map to original image.]"}]},"isMeta":true}`,
+			true,
+		},
+		{
+			"image downscale notice with a reworded tail",
+			`{"type":"user","message":{"role":"user","content":"[Image: original 100x50, displayed at 50x25. Scale factor 2.]"},"isMeta":true}`,
+			true,
+		},
 		// Must NOT hide.
+		{
+			"image notice text but NOT isMeta (a user talking about one) stays",
+			`{"type":"user","message":{"role":"user","content":"[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]"}}`,
+			false,
+		},
+		{
+			"an isMeta line merely mentioning an image stays",
+			`{"type":"user","message":{"role":"user","content":"[Image: /tmp/shot.png]"},"isMeta":true}`,
+			false,
+		},
 		{
 			"same text but NOT isMeta (a real user turn) stays",
 			`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]}}`,

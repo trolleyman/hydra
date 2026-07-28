@@ -1,28 +1,40 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot, FileArchive, FileText, File as FileIcon, Film } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
+import { LightboxFile, LightboxPdf, LightboxText, LightboxVideo } from './LightboxViewers'
 import { makeAuxOpen } from './artifactDiffShared'
 import { CheckerLayer } from './CheckerLayer'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
+import type { FileKind } from '../lib/fileKind'
 import {
   canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
   whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
 } from '../lib/lightboxFlip'
 
-export interface LightboxImage {
+export interface LightboxItem {
   url: string
   filename: string
   /** File size in bytes, shown in the caption. Omit/0 when unknown (e.g. an
    *  image referenced only by path), in which case the size is left out. */
   size: number
+  /** How to show this entry. Omitted → 'image', so a caller that only ever has
+   *  pictures needs no change; anything else picks one of the viewers in
+   *  LightboxViewers (video, PDF, text, or the download card for a binary the
+   *  browser can't render). Usually lib/fileKind's verdict on the filename. */
+  kind?: FileKind
   /** When set, the lightbox renders a fullscreen before/after comparator (with mode
-   *  controls - toggle, slider, onion) for this entry instead of a single image. The
-   *  diff viewer supplies this; `url` is still used for the edge previews and caption. */
+   *  controls - toggle, slider, onion) for this entry instead of a single file. The
+   *  diff viewer supplies this; `url` is still used for the edge previews and caption.
+   *  Honoured for 'image' and 'video' (the two kinds the artifact pipeline actually
+   *  compares); the other viewers use it only for their per-side download links. */
   diff?: { left?: string | null; right?: string | null; mode: ImageDiffMode }
+  /** Frame rate for a video entry's single-frame step buttons, from the artifact's
+   *  .meta sidecar. Ignored by every other kind. */
+  fps?: number | null
   /** Pixel density (device-scale factor) the media was captured at, surfaced in the
    *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
   dpi?: number
@@ -34,7 +46,7 @@ export interface LightboxImage {
   height?: number
   /** How this artifact changed vs its counterpart (added/removed/modified), when
    *  known - shown as a small +/−/• glyph right after the filename in the caption,
-   *  mirroring the diff grid's per-file badge. Omit for plain images with no diff
+   *  mirroring the diff grid's per-file badge. Omit for plain items with no diff
    *  context (e.g. the repository browser). */
   changeType?: 'added' | 'removed' | 'modified'
 }
@@ -42,7 +54,7 @@ export interface LightboxImage {
 // A small +/−/• glyph marking whether the artifact was added, removed, or modified
 // relative to its counterpart - mirrors the diff grid's ArtifactChangeIcon, but tuned
 // for the lightbox's always-dark backdrop (the brighter dark-theme colors).
-function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxImage['changeType']> }) {
+function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxItem['changeType']> }) {
   const cls = 'w-3.5 h-3.5 shrink-0'
   switch (type) {
     case 'added':
@@ -60,7 +72,36 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// Checkerboard behind images so transparent PNGs read as transparent rather than
+// An entry with no explicit kind is a picture - every caller predates the other
+// viewers, and a picture is what the lightbox has always shown.
+function kindOf(item: LightboxItem | undefined): FileKind {
+  return item?.kind ?? 'image'
+}
+
+// Whether this kind is shown as a picture that can be zoomed, flown between
+// thumbnails and previewed at the edges. The rest are panels: they size themselves,
+// scroll their own content, and are too abstract to preview as a sliver.
+function isPictorial(kind: FileKind): boolean {
+  return kind === 'image' || kind === 'video'
+}
+
+// The mark standing in for a non-pictorial entry - in the edge previews, where
+// there is no frame to show. Deliberately the same icons the tiles in the page use,
+// so the sliver at the edge reads as the same file you clicked past.
+function KindIcon({ kind, className }: { kind: FileKind; className: string }) {
+  switch (kind) {
+    case 'video':
+      return <Film className={className} />
+    case 'text':
+      return <FileText className={className} />
+    case 'binary':
+      return <FileArchive className={className} />
+    default:
+      return <FileIcon className={className} />
+  }
+}
+
+// Checkerboard behind pictures so transparent PNGs read as transparent rather than
 // blending into the dark backdrop. Shared by the main image and the side previews.
 const CHECKER = 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px'
 
@@ -89,17 +130,24 @@ type Entrance =
   | { kind: 'flip'; from: Rect; outgoing?: { side: 'prev' | 'next'; from: Rect } }
   | { kind: 'slide'; dir: -1 | 0 | 1 }
 
-// A Slack-style fullscreen image viewer: a blurred dark backdrop with the image
-// centered, optional prev/next arrows when there's more than one image, and
-// keyboard support (Esc closes, ←/→ navigate). Clicking the backdrop closes it.
-export function ImageLightbox({
-  images,
+// A Slack-style fullscreen file viewer: a blurred dark backdrop with the file
+// centered, optional prev/next arrows when there's more than one, and keyboard
+// support (Esc closes, ←/→ navigate). Clicking the backdrop closes it.
+//
+// "File", not "image": a gallery is whatever a surface has to show - the artifacts
+// grid mixes screenshots, recordings, PDFs and .apks in one strip - so each entry
+// picks its viewer from its `kind` (see LightboxViewers). Only pictures (and video)
+// get the zoom frame and the travelling-thumbnail flights; the rest are panels that
+// simply fade in. What every kind shares is the caption, the navigation and the
+// promise that clicking a file leads SOMEWHERE.
+export function Lightbox({
+  items,
   index,
   origin,
   onIndexChange,
   onClose,
 }: {
-  images: LightboxImage[]
+  items: LightboxItem[]
   index: number
   // The thumbnail the lightbox was opened from, when the opener supplied one - the
   // picture flies out of its box on open and back into it on close. See lightboxFlip.
@@ -107,7 +155,7 @@ export function ImageLightbox({
   onIndexChange: (i: number) => void
   onClose: () => void
 }) {
-  const count = images.length
+  const count = items.length
   // Navigation has a hard start and end - it does NOT wrap around. At the first image
   // there's no previous, at the last there's no next (the arrows/previews for those
   // directions are hidden below), so a gallery reads as a finite strip rather than an
@@ -118,14 +166,16 @@ export function ImageLightbox({
   // The wrapper the shown media sits in (keyed by index, so it is a fresh node per
   // navigation) and the two edge previews - the endpoints every flight measures.
   const mediaRef = useRef<HTMLDivElement | null>(null)
-  const prevPeekRef = useRef<HTMLImageElement | null>(null)
-  const nextPeekRef = useRef<HTMLImageElement | null>(null)
+  // HTMLElement, not HTMLImageElement: a peek is an <img> for a picture, a <video>
+  // for a recording, and a plain card for everything else (see sidePreview).
+  const prevPeekRef = useRef<HTMLElement | null>(null)
+  const nextPeekRef = useRef<HTMLElement | null>(null)
   const peekRef = (side: 'prev' | 'next') => (side === 'prev' ? prevPeekRef : nextPeekRef)
 
   // The thumbnail this lightbox was opened from, resolved once at mount (the page
   // hasn't moved yet, and this is the only moment `origin` is certain to match what
   // is shown). Null → nothing to fly from, so the lightbox fades in as it used to.
-  const [opening] = useState(() => (canFlip() ? findLightboxOrigin(images[index]?.url ?? '', origin) : null))
+  const [opening] = useState(() => (canFlip() ? findLightboxOrigin(items[index]?.url ?? '', origin) : null))
   const openedIndexRef = useRef(index)
   const [entrance, setEntrance] = useState<Entrance>(() => (
     opening ? { kind: 'flip', from: opening.rect } : { kind: 'slide', dir: 0 }
@@ -166,9 +216,9 @@ export function ImageLightbox({
   // out and back on every navigation - which recentred the whole caption row and
   // made the filename jump around.
   const seedDims = useCallback((i: number) => {
-    const img = images[i]
+    const img = items[i]
     return img?.width && img?.height ? { w: img.width, h: img.height } : null
-  }, [images])
+  }, [items])
   const [dims, setDims] = useState<{ w: number; h: number } | null>(() => seedDims(index))
   // Re-seed the moment the shown image changes (adjust-during-render rather than
   // in an effect, so a stale size never survives to the next paint).
@@ -177,11 +227,11 @@ export function ImageLightbox({
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
-  // images - pick a side or a mode and the next entry keeps it rather than resetting.
+  // items - pick a side or a mode and the next entry keeps it rather than resetting.
   // The mode seeds from whichever entry the lightbox was opened on (the grid's current
   // mode); view/highlight start fresh each opening. (Zoom still resets per image - its
   // state lives in the per-index ZoomPan remount.)
-  const [diffMode, setDiffMode] = useState<ImageDiffMode>(() => images[index]?.diff?.mode ?? 'ab')
+  const [diffMode, setDiffMode] = useState<ImageDiffMode>(() => items[index]?.diff?.mode ?? 'ab')
   const [abView, setAbView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
 
@@ -273,7 +323,7 @@ export function ImageLightbox({
   const requestClose = useCallback(() => {
     if (closingRef.current) return
     const wrapper = mediaRef.current
-    const url = images[index]?.url
+    const url = items[index]?.url
     const from = wrapper && url && canFlip() ? mediaRectOf(wrapper) : null
     // Prefer the element the lightbox was opened from, but only while we are still on
     // the image it was opened at - after ←/→ the right target is whatever thumbnail on
@@ -297,14 +347,17 @@ export function ImageLightbox({
     // A backgrounded tab pauses the animation, so onfinish alone can leave the
     // lightbox stuck open; the timer is the floor under it.
     window.setTimeout(land, FLIP_OPEN_MS + 250)
-  }, [images, index, opening, onClose])
+  }, [items, index, opening, onClose])
 
   // X/B/A/H - the shared comparator shortcuts (see applyABShortcut) - drive a diff
   // entry's before/after view + highlight. Held here (with the state above) so they
   // persist across navigation; non-diff (plain image) entries ignore them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!images[index]?.diff) return
+      // Only a comparator responds to them; a text/PDF/binary entry has no
+      // before/after view to flip even when it carries two sides.
+      const it = items[index]
+      if (!it?.diff || !isPictorial(kindOf(it))) return
       applyABShortcut(e, {
         view: abView,
         highlight,
@@ -314,7 +367,7 @@ export function ImageLightbox({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, images, abView, highlight])
+  }, [index, items, abView, highlight])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -335,13 +388,20 @@ export function ImageLightbox({
   // zoomed pan handler suspends inner gestures that way) can't hide the press.
   const pressOnBackdrop = useRef(false)
 
-  const current = images[index]
+  const current = items[index]
   if (!current) return null
 
-  // On large screens, when there's more than one image, the prev/next images sit
+  const currentKind = kindOf(current)
+  // A before/after comparator, and the mode controls that drive it, only exist for
+  // the two kinds the artifact pipeline actually compares. A text file or an .apk
+  // may still carry a `diff` (its two sides) - the viewer turns that into a pair of
+  // download links rather than a comparison.
+  const showsDiff = !!current.diff && isPictorial(currentKind)
+
+  // On large screens, when there's more than one item, the prev/next entries sit
   // mostly off-screen at the edges with only a sliver (~12%) peeking in - a
   // Lightroom-style filmstrip hint of what ←/→ will bring up. Hovering slides the
-  // peeked image a little further in. The main image is narrowed slightly so the
+  // peeked entry a little further in. The main picture is narrowed slightly so the
   // arrows have gutter room beside the peek (both dropped below `lg`).
   const hasSiblings = count > 1
   const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[80vw]' : 'max-w-[90vw]'
@@ -358,13 +418,17 @@ export function ImageLightbox({
     // Only rendered when a sibling exists in that direction (no wrap), so the index
     // is always in range.
     const i = dir === 'prev' ? index - 1 : index + 1
+    const peek = items[i]
+    const peekKind = kindOf(peek)
     const onClick = dir === 'prev' ? prev : next
-    // Translate the whole button (not just the image) so its click area travels
+    // Translate the whole button (not just the media) so its click area travels
     // off-screen with it - only the visible sliver stays clickable, rather than a
     // full-width hit zone covering the gutter.
     const slide = dir === 'prev'
       ? '-translate-x-[88%] hover:-translate-x-[78%]'
       : 'translate-x-[88%] hover:translate-x-[78%]'
+    const round = dir === 'prev' ? 'rounded-r-2xl' : 'rounded-l-2xl'
+    const common = `max-h-[70vh] max-w-[22vw] ${round} opacity-40 group-hover:opacity-80 transition-opacity duration-200 shadow-2xl`
     return (
       <button
         type="button"
@@ -375,15 +439,40 @@ export function ImageLightbox({
         aria-hidden="true"
         className={`group hidden lg:block absolute top-1/2 -translate-y-1/2 ${dir === 'prev' ? 'left-0' : 'right-0'} ${slide} transition-transform duration-200 cursor-pointer ${chromeFade}`}
       >
-        <img
-          // The flight endpoint for ←/→: the picture arriving comes from this box, and
-          // the one leaving flies INTO this element once it takes its place here.
-          ref={(el) => { peekRef(dir).current = el }}
-          src={images[i].url}
-          alt=""
-          style={{ background: CHECKER }}
-          className={`max-h-[70vh] max-w-[22vw] object-contain ${dir === 'prev' ? 'rounded-r-2xl' : 'rounded-l-2xl'} opacity-40 group-hover:opacity-80 transition-opacity duration-200 shadow-2xl`}
-        />
+        {/* The flight endpoint for ←/→: the picture arriving comes from this box, and
+            the one leaving flies INTO this element once it takes its place here. */}
+        {peekKind === 'image' ? (
+          <img
+            ref={(el) => { peekRef(dir).current = el }}
+            src={peek.url}
+            alt=""
+            style={{ background: CHECKER }}
+            className={`${common} object-contain`}
+          />
+        ) : peekKind === 'video' ? (
+          // A poster frame, not playback: metadata-only, muted and paused, so a strip
+          // of recordings doesn't set several videos running off-screen at once.
+          <video
+            ref={(el) => { peekRef(dir).current = el }}
+            src={peek.url}
+            muted
+            playsInline
+            preload="metadata"
+            style={{ background: CHECKER }}
+            className={`${common} object-contain`}
+          />
+        ) : (
+          // Nothing to show a sliver OF - a PDF, a log, an .apk - so the peek is a
+          // labelled card instead. It still gives the strip its "there is one more
+          // that way, and here is what it is" cue, which is the point of the peek.
+          <div
+            ref={(el) => { peekRef(dir).current = el }}
+            className={`${common} w-[22vw] flex flex-col items-center justify-center gap-2 py-10 px-6 bg-gray-900 border border-white/10`}
+          >
+            <KindIcon kind={peekKind} className="w-8 h-8 text-white/40" />
+            <span className="max-w-full truncate text-[11px] font-mono text-white/50">{peek.filename}</span>
+          </div>
+        )}
       </button>
     )
   }
@@ -399,7 +488,7 @@ export function ImageLightbox({
       // modal dialogs sit above the toasts instead (z-[120]).
       className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center outline-none"
       // Marks this subtree as the lightbox's own, so the search for the thumbnail to
-      // fly from/to (lib/lightboxFlip) never picks one of the images in here.
+      // fly from/to (lib/lightboxFlip) never picks one of the items in here.
       data-lightbox-root=""
       onPointerDownCapture={(e) => { pressOnBackdrop.current = e.target === e.currentTarget }}
       // Close only when the press and the click BOTH land on the backdrop - see
@@ -427,7 +516,7 @@ export function ImageLightbox({
         <X className="w-5 h-5" />
       </button>
 
-      {/* Previous image preview (large screens only) - hidden at the start */}
+      {/* Previous file preview (large screens only) - hidden at the start */}
       {hasPrev && sidePreview('prev')}
 
       {/* Previous arrow - hidden at the start (no wrap-around) */}
@@ -435,7 +524,7 @@ export function ImageLightbox({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); prev() }}
-          aria-label="Previous image"
+          aria-label="Previous file"
           // Sits at the edge on small screens; on `lg` it moves inward to clear the
           // peeking preview, landing in the gutter beside it.
           className={`absolute left-4 lg:left-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
@@ -444,12 +533,12 @@ export function ImageLightbox({
         </button>
       )}
 
-      {/* Image (or diff comparator) + caption (clicks here don't close). `relative` so
-          it paints above the (positioned) backdrop layer. The zoom-in is only for the
-          fade fallback - when the picture flies in from a thumbnail, scaling the figure
-          around it as well would fight the flight. */}
+      {/* The file (picture, comparator, or one of the panels) + caption (clicks here
+          don't close). `relative` so it paints above the (positioned) backdrop layer.
+          The zoom-in is only for the fade fallback - when the picture flies in from a
+          thumbnail, scaling the figure around it as well would fight the flight. */}
       <figure
-        className={`relative flex flex-col items-center gap-3 ${current.diff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] ${opening ? '' : 'animate-in zoom-in-95 duration-150'}`}
+        className={`relative flex flex-col items-center gap-3 ${showsDiff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] ${opening ? '' : 'animate-in zoom-in-95 duration-150'}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Keyed by index so the media remounts on each navigation - which is both what
@@ -468,14 +557,17 @@ export function ImageLightbox({
             ? { ['--lb-from' as string]: entrance.dir < 0 ? '-2rem' : entrance.dir > 0 ? '2rem' : '0rem' }
             : undefined}
         >
-          {current.diff ? (
-            // A before/after pair: render the fullscreen comparator. Its control
-            // row (mode selector, A/B toggle, Highlight) is rendered BELOW,
-            // outside this keyed wrapper, so it doesn't fade/remount per entry.
+          {showsDiff && current.diff ? (
+            // A before/after pair (a picture or a recording): render the fullscreen
+            // comparator. Its control row (mode selector, A/B toggle, Highlight) is
+            // rendered BELOW, outside this keyed wrapper, so it doesn't fade/remount
+            // per entry.
             <LightboxDiff
               left={current.diff.left}
               right={current.diff.right}
               name={current.filename}
+              kind={currentKind === 'video' ? 'video' : 'image'}
+              fps={current.fps}
               mode={diffMode}
               view={abView}
               onViewChange={setAbView}
@@ -483,6 +575,14 @@ export function ImageLightbox({
               aspect={current.width && current.height ? current.width / current.height : undefined}
               onDims={setDims}
             />
+          ) : currentKind === 'video' ? (
+            <LightboxVideo url={current.url} aspect={current.width && current.height ? current.width / current.height : undefined} />
+          ) : currentKind === 'pdf' ? (
+            <LightboxPdf url={current.url} />
+          ) : currentKind === 'text' ? (
+            <LightboxText url={current.url} filename={current.filename} diff={current.diff} />
+          ) : currentKind === 'binary' ? (
+            <LightboxFile url={current.url} filename={current.filename} kind={currentKind} diff={current.diff} />
           ) : (
             // Wrapped in ZoomPan so the image can be magnified past fit (wheel),
             // panned (drag once zoomed), and navigated with the corner minimap -
@@ -526,7 +626,7 @@ export function ImageLightbox({
             persists across ←/→ - no fade/remount per image, and the caption below
             doesn't get shoved as it re-appears. State is held up here anyway (it
             survives navigation); only the picture slides. */}
-        {current.diff && (
+        {showsDiff && current.diff && (
           <div className={chromeFade}>
             <LightboxDiffControls
               mode={diffMode}
@@ -570,14 +670,14 @@ export function ImageLightbox({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); next() }}
-          aria-label="Next image"
+          aria-label="Next file"
           className={`absolute right-4 lg:right-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
         >
           <ChevronRight className="w-7 h-7" />
         </button>
       )}
 
-      {/* Next image preview (large screens only) - hidden at the end */}
+      {/* Next file preview (large screens only) - hidden at the end */}
       {hasNext && sidePreview('next')}
     </div>,
     document.body,

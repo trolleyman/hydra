@@ -5,7 +5,7 @@ import './index.css'
 
 import { routeTree } from './routeTree.gen'
 import { AuthGate } from './components/AuthGate'
-import { ImageLightboxHost } from './components/ImageLightboxHost'
+import { LightboxHost } from './components/LightboxHost'
 import { installToastHarness } from './lib/toastHarness'
 
 // Screenshot/test harness hook (dormant unless its localStorage flag is set).
@@ -26,7 +26,7 @@ if (!rootElement.innerHTML) {
     <StrictMode>
       <AuthGate>
         <RouterProvider router={router} />
-        <ImageLightboxHost />
+        <LightboxHost />
       </AuthGate>
     </StrictMode>,
   )

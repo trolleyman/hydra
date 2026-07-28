@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { ArtifactsPanel, MasonryGrid } from './ArtifactsPanel'
-import { useImageLightboxStore } from '../stores/imageLightboxStore'
+import { useLightboxStore } from '../stores/lightboxStore'
 
 // Regression tests for the masonry tile's "drag horizontally to resize the column
 // span" gesture (startBodyResize). The handler used to sit on the whole tile, so
@@ -286,7 +286,7 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
 
 // Regression tests for the grid's global A/B keyboard shortcuts: the handler used to
 // bind only B (as a toggle) and H, so A and X - advertised and handled by the lightbox
-// (ImageLightbox) - silently did nothing over the grid. The grid must accept the same
+// (Lightbox) - silently did nothing over the grid. The grid must accept the same
 // X (flip) / B (Before) / A (After) / H (highlight) set, gate them on A/B mode, and
 // stand down while the lightbox is open. The panel is rendered for real, with inert
 // WebSocket/ResizeObserver stubs (jsdom provides neither) so it idles in its
@@ -309,7 +309,7 @@ describe('ArtifactsPanel A/B keyboard shortcuts', () => {
     })
   })
   afterAll(() => vi.unstubAllGlobals())
-  afterEach(() => useImageLightboxStore.setState({ images: null }))
+  afterEach(() => useLightboxStore.setState({ items: null }))
 
   function renderPanel(over: Partial<ComponentProps<typeof ArtifactsPanel>> = {}) {
     const onView = vi.fn()
@@ -356,7 +356,7 @@ describe('ArtifactsPanel A/B keyboard shortcuts', () => {
 
   it('stands down while the image lightbox is open (its own X/B/A/H take over)', () => {
     const { onView } = renderPanel()
-    useImageLightboxStore.setState({ images: [{ url: 'u', filename: 'f.png', size: 1 }], index: 0 })
+    useLightboxStore.setState({ items: [{ url: 'u', filename: 'f.png', size: 1 }], index: 0 })
     fireEvent.keyDown(document.body, { key: 'a' })
     expect(onView).not.toHaveBeenCalled()
   })

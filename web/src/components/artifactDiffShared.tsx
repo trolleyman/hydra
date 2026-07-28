@@ -1,9 +1,15 @@
 // Presentational helpers shared by the artifact diff viewers - the still-image
 // modes in ArtifactsPanel and the video (.webm) modes in VideoDiffView. Kept in
 // their own module so both have one source of truth for sizing, the checkerboard
-// backdrop, the new-tab affordance and the pixel-diff constants, and so
+// backdrop, the open affordances and the pixel-diff constants, and so
 // VideoDiffView doesn't have to import back from ArtifactsPanel (which renders it
 // - that would be a circular import).
+//
+// The lightbox opener at the bottom lives here for a second reason: the modules
+// that render the tiles are component modules, and a non-component export in one
+// of those breaks React Fast Refresh for the whole file.
+import type { LightboxItem } from './Lightbox'
+import { fileKind } from '../lib/fileKind'
 
 // A subtle checkerboard so transparent screenshots/frames read clearly in both themes.
 export const checkerStyle: React.CSSProperties = {
@@ -35,8 +41,10 @@ export const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain roun
 export const STACK_CLASS = 'rounded-md border border-gray-200 dark:border-gray-700'
 export const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
 
-// Open media in a new tab - the fallback affordance for video frames (which the
-// image lightbox can't show); still images open in the fullscreen lightbox instead.
+// Open media in a new tab - the middle-click affordance across the artifact
+// viewers. Every artifact opens in the fullscreen lightbox on a plain click now
+// (pictures, video, PDFs, downloads alike), so this is the "give me the raw file"
+// escape hatch rather than a fallback for what the lightbox couldn't show.
 export function openInNewTab(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
@@ -67,3 +75,37 @@ export const DIFF_ALPHA = 204
 // which two pixels count as equal, so JPEG/codec/anti-aliasing speckle doesn't
 // paint a confetti of magenta over otherwise-identical regions. 0 would be exact.
 export const DIFF_PIXEL_THRESHOLD = 32
+
+// A single artifact file as a lightbox entry; size is unknown here (the diff
+// viewer doesn't carry byte sizes) so it's left out of the caption. The kind comes
+// from the name, so a fallback open of a .webm still lands on the video viewer
+// rather than rendering it as a broken picture.
+function lightboxItem(url: string, name: string): LightboxItem {
+  return { url, filename: name, size: 0, kind: fileKind(name) }
+}
+
+type OpenLightbox = (items: LightboxItem[], index?: number, origin?: Element | null) => void
+
+// Open this tile's entry in the lightbox. When the grid threaded down its `gallery`
+// (one entry per visible file, carrying the before/after pair + mode) and this
+// tile's `index`, open the whole gallery there - so ←/→ step between files and the
+// lightbox shows the diff comparison. Otherwise fall back to just this one file
+// (e.g. the unit tests, or any caller that doesn't supply a gallery).
+//
+// `origin` is the tile element the click landed on: the lightbox flies the picture out
+// of that exact box. It's passed even though the tile may be showing the other side of
+// the pair - where the click landed is where the picture should come from.
+//
+// Exported because the video and download tiles open in exactly the same way - the
+// lightbox is the one destination for every artifact, whatever its type.
+export function openGalleryAt(
+  open: OpenLightbox,
+  gallery: LightboxItem[] | undefined,
+  index: number | undefined,
+  fallbackUrl: string,
+  name: string,
+  origin?: Element | null,
+) {
+  if (gallery && index != null) open(gallery, index, origin)
+  else open([lightboxItem(fallbackUrl, name)], 0, origin)
+}

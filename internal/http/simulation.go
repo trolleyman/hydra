@@ -559,6 +559,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode agent parked mid-turn: the only place the live working
 		// indicator is visible in simulation.
 		simAgentWorking(),
+		// A long, finished conversation that never streams - the still transcript
+		// to scroll, fold and copy (see handleSimHistoryWS).
+		simAgentHistory(),
 		// The approval picker: its question card raises any one of the gate's
 		// approval cards on demand (nothing is parked until you pick).
 		s.simAgentApprovals(),
@@ -813,6 +816,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 	if id == "agent-working" {
 		write(simAgentWorking())
+		return
+	}
+	if id == "agent-history" {
+		write(simAgentHistory())
 		return
 	}
 	if id == "agent-approvals" {
@@ -2615,8 +2622,16 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// generation slot, so this is the state that used to be indistinguishable
 		// from the one above - spinner, climbing clock, no output. Both sides are
 		// waiting, so the card says so and names the clock as the wait.
+		//
+		// Every Name in this slice must be DISTINCT. A real agent's sets come from
+		// the [artifacts.<name>] config tables, which merge by name, so two sets
+		// can't share one - and the panel relies on that: it keys its cards by
+		// name so the cached-chrome skeleton card is reused by the live card that
+		// replaces it, with no remount (see displaySets in ArtifactsPanel.tsx).
+		// This one used to be a second "screenshots", which collided with
+		// simReadyChangedSet above and made React drop a card and warn.
 		{
-			Name:        "screenshots",
+			Name:        "icons",
 			Status:      api.ArtifactSetStatusGenerating,
 			StartedAt:   &startedAt,
 			LeftQueued:  ptr(2),
@@ -3777,6 +3792,19 @@ var simChatEvents = []string{
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_1","content":[{"type":"thinking","thinking":"I'll grep the package for retry test functions, then read the upload test file to see which paths are covered."}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2","content":[{"type":"tool_use","id":"toolu_sub_grep","name":"Grep","input":{"pattern":"func Test.*Retry","path":"internal/artifacts"}}]}}`,
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep","content":"internal/artifacts/upload_test.go:41:func TestPutRetry(t *testing.T) {"}]}}`,
+	// The rest of the sub-agent's run. A sub-agent's inner timeline folds by the
+	// same rule as the main one (SubagentTimeline -> planStepRows), so it needs
+	// more than one call in a row to be worth anything as a test of it.
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2b","content":[{"type":"tool_use","id":"toolu_sub_read_test","name":"Read","input":{"file_path":"internal/artifacts/upload_test.go","offset":30,"limit":40}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_read_test","content":"func TestPutRetry(t *testing.T) {\n\tsrv := flakyServer(t, 1) // fails once, then succeeds\n\tif err := Put(ctx, srv.URL, blob); err != nil {\n\t\tt.Fatalf(\"expected success after one retry: %v\", err)\n\t}\n}"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2c","content":[{"type":"tool_use","id":"toolu_sub_read_impl","name":"Read","input":{"file_path":"internal/artifacts/upload.go"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_read_impl","content":"func Put(ctx context.Context, url string, blob []byte) error {\n\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n\t\tif err := put(ctx, url, blob); err == nil {\n\t\t\treturn nil\n\t\t}\n\t}\n\treturn nil // <- swallows the last error\n}"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2d","content":[{"type":"tool_use","id":"toolu_sub_bash","name":"Bash","input":{"command":"go test ./internal/artifacts/ -run TestPutRetry -v","description":"Run the one retry test that exists"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_bash","content":"=== RUN   TestPutRetry\n--- PASS: TestPutRetry (0.01s)\nPASS\nok  \tgithub.com/trolleyman/hydra/internal/artifacts\t0.014s"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2e","content":[{"type":"tool_use","id":"toolu_sub_grep2","name":"Grep","input":{"pattern":"maxAttempts|MaxAttempts","path":"internal","output_mode":"content"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep2","content":"internal/artifacts/upload.go:18:const maxAttempts = 5\ninternal/config/config.go:88:\tMaxAttempts int"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_2f","content":[{"type":"tool_use","id":"toolu_sub_grep3","name":"Grep","input":{"pattern":"ErrGaveUp|exhausted","path":"internal/artifacts"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sub_grep3","content":"No matches found","is_error":true}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_1","message":{"id":"msg_sub_3","content":[{"type":"text","text":"Found a single retry test. It exercises the succeed-after-a-failure path but never the exhausted-attempts path."}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_task","content":"## Coverage summary\n\n- ` + "`TestPutRetry`" + ` (upload_test.go:41) covers **succeed after one transient failure**.\n\n**Gap:** nothing asserts the *giving-up* path - when every attempt fails, the last error should surface. Worth adding a case where the fake server fails more times than the attempt cap."}]}}`,
 	// A SendMessage back to that (now finished) sub-agent: the card renders the
@@ -3826,17 +3854,33 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_nest","content":[{"type":"tool_use","id":"toolu_sim_nest","name":"Agent","input":{"description":"Audit retry stack end to end","subagent_type":"general-purpose","prompt":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"text","text":"Audit the whole retry stack: delegate a config-parsing scan to a scout, then combine it with the uploader findings into one report."}]}}`,
+	// Two calls of its own BEFORE the nested spawn, so the parent's timeline has a
+	// folded run above the child's card as well as below it.
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_0a","content":[{"type":"tool_use","id":"toolu_sim_nest_read","name":"Read","input":{"file_path":"internal/artifacts/backoff.go"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_read","content":"func sleepBackoff(attempt int) {\n\td := base << attempt\n\ttime.Sleep(d/2 + time.Duration(rand.Int63n(int64(d))))\n}"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_0b","content":[{"type":"tool_use","id":"toolu_sim_nest_grep","name":"Grep","input":{"pattern":"sleepBackoff","path":"internal"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_grep","content":"internal/artifacts/upload.go:37:\t\tsleepBackoff(attempt)"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child","name":"Agent","input":{"description":"Scan config parsing","subagent_type":"scout","prompt":"Find where retry settings are parsed from config and report the file:line references."}}]}}`,
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child","content":"Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part of it into a user-facing reply.)\nagentId: sim_sub_nest_child (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2","content":[{"type":"text","text":"The config scan is running in the background - I'll fold its findings into the audit once it reports."}]}}`,
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"text","text":"Find where retry settings are parsed from config and report the file:line references."}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_1","content":[{"type":"tool_use","id":"toolu_sim_nest_child_grep","name":"Grep","input":{"pattern":"max_attempts","path":"internal/config"}}]}}`,
 	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child_grep","content":"internal/config/config.go:88: MaxAttempts int"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_1b","content":[{"type":"tool_use","id":"toolu_sim_nest_child_read","name":"Read","input":{"file_path":"internal/config/config.go","offset":84,"limit":12}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child_read","content":"\t// Retry caps how many times a transient upload failure is retried.\n\tMaxAttempts int"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_1c","content":[{"type":"tool_use","id":"toolu_sim_nest_child_grep2","name":"Grep","input":{"pattern":"cfg.Retry.MaxAttempts","path":"internal"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_child_grep2","content":"internal/artifacts/upload.go:22:\tmax := cfg.Retry.MaxAttempts"}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest_child","message":{"id":"msg_sim_nest_child_2","content":[{"type":"text","text":"Retry settings are parsed at internal/config/config.go:88 (MaxAttempts); nothing validates a zero/negative cap."}]}}`,
 	// The parent stopped (waiting on its child) -> the harness notified
 	// "finished" prematurely. This chip is superseded by the second one below.
 	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
 	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest_child</task-id>\n<tool-use-id>toolu_sim_nest_child</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Scan config parsing\" finished</summary>\n</task-notification>"}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2b","content":[{"type":"tool_use","id":"toolu_sim_nest_read2","name":"Read","input":{"file_path":"internal/config/config.go","offset":80,"limit":20}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_read2","content":"type Retry struct {\n\tMaxAttempts int\n\tBase        string\n}"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2c","content":[{"type":"tool_use","id":"toolu_sim_nest_bash","name":"Bash","input":{"command":"go test ./internal/config/ -run TestRetryDefaults","description":"Check the config defaults are covered"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_bash","content":"testing: warning: no tests to run\nPASS\nok  \tgithub.com/trolleyman/hydra/internal/config\t0.004s [no tests to run]"}]}}`,
+	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_2d","content":[{"type":"tool_use","id":"toolu_sim_nest_grep2","name":"Grep","input":{"pattern":"MaxAttempts <= 0","path":"internal"}}]}}`,
+	`{"type":"user","isSidechain":true,"agentId":"sim_sub_nest","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_nest_grep2","content":"No matches found","is_error":true}]}}`,
 	`{"type":"assistant","isSidechain":true,"agentId":"sim_sub_nest","message":{"id":"msg_sim_nest_3","content":[{"type":"text","text":"Audit complete: the uploader retries with jittered backoff (internal/artifacts/backoff.go), config caps it via MaxAttempts (internal/config/config.go:88), and the unvalidated zero cap is the one real gap."}]}}`,
 	`{"type":"queue-operation","operation":"enqueue","sessionId":"sim-chat","content":"<task-notification>\n<task-id>sim_sub_nest</task-id>\n<tool-use-id>toolu_sim_nest_resume</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Audit retry stack end to end\" finished</summary>\n</task-notification>"}`,
 	// A chained command with a description: the collapsed card shows the
@@ -3909,12 +3953,22 @@ var simChatEvents = []string{
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
+	// The bookkeeping record the CLI logs for the image it just downscaled. It
+	// writes one to the transcript WITHOUT emitting it on stdout, so it reaches
+	// the chat only through the history backfill - i.e. appended at the tail of
+	// an already-filled event log, where it rendered as an "Injected context"
+	// card hanging off a finished answer. IsHiddenChatMessage drops it, so the
+	// chat must render NOTHING for this line.
+	`{"type":"user","uuid":"sim-image-resize","message":{"role":"user","content":"[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"},"isMeta":true}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
-	// An assistant reply that embeds a screenshot IT took, by the path it wrote it
-	// to (inside the head's private /tmp). The chat markdown renderer resolves that
-	// through the agent-files endpoint and shows the picture inline - see
-	// MarkdownImage / HandleAgentFileBlob.
-	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
+	// An assistant reply that embeds screenshots IT took, by the paths it wrote
+	// them to (inside the head's private /tmp). The chat markdown renderer
+	// resolves those through the agent-files endpoint and shows the pictures
+	// inline - see MarkdownImage / HandleAgentFileBlob. TWO of them, which is the
+	// real shape of a before/after report and what makes the lightbox a gallery:
+	// the two are one message, so ←/→ step between them and stop there (see
+	// lib/markdownGallery).
+	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, before](/tmp/hydra-sim/popover-before@2x.png)\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
 	// A background Bash command plus its completion <task-notification>
 	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
 	// deduped to ONE notice chip). The notification carries the <output-file>
@@ -4149,6 +4203,10 @@ func handleSimChatWS(conn *safeConn) {
 	})
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep","name":"Grep","input":{"pattern":"httputil.ReverseProxy","path":"internal"}}]}}`)
 	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep","content":"internal/preview/spawn.go:223: in.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1b","content":[{"type":"tool_use","id":"toolu_sim_resumed_read","name":"Read","input":{"file_path":"internal/preview/spawn.go","offset":210,"limit":30}}]}}`)
+	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_read","content":"target, err := url.Parse(fmt.Sprintf(\"http://127.0.0.1:%d\", port))\nif err != nil {\n\treturn nil, err\n}\nin.proxy = httputil.NewSingleHostReverseProxy(target)"}]}}`)
+	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_1c","content":[{"type":"tool_use","id":"toolu_sim_resumed_grep2","name":"Grep","input":{"pattern":"ModifyResponse|Director","path":"internal/preview"}}]}}`)
+	sendSimChatEvent(conn, `{"type":"user","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_resumed_grep2","content":"No matches found","is_error":true}]}}`)
 	sendSimChatEvent(conn, `{"type":"assistant","isSidechain":true,"agentId":"sim_sub_resumed_bg","message":{"id":"msg_sim_resumed_bg_2","content":[{"type":"text","text":"The reverse proxy is built at internal/preview/spawn.go:223 (stock NewSingleHostReverseProxy, no ModifyResponse); headers pass through untouched."}]}}`)
 	// The daemon's full-transcript plan reconstruction (sendReconstructedPlan),
 	// derived here from the same canned events so sim exercises the real
@@ -4706,6 +4764,34 @@ var simAskImplMarkdown = strings.Join([]string{
 	"me to add hot-reload next, or wire up secrets interpolation first?",
 }, "\n")
 
+// simAskPlanMarkdown is the block agent-ask types out BEFORE it starts working.
+// It exists so the demo turn has real prose above its run of steps: reading it
+// carries you down the pane, and the steps then land off the bottom of what you
+// are reading - which is the case where a fold could shove the text you are
+// mid-sentence in (see the scroll-stability checks on the step group).
+var simAskPlanMarkdown = strings.Join([]string{
+	// Paragraphs are ONE line each: the chat renderer honours a single newline as
+	// a line break, so wrapping the source mid-sentence breaks the rendered text
+	// in the same place.
+	"Before I touch the loader, here is the shape of the change, so the diff doesn't arrive as a surprise.",
+	"",
+	"### Where the layering goes",
+	"",
+	"`Load` is the only entry point that reads config today, and every caller passes a project root. That makes it the right seam: it grows an `env` argument, reads the base file exactly as it does now, and then hands the parsed map to a new `applyEnvOverlay` before anything validates it.",
+	"",
+	"The overlay file is *optional*. A missing `config.<env>.toml` is not an error - it means the environment adds nothing, and the base config stands on its own. Only a malformed one fails the load.",
+	"",
+	"### The merge rule, precisely",
+	"",
+	"- **Tables merge** field by field, recursively, so an override can set one key of `[network]` without restating the rest of it.",
+	"- **Scalars and arrays replace** wholesale. An `allowed_hosts` in the overlay is the list, not an addition to the base list - the alternative (append) has no way to spell \"remove a host\".",
+	"- **Validation runs once**, on the merged result, so an override is allowed to fill in a key the base leaves out.",
+	"",
+	"That last one is the reason validation moves after the merge rather than staying where it is. Everything else is additive.",
+	"",
+	"Let me read the loader and the callers before I start.",
+}, "\n")
+
 // streamSimAskImplementation streams the large, feature-rich turn agent-ask
 // produces once its AskUserQuestion is answered: an opening paragraph, two
 // interleaved tool steps with a thinking block between them, then the long
@@ -4756,8 +4842,10 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 		sendSimThinking(conn, msgID, dur.Milliseconds())
 	}
 	// toolStep emits a tool_use card, pauses as if it were running, then lands
-	// its tool_result so the card settles out of the running state.
-	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration) {
+	// its tool_result so the card settles out of the running state. failed marks
+	// the result an error, so the card lands red (and a fold that swallowed it
+	// still reports it - see stepSummary in the chat).
+	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration, failed bool) {
 		use, _ := json.Marshal(map[string]any{
 			"type":       "assistant",
 			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "tool_use", "id": toolID, "name": name, "input": input}}},
@@ -4766,27 +4854,55 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 		sendSimChatEvent(conn, string(use))
 		time.Sleep(dur)
 		res, _ := json.Marshal(map[string]any{
-			"type":       "user",
-			"message":    map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": result}}},
+			"type": "user",
+			"message": map[string]any{"role": "user", "content": []map[string]any{
+				{"type": "tool_result", "tool_use_id": toolID, "content": result, "is_error": failed},
+			}},
 			"session_id": sessionID,
 		})
 		sendSimChatEvent(conn, string(res))
 	}
 
-	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result. Let me read the current loader first.", 45*time.Millisecond)
+	// A long run of steps on purpose: this is the demo turn for everything that
+	// depends on a turn doing a LOT between two things it says - the folded step
+	// group, its live count, the failed-step marker, the shell cwd tracking.
+	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result.", 45*time.Millisecond)
+	streamText("msg_ask_impl_1b", simAskPlanMarkdown, 30*time.Millisecond)
 	toolStep("msg_ask_impl_2", "toolu_ask_read", "Read",
 		map[string]any{"file_path": "internal/config/load.go"},
-		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond)
+		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond, false)
 	streamThinking("msg_ask_impl_3", "Load reads a single file today. I'll overlay config.<env>.toml on top via a recursive merge, then validate the merged map against the known keys.", 1600*time.Millisecond)
+	toolStep("msg_ask_impl_3b", "toolu_ask_grep", "Grep",
+		map[string]any{"pattern": "config\\.Load\\(", "path": "internal", "output_mode": "files_with_matches"},
+		"internal/cli/runtime.go\ninternal/heads/seed.go\ninternal/http/server.go", 700*time.Millisecond, false)
 	toolStep("msg_ask_impl_4", "toolu_ask_edit", "Edit",
 		map[string]any{"file_path": "internal/config/load.go", "old_string": "return parseFile(filepath.Join(root, \"config.toml\"))", "new_string": "base, err := parseFile(filepath.Join(root, \"config.toml\"))\nif err != nil {\n\treturn nil, err\n}\nreturn applyEnvOverlay(base, root, env)"},
-		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond)
-	streamText("msg_ask_impl_5", "That's the merge wired in. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
+		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond, false)
+	toolStep("msg_ask_impl_4b", "toolu_ask_write", "Write",
+		map[string]any{"file_path": "internal/config/overlay.go", "content": "package config\n\n// applyEnvOverlay merges config.<env>.toml over the base config. Keys present\n// in the overlay win; tables merge recursively, scalars and arrays replace.\nfunc applyEnvOverlay(base *Config, root, env string) (*Config, error) {\n\tif env == \"\" {\n\t\treturn base, nil\n\t}\n\tover, err := parseFile(filepath.Join(root, \"config.\"+env+\".toml\"))\n\tif errors.Is(err, fs.ErrNotExist) {\n\t\treturn base, nil\n\t}\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn mergeConfig(base, over), nil\n}\n"},
+		"File created successfully at: internal/config/overlay.go", 1000*time.Millisecond, false)
+	toolStep("msg_ask_impl_4c", "toolu_ask_test_1", "Bash",
+		map[string]any{"command": "cd internal/config && go test ./...", "description": "Run the config tests"},
+		"\u001b[2m$ go test ./...\u001b[0m\n\u001b[31m--- FAIL: TestApplyEnvOverlay\u001b[0m (0.00s)\n    \u001b[2moverlay_test.go:52:\u001b[0m [network].allowed_hosts: expected the overlay's 1 host, got 3 (merged instead of replaced)\n\u001b[31mFAIL\u001b[0m\texit=1", 1300*time.Millisecond, true)
+	streamThinking("msg_ask_impl_4d", "Arrays merged when they should replace - mergeConfig recurses into every value, including slices. Replace on a slice, recurse only on tables.", 1200*time.Millisecond)
+	toolStep("msg_ask_impl_4e", "toolu_ask_edit_2", "Edit",
+		map[string]any{"file_path": "internal/config/overlay.go", "old_string": "\t\tout[k] = mergeValue(base[k], v)", "new_string": "\t\tif bt, ok := base[k].(map[string]any); ok {\n\t\t\tif ot, ok := v.(map[string]any); ok {\n\t\t\t\tout[k] = mergeTable(bt, ot)\n\t\t\t\tcontinue\n\t\t\t}\n\t\t}\n\t\tout[k] = v"},
+		"Applied 1 edit to internal/config/overlay.go", 900*time.Millisecond, false)
+	toolStep("msg_ask_impl_4f", "toolu_ask_test_2", "Bash",
+		map[string]any{"command": "go test ./... && go vet ./...", "description": "Re-run the config tests"},
+		"\u001b[2m$ go test ./... && go vet ./...\u001b[0m\nok  \tgithub.com/trolleyman/hydra/internal/config\t0.031s", 1200*time.Millisecond, false)
+	toolStep("msg_ask_impl_4g", "toolu_ask_read_2", "Read",
+		map[string]any{"file_path": "docs/configuration.md", "offset": 120, "limit": 40},
+		"## Layering\n\nConfig is read from the project root. Nothing is layered today: the loader\nreads config.toml and stops.", 700*time.Millisecond, false)
+	toolStep("msg_ask_impl_4h", "toolu_ask_edit_3", "Edit",
+		map[string]any{"file_path": "docs/configuration.md", "old_string": "Nothing is layered today: the loader\nreads config.toml and stops.", "new_string": "config.<env>.toml is layered over config.toml when an\nenvironment is named; keys in the overlay win, tables merge, arrays replace."},
+		"Applied 1 edit to docs/configuration.md", 800*time.Millisecond, false)
+	streamText("msg_ask_impl_5", "That's the merge wired in, the array-replace bug fixed, and the doc updated. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
 	streamText("msg_ask_impl_6", simAskImplMarkdown, 70*time.Millisecond)
 
 	result, _ := json.Marshal(map[string]any{
-		"type": "result", "subtype": "success", "duration_ms": 9200, "total_cost_usd": 0.0361,
-		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 1820, "cache_read_input_tokens": 22400, "cache_creation_input_tokens": 980},
+		"type": "result", "subtype": "success", "duration_ms": 21400, "total_cost_usd": 0.0714,
+		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 3260, "cache_read_input_tokens": 41800, "cache_creation_input_tokens": 980},
 		"session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(result))
@@ -5077,22 +5193,56 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 				}
 				continue
 			}
-			// Extract the answers map the question card submitted.
+			// Extract the answers map (and any per-question notes) the question
+			// card submitted.
 			var payload struct {
 				Response struct {
 					UpdatedInput struct {
-						Answers map[string]string `json:"answers"`
+						Answers     map[string]string `json:"answers"`
+						Annotations map[string]struct {
+							Notes string `json:"notes"`
+						} `json:"annotations"`
 					} `json:"updatedInput"`
 				} `json:"response"`
 			}
 			_ = json.Unmarshal(msg.Response, &payload)
-			var parts []string
-			for q, a := range payload.Response.UpdatedInput.Answers {
-				parts = append(parts, fmt.Sprintf("%q=%q", q, a))
+			in := payload.Response.UpdatedInput
+			// Mirror the real CLI's result text: an unpicked question is
+			// "(no option selected)" rather than an empty value, a note trails
+			// the answer it qualifies, and any note at all switches the closing
+			// sentence to the one that tells the agent to read them carefully.
+			questions := make([]string, 0, len(in.Answers)+len(in.Annotations))
+			for q := range in.Answers {
+				questions = append(questions, q)
 			}
-			sort.Strings(parts)
+			for q := range in.Annotations {
+				if _, ok := in.Answers[q]; !ok {
+					questions = append(questions, q)
+				}
+			}
+			sort.Strings(questions)
+			var parts []string
+			noted := false
+			for _, q := range questions {
+				a, notes := in.Answers[q], in.Annotations[q].Notes
+				if a == "" && notes == "" {
+					continue
+				}
+				part := fmt.Sprintf("%q=(no option selected)", q)
+				if a != "" {
+					part = fmt.Sprintf("%q=%q", q, a)
+				}
+				if notes != "" {
+					part += " notes: " + notes
+					noted = true
+				}
+				parts = append(parts, part)
+			}
 			sendStatusUpdate(conn, "running")
 			resultText := fmt.Sprintf("Your questions have been answered: %s. You can now continue with these answers in mind.", strings.Join(parts, ", "))
+			if noted {
+				resultText = fmt.Sprintf("The user answered: %s. Read the answers carefully - they may request clarification, changes, or that you not proceed - and follow what they actually say.", strings.Join(parts, ", "))
+			}
 			toolResult, _ := json.Marshal(map[string]any{
 				"type": "user",
 				"message": map[string]any{"role": "user", "content": []map[string]any{
@@ -5123,6 +5273,186 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 			})
 			sendSimChatEvent(conn, string(userEv))
 			streamSimReply(conn, "sim-ask", fmt.Sprintf("msg_ask_reply_%d", turn), "Simulated reply: noted. The pending question card above stays answerable.")
+		}
+	}
+}
+
+// --- Simulated long history (agent-history) -----------------------------------
+
+// simAgentHistoryPrompt seeds the long-history demo agent. agent-chat is the
+// feature-rich transcript and agent-ask is the one that STREAMS; this one exists
+// for the cases that want a lot of conversation and no motion at all - scrolling
+// a long pane, step folding at scale, copy-as-markdown, per-agent scroll
+// restoration. It replays a finished conversation on attach and then sits
+// perfectly still.
+const simAgentHistoryPrompt = "Port the storage layer from hand-written SQL to sqlc, one table at a time."
+
+func simAgentHistory() api.AgentResponse {
+	createdAt := simNow().Add(-6 * time.Hour).Unix()
+	return api.AgentResponse{
+		Id:            "agent-history",
+		Title:         ptr("Port the storage layer to sqlc"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/sqlc-port"),
+		SessionPid:    1009,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentHistoryPrompt,
+		ChatMode:      ptr(true),
+		WorktreePath:  ptr("/repo/.hydra/local/worktrees/sqlc-port"),
+		Model:         ptr("claude-opus-4-8"),
+		AgentStatus: &api.AgentStatusInfo{
+			Status:    api.Finished,
+			Timestamp: simNow().Format(time.RFC3339),
+		},
+	}
+}
+
+// simHistoryTables drives the canned conversation: one turn per table, each
+// asked for by the user and answered with a run of tool calls. Deliberately
+// varied in shape - the step counts, the failing run and the silent turn are
+// what make it a fair test of how a long transcript reads.
+var simHistoryTables = []struct {
+	name    string
+	queries int
+	note    string
+}{
+	{"users", 9, "the upsert is the only one with a conflict clause"},
+	{"sessions", 6, "two of these join agents, so the generated row structs nest"},
+	{"agents", 14, "much the biggest, and the status filter is dynamic"},
+	{"projects", 5, "trivial - four selects and an insert"},
+	{"artifacts", 11, "the blob column wants []byte, not string"},
+	{"tests", 8, "the JUnit rollup is one query with a GROUP BY"},
+	{"reviews", 7, "nullable timestamps everywhere; sqlc gives sql.NullTime"},
+	{"approvals", 4, "short, but the enum column needs a type override"},
+}
+
+// simHistoryEvents builds the canned transcript: for each table a user request,
+// a thought, an opening paragraph, a run of tool calls (one of them failing,
+// once), a closing paragraph and a turn footer. Everything is derived from the
+// table above, so the whole conversation is deterministic - a screenshot of it
+// is stable, and it costs a few dozen lines rather than a thousand.
+func simHistoryEvents() (lines []string, thoughts map[string]int64) {
+	thoughts = map[string]int64{}
+	ev := func(v any) {
+		line, _ := json.Marshal(v)
+		lines = append(lines, string(line))
+	}
+	assistant := func(id string, content ...map[string]any) {
+		ev(map[string]any{"type": "assistant", "message": map[string]any{"id": id, "content": content}, "session_id": "sim-history"})
+	}
+	toolResult := func(useID, content string, failed bool) {
+		ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{
+			{"type": "tool_result", "tool_use_id": useID, "content": content, "is_error": failed},
+		}}})
+	}
+	ev(map[string]any{"type": "system", "subtype": "init", "session_id": "sim-history", "model": "claude-opus-4-8", "apiKeySource": "none"})
+	ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "text", "text": simAgentHistoryPrompt}}}})
+
+	for i, t := range simHistoryTables {
+		if i > 0 {
+			ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{
+				{"type": "text", "text": fmt.Sprintf("Good. Now do %s.", t.name)},
+			}}})
+		}
+		msg := fmt.Sprintf("msg_hist_%d", i)
+		thinkID := msg + "_think"
+		thoughts[thinkID] = int64(3000 + 1700*(i%5))
+		assistant(thinkID, map[string]any{"type": "thinking", "thinking": fmt.Sprintf(
+			"store/%s.go has %d queries; %s. I'll write the .sql file first, generate, then swap the callers over and run the package's tests.",
+			t.name, t.queries, t.note)})
+		assistant(msg+"_open", map[string]any{"type": "text", "text": fmt.Sprintf(
+			"Porting **%s** - %d queries. %s.",
+			t.name, t.queries, strings.ToUpper(t.note[:1])+t.note[1:])})
+
+		// The run of steps. Its length varies with the table so the folded counts
+		// in the transcript are not all the same number.
+		steps := []struct {
+			name   string
+			input  map[string]any
+			result string
+			failed bool
+		}{
+			{"Read", map[string]any{"file_path": fmt.Sprintf("internal/store/%s.go", t.name)}, fmt.Sprintf("// %d queries, hand-written\nfunc (s *Store) Get%s(ctx context.Context, id string) (*%s, error) {", t.queries, strings.ToUpper(t.name[:1])+t.name[1:], t.name), false},
+			{"Grep", map[string]any{"pattern": fmt.Sprintf("store\\.%s", t.name), "path": "internal", "output_mode": "files_with_matches"}, "internal/http/server.go\ninternal/heads/heads.go", false},
+			{"Write", map[string]any{"file_path": fmt.Sprintf("internal/db/query/%s.sql", t.name), "content": fmt.Sprintf("-- name: Get%s :one\nSELECT * FROM %s WHERE id = ? LIMIT 1;\n", strings.ToUpper(t.name[:1])+t.name[1:], t.name)}, fmt.Sprintf("File created successfully at: internal/db/query/%s.sql", t.name), false},
+			{"Bash", map[string]any{"command": "sqlc generate", "description": "Regenerate the typed queries"}, fmt.Sprintf("generated %d queries into internal/db/gen", t.queries), false},
+			{"Edit", map[string]any{"file_path": fmt.Sprintf("internal/store/%s.go", t.name), "old_string": "rows, err := s.db.QueryContext(ctx, q)", "new_string": fmt.Sprintf("rows, err := s.q.List%s(ctx)", strings.ToUpper(t.name[:1])+t.name[1:])}, fmt.Sprintf("Applied 1 edit to internal/store/%s.go", t.name), false},
+			{"Bash", map[string]any{"command": "go test ./internal/store/... ./internal/db/...", "description": "Run the storage tests"}, "ok  \tgithub.com/trolleyman/hydra/internal/store\t0.184s\nok  \tgithub.com/trolleyman/hydra/internal/db\t0.061s", false},
+		}
+		// A couple of turns do more, so the folded runs differ in size; the
+		// biggest table also hits a failure and recovers from it.
+		if t.queries > 8 {
+			steps = append(steps,
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Bash", map[string]any{"command": "go vet ./internal/db/...", "description": "Vet the generated package"}, fmt.Sprintf("internal/db/gen/%s.sql.go:41:2: composite literal uses unkeyed fields", t.name), true},
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Edit", map[string]any{"file_path": "sqlc.yaml", "old_string": "emit_empty_slices: false", "new_string": "emit_empty_slices: true\n    emit_result_struct_pointers: true"}, "Applied 1 edit to sqlc.yaml", false},
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Bash", map[string]any{"command": "sqlc generate && go vet ./internal/db/...", "description": "Regenerate and re-vet"}, "generated cleanly", false},
+			)
+		}
+		for j, s := range steps {
+			useID := fmt.Sprintf("toolu_hist_%d_%d", i, j)
+			assistant(fmt.Sprintf("%s_tool_%d", msg, j), map[string]any{"type": "tool_use", "id": useID, "name": s.name, "input": s.input})
+			toolResult(useID, s.result, s.failed)
+		}
+
+		assistant(msg+"_close", map[string]any{"type": "text", "text": fmt.Sprintf(
+			"`%s` is on sqlc: %d queries generated, the callers now take the typed rows, and both packages' tests pass. %s",
+			t.name, t.queries, map[bool]string{true: "The generator's unkeyed literals needed an `sqlc.yaml` tweak, which applies to every table from here on.", false: "Nothing else in the package touches raw SQL now."}[t.queries > 8])})
+		ev(map[string]any{
+			"type": "result", "subtype": "success",
+			"duration_ms":    int64(48000 + 9000*i),
+			"total_cost_usd": 0.08 + 0.02*float64(i),
+			"usage":          map[string]any{"input_tokens": 900 + 40*i, "output_tokens": 1400 + 120*i, "cache_read_input_tokens": 30000 + 2000*i},
+			"session_id":     "sim-history",
+		})
+	}
+	return lines, thoughts
+}
+
+// handleSimHistoryWS replays the long finished conversation and then does
+// nothing: no live stream, no working indicator, no timers. A message typed into
+// it still gets a short canned reply, so the composer is not a dead end.
+func handleSimHistoryWS(conn *safeConn) {
+	sendStatusUpdate(conn, "finished")
+	lines, thoughts := simHistoryEvents()
+	// Measured thinking durations first, as the daemon's backfill delivers them.
+	for id, ms := range thoughts {
+		sendSimThinking(conn, id, ms)
+	}
+	for _, line := range lines {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+	turn := 0
+	for {
+		msg, ok := readSimChatClientMsg(conn)
+		if !ok {
+			return
+		}
+		switch msg.Type {
+		case "user_message":
+			turn++
+			userEv, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": msg.Content}})
+			sendSimChatEvent(conn, string(userEv))
+			streamSimReply(conn, "sim-history", fmt.Sprintf("msg_hist_reply_%d", turn), "Simulated reply: the sqlc port is done for every table above.")
+		case "set_model":
+			sendSimUserText(conn, "sim-history", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
 		}
 	}
 }
@@ -5261,6 +5591,10 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 		handleSimWorkingWS(conn)
 		return
 	}
+	if agentID == "agent-history" && r.URL.Query().Get("shell") != "true" {
+		handleSimHistoryWS(conn)
+		return
+	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {
 		s.handleSimAskWS(conn)
 		return
@@ -5283,6 +5617,17 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 2/3: Preparing sandbox...\r\n"))
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Launching agent session...\r\n"))
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSimulated agent ready.\x1b[0m\r\n\r\n"))
+
+	// A bash shell tab also prints an OSC 8 hyperlink, so the terminal's "Open
+	// external link?" confirmation can be looked at without a live agent. It is
+	// deliberately a link whose LABEL disagrees with where it points, which is
+	// the hazard that dialog exists for. Only the shell tabs print it: an agent's
+	// own terminal is captured by the screenshot generator, and a shell tab has
+	// to be opened by hand, so no baseline transcript changes.
+	if r.URL.Query().Get("shell") == "true" {
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte(
+			"See \x1b]8;;https://docs.anthropic.com.cdn-assets-eu.net/agent-sdk\x1b\\docs.anthropic.com/agent-sdk\x1b]8;;\x1b\\ for the tool reference.\r\n\r\n"))
+	}
 
 	// 2. Transition to Running
 	sendStatusUpdate(conn, "running")

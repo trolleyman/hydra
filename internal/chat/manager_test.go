@@ -62,6 +62,35 @@ func TestManagerSeedsInitialPromptOnce(t *testing.T) {
 	}
 }
 
+// The CLI's internal placeholders reach the normalizer only through the
+// transcript, i.e. through the one-shot history import - which appends onto an
+// event log the live stream has already filled, so anything it finds that the
+// stream never carried lands at the TAIL of the conversation. The image-resize
+// notice is the one that bites: a mid-turn note about an image read minutes ago,
+// rendered as an "Injected context" card hanging off a finished answer. Nothing
+// should be recorded for any of them.
+func TestManagerDropsClaudeInternalPlaceholders(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
+	m.ObserveProviderLine("head", "claude", []byte(`{"type":"assistant","uuid":"u1","message":{"id":"m1","content":[{"type":"text","text":"done"}]}}`))
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"u2","message":{"role":"user","content":"[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]"},"isMeta":true}`))
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"u3","message":{"role":"user","content":[{"type":"text","text":"Continue from where you left off."}]},"isMeta":true}`))
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"assistant","uuid":"u4","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}`))
+	// A genuine injected context (a skill body) still gets through: the filter is
+	// for the CLI's own placeholders, not for isMeta in general.
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"u5","message":{"role":"user","content":"Base directory for this skill: /tmp/x"},"isMeta":true}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	page, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 2 || page[0].Type != "assistant_message" || page[1].Type != "context_message" {
+		t.Fatalf("events = %+v", page)
+	}
+}
+
 func TestManagerReconcilesClaudeUserEchoDurably(t *testing.T) {
 	root := t.TempDir()
 	resolve := func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" }

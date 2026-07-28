@@ -15,7 +15,14 @@ export interface Attachment {
   id: number
   filename: string
   path: string | null
+  /** Thumbnail source - set only for images, and so also the flag for "this chip
+   *  shows a picture rather than a file icon". */
   previewUrl?: string
+  /** The file's bytes, for ANY attachment: an object URL while it is only local,
+   *  the uploads blob endpoint once it has been submitted. This is what the
+   *  lightbox opens, which is why it exists separately from previewUrl - a .log or
+   *  a .zip has nothing to put in a thumbnail but is still worth opening. */
+  url?: string
   size: number
   uploading: boolean
   error?: string
