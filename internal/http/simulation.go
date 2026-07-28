@@ -2622,8 +2622,16 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// generation slot, so this is the state that used to be indistinguishable
 		// from the one above - spinner, climbing clock, no output. Both sides are
 		// waiting, so the card says so and names the clock as the wait.
+		//
+		// Every Name in this slice must be DISTINCT. A real agent's sets come from
+		// the [artifacts.<name>] config tables, which merge by name, so two sets
+		// can't share one - and the panel relies on that: it keys its cards by
+		// name so the cached-chrome skeleton card is reused by the live card that
+		// replaces it, with no remount (see displaySets in ArtifactsPanel.tsx).
+		// This one used to be a second "screenshots", which collided with
+		// simReadyChangedSet above and made React drop a card and warn.
 		{
-			Name:        "screenshots",
+			Name:        "icons",
 			Status:      api.ArtifactSetStatusGenerating,
 			StartedAt:   &startedAt,
 			LeftQueued:  ptr(2),

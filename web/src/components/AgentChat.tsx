@@ -79,7 +79,8 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatIsSerif } from '../lib/fontPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { approvalMatchesTool } from '../lib/approvalMatch'
@@ -1964,7 +1965,7 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
   )
 }
 
-function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
+function WebSearchOutput({ text }: { text: string }) {
   const parsed = (() => {
     const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
     if (!match) return { body: text, links: [] as { title: string; url: string }[] }
@@ -1979,7 +1980,7 @@ function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
     }
   })()
   return (
-    <div className={`space-y-2 break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+    <div className="space-y-2 break-words leading-relaxed chat-font">
       {parsed.links.length > 0 && (
         <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
           <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
@@ -2408,7 +2409,6 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 // frontmatter as a highlighted code box, and the body as normal markdown prose -
 // no line-number gutter.
 function MemoryPanel({ text }: { text: string }) {
-  const serif = useChatFontStore((s) => s.serif)
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
   const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
@@ -2426,7 +2426,7 @@ function MemoryPanel({ text }: { text: string }) {
           : <pre className={codeCls}>{yaml}</pre>
       )}
       {body && (
-        <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className="break-words leading-relaxed chat-font">
           <Markdown text={body} />
         </div>
       )}
@@ -2448,12 +2448,12 @@ function LabeledField({ label, children }: { label: string; children: ReactNode 
 // TaskToolFields renders a TaskCreate / TaskUpdate input as labeled fields -
 // subject and description as markdown prose - instead of raw JSON. A TaskUpdate's
 // id/status ride on a compact line above.
-function TaskToolFields({ input, serif }: { input: Record<string, unknown>; serif: boolean }) {
+function TaskToolFields({ input }: { input: Record<string, unknown> }) {
   const taskId = typeof input.taskId === 'string' || typeof input.taskId === 'number' ? String(input.taskId) : ''
   const status = typeof input.status === 'string' ? (input.status as string) : ''
   const subject = typeof input.subject === 'string' ? (input.subject as string) : ''
   const description = typeof input.description === 'string' ? (input.description as string) : ''
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {(taskId || status) && (
@@ -2496,7 +2496,7 @@ function gitAddSpecs(input: Record<string, unknown>): { path: string; lines: str
 // stated outright, because "which of my changes did that actually capture?" is
 // the question the JSON never answered: `git add -A` is the default, so the
 // interesting cases (a path list, or a pre-built index) have to be visible.
-function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: Record<string, unknown>; serif: boolean; worktree: string | null }) {
+function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<string, unknown>; worktree: string | null }) {
   const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
   const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
   const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
@@ -2531,7 +2531,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
             and the panel already frames it. Rendered as markdown with paragraph
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
-        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
           <Markdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
@@ -2636,7 +2636,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
               <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
                 <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
                 {sha(String(step.commit ?? ''))}
-                {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
+                {message && <span className="truncate text-stone-500 dark:text-stone-400 chat-font">{message}</span>}
               </span>,
             )
           })}
@@ -2689,14 +2689,12 @@ function AgentChip({
 // duplicates) said the same thing three times and buried the actual message.
 function SendMessageFields({
   input,
-  serif,
   recipientLabel,
   recipientId,
   recipientRunning,
   onOpenChat,
 }: {
   input: Record<string, unknown>
-  serif: boolean
   recipientLabel: string
   recipientId: string
   recipientRunning?: boolean
@@ -2711,7 +2709,7 @@ function SendMessageFields({
       ([key]) => !SEND_MESSAGE_ECHO_KEYS.has(key) && key !== 'to' && key !== 'summary' && key !== 'message' && !key.startsWith('_'),
     ),
   )
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {recipientId && (
@@ -2854,7 +2852,6 @@ const ToolCard = memo(function ToolCard({
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
-  const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
 	const visibleResult = item.result ?? item.runningOutput
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -3236,16 +3233,15 @@ const ToolCard = memo(function ToolCard({
               ) : isSendMessage && input ? (
                 <SendMessageFields
                   input={input}
-                  serif={serif}
                   recipientLabel={recipientName}
                   recipientId={messageTo}
                   recipientRunning={recipientRunning}
                   onOpenChat={openRecipientChat}
                 />
               ) : isTaskTool && input ? (
-                <TaskToolFields input={input} serif={serif} />
+                <TaskToolFields input={input} />
               ) : gitTool && input && !hideInput ? (
-                <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
+                <GitToolFields tool={gitTool} input={input} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
@@ -3298,11 +3294,11 @@ const ToolCard = memo(function ToolCard({
                     : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+							? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
-                          ? <WebSearchOutput text={renderedResult} serif={serif} />
+                          ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
-                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                          ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : fileViewSections
                           ? <FileViewSections sections={fileViewSections} />
                         : scriptSections
@@ -3582,7 +3578,6 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
 function SubagentTimeline({
   sub,
   worktree,
-  serif,
   skipId,
   links,
   // Whether this timeline may fold its own runs of steps. Off inside a folded
@@ -3594,7 +3589,6 @@ function SubagentTimeline({
 }: {
   sub: SubagentView
   worktree: string | null
-  serif: boolean
   skipId?: number
   links?: SubagentLinks
   fold?: boolean
@@ -3623,7 +3617,6 @@ function SubagentTimeline({
             sub={nested}
             tool={it}
             worktree={worktree}
-            serif={serif}
             links={links}
             onOpenChat={() => links.openSubView(nested.agentId)}
           />
@@ -3633,7 +3626,7 @@ function SubagentTimeline({
     }
     if (it.kind === 'assistant')
       return (
-        <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+        <div key={it.id} className="chat-leading-xs chat-font">
           <Markdown text={it.text} />
         </div>
       )
@@ -3796,7 +3789,7 @@ function reportSkipId(sub: SubagentView, report: SubReport | null): number | und
 
 // SubagentReport renders a sub-agent's final report (an error result as an error
 // panel), under a small "Report" heading.
-function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
+function SubagentReport({ report }: { report: SubReport }) {
   return (
     <div>
       <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -3805,7 +3798,7 @@ function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }
       {report.isError ? (
         <OutputPanel text={report.text} lang="" isError />
       ) : (
-        <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+        <div className="chat-leading-xs chat-font">
           <Markdown text={report.text} />
         </div>
       )}
@@ -3839,14 +3832,12 @@ function FinishedReportCard({
   label,
   desc,
   report,
-  serif,
   onOpenChat,
   openLabel,
 }: {
   label: string
   desc?: string
   report: SubReport | null
-  serif: boolean
   onOpenChat?: () => void
   openLabel?: string
 }) {
@@ -3881,7 +3872,7 @@ function FinishedReportCard({
           report.isError ? (
             <OutputPanel text={report.text} lang="" isError />
           ) : (
-            <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+            <div className="chat-leading-xs chat-font">
               <Markdown text={report.text} />
             </div>
           )
@@ -3906,7 +3897,6 @@ const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
   worktree,
-  serif,
   onOpenChat,
   finishedBadge,
   links,
@@ -3914,7 +3904,6 @@ const SubagentCard = memo(function SubagentCard({
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   onOpenChat?: () => void
   finishedBadge?: boolean
   links?: SubagentLinks
@@ -4010,7 +3999,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`break-words chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+              <div className="break-words chat-leading-xs chat-font">
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -4028,12 +4017,12 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+                  <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} />
                 </div>
               </Expandable>
             </div>
           )}
-          {report && <SubagentReport report={report} serif={serif} />}
+          {report && <SubagentReport report={report} />}
         </div>
       </Expandable>
     </div>
@@ -4048,13 +4037,11 @@ function SubagentChatView({
   sub,
   tool,
   worktree,
-  serif,
   links,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
@@ -4085,15 +4072,15 @@ function SubagentChatView({
           full view only - the folded SubagentCard keeps its labelled Prompt. */}
       {sub.prompt && (
         <div className="flex flex-col items-end gap-1">
-          <div className={`${USER_BUBBLE_CLASS} leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <div className={`${USER_BUBBLE_CLASS} leading-relaxed chat-font`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} fold />
+        <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} fold />
       </div>
-      {report && <SubagentReport report={report} serif={serif} />}
+      {report && <SubagentReport report={report} />}
       {/* whitespace-nowrap for the same reason as the main working line: the
           label swaps between "Working..." and the longer "Waiting on
           sub-agents...", and a wrap there would shift the mark. */}
@@ -6178,8 +6165,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const unreadKey = `${agentId}\0${projectId}`
   if (openedUnread.key !== unreadKey) setOpenedUnread({ key: unreadKey, unread: unreadNow })
   else if (openedUnread.unread == null && unreadNow != null) setOpenedUnread({ key: unreadKey, unread: unreadNow })
-  // Whether agent prose renders serif (item 9, the default) - a Browser setting.
-  const serif = useChatFontStore((s) => s.serif)
+  // Whether the chosen chat font (Settings -> Browser -> Fonts) is a serif. The
+  // family itself arrives through the .chat-font class; this only picks the
+  // serif TREATMENT - larger size, looser leading, real semibold - which reads
+  // better for a serif and wrong for a sans. Still threaded through the memo
+  // comparators below because it changes how every settled row renders.
+  const serif = useChatIsSerif()
   // Which head the tool cards below can answer parked approvals for. Null with no
   // project (nothing to POST a decision to), which just leaves the toast.
   const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
@@ -9598,7 +9589,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool': {
@@ -9607,7 +9598,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const sub = subByToolUse[item.toolUseId]
         if (sub)
           return (
-            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
@@ -9626,7 +9617,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 label={label}
                 desc={desc}
                 report={{ text: parsed.output!, isError: parsed.status !== undefined && parsed.status !== 'completed' }}
-                serif={serif}
                 onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
               />
             )
@@ -9662,7 +9652,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // another card renders this sub, the standalone copy is a duplicate.
         if (sub.parentAgentId) return null
         if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+        return <SubagentCard sub={sub} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question': {
         // Its control_request channel dies with the turn that raised it, and
@@ -9931,7 +9921,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         >
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
-            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
           <>
           {!replayDone && items.length === 0 && (
