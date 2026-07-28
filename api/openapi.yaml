@@ -4318,7 +4318,7 @@ components:
         format:
           type: string
           nullable: true
-          description: Report format parsed (junit | hydra | exit).
+          description: Report format parsed (junit | hydra | stdout | exit). Never set while running - which format a run settles with is only known once its report has been parsed.
         started_at:
           type: integer
           format: int64

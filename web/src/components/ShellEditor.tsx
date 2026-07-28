@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
-import hljs from '../lib/hljs'
+import { highlightHtml } from '../lib/highlightCore'
 import { ResizeHandle } from '../lib/ResizeHandle'
 
 function escapeHtml(s: string): string {
@@ -55,13 +55,7 @@ export function ShellEditor({
 
   const lines = useMemo(() => {
     const src = value ?? ''
-    let html: string
-    try {
-      html = hljs.highlight(src, { language: 'bash', ignoreIllegals: true }).value
-    } catch {
-      html = escapeHtml(src)
-    }
-    return splitHighlightedLines(html)
+    return splitHighlightedLines(highlightHtml(src, 'bash') ?? escapeHtml(src))
   }, [value])
 
   // Reserve room for the widest line number plus left/right breathing room. In

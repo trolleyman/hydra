@@ -691,8 +691,9 @@ func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ct := http.DetectContentType(data)
+	ct := blobContentType(filePath, data)
 	w.Header().Set("Content-Type", ct)
+	setBlobSecurityHeaders(w, ct)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(data)
 }
@@ -751,18 +752,23 @@ func (s *Server) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", http.DetectContentType(data))
+	ct := blobContentType(filePath, data)
+	w.Header().Set("Content-Type", ct)
+	setBlobSecurityHeaders(w, ct)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(data)
 }
 
 // serveWorktreeBlob serves a repo-relative file straight from an agent's worktree
 // directory. relPath has already been path.Clean'd and stripped of a leading
-// slash; the filepath.Rel guard rejects any path that still escapes the worktree
-// (e.g. "../secret"), so a crafted request can't read outside it.
+// slash; containedIn rejects any path that still escapes the worktree - both
+// lexically ("../secret") and through a SYMLINK the agent planted in its own
+// worktree, which os.Open would otherwise happily follow off to any file the
+// daemon can read. Refusing an out-of-worktree link also matches how the same
+// file reads at a ref: resolveSymlink already declines a target outside the repo.
 func (s *Server) serveWorktreeBlob(w http.ResponseWriter, r *http.Request, worktree, relPath string) {
 	full := filepath.Join(worktree, filepath.FromSlash(relPath))
-	if rel, err := filepath.Rel(worktree, full); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !containedIn(worktree, full) {
 		http.NotFound(w, r)
 		return
 	}
@@ -777,6 +783,7 @@ func (s *Server) serveWorktreeBlob(w http.ResponseWriter, r *http.Request, workt
 		http.NotFound(w, r)
 		return
 	}
+	setBlobFileHeaders(w, f, full)
 	w.Header().Set("Cache-Control", "no-store") // worktree contents change as the agent works
 	http.ServeContent(w, r, filepath.Base(full), info.ModTime(), f)
 }

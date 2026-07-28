@@ -40,13 +40,13 @@ import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import hljs from '../lib/hljs'
 import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
 import { formatBytes } from '../lib/formatBytes'
-import { highlightLines } from '../lib/highlightCore'
+import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { pasteMarkerText } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -1597,16 +1597,6 @@ function modelDisplayLabel(model: string): string {
   return model.replace(/^claude-/, '')
 }
 
-// highlightHtml returns highlight.js token HTML, or null for plain rendering.
-function highlightHtml(code: string, lang: string): string | null {
-  if (!code || !hljs.getLanguage(lang)) return null
-  try {
-    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-  } catch {
-    return null
-  }
-}
-
 // useDelayedUnmount keeps collapsed disclosure content mounted just long
 // enough for the closing height animation to play, then drops it from the
 // tree (so a long conversation isn't paying for every collapsed tool output).
@@ -2503,6 +2493,10 @@ const ToolCard = memo(function ToolCard({
   // old_string/new_string side by side. Both syntax-highlight by the target
   // file's extension.
   const filePath = typeof input?.file_path === 'string' ? (input.file_path as string) : ''
+  // A tool's image output is laid out at its logical size. A data-URL image
+  // carries no name, so the density hint comes from the path that produced it
+  // (shot@2x.png) - see lib/imageDensity.
+  const imageDensity = densityFromPath(readPath || filePath)
   const isWrite = item.name === 'Write' && typeof input?.content === 'string'
   const isEdit = item.name === 'Edit' && typeof input?.old_string === 'string' && typeof input?.new_string === 'string'
   const fileLang = isWrite || isEdit ? langFromPath(filePath) : ''
@@ -2735,21 +2729,30 @@ const ToolCard = memo(function ToolCard({
                       {item.resultImages.map((src, i) => {
                         // width/height attrs (from the eager decode) + h-auto:
                         // layout reserves the image's aspect box before the
-                        // browser paints the pixels - see useImageDims.
+                        // browser paints the pixels - see useImageDims. The size
+                        // is LOGICAL (physical px / the @2x density in the read
+                        // path), so a 2x capture lays out like a 1x one, sharper.
                         const dims = imageDims.get(src)
+                        const logical = dims && logicalSize(dims, imageDensity)
                         return (
                           <img
                             key={i}
                             src={src}
-                            width={dims?.w}
-                            height={dims?.h}
+                            width={logical?.w}
+                            height={logical?.h}
                             alt="Tool output image"
                             onClick={() => setImgLightbox(i)}
+                            // A ring, NOT a border: with border-box sizing (the
+                            // Tailwind default) a 1px border eats 2px out of the
+                            // content box the width attr set, so a 420px shot was
+                            // resampled into 418x199.047 - a fractional rescale
+                            // that softens every pixel. A ring is a box-shadow
+                            // and costs no layout, so the image draws 1:1.
                             // min-h while the size is still unknown (a slow
                             // url-source image opened before the eager decode
                             // finished): the open measures a visible loading
                             // box instead of a sliver.
-                            className={`max-w-full h-auto rounded-md border border-stone-200 dark:border-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
+                            className={`max-w-full h-auto rounded-md ring-1 ring-stone-200 dark:ring-white/[0.08] cursor-zoom-in ${dims ? '' : 'min-h-32 w-full'}`}
                           />
                         )
                       })}
@@ -2780,7 +2783,7 @@ const ToolCard = memo(function ToolCard({
           full-size in the shared lightbox, like an attachment image. */}
       {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
         <ImageLightbox
-          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0 }))}
+          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
@@ -4931,9 +4934,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
   )
-  const chatLinkCtx = projectId
-    ? { projectId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
-    : undefined
+  // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
+  // would re-parse every rendered message on every keystroke in the composer.
+  // agentId lets a markdown image resolve against this head's files.
+  const chatLinkCtx = useMemo(
+    () =>
+      projectId
+        ? { projectId, agentId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+        : undefined,
+    [projectId, agentId, branchName, worktreePath],
+  )
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value

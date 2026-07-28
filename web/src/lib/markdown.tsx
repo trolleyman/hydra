@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react'
-import hljs from './hljs'
+import { highlightHtml } from './highlightCore'
 
 // Simple inline-markdown support. We deliberately do NOT pull in a full
 // markdown library: the goal is to highlight `code` spans, *italic* / **bold** /
@@ -209,13 +209,13 @@ const CODEBLOCK_CLASS =
 // recognised language, or null to fall back to plain (uncoloured) monospace text.
 // Exported so the react-markdown renderer (Markdown.tsx) shares the one
 // highlighter rather than pulling in a second (rehype-highlight/lowlight).
+//
+// The work itself lives in lib/highlightCore (which also serves the diff viewer
+// and the highlight worker), so a ```bash block gets the same embedded-language
+// treatment - heredoc bodies, `python3 -c "..."` - as everywhere else.
 export function highlightCode(code: string, lang: string): string | null {
-  if (!code || !lang || !hljs.getLanguage(lang)) return null
-  try {
-    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-  } catch {
-    return null
-  }
+  if (!lang) return null
+  return highlightHtml(code, lang)
 }
 
 export interface RenderMarkdownOptions {

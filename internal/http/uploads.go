@@ -130,8 +130,9 @@ func (s *Server) HandleUploadBlob(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// http.ServeContent infers the Content-Type from the extension (and content
-	// sniffing) and handles range/conditional requests.
+	// setBlobFileHeaders decides the Content-Type (ServeContent leaves a set one
+	// alone); ServeContent handles range/conditional requests.
+	setBlobFileHeaders(w, f, name)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }

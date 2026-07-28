@@ -23,6 +23,7 @@ import { buildRepoSplat } from '../lib/repoSplat'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
 import { AnsiText } from './AnsiText'
+import { ElapsedTime } from './ElapsedTime'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -538,28 +539,33 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         {runner.status}
       </span>
       <Summary runner={runner} />
+      {/* Format + duration, right-aligned against the actions cluster. Inside the
+          collapse button (rather than beside it) so the whole header row stays
+          one click target. */}
+      <RunnerMeta runner={runner} />
     </>
   )
 
   const actions = (
     <>
-      {/* Show/hide the build log. Available whenever there's a log to show - even
-          on failure, so an auto-opened build-failure log can be hidden again. Only
-          suppressed while running, where it streams live and there's nothing to
-          toggle. Tinted blue while open. */}
-      {hasLog && !running && (
-        <Tooltip content={buildLogOpen ? 'Hide build log' : 'Show build log'}>
-          <button
-            onClick={toggleBuildLog}
-            aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
-            className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              buildLogOpen ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300' : MELT_BTN
-            }`}
-          >
-            <ScrollText className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
-      )}
+      {/* Show/hide the build log. Available whenever there's a log to toggle - even
+          on failure, so an auto-opened build-failure log can be hidden again. It is
+          always RENDERED, just disabled while the run is in flight (the log streams
+          live below, so there's nothing to toggle) or when a settled run kept no
+          log: the actions cluster then keeps its width, instead of the re-run button
+          sliding sideways the instant a run finishes. Tinted blue while open. */}
+      <Tooltip content={running ? 'Build log - streaming live below' : hasLog ? (buildLogOpen ? 'Hide build log' : 'Show build log') : 'No build log for this run'}>
+        <button
+          onClick={toggleBuildLog}
+          disabled={running || !hasLog}
+          aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+          className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default ${
+            buildLogOpen ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300' : MELT_BTN
+          }`}
+        >
+          <ScrollText className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
       {/* Re-run this runner: busts the cached verdict and runs it again. Styled
           like the artifact regenerate button (single - tests are single-sided, so
           there's no before/after side to re-run separately). */}
@@ -568,7 +574,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
           onClick={onRefresh}
           disabled={running}
           aria-label="Re-run this test runner"
-          className={`h-7 px-2 inline-flex items-center justify-center rounded-md disabled:opacity-50 ${MELT_BTN}`}
+          className={`h-7 px-2 inline-flex items-center justify-center rounded-md disabled:opacity-50 disabled:cursor-default ${MELT_BTN}`}
         >
           {/* Spins while the run is in flight (a fresh re-run flips the card to
               running immediately via the optimistic update). */}
@@ -770,9 +776,10 @@ function liveDenominator(runner: TestRunResult): number {
 function Summary({ runner }: { runner: TestRunResult }) {
   const denom = liveDenominator(runner)
   // items-center (not items-baseline): the header height must not depend on the
-  // summary's contents, or it grows by a pixel when a settled run adds its mono
-  // `. 4.2s . junit` suffix - a visible layout jump the moment the loading bar
-  // finishes. Centering pins every child to the row's natural height.
+  // summary's contents, or it grows by a pixel when a settled run swaps in its
+  // mono `junit . 4.2s` column (see RunnerMeta) - a visible layout jump the
+  // moment the loading bar finishes. Centering pins every child to the row's
+  // natural height.
   return (
     <span className="flex items-center gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
@@ -810,10 +817,35 @@ function Summary({ runner }: { runner: TestRunResult }) {
           {runner.skipped}
         </span>
       ) : null}
-      {runner.duration_ms != null && runner.duration_ms > 0 ? (
-        <span className="font-mono text-xs text-gray-400">· {(runner.duration_ms / 1000).toFixed(1)}s</span>
-      ) : null}
-      {runner.format ? <span className="font-mono text-xs text-gray-400">· {runner.format}</span> : null}
+    </span>
+  )
+}
+
+// RunnerMeta is the card header's right-hand column: the run's report format and
+// its duration, mono, hugging the actions cluster (ml-auto pushes it off the
+// counts, which stay left). The duration is the RIGHTMOST field and the one
+// field a running card also has - the elapsed seconds ticking up from
+// started_at, which become the exact wall-clock when the run settles - so the
+// clock never moves sideways as a run finishes; the format simply appears to
+// its left. There is deliberately no format while running: which format a run
+// settles with (junit/hydra/stdout, or "exit" when it produces no report at all)
+// is only known once that report has been parsed, so there is nothing honest to
+// show until then.
+function RunnerMeta({ runner }: { runner: TestRunResult }) {
+  const running = runner.status === 'running'
+  const settled = runner.duration_ms != null && runner.duration_ms > 0
+  const format = !running && runner.format ? runner.format : null
+  const time = settled
+    ? `${((runner.duration_ms ?? 0) / 1000).toFixed(1)}s`
+    : running && runner.started_at
+      ? <ElapsedTime startedAt={runner.started_at} />
+      : null
+  if (!format && !time) return null
+  return (
+    <span className="ml-auto pl-2 shrink-0 font-mono text-xs text-gray-400">
+      {format}
+      {format && time ? ' · ' : null}
+      {time}
     </span>
   )
 }

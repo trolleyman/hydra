@@ -178,9 +178,16 @@ func runSimulationServer() error {
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
 
-	// Persisted build log behind the artifacts "Show build log" toggle (mirrors
-	// the real server's non-OpenAPI route), so that toggle can be screenshotted.
+	// Images an agent embedded in a chat message by local path (mirrors the real
+	// server's non-OpenAPI route), so the inline-image rendering can be demoed.
+	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
+
+	// Persisted build logs behind the artifacts / tests "Show build log" toggles
+	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
+	// screenshotted - and so a settled test card's log button is live, as it is
+	// against a real project.
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
+	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 
 	// Auth status (mirrors the real server's non-OpenAPI route): the sim is
 	// always local/authenticated. Without it every page load logs a 404 in the
