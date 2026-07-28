@@ -132,7 +132,10 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
               ? <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>{withBranchPills(toast.message as string)}</p>
               : toast.message}
             {toast.code && (
-              <div className={`overflow-hidden bg-gray-100 dark:bg-gray-900/60 ${size.codeWrap}`}>
+              // w-fit: the block hugs its content instead of stretching to the
+              // toast's width. A short value (a branch name, a path) otherwise
+              // trailed a band of empty tint out to the right edge.
+              <div className={`w-fit max-w-full overflow-hidden bg-gray-100 dark:bg-gray-900/60 ${size.codeWrap}`}>
                 {toast.codeLang && (
                   <div className={`pt-1.5 text-[10px] font-mono tracking-wide text-gray-400 dark:text-gray-500 ${toast.compact ? 'px-2' : 'px-2.5'}`}>
                     {toast.codeLang}

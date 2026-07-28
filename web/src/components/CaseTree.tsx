@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, type LinkProps } from '@tanstack/react-router'
-import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, MessageSquareWarning, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
@@ -504,7 +504,6 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
               text={c.message ?? ''}
               title="Copy test output"
               what={c.status === 'skipped' ? 'skip reason' : 'test error'}
-              idle={MessageSquareWarning}
             />
             {/* Asking the agent to fix a SKIP reason is nonsense - the case never
                 ran and there's no failure to chase. */}

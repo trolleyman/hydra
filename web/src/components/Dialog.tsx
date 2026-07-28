@@ -4,6 +4,7 @@ import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import { BranchPill } from './BranchPill'
+import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -271,11 +272,19 @@ function SendPromptPanel({
             <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{description}</p>
           </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <DialogSectionLabel>Message</DialogSectionLabel>
-          <pre className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-[11.5px] leading-relaxed font-mono text-gray-700 dark:text-[#8b94a6] whitespace-pre-wrap break-words">
-            {details?.prompt ?? ''}
-          </pre>
+        <div>
+          {/* mb-1 (replacing the label's default mb-2) pulls the caption down
+              onto the panel it names - the default gap reads as a separation
+              once what follows is a bordered block. */}
+          <DialogSectionLabel className="mb-1">Message</DialogSectionLabel>
+          {/* Rendered as markdown, not a mono dump: this is how the message will
+              look in the chat once it is sent, so the confirmation should show
+              it that way. The output is fenced in the source, so it still lands
+              as a code block - the surrounding prose just reads as prose. */}
+          <Markdown
+            text={details?.prompt ?? ''}
+            className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-[13px] text-gray-700 dark:text-[#8b94a6]"
+          />
         </div>
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
