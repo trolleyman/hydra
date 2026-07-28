@@ -1767,6 +1767,19 @@ func Clean() error {
 		return errtrace.Wrap(fmt.Errorf("failed to remove web/test-results directory: %w", err))
 	}
 
+	// The gitignored root binary from a manual `go build -o hydra .`. Mage itself
+	// builds to .mage/, so this is only ever hand-made - but it is still stale build
+	// output, and one left on PATH-adjacent `./hydra` is a confusing thing to run.
+	// Only a regular file is removed, so a directory that happens to be named `hydra`
+	// is never touched.
+	for _, name := range []string{"hydra", "hydra.exe"} {
+		if info, err := os.Lstat(name); err == nil && info.Mode().IsRegular() {
+			if err := os.Remove(name); err != nil {
+				return errtrace.Wrap(fmt.Errorf("failed to remove %s binary: %w", name, err))
+			}
+		}
+	}
+
 	// Deliberately NOT removed:
 	//   .hydra/local/* - runtime state, not build output: live head worktrees, the DB,
 	//     chat events, and the agent caches (captured gemini system prompts, the claude
