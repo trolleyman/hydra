@@ -123,6 +123,10 @@ export function SettingsPopover({
     <div ref={anchorRef} className="relative inline-flex">
       <Tooltip content={label}>
         <button
+          // Explicitly type="button": this cog renders inside SpawnForm's
+          // <form>, where a bare <button> defaults to type="submit" - opening
+          // the spawn options would submit the form and spawn the head.
+          type="button"
           onClick={() => setOpen((o) => { const next = !o; if (next) onOpen?.(); return next })}
           aria-label={label}
           aria-haspopup="true"
