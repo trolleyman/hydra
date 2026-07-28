@@ -2,6 +2,7 @@ import React, { Fragment } from 'react'
 import { Server, SquareTerminal, Globe, Network, Shield, Check, X, TriangleAlert } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
+import { HostName, UrlText } from './HostName'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { AgentNameLink } from './AgentNameLink'
 import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
@@ -119,9 +120,9 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
       return <>An agent wants to run <ChipClause><Chip><ServerName>{server}</ServerName> <span className="px-0.5 text-gray-400 dark:text-gray-500">▸</span> {tool}</Chip>.</ChipClause></>
     }
     case 'webfetch':
-      return <>An agent wants to fetch from <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
+      return <>An agent wants to fetch from <ChipClause><Chip><HostName host={data.target} /></Chip>.</ChipClause></>
     case 'egress':
-      return <>An agent wants to connect to <ChipClause><Chip>{data.target}</Chip>,</ChipClause> which isn&rsquo;t on its network allow-list.</>
+      return <>An agent wants to connect to <ChipClause><Chip><HostName host={data.target} /></Chip>,</ChipClause> which isn&rsquo;t on its network allow-list.</>
     case 'tool':
       return <>An agent wants to use <ChipClause><Chip>{data.target}</Chip>,</ChipClause> a tool Hydra&rsquo;s security gate doesn&rsquo;t recognize.</>
     case 'host_command':
@@ -191,7 +192,7 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   if (data.kind === 'webfetch' && data.url) {
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[12px] break-all text-gray-600 dark:text-gray-300">
-        {stripScheme(data.url)}
+        <UrlText url={stripScheme(data.url)} />
       </div>
     )
   }
@@ -353,14 +354,19 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'mcp' && (
             <Caption icon={<Shield className="w-3 h-3" />}>You&rsquo;ll still approve individual tools the first time the agent calls them.</Caption>
           )}
+          {/* The network captions warn rather than label: each one is there to say
+              that Allow grants MORE than the line above it asked for - the whole
+              host, not this one URL. Repeating the card's own Globe / Network mark
+              made that read as a restatement of the ask. The alert glyph is the
+              same one the host_command caption wears, for the same job. */}
           {data.kind === 'webfetch' && (
-            <Caption icon={<Globe className="w-3 h-3" />}>
-              Allow trusts the whole host for the rest of this session - every request to <span className="font-mono">{data.target}</span>, including POSTs - not just this URL.
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
+              Allow trusts the whole host for the rest of this session - every request to <span className="font-mono"><HostName host={data.target} /></span>, including POSTs - not just this URL.
             </Caption>
           )}
           {data.kind === 'egress' && (
-            <Caption icon={<Network className="w-3 h-3" />}>
-              Allow opens <span className="font-mono">{data.target}</span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
+              Allow opens <span className="font-mono"><HostName host={data.target} /></span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
             </Caption>
           )}
           {data.kind === 'tool' && (
