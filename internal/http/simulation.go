@@ -3626,9 +3626,17 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_img","content":[{"type":"tool_use","id":"toolu_sim_img","name":"Read","input":{"file_path":"web/scripts/screenshots/out/agent-dark.png"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_img","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + simChatImageB64 + `"}}]}]}}`,
 	// An Edit tool call: its input panel shows unlabelled (item 14, no "Input"
-	// header).
+	// header), rendered as a unified diff. This one's result carries the CLI's
+	// structuredPatch, so the card shows the file's real line numbers and the
+	// context lines around the edit.
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]},"tool_use_result":{"filePath":"internal/artifacts/upload.go","oldString":"return u.put(ctx, key, r)","newString":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}","replaceAll":false,"structuredPatch":[{"oldStart":86,"oldLines":4,"newStart":86,"newLines":7,"lines":[" func (u *Uploader) Upload(ctx context.Context, key string, r io.Reader) error {"," \tvar err error","-return u.put(ctx, key, r)","+for attempt := 0; attempt < maxAttempts; attempt++ {","+\tif err = u.put(ctx, key, r); err == nil { return nil }","+\tsleepBackoff(attempt)","+}"," }"]}]}}`,
+	// A second Edit whose result carries NO patch (an older CLI, or the call
+	// still running): the card falls back to diffing old_string against
+	// new_string, so shared lines still read as context - but with no gutter,
+	// since a fragment cannot say where in the file it sits.
+	`{"type":"assistant","message":{"id":"msg_sim_edit2","content":[{"type":"tool_use","id":"toolu_sim_edit2","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"// maxAttempts bounds the retry loop.\nconst maxAttempts = 3\n\nvar errGaveUp = errors.New(\"upload: gave up\")","new_string":"// maxAttempts bounds the retry loop (three tries, jittered backoff).\nconst maxAttempts = 5\n\nvar errGaveUp = errors.New(\"upload: gave up\")"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit2","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
 	// A Write tool call: its content renders as a numbered, syntax-highlighted
 	// code block (like a Read), not raw JSON.
 	`{"type":"assistant","timestamp":"2026-07-09T18:01:00.000Z","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,
@@ -3767,7 +3775,26 @@ var simChatEvents = []string{
 	// the no-op cd, splits the chain, keeps the subshell on one line, and leaves
 	// the heredoc body exactly as written (semicolons and all).
 	`{"type":"assistant","message":{"id":"msg_sim_heredoc","content":[{"type":"tool_use","id":"toolu_sim_heredoc","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
+	// `cwd` on the RESULT entry is where the CLI says the shell was left - the
+	// chat prefers it over working the directory out from the commands.
+	`{"type":"user","cwd":"/repo/.hydra/local/worktrees/feat-uploader-retry/web","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
+	// The command after it: the shell is STILL in web/ (one shell per session),
+	// which is why this runs a bare `bun test` - so the card shows the tracked
+	// `cd web` above it. Without that line the command reads as if it ran at the
+	// worktree root, where it would not work at all.
+	`{"type":"assistant","message":{"id":"msg_sim_cwd","content":[{"type":"tool_use","id":"toolu_sim_cwd","name":"Bash","input":{"command":"bun test src/lib/upload.test.ts","description":"Run the uploader tests"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_cwd","content":" 12 pass\n  0 fail"}]}}`,
+	// A Bash call that is really a Read: the card takes the Read shape (file +
+	// "lines 40-53" in the header) and renders the output as numbered, Go-
+	// highlighted source rather than anonymous terminal text - see
+	// web/src/lib/fileViewCommand.ts.
+	`{"type":"assistant","message":{"id":"msg_sim_sed","content":[{"type":"tool_use","id":"toolu_sim_sed","name":"Bash","input":{"command":"sed -n 40,53p internal/chat/claude.go"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sed","content":"type claudeMessage struct {\n\tType    string          ` + "`json:\\\"type\\\"`" + `\n\tSubtype string          ` + "`json:\\\"subtype,omitempty\\\"`" + `\n\tMessage json.RawMessage ` + "`json:\\\"message,omitempty\\\"`" + `\n\tUsage   json.RawMessage ` + "`json:\\\"usage,omitempty\\\"`" + `\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"}]}}`,
+	// Two reads in one call, separated by the `echo` marker agents use to tell
+	// them apart. The card splits the output back at that marker and gives each
+	// file its own numbered block.
+	`{"type":"assistant","message":{"id":"msg_sim_sed2","content":[{"type":"tool_use","id":"toolu_sim_sed2","name":"Bash","input":{"command":"sed -n 1,4p web/src/lib/lineRange.ts; echo '--- 8< ---'; sed -n 10,16p web/src/lib/lineRange.ts"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sed2","content":"// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- 8< ---\nexport function parseLineRange(hash: string): LineRange | null {\n  const m = /^#?L(\\d+)(?:-L?(\\d+))?/.exec(hash || '')\n  if (!m) return null\n  const a = parseInt(m[1], 10)\n  const b = m[2] ? parseInt(m[2], 10) : a\n  return { start: Math.min(a, b), end: Math.max(a, b) }\n}"}]}}`,
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,

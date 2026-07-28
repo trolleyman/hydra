@@ -159,3 +159,55 @@ func TestOneLine(t *testing.T) {
 		t.Errorf("blank text should render nothing, got %q", got)
 	}
 }
+
+// The run ops must be answered like every other request - and, with no test
+// manager wired, must say so rather than silently doing nothing.
+func TestDrainReviewRequestsAnswersRunOps(t *testing.T) {
+	projectRoot := t.TempDir()
+	store, err := db.Open(projectRoot)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := store.CreateAgent(&db.Agent{ID: "head", ProjectPath: projectRoot}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	dir := paths.GetReviewReqDir(projectRoot, "head")
+	for id, op := range map[string]reviewq.Op{"r1": reviewq.OpRunTests, "r2": reviewq.OpRunArtifacts} {
+		if err := reviewq.WriteRequest(dir, reviewq.Request{ReqID: id, TS: "t", Op: op}); err != nil {
+			t.Fatalf("write %s: %v", id, err)
+		}
+	}
+
+	(&Server{DB: store}).drainReviewRequests(context.Background(), projectRoot)
+
+	for _, id := range []string{"r1", "r2"} {
+		res, ok, err := reviewq.ReadResult(dir, id)
+		if err != nil || !ok {
+			t.Fatalf("%s: no result written (ok=%v err=%v)", id, ok, err)
+		}
+		if !strings.Contains(res.Message, "not available") {
+			t.Errorf("%s: want an explanation that nothing could run, got %q", id, res.Message)
+		}
+	}
+}
+
+// startedText is the agent's only account of what a run call did, so it must
+// separate what was kicked off from what was declined, and always point at
+// polling rather than at calling again.
+func TestStartedText(t *testing.T) {
+	got := startedText("test runner", []string{"unit"}, []string{"e2e (already running)"})
+	for _, want := range []string{"Started 1 test runner(s): unit", "get_head_status", "do NOT call this again", "Left alone: e2e (already running)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("startedText = %q, missing %q", got, want)
+		}
+	}
+	// Nothing started and nothing declined is a real outcome, not an empty string.
+	if got := startedText("artifact", nil, nil); got != "Nothing to do." {
+		t.Errorf("empty startedText = %q", got)
+	}
+	// Everything declined: no "Started" line at all, so the agent can't read it as
+	// having kicked something off.
+	if got := startedText("test runner", nil, []string{"unit (just ran - it is passing)"}); strings.Contains(got, "Started") {
+		t.Errorf("all-declined text should not claim a start: %q", got)
+	}
+}

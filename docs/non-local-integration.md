@@ -234,6 +234,8 @@ linked or not (`internal/http/head_status.go` renders them):
   state, and the project's supervised services.
 - `get_test_logs` - the tail of one runner's captured output (default 200 lines,
   cap 2000), named by runner.
+- `run_tests` / `generate_artifacts` - discard the cached verdict/output for the
+  branch tip and start a fresh run.
 
 They exist because an agent could run its own test command but could not see
 **the thing that actually gates its merge**: the daemon's cached per-runner
@@ -244,9 +246,23 @@ gate would be worse than no verdict.
 
 Design notes worth keeping:
 
-- **Read-only by construction.** Every lookup is a `Peek` (`tests.Manager.Peek` /
-  `PeekCases`, and a new `artifacts.Manager.Peek`), so a status call never starts
-  a run or a generation. A status call that causes the thing it reports is a trap.
+- **Reading never runs anything.** Every lookup is a `Peek`
+  (`tests.Manager.Peek` / `PeekCases`, and a new `artifacts.Manager.Peek`), so a
+  status call never starts a run or a generation - a status call that causes the
+  thing it reports is a trap. Starting work is a separate, explicit tool.
+- **`run_tests` exists because the agent cannot reproduce the gate.** Hydra's
+  runner executes in a separate checkout with the project's real
+  `[tests.<name>]` command, possibly `unsafe_host`, possibly needing egress the
+  head does not have - so "make the gate re-evaluate" is genuinely not something
+  a head can do with its own shell. It invalidates the branch-tip entry and calls
+  `Get`, which returns as soon as the run is queued: an agent must never hold a
+  tool call open for a suite's runtime, so it polls `get_head_status` instead.
+  This is the only place an agent spends the user's CPU, and it is bounded twice
+  over - a run already in flight is reused rather than restarted (both managers'
+  `Invalidate` no-op while generating), and one that settled inside
+  `runCooldown` is reported rather than repeated, which is what stops a
+  finish-then-immediately-rerun loop. `generate_artifacts` is the same shape;
+  its payoff is a UI head regenerating its screenshots and then reading them.
 - **Split, but the summary must stand alone.** The common call stays cheap and
   only a real failure pays for a log - yet a status that just said "FAILING" and
   pointed at another tool would make the split a tax, not a saving. So the

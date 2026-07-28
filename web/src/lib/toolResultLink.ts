@@ -10,10 +10,13 @@
 //
 // A ToolResultLink is the connection-scoped bridge: `known` is every tool_use
 // id a card was built for, `orphans` the results still waiting for theirs.
+import type { EditHunk } from './editDiff'
 
 // `raw` is the provider's own tool_result block, carried alongside the parsed
 // text so a card built by a later page still gets a truthful Raw panel.
-export type OrphanResult = { result: string; isError: boolean; images: string[]; raw?: unknown }
+// `editPatch` is an Edit result's structured patch (see lib/editDiff), which
+// rides with the result rather than the call.
+export type OrphanResult = { result: string; isError: boolean; images: string[]; raw?: unknown; editPatch?: EditHunk[] | null }
 
 export type ToolResultLink = { known: Set<string>; orphans: Map<string, OrphanResult> }
 
@@ -58,5 +61,6 @@ export function claimOrphanResult<T extends { kind: string; toolUseId?: string }
     isError: orphan.isError,
     resultImages: orphan.images.length ? orphan.images : undefined,
     rawResult: orphan.raw,
+    editPatch: orphan.editPatch ?? undefined,
   }
 }

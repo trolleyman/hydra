@@ -56,6 +56,11 @@ export const StorageKeys = {
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
   pasteMarkers: 'hydra-paste-markers',
+  // '0' when the user turned OFF auto-pairing in the composers: typing an opener
+  // (` ( [ { " ') inserts its closer, a third backtick opens a fenced block, and
+  // a mark typed over a selection wraps it. Absent/'1' = on (the default). See
+  // lib/composerPrefs.ts + lib/autoPair.ts.
+  autoPair: 'hydra-auto-pair',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
   // text. Default (absent) = on: incoming token bursts are revealed at a steady
   // per-frame rate so the text reads as continuous typing rather than landing in
