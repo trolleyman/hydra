@@ -30,9 +30,19 @@ a trusted cert (Tailscale / a real CA / a locally-installed CA), not self-signed
 - Binding a non-loopback address is refused unless an auth key is set:
   `mage deploy:setup` writes one to `.hydra/deploy.toml` (gitignored), and
   `mage prod` / `mage devExpose` bind `0.0.0.0:<port>` with that key required.
-- **Localhost is always trusted.** The auth gate keys off the request's remote
-  address, so any request arriving from `127.0.0.1` is treated as authenticated.
-  This matters when a TLS terminator runs on the same box (below).
+- **Localhost is trusted by default.** The auth gate keys off the request's
+  remote address, so any request arriving from `127.0.0.1` is treated as
+  authenticated. This matters when a TLS terminator runs on the same box (below).
+- **`require_local_auth = true` withdraws that exemption.** Set it in
+  `.hydra/deploy.toml` (or answer yes to the prompt in `mage deploy:setup`) and
+  every TCP client must present the key, localhost included - the local browser
+  gets the same login screen, worded for a local connection. Use it whenever
+  something on this host proxies outside traffic in from `127.0.0.1`, since
+  otherwise those requests are indistinguishable from a local browser.
+  The daemon's unix control socket is **not** gated by it: the `hydra` CLI and
+  the in-sandbox agent tools go through the socket, which is already 0600, and
+  gating it would break them. A `require_local_auth` with no `auth_key` is inert
+  (auth stays off) and logs a warning at startup.
 
 ## Options
 
@@ -69,10 +79,13 @@ Prerequisites: install Tailscale and `tailscale up` on the host, and enable
 HTTPS certs for your tailnet in the admin console (DNS -> HTTPS).
 
 **Auth nuance.** `tailscale serve` proxies to Hydra from `127.0.0.1`, so every
-request looks like localhost and Hydra enforces no password. For a solo tailnet
-(just your own devices) that is exactly right - tailnet membership *is* the auth.
-If your tailnet has other people, gate access with Tailscale ACLs on this node,
-because Hydra can't tell tailnet users apart through the localhost proxy.
+request looks like localhost and Hydra enforces no password by default. For a
+solo tailnet (just your own devices) that is exactly right - tailnet membership
+*is* the auth. If your tailnet has other people, either gate access with
+Tailscale ACLs on this node, or set `require_local_auth = true` in
+`.hydra/deploy.toml` so the proxied requests have to present the key like any
+other client (Hydra still can't tell tailnet users apart, but now they all need
+the key). The price is that the browser on the host has to log in too.
 
 Latency: on the LAN it's direct WireGuard (negligible); a phone over cellular may
 fall back to a DERP relay (+10-40ms), fine for a UI.
@@ -94,8 +107,9 @@ Run Caddy / nginx on the host, terminate TLS, proxy to `127.0.0.1:26600`. Get a
 cert from `mkcert` (installs a local CA) or Caddy's `tls internal`. Fully offline,
 but you must install the CA root into each device's trust store. If the proxy
 listens on a non-loopback address and forwards from localhost, remember the auth
-nuance from the bind model above - restrict who can reach the proxy, or bind
-Hydra to `0.0.0.0` with an auth key so it still checks the password.
+nuance from the bind model above - restrict who can reach the proxy, set
+`require_local_auth = true` so the forwarded requests are still checked, or bind
+Hydra to `0.0.0.0` with an auth key so it checks the password itself.
 
 ## Live server previews over HTTPS
 

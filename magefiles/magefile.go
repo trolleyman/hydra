@@ -533,8 +533,9 @@ func Build() {
 type Deploy mg.Namespace
 
 // Setup interactively generates .hydra/deploy.toml, which holds the auth key
-// required for non-localhost access (localhost is always trusted). Run it once
-// to reach the web UI safely from another device, e.g. your phone:
+// required for non-localhost access (localhost is trusted unless you opt into
+// require_local_auth). Run it once to reach the web UI safely from another
+// device, e.g. your phone:
 //
 //	mage deploy:setup
 func (Deploy) Setup() error {
@@ -584,7 +585,19 @@ func (Deploy) Setup() error {
 		}
 	}
 
-	cfg := config.DeployConfig{AuthKey: key}
+	// Whether localhost has to log in too. Off by default (a local browser just
+	// works); on when a TLS front-end on this host proxies outside traffic in
+	// from 127.0.0.1, which the loopback exemption would otherwise wave through.
+	def := "n"
+	if existing.RequireLocalAuth {
+		def = "y"
+	}
+	requireLocal := strings.EqualFold(prompt("Require the key from localhost too? (for a tailscale/reverse-proxy front-end) [y/N]", def), "y")
+
+	// Start from the existing config so unrelated sections (e.g. [ngrok]) survive.
+	cfg := existing
+	cfg.AuthKey = key
+	cfg.RequireLocalAuth = requireLocal
 	if err := config.SaveDeploy(projectRoot, cfg); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -595,8 +608,14 @@ func (Deploy) Setup() error {
 	path := paths.GetDeployConfigPath(projectRoot)
 	fmt.Printf("\n%s✓ Wrote %s%s\n", colorGreen, displayPath(path), colorReset)
 	fmt.Printf("\n%sAuth key:%s %s\n", colorBold, colorReset, key)
-	fmt.Println("\nLocalhost is always trusted; other devices must enter this key at the web")
-	fmt.Println("login screen (or send 'Authorization: Bearer <key>' for API calls).")
+	if requireLocal {
+		fmt.Println("\nEvery browser - localhost included - must enter this key at the web login")
+		fmt.Println("screen (or send 'Authorization: Bearer <key>' for API calls). The CLI's")
+		fmt.Println("control socket is unaffected.")
+	} else {
+		fmt.Println("\nLocalhost is trusted; other devices must enter this key at the web")
+		fmt.Println("login screen (or send 'Authorization: Bearer <key>' for API calls).")
+	}
 	fmt.Println("\nA normal `mage run` / `hydra server` keeps the UI bound to localhost.")
 	fmt.Println("Opening it to the network is a separate, explicit step:")
 	fmt.Printf("  %smage prod%s        build + serve on 0.0.0.0 (production)\n", colorBold, colorReset)
