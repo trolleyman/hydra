@@ -1660,14 +1660,33 @@ export function AgentDetail({
   // doing that for every later commit (docs/non-local-integration.md). The toast
   // names whichever the head is actually armed for, in the same plain terms the
   // menu uses - "when green" is the code's word for this, not the user's.
-  async function armPublish() {
+  async function armPublish(acknowledgeAdopted = false) {
     const linkedNow = !!agent.review
-    const res = await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id), {
-      success: linkedNow ? 'Will push to the MR once tests pass' : 'Will open a draft MR once tests pass',
+    const noun = agent.review?.adopted ? 'PR' : 'MR'
+    const res = await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id, acknowledgeAdopted || undefined), {
+      success: linkedNow ? `Will push to the ${noun} once tests pass` : 'Will open a draft MR once tests pass',
       errorPrefix: 'Failed to arm',
     })
     // The arm endpoint returns no body, so refresh to repaint the menu's toggle.
     if (res.ok) onRefresh?.()
+  }
+
+  // Arming an adopted PR means Hydra starts pushing into a PR someone else owns,
+  // on every green commit, until it is cancelled - so the API refuses it unless the
+  // caller acknowledges exactly that (acknowledge_adopted, docs/pr-adoption.md).
+  // This dialog is where that acknowledgement is collected: it names the PR and the
+  // stickiness, because "it pushed again on its own" is the surprise worth spending
+  // a click to prevent.
+  function confirmArmAdoptedPublish() {
+    const pr = agent.review?.id ? `PR #${agent.review.id}` : 'this PR'
+    useDialogStore.getState().show({
+      title: `Push automatically to ${pr}?`,
+      message: `${pr} is not yours - Hydra did not open it. Arming this pushes every commit that passes tests straight to its branch, and keeps doing so until you stop it.`,
+      type: 'warning',
+      confirmLabel: 'Push automatically',
+      showCancel: true,
+      onConfirm: () => void armPublish(true),
+    })
   }
   async function disarmPublish() {
     const linkedNow = !!agent.review
@@ -1792,34 +1811,22 @@ export function AgentDetail({
       }
     : {
         label: linked ? 'Push automatically' : 'Queue MR',
-        description: linked
-          ? `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`
-          : 'Opens a draft MR on its own once tests pass, then keeps it up to date.',
+        // An adopted PR says whose it is and that it will ask first, so the menu
+        // itself carries the warning rather than springing the dialog unannounced.
+        description: adoptedPR
+          ? "Pushes each new commit to this PR on its own, once tests pass. It isn't yours, so this asks first."
+          : linked
+            ? `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`
+            : 'Opens a draft MR on its own once tests pass, then keeps it up to date.',
         icon: <Clock className="w-4 h-4" />,
-        onClick: () => void armPublish(),
+        onClick: adoptedPR ? confirmArmAdoptedPublish : () => void armPublish(),
         tone: 'emerald' as const,
         disabled: busy || publishing,
       }
-  // Hydra never auto-pushes into a PR it did not create, and the backend rejects
-  // the arm outright (docs/pr-adoption.md), so offering the toggle on an adopted
-  // PR is a button whose only outcome is an error toast. Say why in its place.
-  const manualPushOnlyItem = {
-    label: 'Pushes to this PR are manual',
-    description: "Auto-push is off for a PR you adopted: sending commits to someone else's PR stays a deliberate action.",
-    icon: <Clock className="w-4 h-4" />,
-    onClick: () => {},
-    tone: 'neutral' as const,
-    disabled: true,
-  }
-  // Disarming stays available whatever the head is, so an arm that predates a link
-  // (or a stale one) can always be cleared; only the arm itself is gated.
-  const publishWhenGreenItems = agent.publish_when_green
-    ? [syncWhenGreenItem]
-    : readOnlyPR
-      ? [] // the read-only note above already says no commits can be pushed at all
-      : adoptedPR
-        ? [manualPushOnlyItem]
-        : [syncWhenGreenItem]
+  // A read-only PR can't be pushed to at all, by hand or automatically, so it gets
+  // no arm toggle - the lock note above already says why. Disarming stays offered
+  // whatever the head is, so a stale arm can always be cleared.
+  const publishWhenGreenItems = readOnlyPR && !agent.publish_when_green ? [] : [syncWhenGreenItem]
   const respondItem = {
     label: 'Respond to review comments',
     description: 'Ask the agent to fetch and address the unresolved review comments.',

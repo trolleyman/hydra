@@ -170,8 +170,9 @@ daemon's boot project's). Unlinked heads cost nothing. It:
 - refreshes the remote-tracking refs (see the ahead/behind note above);
 - auto-publishes armed **publish/sync-when-green** heads once local tests pass
   and the agent has been finished for the usual dwell - unlinked heads open a
-  DRAFT MR, linked heads plain-push. Never for an adopted PR (pushing into
-  someone else's PR must be deliberate).
+  DRAFT MR, linked heads plain-push. For an adopted PR it is opt-in per PR, never
+  implicit: the arm endpoint refuses one without `acknowledge_adopted=true` and
+  the spawn-time config default skips it entirely (docs/pr-adoption.md).
 
   The arm is **sticky**: it survives a successful publish or push, so an armed
   head keeps its MR in sync for the rest of its life. That is the point - the

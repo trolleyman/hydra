@@ -167,8 +167,13 @@ export const Dialog: React.FC = () => {
             {(showCancel || type === 'confirm') && (
               <DialogCancelButton onClick={handleCancel}>Cancel</DialogCancelButton>
             )}
+            {/* confirmLabel was documented as rich-variants-only, so callers that
+                passed one here (Remove project, Switch to chat, ...) silently got
+                the generic "Confirm". Honour it - a button that names its action is
+                the whole reason those call sites set it - keeping the old wording as
+                the fallback. */}
             <DialogConfirmButton tone={type === 'error' ? 'red' : 'blue'} onClick={handleConfirm}>
-              {type === 'confirm' ? 'Confirm' : 'OK'}
+              {confirmLabel ?? (type === 'confirm' ? 'Confirm' : 'OK')}
             </DialogConfirmButton>
           </div>
         </div>
