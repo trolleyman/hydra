@@ -3674,6 +3674,12 @@ var simChatEvents = []string{
 	// the heredoc body exactly as written (semicolons and all).
 	`{"type":"assistant","message":{"id":"msg_sim_heredoc","content":[{"type":"tool_use","id":"toolu_sim_heredoc","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
+	// The command after it: the shell is STILL in web/ (one shell per session),
+	// which is why this runs a bare `bun test` - so the card shows the tracked
+	// `cd web` above it. Without that line the command reads as if it ran at the
+	// worktree root, where it would not work at all.
+	`{"type":"assistant","message":{"id":"msg_sim_cwd","content":[{"type":"tool_use","id":"toolu_sim_cwd","name":"Bash","input":{"command":"bun test src/lib/upload.test.ts","description":"Run the uploader tests"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_cwd","content":" 12 pass\n  0 fail"}]}}`,
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,

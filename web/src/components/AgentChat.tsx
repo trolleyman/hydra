@@ -41,7 +41,8 @@ import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
+import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
+import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
@@ -2476,6 +2477,7 @@ function LowlitPath({ path }: { path: string }) {
 const ToolCard = memo(function ToolCard({
   item,
   worktree,
+  shellCwd = null,
   recipientId = '',
   recipientLabel = '',
   recipientRunning = false,
@@ -2483,6 +2485,9 @@ const ToolCard = memo(function ToolCard({
 }: {
   item: Extract<ChatItem, { kind: 'tool' }>
   worktree: string | null
+  // The directory this command ran in, tracked across the session's shell (see
+  // lib/shellCwd) - null when it isn't known.
+  shellCwd?: string | null
   recipientId?: string
   recipientLabel?: string
   recipientRunning?: boolean
@@ -2532,7 +2537,27 @@ const ToolCard = memo(function ToolCard({
   // `&&` chaining it) is noise worth dropping.
   const bashSource = trimWorktreePaths(hostRunScript ?? command, worktree)
   const bashIndent = useChatBashIndentStore((s) => s.indent)
-  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
+  // The directory the command ran in, as a `cd` line above the script. The
+  // agent's shell persists across its whole session, so the tracked directory
+  // (lib/shellCwd) is often nowhere near the worktree - and a command reads
+  // completely differently depending on where it ran: `cd web && node x.ts`
+  // fails in web/ and works at the root. Shown only when it differs from the
+  // worktree, is known, and the script does not immediately set it itself; a
+  // host run always runs in the worktree whatever the agent's shell is doing.
+  //
+  // A command that OPENS with `cd <the worktree>` pins itself there, so the
+  // shell's directory does not matter and nothing is prepended. That leading cd
+  // trims to `cd .` and is dropped as noise - but a `cd .` the agent wrote
+  // literally (Codex, whose `.` means the cwd it reported) is a different thing
+  // and still gets its reported directory shown.
+  const rawSource = unwrapBashLoginCommand(hostRunScript ?? command)
+  const pinnedToWorktree = dropNoopCd(bashSource) !== bashSource && !/^[ \t]*cd[ \t]+(['"]?)\.\/?\1[ \t]*(?:&&|;|\n)/.test(rawSource)
+  const effectiveCwd = commandCwd || shellCwd || ''
+  const cwdPreamble =
+    isHostRun || pinnedToWorktree || !effectiveCwd || effectiveCwd === worktree
+      ? ''
+      : collapseHome(trimWorktreePaths(effectiveCwd, worktree))
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, cwdPreamble, bashIndent) : ''
   const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
   const interactiveTranscript = isBash && !isHostRunTool && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
@@ -3095,6 +3120,29 @@ interface SubagentLinks {
   openSubView: (key: string) => void
 }
 
+// shellCwdsFor follows the working directory across a list of chat items, so
+// each Bash card can show where its command actually ran (lib/shellCwd). The
+// agent's shell is ONE process for the whole session: a `cd` in an early step is
+// still in force much later, and a command that reads as nonsense at the
+// worktree ("cd web" failing) makes sense once you can see the shell was already
+// there. A sub-agent has its own shell, so each timeline tracks its own.
+function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, string | null> {
+  const steps: ShellStep[] = []
+  for (const it of items) {
+    if (it.kind !== 'tool' || it.name !== 'Bash') continue
+    const input = (typeof it.input === 'object' && it.input !== null ? it.input : {}) as Record<string, unknown>
+    if (typeof input.command !== 'string' || !input.command) continue
+    steps.push({
+      id: it.toolUseId,
+      command: input.command,
+      cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
+      output: it.result ?? it.runningOutput,
+      background: input.run_in_background === true,
+    })
+  }
+  return trackShellCwds(steps, worktree)
+}
+
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
 // skipId drops one inner item (the assistant message shown separately as the
@@ -3112,6 +3160,7 @@ function SubagentTimeline({
   skipId?: number
   links?: SubagentLinks
 }) {
+  const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
   return (
     <>
       {sub.items.map((it) => {
@@ -3136,7 +3185,7 @@ function SubagentTimeline({
               />
             )
           if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
-          return <ToolCard key={it.id} item={it} worktree={worktree} />
+          return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
         }
         if (it.kind === 'assistant')
           return (
@@ -4587,12 +4636,18 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
 interface SettledMessagesProps {
   items: ChatItem[]
   liveFromId: number | null
-  renderItem: (item: ChatItem) => ReactNode
+  renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   serif: boolean
   connected: boolean
   worktreePath: string | null
   subByToolUse: Record<string, SubagentView>
   subagents: Record<string, SubagentView>
+  // Where each Bash command ran (lib/shellCwd). Handed to the rows one value at
+  // a time rather than read through the ref, because it is the one input that
+  // can change for an OLD row: a late result revealing a `cd` that failed, or
+  // older history loading in and moving the baseline. Per-row values keep that
+  // from re-rendering the whole transcript every time a command is appended.
+  shellCwds: Map<string, string | null>
 }
 
 // One settled row, memo'd per item so appending a new message renders ONLY the
@@ -4605,7 +4660,8 @@ interface SettledMessagesProps {
 interface SettledRowProps {
   item: ChatItem
   animate: boolean
-  renderItem: (item: ChatItem) => ReactNode
+  renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
+  shellCwd: string | null
   serif: boolean
   connected: boolean
   worktreePath: string | null
@@ -4621,7 +4677,7 @@ function isChatMessage(item: ChatItem): boolean {
 }
 
 const SettledRow = memo(
-  function SettledRow({ item, animate, renderItem }: SettledRowProps) {
+  function SettledRow({ item, animate, renderItem, shellCwd }: SettledRowProps) {
     return (
       <div
         // Marks the row as a scroll target for alignToLastMessage; absent on
@@ -4629,7 +4685,7 @@ const SettledRow = memo(
         data-chat-message={isChatMessage(item) ? '' : undefined}
         className={animate ? 'animate-chat-item-in' : undefined}
       >
-        {renderItem(item)}
+        {renderItem(item, shellCwd)}
       </div>
     )
   },
@@ -4637,6 +4693,7 @@ const SettledRow = memo(
     a.item === b.item &&
     a.animate === b.animate &&
     a.renderItem === b.renderItem &&
+    a.shellCwd === b.shellCwd &&
     a.serif === b.serif &&
     a.connected === b.connected &&
     a.worktreePath === b.worktreePath &&
@@ -4645,7 +4702,7 @@ const SettledRow = memo(
 )
 
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents }: SettledMessagesProps) {
+  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
     return (
       <>
         {items.map((item) => (
@@ -4654,6 +4711,7 @@ const SettledMessages = memo(
             item={item}
             animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
             renderItem={renderItem}
+            shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
             serif={serif}
             connected={connected}
             worktreePath={worktreePath}
@@ -4668,6 +4726,7 @@ const SettledMessages = memo(
     a.items === b.items &&
     a.liveFromId === b.liveFromId &&
     a.renderItem === b.renderItem &&
+    a.shellCwds === b.shellCwds &&
     a.serif === b.serif &&
     a.connected === b.connected &&
     a.worktreePath === b.worktreePath &&
@@ -8083,7 +8142,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return parts
   }
 
-  function renderChatItem(item: ChatItem): ReactNode {
+  // Where each Bash command ran, followed across the session's one shell. The
+  // worktree is only the right starting point once the WHOLE conversation is
+  // loaded - with older history still unread the shell could have been left
+  // anywhere, so the tracking starts out knowing nothing and re-anchors on the
+  // first absolute `cd` (which is exactly what an agent's defensive
+  // `cd <the worktree> && ...` prefix is).
+  const shellCwds = useMemo(
+    () => shellCwdsFor(items, allHistoryLoaded ? worktreePath : null),
+    [items, worktreePath, allHistoryLoaded],
+  )
+
+  function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
         return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
@@ -8263,7 +8333,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             />
           )
         }
-        return <ToolCard item={item} worktree={worktreePath} />
+        return <ToolCard item={item} worktree={worktreePath} shellCwd={shellCwd} />
       }
       case 'subagent': {
         // A sub-agent with no parent Task card (its meta lacked a tool_use id).
@@ -8443,7 +8513,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // are passed to SettledMessages explicitly (and listed in its comparator).
   const renderItemRef = useRef(renderChatItem)
   renderItemRef.current = renderChatItem
-  const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
+  const renderItem = useCallback((item: ChatItem, shellCwd?: string | null) => renderItemRef.current(item, shellCwd), [])
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
@@ -8541,6 +8611,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             worktreePath={worktreePath}
             subByToolUse={subByToolUse}
             subagents={subagents}
+            shellCwds={shellCwds}
           />
           {/* The in-flight streamed block: markdown-rendered live (with a
               virtual closing fence while inside a code block); streamed thinking
