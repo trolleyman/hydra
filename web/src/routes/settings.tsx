@@ -1,20 +1,18 @@
-import { createFileRoute, useBlocker, useCanGoBack, useRouter } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../api'
-import { Save, Loader2 } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
 } from '../components/SettingsComponents'
-import { PageTopBar } from '../components/PageTopBar'
-import { Tooltip } from '../components/Tooltip'
+import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { BrowserSections } from '../components/settings/BrowserSections'
-import { ScopeTabs } from '../components/settings/shared'
+import { ScopeTabs, SettingsSaveAction } from '../components/settings/shared'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -28,8 +26,6 @@ const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
 }
 
 function SettingsPage() {
-  const router = useRouter()
-  const canGoBack = useCanGoBack()
   const { selectedProjectId, projects } = useProjectStore()
   // Unlike the project page there is only one config scope here, so switching
   // tabs never refetches: the user-config draft survives a Browser detour.
@@ -55,23 +51,7 @@ function SettingsPage() {
     return JSON.stringify(config) !== baseConfig
   }, [config, baseConfig])
 
-  useBlocker({
-    shouldBlockFn: () => {
-      if (hasUnsavedChanges) {
-        return !window.confirm('You have unsaved changes. Discard them?')
-      }
-      return false
-    },
-    enableBeforeUnload: true,
-  })
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) { e.preventDefault(); e.returnValue = '' }
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedChanges])
+  useUnsavedChangesGuard(hasUnsavedChanges)
 
   useEffect(() => {
     if (!effectiveProjectId) return
@@ -129,26 +109,10 @@ function SettingsPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* Single "Settings" header bar with a small save button (always shown,
-          never grayed - except on the Browser tab, whose preferences apply
-          instantly). */}
-      <PageTopBar
-        title="Settings"
-        onBack={canGoBack ? () => router.history.back() : undefined}
-        right={
-          tab !== 'browser' ? (
-            <Tooltip content="Save settings">
-              <button
-                onClick={handleSave}
-                aria-label="Save settings"
-                className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              </button>
-            </Tooltip>
-          ) : undefined
-        }
-      />
+      {/* Save lives in the global top bar beside its "Settings" crumb - the page
+          has no header of its own. Nothing to save on the Browser tab, whose
+          preferences apply instantly. */}
+      {tab !== 'browser' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           <ScopeTabs

@@ -122,9 +122,39 @@ func TestAutoPublishDisarmsOnFailure(t *testing.T) {
 	}
 }
 
-// Pushing into a PR Hydra did not create must always be a deliberate act, so an
-// adopted head is disarmed rather than auto-pushed.
-func TestAutoPublishNeverTouchesAdoptedPR(t *testing.T) {
+// Pushing into a PR Hydra did not create must be a deliberate act - but once the
+// user HAS deliberately armed it (ArmPublishWhenGreen refuses to arm an adopted
+// head without acknowledge_adopted, and spawn never arms one from config), the
+// watcher must honour it like any other armed head.
+func TestAutoPublishPushesExplicitlyArmedAdoptedPR(t *testing.T) {
+	projectRoot, store, git := syncFixture(t)
+	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "a.txt"), []byte("four\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("commit", "-qam", "unpushed work")
+	local := git("rev-parse", "HEAD")
+
+	head := armedHead(projectRoot)
+	head.ReviewAdopted = true
+	head.ReviewCanPush = true
+	(&Server{DB: store}).autoPublish(context.Background(), projectRoot, head)
+
+	if got := git("rev-parse", "refs/remotes/origin/feat/h1"); got != local {
+		t.Errorf("armed adopted PR not pushed: remote at %s, want %s", got, local)
+	}
+	if a, _ := store.GetAgent("h1"); a == nil || !a.PublishWhenGreen {
+		t.Errorf("a successful push must not consume the arm, got %+v", a)
+	}
+}
+
+// A read-only adopted PR (the author never enabled maintainer edits) can never be
+// pushed to, so an arm on one is disarmed instead of failing every 30s. The arm
+// endpoint refuses this case up front; this covers a head that was armed before
+// its can-push status was known.
+func TestAutoPublishDisarmsReadOnlyAdoptedPR(t *testing.T) {
 	projectRoot, store, git := syncFixture(t)
 	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -137,13 +167,13 @@ func TestAutoPublishNeverTouchesAdoptedPR(t *testing.T) {
 
 	head := armedHead(projectRoot)
 	head.ReviewAdopted = true
-	head.ReviewCanPush = true
+	head.ReviewCanPush = false
 	(&Server{DB: store}).autoPublish(context.Background(), projectRoot, head)
 
 	if after := git("rev-parse", "refs/remotes/origin/feat/h1"); after != before {
-		t.Errorf("adopted PR was pushed to: %s -> %s", before, after)
+		t.Errorf("read-only PR was pushed to: %s -> %s", before, after)
 	}
 	if a, _ := store.GetAgent("h1"); a == nil || a.PublishWhenGreen {
-		t.Errorf("adopted head should be disarmed, got %+v", a)
+		t.Errorf("read-only adopted head should be disarmed, got %+v", a)
 	}
 }

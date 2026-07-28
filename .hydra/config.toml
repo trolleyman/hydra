@@ -44,7 +44,7 @@ artifact_concurrency = 2
 # artifact_prefetch = true
 
 ## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
-# test_concurrency = 1
+test_concurrency = 2
 
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
