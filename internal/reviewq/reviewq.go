@@ -55,6 +55,12 @@ const (
 	// this head, tail-limited. Split from OpHeadStatus so the common "am I green?"
 	// question stays a few hundred tokens and only a real failure pays for a log.
 	OpTestLogs Op = "test_logs"
+	// OpRunTests / OpRunArtifacts discard this head's cached verdict/output for its
+	// branch tip and start a fresh run. The ONLY write ops in the status family:
+	// they kick work and return immediately, so the agent polls OpHeadStatus for
+	// the result rather than holding a tool call open for minutes.
+	OpRunTests     Op = "run_tests"
+	OpRunArtifacts Op = "run_artifacts"
 )
 
 // Request asks the daemon to do one thing for this head's review state.
@@ -67,7 +73,8 @@ type Request struct {
 	ThreadID string `json:"thread_id,omitempty"`
 	Body     string `json:"body,omitempty"`
 
-	// test_logs
+	// test_logs / run_tests / run_artifacts. Runner names one test runner or one
+	// artifact script; empty means all of them.
 	Runner string `json:"runner,omitempty"`
 	Tail   int    `json:"tail,omitempty"` // lines from the end; 0 = the host's default
 }

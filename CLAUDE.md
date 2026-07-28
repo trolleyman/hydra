@@ -187,8 +187,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
   tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
   (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go` +
   `head_status.go`, `internal/reviewq` on-demand refresh,
-  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs`; also lists
-  what is deliberately NOT built)
+  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs` /
+  `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
