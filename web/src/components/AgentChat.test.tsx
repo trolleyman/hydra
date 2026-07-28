@@ -543,10 +543,12 @@ describe('planStepRows', () => {
     expect(kinds(planStepRows([tool('Read'), tool('Edit'), tool('Bash')], {}, false))).toEqual(['tool', 'tool', 'tool'])
   })
 
-  it('summarizes a run by its most-used tools, capped at three names', () => {
+  // The whole list, most-used first: the header clips it with a CSS ellipsis
+  // rather than spending its last characters on "+N more".
+  it('summarizes a run by its tools, most-used first', () => {
     const s = stepSummary([tool('Read'), tool('Read'), tool('Bash'), tool('Edit'), tool('Write'), thought(4000), thought(2000)])
     expect(s.label).toBe('5 steps')
-    expect(s.tools).toBe('Read x2 · Bash · Edit · +1 more')
+    expect(s.tools).toBe('Read x2 · Bash · Edit · Write')
     expect(s.thinkingMs).toBe(6000)
     expect(s.failed).toBe(0)
   })

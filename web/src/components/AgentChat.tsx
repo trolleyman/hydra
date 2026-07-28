@@ -5076,10 +5076,16 @@ export function stepSummary(items: ChatItem[]): {
     counts.set(name, (counts.get(name) ?? 0) + 1)
   }
   const total = [...counts.values()].reduce((a, b) => a + b, 0)
+  // The WHOLE list, most-used first, and no "+N more": the header clips it with
+  // a CSS ellipsis instead. Two truncations stacked (a cap at three names, then
+  // `truncate` over the top) meant a narrow pane spent its last characters
+  // saying "+2 mo..." rather than naming another tool, and a wide one hid tools
+  // it had room for. Letting the list run costs no layout shift either - it is
+  // the one flexible cell in a row of shrink-0 ones, so its length never moves
+  // anything.
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
-  const shown = ranked.slice(0, 3).map(([name, n]) => (n > 1 ? `${name} x${n}` : name))
-  if (ranked.length > shown.length) shown.push(`+${ranked.length - shown.length} more`)
-  return { label: `${total} step${total === 1 ? '' : 's'}`, tools: shown.join(' · '), thinkingMs, failed, running }
+  const tools = ranked.map(([name, n]) => (n > 1 ? `${name} x${n}` : name)).join(' · ')
+  return { label: `${total} step${total === 1 ? '' : 's'}`, tools, thinkingMs, failed, running }
 }
 
 // GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
