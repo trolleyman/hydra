@@ -28,7 +28,7 @@ import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
-import { buildWordRangeMaps, renderWordDiffHtml, type WordRange } from './lib/wordDiff'
+import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine, anchorScrollBelow } from './lib/diffScroll'
@@ -535,13 +535,6 @@ const LineNumCell = memo(function LineNumCell({ num, side, baseClass, selected, 
 // glyph fragments from neighbouring wrapped rows. A black overlay at alpha a is
 // arithmetically identical to brightness(1-a), so the light-mode tint is unchanged.
 const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:after:absolute hover:after:inset-0 hover:after:bg-black/[0.05] dark:hover:after:bg-white/[0.04]"
-
-// Intra-line "word diff" tints. A changed line already carries a faint whole-row
-// tint (bg-*-50); these darker spans mark the exact characters that differ so the
-// eye lands on the actual edit rather than re-reading the whole line. Deletions
-// read red, additions green - the same red/green language as the row.
-const WORD_DEL_CLASS = 'rounded-[2px] bg-red-300/45 dark:bg-red-400/25'
-const WORD_ADD_CLASS = 'rounded-[2px] bg-green-300/45 dark:bg-green-400/25'
 
 // Empty maps shared by every line without word-diff data, so the memo'd hunks
 // keep a stable prop identity when word highlighting is off or a file has none.

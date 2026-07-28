@@ -3532,9 +3532,17 @@ var simChatEvents = []string{
 	`{"type":"assistant","message":{"id":"msg_sim_img","content":[{"type":"tool_use","id":"toolu_sim_img","name":"Read","input":{"file_path":"web/scripts/screenshots/out/agent-dark.png"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_img","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + simChatImageB64 + `"}}]}]}}`,
 	// An Edit tool call: its input panel shows unlabelled (item 14, no "Input"
-	// header).
+	// header), rendered as a unified diff. This one's result carries the CLI's
+	// structuredPatch, so the card shows the file's real line numbers and the
+	// context lines around the edit.
 	`{"type":"assistant","message":{"id":"msg_sim_edit","content":[{"type":"tool_use","id":"toolu_sim_edit","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"return u.put(ctx, key, r)","new_string":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit","content":"The file internal/artifacts/upload.go has been updated."}]},"tool_use_result":{"filePath":"internal/artifacts/upload.go","oldString":"return u.put(ctx, key, r)","newString":"for attempt := 0; attempt < maxAttempts; attempt++ {\n\tif err = u.put(ctx, key, r); err == nil { return nil }\n\tsleepBackoff(attempt)\n}","replaceAll":false,"structuredPatch":[{"oldStart":86,"oldLines":4,"newStart":86,"newLines":7,"lines":[" func (u *Uploader) Upload(ctx context.Context, key string, r io.Reader) error {"," \tvar err error","-return u.put(ctx, key, r)","+for attempt := 0; attempt < maxAttempts; attempt++ {","+\tif err = u.put(ctx, key, r); err == nil { return nil }","+\tsleepBackoff(attempt)","+}"," }"]}]}}`,
+	// A second Edit whose result carries NO patch (an older CLI, or the call
+	// still running): the card falls back to diffing old_string against
+	// new_string, so shared lines still read as context - but with no gutter,
+	// since a fragment cannot say where in the file it sits.
+	`{"type":"assistant","message":{"id":"msg_sim_edit2","content":[{"type":"tool_use","id":"toolu_sim_edit2","name":"Edit","input":{"file_path":"internal/artifacts/upload.go","old_string":"// maxAttempts bounds the retry loop.\nconst maxAttempts = 3\n\nvar errGaveUp = errors.New(\"upload: gave up\")","new_string":"// maxAttempts bounds the retry loop (three tries, jittered backoff).\nconst maxAttempts = 5\n\nvar errGaveUp = errors.New(\"upload: gave up\")"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_edit2","content":"The file internal/artifacts/upload.go has been updated."}]}}`,
 	// A Write tool call: its content renders as a numbered, syntax-highlighted
 	// code block (like a Read), not raw JSON.
 	`{"type":"assistant","timestamp":"2026-07-09T18:01:00.000Z","message":{"id":"msg_sim_write","content":[{"type":"tool_use","id":"toolu_sim_write","name":"Write","input":{"file_path":"internal/artifacts/backoff.go","content":"package artifacts\n\nimport (\n\t\"math/rand\"\n\t\"time\"\n)\n\n// sleepBackoff sleeps for a jittered exponential delay: base 100ms, doubled per\n// attempt, plus up to 50% jitter.\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\tjitter := time.Duration(rand.Int63n(int64(d) / 2))\n\ttime.Sleep(d + jitter)\n}"}}]}}`,

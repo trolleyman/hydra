@@ -39,10 +39,17 @@ type claudeEnvelope struct {
 		StopReason string          `json:"stop_reason,omitempty"`
 		Usage      json.RawMessage `json:"usage,omitempty"`
 	} `json:"message,omitempty"`
-	Request               json.RawMessage `json:"request,omitempty"`
-	Usage                 json.RawMessage `json:"usage,omitempty"`
-	Event                 json.RawMessage `json:"event,omitempty"`
-	RetractedMessageUUIDs []string        `json:"retractedMessageUuids,omitempty"`
+	Request json.RawMessage `json:"request,omitempty"`
+	Usage   json.RawMessage `json:"usage,omitempty"`
+	Event   json.RawMessage `json:"event,omitempty"`
+	// The tool's own structured result, riding alongside the tool_result block.
+	// Two spellings for the same field: live stdout stream-json writes it
+	// snake_case, the persisted transcript camelCase. Only the Edit slice of it
+	// is kept (see editPatch) - the rest holds the whole pre-edit file.
+	ToolUseResult      json.RawMessage `json:"tool_use_result,omitempty"`
+	ToolUseResultCamel json.RawMessage `json:"toolUseResult,omitempty"`
+
+	RetractedMessageUUIDs []string `json:"retractedMessageUuids,omitempty"`
 	Attachment            struct {
 		Prompt json.RawMessage `json:"prompt,omitempty"`
 	} `json:"attachment,omitempty"`
@@ -102,9 +109,26 @@ func normalizeClaude(line []byte) []eventSpec {
 		var blocks []claudeBlock
 		if json.Unmarshal(ev.Message.Content, &blocks) == nil {
 			out := make([]eventSpec, 0, len(blocks))
+			// The envelope carries ONE tool_use_result, with nothing tying it to
+			// a particular block, so it is only attributable when the message
+			// holds a single result.
+			results := 0
+			for _, block := range blocks {
+				if block.Type == "tool_result" {
+					results++
+				}
+			}
+			var patch json.RawMessage
+			if results == 1 {
+				patch = editPatch(ev)
+			}
 			for i, block := range blocks {
 				if block.Type == "tool_result" {
-					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError})})
+					payload := map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError}
+					if patch != nil {
+						payload["patch"] = patch
+					}
+					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, payload)})
 				}
 			}
 			if len(out) > 0 {
@@ -180,6 +204,44 @@ func cleanClaudeToolResult(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	return out
+}
+
+// maxEditPatchBytes caps the structured patch carried on a tool_completed
+// event. The patch is roughly old_string + new_string + 6 context lines, so it
+// about doubles what an Edit already costs to store; a pathological
+// whole-file Edit is not worth that, and the client falls back to diffing the
+// two strings itself when the patch is absent.
+const maxEditPatchBytes = 128 * 1024
+
+// editPatch returns the Edit tool's own unified patch (the CLI's
+// `structuredPatch`: hunks of oldStart/newStart line numbers and ` `/`-`/`+`
+// lines) so the chat can render an Edit as a real diff against the file's REAL
+// line numbers, rather than as two disembodied string fragments.
+//
+// Gated on oldString+newString being present, which is what distinguishes an
+// Edit result from a Write's (whose patch is the entire new file, already
+// rendered as a numbered code block). Returned verbatim as the provider sent
+// it; nil when absent, unparseable, not an Edit, or over the size cap.
+func editPatch(ev claudeEnvelope) json.RawMessage {
+	raw := ev.ToolUseResult
+	if len(raw) == 0 {
+		raw = ev.ToolUseResultCamel
+	}
+	if len(raw) == 0 || len(raw) > maxEditPatchBytes {
+		return nil
+	}
+	var res struct {
+		OldString       *string         `json:"oldString"`
+		NewString       *string         `json:"newString"`
+		StructuredPatch json.RawMessage `json:"structuredPatch"`
+	}
+	if json.Unmarshal(raw, &res) != nil || res.OldString == nil || res.NewString == nil {
+		return nil
+	}
+	if len(res.StructuredPatch) == 0 || string(res.StructuredPatch) == "null" {
+		return nil
+	}
+	return res.StructuredPatch
 }
 
 func taskNotificationField(text, field string) string {
