@@ -472,15 +472,18 @@ func (s *Store) UnarchiveAgent(id string) error {
 }
 
 // ListArchivedAgents returns a page of archived (soft-deleted, non-ephemeral,
-// with a recorded EndState) agents for the project, newest-created first - i.e.
-// ordered by the same creation timestamp the UI shows for each agent, matching
-// the active list's ordering. A limit <= 0 returns all; offset paginates.
-// Aborted spawns (soft-deleted but EndState "") are excluded.
+// with a recorded EndState) agents for the project, newest-archived first -
+// ordered by deleted_at, the timestamp the soft-delete in ArchiveAgent stamps
+// when the head is killed or merged. That is the order the history reads in:
+// what you just finished with belongs at the top, however long ago it was
+// spawned. created_at breaks ties (and covers any legacy row with a null
+// deleted_at). A limit <= 0 returns all; offset paginates. Aborted spawns
+// (soft-deleted but EndState "") are excluded.
 func (s *Store) ListArchivedAgents(projectRoot string, limit, offset int) ([]Agent, error) {
 	var agents []Agent
 	q := s.reader().Unscoped().
 		Where("project_path = ? AND deleted_at IS NOT NULL AND end_state <> ? AND ephemeral = ?", projectRoot, "", false).
-		Order("created_at DESC")
+		Order("deleted_at DESC, created_at DESC")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}

@@ -188,6 +188,11 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
   )
 })
 
+// Current time in whole Unix seconds - the unit every agent timestamp uses
+// (created_at, archived_at), so an optimistic local stamp is comparable with a
+// server-sent one.
+const nowUnix = () => Math.floor(Date.now() / 1000)
+
 // ArchivedAgentDetail is the read-only view for a finished (killed/merged) agent
 // retained in the history. There is no live session, so there is no terminal
 // (just a grayed placeholder) and no diff/kill/merge/restart actions. The
@@ -267,9 +272,9 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row. Not `live`: this archived view's agent is static, so
-              the only thing that ticks is "created X ago", which self-updates via
-              its own <RelativeTime> leaf - no need to re-render + re-measure the
-              whole row every second. */}
+              the only things that tick are the "created X ago" / "merged X ago"
+              labels, which self-update via their own <RelativeTime> leaves - no
+              need to re-render + re-measure the whole row every second. */}
           <SeparatedRow className="flex items-center gap-3 flex-wrap">
             <Badge
               variant="pill"
@@ -281,9 +286,22 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
             <Badge className={endBadge.className}>{endBadge.label}</Badge>
             {agent.branch_name && <BranchTag branch={agent.branch_name} />}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                created <RelativeTime createdAt={agent.created_at} />
-              </span>
+              <Tooltip content={new Date(agent.created_at * 1000).toLocaleString()}>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  created <RelativeTime createdAt={agent.created_at} />
+                </span>
+              </Tooltip>
+            )}
+            {/* When it ended, next to when it started - the pair is what you
+                actually want off an archived head ("this ran from X to Y").
+                Labelled with the end state so it reads "merged 3h ago". Absent
+                on a legacy row archived before the timestamp was recorded. */}
+            {!!agent.archived_at && (
+              <Tooltip content={new Date(agent.archived_at * 1000).toLocaleString()}>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {endBadge.label} <RelativeTime createdAt={agent.archived_at} />
+                </span>
+              </Tooltip>
             )}
           </SeparatedRow>
         </div>
@@ -1023,7 +1041,9 @@ export function AgentDetail({
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next
           // archived-list refetch (which only happens on a project switch).
-          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'killed', session_status: 'stopped', session_pid: 0 })
+          // archived_at is stamped locally so it sorts to the top of the history
+          // straight away, where the server's own stamp will also put it.
+          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'killed', archived_at: nowUnix(), session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -1121,7 +1141,7 @@ export function AgentDetail({
         type: 'success',
         ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` }),
       })
-      useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
+      useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', archived_at: nowUnix(), session_status: 'stopped', session_pid: 0 })
       onKilled(agent.id)
     } catch (err) {
       const body = apiErrorBody(err)

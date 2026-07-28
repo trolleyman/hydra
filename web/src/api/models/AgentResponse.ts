@@ -67,6 +67,10 @@ export type AgentResponse = {
      * How an archived agent ended ("killed" | "merged"); null/absent for active agents.
      */
     end_state?: string | null;
+    /**
+     * Unix timestamp (seconds) when an archived agent was killed or merged; absent for active agents (and for a legacy archived record with no recorded archive time). The archived history list is ordered by this.
+     */
+    archived_at?: number;
     tests?: TestSummary;
     /**
      * True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
