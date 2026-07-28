@@ -1,13 +1,5 @@
 import { useNowTick } from '../lib/useNowTick'
-
-// formatElapsed renders a running duration compactly: "12s", or "1m 05s" once it
-// passes a minute.
-function formatElapsed(secs: number): string {
-  if (secs < 60) return `${secs}s`
-  const m = Math.floor(secs / 60)
-  const s = secs % 60
-  return `${m}m ${s.toString().padStart(2, '0')}s`
-}
+import { formatElapsed } from '../lib/formatElapsed'
 
 // ElapsedTime shows how long an in-flight run (an artifact generation, a test
 // runner) has been going, ticking once a second off the shared clock - so a
