@@ -18,7 +18,7 @@ import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
-import { agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
+import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
@@ -495,6 +495,29 @@ function GitIsolationBadge({ mode }: { mode?: string }) {
   )
 }
 
+// AgentStatusChip is the head's live status badge with an explainer behind it:
+// the labels are short and internal ("needs_input", "waiting", "errored"), so the
+// chip says WHICH state and the card says what that state means and what it wants
+// from you. A card (not a hint): it's a sentence you're meant to read, it opens
+// instantly, and it can be pinned open by clicking - the only way to read it on a
+// touch device. An unmapped status has no prose, so it stays a bare chip rather
+// than opening an empty box.
+function AgentStatusChip({ status }: { status: string }) {
+  const badge = agentStatusBadge(status)
+  const help = agentStatusHelp(status)
+  const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
+  if (!help) return chip
+  return (
+    <Tooltip variant="card" width={300} title={badge.label} content={help} className="shrink-0">
+      {/* The chip is a plain span, so the card needs a focusable trigger of its
+          own for keyboard parity (Tooltip only opens a card on focus-visible). */}
+      <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+        {chip}
+      </button>
+    </Tooltip>
+  )
+}
+
 // The fields of `agent` the metadata row (AgentMetaRow) actually renders. The
 // row is memoized on a deep comparison of just these, so the near-constant agent
 // refreshes while a head works (activity text, timestamps, token counts - none
@@ -529,10 +552,11 @@ function metaRowSignature(a: AgentResponse) {
 // Flip this to compare the two.
 const IDENTITY_LINE_FIRST = true
 
-// The agent-page metadata row: two lines. The chip strip carries the type/status
-// /test badges, network + git-isolation tags, base-branch selector, terminal/chat
-// toggle, downstream editor and MR chip; the identity line carries the head id
-// and a self-ticking "created X ago", right-aligned. Memoized (see
+// The agent-page metadata row: two lines. The identity line carries what the head
+// IS and is DOING - the agent-type pill, the status chip and the head id - plus a
+// self-ticking "created X ago", right-aligned; the chip strip under it carries the
+// configuration: test verdict, network + git-isolation tags, base-branch selector,
+// terminal/chat toggle, downstream editor and MR chip. Memoized (see
 // metaRowSignature) so a running head's constant refreshes don't churn it; the
 // handlers are stabilized by the caller so only real display changes get through.
 const AgentMetaRow = memo(function AgentMetaRow({
@@ -588,13 +612,28 @@ const AgentMetaRow = memo(function AgentMetaRow({
     // min-h-7 (the height of the pane's collapse toggle, and of the inspector
     // bar's "Changes" row across the divider) so this line's contents centre on
     // the same baseline as both - the toolbar rows line up across the split.
-    <div className="flex items-center gap-3 min-w-0 min-h-7">
+    <div className="flex items-center gap-2 min-w-0 min-h-7">
+      {/* What this head IS (agent type) and what it is DOING (status), leading the
+          head's own name. They were the first two chips of the strip below, but
+          they answer the question you ask first, so they belong on the identity
+          line - the strip under it is configuration (network, git, base branch,
+          MR), which you read second. */}
+      <Tooltip content={agentTypeLabel(agent.agent_type)} className="shrink-0">
+        {/* min-h-5 keeps the icon-only pill the same height as text chips. */}
+        <Badge
+          variant="pill"
+          className={agentTypeClass}
+          containerClassName="min-h-5"
+          icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+        >{null}</Badge>
+      </Tooltip>
+      {agent.agent_status && <AgentStatusChip status={agent.agent_status.status} />}
       {agent.branch_name && (
         <BranchTag
           branch={agent.branch_name}
           label={headId}
           icon={false}
-          className="text-sm font-mono text-gray-700 dark:text-gray-200"
+          className="ml-1 text-sm font-mono text-gray-700 dark:text-gray-200"
         />
       )}
       {agent.created_at !== 0 && agent.created_at !== undefined && (
@@ -610,26 +649,8 @@ const AgentMetaRow = memo(function AgentMetaRow({
     // mobile (see MetaStrip). Dropdown children (the base selector) are
     // portalled, so the mobile overflow clipping can't swallow them.
     <MetaStrip>
-      {/* Agent type, icon only - the colored pill is recognizable without the
-          text label; the tooltip still names it. */}
-      <Tooltip content={agent.agent_type} className="shrink-0">
-        {/* min-h-5 keeps the icon-only pill the same height as text chips. */}
-        <Badge
-          variant="pill"
-          className={agentTypeClass}
-          containerClassName="min-h-5"
-          icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
-        >{null}</Badge>
-      </Tooltip>
-      {agent.agent_status && (
-        <Badge
-          className={agentStatusBadge(agent.agent_status.status).className}
-          containerClassName="shrink-0"
-        >
-          {agentStatusBadge(agent.agent_status.status).label}
-        </Badge>
-      )}
-      {/* Test verdict, right after the status. shrink-0 wrappers throughout:
+      {/* Test verdict leads the strip - the agent type + status chips it used to
+          follow now sit on the identity line above. shrink-0 wrappers throughout:
           several chips have min-w-0/truncate internals for wrapping rows, which
           would otherwise absorb ALL the shrink in this nowrap row and collapse
           to their icons - the strip must scroll instead. */}
