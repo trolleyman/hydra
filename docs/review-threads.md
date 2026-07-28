@@ -56,6 +56,10 @@ GitHub** (forge mark), **Comment to agent** (bot) for a single immediate
 message, and **Add to agent review** (bot) - the primary, since batching several
 comments into one review is the usual way to brief a head.
 
+Both boxes are the shared `HighlightedTextarea` - the same live inline-markdown
+highlighting as the chat and spawn composers. Review comments are markdown on
+both forges, so what you type should read like what will be posted.
+
 An in-progress reply is persisted per thread id (`loadThreadDraft` and friends,
 the same shard-store machinery as the line drafts): a thread card unmounts when
 it scrolls out of the diff, and losing a half-written reply to a reviewer is

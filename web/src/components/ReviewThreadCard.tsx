@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, EllipsisVertical, EyeOff, LoaderCircle, MessageSquare, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
@@ -6,6 +6,7 @@ import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
 import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
+import { HighlightedTextarea } from './HighlightedTextarea'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -101,6 +102,17 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
   const [menuOpen, setMenuOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const forge = providerLabel(actions.provider)
+  // HighlightedTextarea has no autoFocus of its own (it forwards a ref to the
+  // real textarea), so opening the box focuses it here - with the caret after a
+  // restored draft rather than selecting it, so typing appends.
+  const replyRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!replying) return
+    const el = replyRef.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [replying])
 
   const changeText = (v: string) => {
     setText(v)
@@ -222,8 +234,11 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
           {replying && (
             <div className="mt-2">
-              <textarea
-                autoFocus
+              {/* The same live inline-markdown highlighting as the chat and spawn
+                  composers - review replies are markdown on both forges, so what
+                  you type should read like what will be posted. */}
+              <HighlightedTextarea
+                ref={replyRef}
                 value={text}
                 onChange={(e) => changeText(e.target.value)}
                 onKeyDown={(e) => {
@@ -233,7 +248,8 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   } else if (e.key === 'Escape') setReplying(false)
                 }}
                 placeholder={`Reply... (Ctrl+Enter to post on ${forge})`}
-                className="w-full h-16 p-2 text-xs leading-5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none focus:ring-1 focus:ring-violet-500"
+                wrapperClassName="w-full h-16 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-violet-500"
+                textClassName="p-2 text-xs leading-5"
               />
               <div className="flex justify-end gap-2 mt-1.5">
                 <button type="button" onClick={() => { setReplying(false) }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
