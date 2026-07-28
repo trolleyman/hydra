@@ -6,12 +6,61 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Arrows for serif prose. Merriweather draws all of U+2190-2199, but Google
+   Fonts only serves it in Latin/Cyrillic/Greek subsets, so not one arrow ever
+   reaches the browser - every ← ↑ → ↓ ↔ ↕ ↖ ↗ ↘ ↙ an agent writes falls out of
+   the pinned webfont and lands in whatever serif the OS substitutes. Those
+   glyphs are drawn short and hairline against 14px Merriweather (the diagonals
+   worst of all - they read as flecks), and they change per OS, which is the
+   exact thing pinning the family was meant to stop.
+
+   So the arrows get their own face: a 123-glyph subset of Noto Sans Math
+   (public/fonts, OFL - see OFL.txt), scoped by `unicode-range` so it is
+   consulted ONLY for arrows and every letter still comes from Merriweather.
+   Noto Sans Math was picked over Merriweather's own arrows, Inter and Work Sans
+   because it is the only one that draws the diagonals at the same length and
+   weight as the cardinals - in the others ↖ ↗ ↘ ↙ stay stubby, which was half
+   the original complaint. A sans arrow inside serif prose reads as a symbol
+   rather than a mismatched letterform, so the family clash is not visible.
+
+   size-adjust: 110% - measured against the alternatives at the 14px/22px
+   `.chat-serif` size. It scales the glyph, not the line box, so nothing
+   reflows.
+
+   The face carries a single weight, and Chrome does not synthesise a heavier
+   one for it (measured: same advance, same ink at font-weight 700), so an arrow
+   inside bold prose stays the weight it is here. That is the trade this font
+   makes - the variable-weight candidates bold correctly but draw the stubby
+   diagonals - and it reads fine, because an arrow is a symbol rather than a
+   letter that has to match its neighbours' colour.
+
+   Range: the whole Arrows block plus the long arrows (⟵ ⟶ ⟷ and friends), which
+   is what the subset contains. Heavier/emoji arrows (U+2B05-2B0D) are
+   deliberately left out - those belong to the emoji font. */
+@font-face {
+  font-family: 'Hydra Arrows';
+  src: url('/fonts/noto-sans-math-arrows.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+2190-21FF, U+27F5-27FF;
+  size-adjust: 110%;
+}
+
 /* Pin the serif family to Merriweather (loaded in index.html) so every `serif`
    surface - `.chat-serif` prose and the Tailwind `font-serif` utility used for
    subagent prose / the settings preview - renders the same font on every OS.
-   Georgia and the system serif stay as graceful fallbacks. */
+   Georgia and the system serif stay as graceful fallbacks.
+
+   'Hydra Arrows' goes FIRST, ahead of Merriweather, and this order matters.
+   Its `unicode-range` means it is only ever consulted for arrows, so every
+   letter still falls straight through to Merriweather - but Google's Merriweather
+   `latin` subset does ship two arrows, U+2191 and U+2193. Behind Merriweather the
+   arrow face would therefore never be reached for ↑ and ↓: those two would keep
+   Merriweather's small drawing while the other eight got the new one, which reads
+   worse than the bug did. In front, all ten come from the same face. */
 @theme {
-  --font-serif: 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
+  --font-serif: 'Hydra Arrows', 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
 }
 
 /* The prompt/chat input font (HighlightedTextarea). Pinned to Roboto Flex (loaded
