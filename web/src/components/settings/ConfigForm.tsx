@@ -298,11 +298,12 @@ export function ConfigForm({
     onChange({ ...value, policy: empty ? null : next })
   }
 
-  // Git-isolation default. nil = off (the backend default), so selecting Off
-  // writes null to keep the emitted config minimal; Read-only writes it explicitly.
-  const gitIsolation: GitIsolation = (policy.git_isolation as GitIsolation | null | undefined) ?? 'off'
+  // Git-isolation default. nil = readonly (the backend default), so selecting
+  // Read-only writes null to keep the emitted config minimal; Off - the opt-out
+  // from the protective default - is written explicitly.
+  const gitIsolation: GitIsolation = (policy.git_isolation as GitIsolation | null | undefined) ?? 'readonly'
   function setGitIsolation(next: GitIsolation) {
-    updatePolicy({ git_isolation: next === 'off' ? null : next })
+    updatePolicy({ git_isolation: next === 'readonly' ? null : next })
   }
 
   function toggleMcp(name: string, on: boolean) {
@@ -478,8 +479,8 @@ export function ConfigForm({
               Git isolation
             </label>
             <InfoTooltip title="Git isolation">
-              <p><strong>Off</strong> (default): the repo's shared <code className="text-blue-300">.git</code> is writable in the sandbox, guarded only by the decision gate. The agent commits in-sandbox onto its own branch.</p>
-              <p className="mt-1.5"><strong>Read-only .git</strong>: the whole <code className="text-blue-300">.git</code> is bound read-only, so a rogue agent cannot write it at all - no wrong-branch commit, no destroying the shared object store. Commits are staged and made host-side via the <code className="text-blue-300">git_commit</code> tool onto the head's own branch.</p>
+              <p><strong>Read-only .git</strong> (default): the whole <code className="text-blue-300">.git</code> is bound read-only, so a rogue agent cannot write it at all - no wrong-branch commit, no destroying the shared object store. Commits are staged and made host-side via the <code className="text-blue-300">git_commit</code> tool onto the head's own branch.</p>
+              <p className="mt-1.5"><strong>Off</strong>: the repo's shared <code className="text-blue-300">.git</code> is writable in the sandbox, guarded only by the decision gate. The agent commits in-sandbox onto its own branch.</p>
               <p className="mt-1.5 text-gray-400 italic">Read-only disables in-sandbox <code className="text-blue-300">git add -p</code> / <code className="text-blue-300">stash</code> / <code className="text-blue-300">rebase -i</code> and setup-time .git writers (husky / git-lfs / submodules); use host-run for those. See docs/git-isolation.md.</p>
             </InfoTooltip>
           </div>

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
-import { SettingsPopover, SettingsGroupLabel } from './SettingsPopover'
+import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, X, Lock } from 'lucide-react'
@@ -869,32 +869,24 @@ export const SpawnForm = memo(function SpawnForm({
         {showChat && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
-        {/* Git isolation (per-head override; Default inherits the project policy).
-            See docs/git-isolation.md. */}
+        {/* Git isolation (per-head override; Default inherits the project policy,
+            which is readonly unless the project sets otherwise). Last in the
+            popover, as a dropdown: its options carry two-line explanations that
+            crowded out the other controls when listed inline. See
+            docs/git-isolation.md. */}
         <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>
-        <div className="flex flex-col gap-0.5">
-          {GIT_ISOLATION_OPTS.map((o) => {
+        <SettingsSelect
+          label="Git isolation"
+          value={gitIsolation}
+          onChange={setGitIsolation}
+          options={GIT_ISOLATION_OPTS.map((o) => {
             // readonly commits go through the hydra git tools, which only claude/
             // codex/gemini get - disable it for others (the server downgrades to
             // off anyway).
             const disabled = o.id === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)
-            return (
-              <button
-                key={o.id || 'default'}
-                type="button"
-                disabled={disabled}
-                onClick={() => setGitIsolation(o.id)}
-                className={`w-full flex items-start gap-2 px-2 py-1 rounded-md text-left transition-colors ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer'}`}
-              >
-                <span className="w-3.5 shrink-0 pt-0.5">{gitIsolation === o.id && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
-                  <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{disabled ? `Not available for ${agentType} (no git tools).` : o.desc}</span>
-                </span>
-              </button>
-            )
+            return { ...o, disabled, desc: disabled ? `Not available for ${agentType} (no git tools).` : o.desc }
           })}
-        </div>
+        />
       </SettingsPopover>
     )
   }

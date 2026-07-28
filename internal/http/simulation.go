@@ -1069,13 +1069,45 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 	api.WriteJSON(w, http.StatusOK, api.TestsResponse{Runners: simTestRunners(id)})
 }
 
+// simTestLogURL mirrors the real server's testLogURL: an opaque (runner, key)
+// URL a SETTLED runner hands out, which the "Show build log" toggle resolves.
+// Without it a settled card's log button would sit permanently disabled in the
+// simulation, which is not what a real settled run looks like.
+func simTestLogURL(runner string) string {
+	return "/tests/projects/sim-project/log?runner=" + runner + "&key=commit/a1b2c3d"
+}
+
+// HandleTestLog serves the persisted build log ({lines:[...]}) for a settled
+// runner, mirroring the real server's non-OpenAPI route (Server.HandleTestLog).
+// The failing runner resolves to a failing log, so the red-bordered terminal
+// treatment is exercised too.
+func (s *SimulationServer) HandleTestLog(w http.ResponseWriter, r *http.Request) {
+	lines := []api.ArtifactLogLine{
+		{Text: "$ go test ./... -json", Stream: api.Stdout},
+		{Text: "ok  \tinternal/heads\t0.42s", Stream: api.Stdout},
+		{Text: "ok  \tinternal/sandbox\t1.15s", Stream: api.Stdout},
+		{Text: "ok  \tinternal/tests\t0.88s", Stream: api.Stdout},
+	}
+	if r.URL.Query().Get("runner") == "vitest" {
+		lines = []api.ArtifactLogLine{
+			{Text: "$ vitest run --reporter=junit", Stream: api.Stdout},
+			{Text: " \u2713 diff/onion.test.ts (1)", Stream: api.Stdout},
+			{Text: " \u2717 auth/rotation.test.ts (2 failed)", Stream: api.Stderr},
+			{Text: "Test Files  1 failed | 12 passed (13)", Stream: api.Stderr},
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, struct {
+		Lines []api.ArtifactLogLine `json:"lines"`
+	}{Lines: lines})
+}
+
 // simTestRunners returns fixture test verdicts so --simulation and the
 // tests-panel screenshot exercise both a clean run and a regression (PLAN #68).
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
 		Total: ptr(152), Passed: ptr(145), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
-		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"), LogUrl: ptr(simTestLogURL("go")),
 		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
 		// Structured locations (path + line/col + scope) exercise the CaseTree. The
 		// two Go cases carry a `func TestXxx` subtest parent → ScopeKinds "function"
@@ -1105,7 +1137,7 @@ func simTestRunners(id string) []api.TestRunResult {
 		return []api.TestRunResult{{
 			Name: "vitest", Status: api.TestStatusFailing,
 			Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3),
-			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"), LogUrl: ptr(simTestLogURL("vitest")),
 			Cases: &[]api.TestCase{
 				// Scope levels are vitest describe blocks → ScopeKinds "module".
 				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
@@ -1158,7 +1190,7 @@ func simTestRunners(id string) []api.TestRunResult {
 				// No Total: a streamed runner that never declared ::hydra:test:total::,
 				// so the panel shows a sliding barber pole instead of a fill percentage.
 				Passed: ptr(213), Warnings: ptr(3),
-				StartedAt: ptr(simNow().Add(-3 * time.Second).Unix()), Progress: ptr("216"), Format: ptr("stdout"),
+				StartedAt: ptr(simNow().Add(-3 * time.Second).Unix()), Progress: ptr("216"),
 				Log: &[]api.ArtifactLogLine{
 					{Text: "$ eslint -f junit .", Stream: "stdout"},
 					{Text: "web/src/DiffViewer.tsx", Stream: "stdout"},
@@ -1171,7 +1203,7 @@ func simTestRunners(id string) []api.TestRunResult {
 				// denominator (48). TotalEstimated flags it approximate → the panel shows
 				// a determinate bar and the count reads "31/~48".
 				Total: ptr(48), TotalEstimated: ptr(true), Passed: ptr(31), Failed: ptr(0),
-				StartedAt: ptr(simNow().Add(-6 * time.Second).Unix()), Progress: ptr("31/~48"), Format: ptr("stdout"),
+				StartedAt: ptr(simNow().Add(-6 * time.Second).Unix()), Progress: ptr("31/~48"),
 				Log: &[]api.ArtifactLogLine{
 					{Text: "$ playwright test", Stream: "stdout"},
 					{Text: "Running 48 tests using 4 workers", Stream: "stdout"},
@@ -3527,7 +3559,7 @@ var simChatEvents = []string{
 	// The chat must count the usage once and render ONE footer at the turn
 	// boundary - not one per event, interleaved around the text.
 	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"thinking","thinking":""}]}}`,
-	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nThe resulting backoff schedule:\n\n| Attempt | Base delay | With jitter | Outcome |\n| ------- | ---------: | :---------: | ------- |\n| 1 | 100ms | 50-150ms | retry |\n| 2 | 200ms | 100-300ms | retry |\n| 3 | 400ms | 200-600ms | retry |\n| 4 | 800ms | 400-1200ms | retry |\n| 5 | 1600ms | 800-2400ms | give up, surface last error |\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_4","stop_reason":"end_turn","usage":{"input_tokens":210,"output_tokens":845,"cache_read_input_tokens":18200,"cache_creation_input_tokens":512},"content":[{"type":"text","text":"The new test fails as expected against the old code - now wiring the backoff loop in:\n\n` + "```go\\nfor attempt := 0; attempt < maxAttempts; attempt++ {\\n    if err = u.put(ctx, key, r); err == nil {\\n        return nil\\n    }\\n    sleepBackoff(attempt)\\n}\\n```" + `\n\nThe resulting backoff schedule:\n\n| Attempt | Base delay | With jitter | Outcome |\n| ------- | ---------: | :---------: | ------- |\n| 1 | 100ms | 50-150ms | retry |\n| 2 | 200ms | 100-300ms | retry |\n| 3 | 400ms | 200-600ms | retry |\n| 4 | 800ms | 400-1200ms | retry |\n| 5 | 1600ms | 800-2400ms | give up, surface last error |\n\nHere is the probe I timed it with - a ` + "```bash" + ` block carrying two OTHER languages inside it, which is what the embedded-language highlighting (web/src/lib/shellEmbed.ts) exists for: the inline Python and the ` + "`PY`" + ` heredoc colour as Python, while the quoted-delimiter heredoc stays inert text instead of lighting up ` + "`if`/`then`/`echo`" + ` as shell keywords.\n\n` + "```bash\\npython3 -c 'import json, sys\\nfor line in sys.stdin:\\n    e = json.loads(line)\\n    if e[0] == 1:\\n        print(e)'\\n\\ncat <<PY > /tmp/probe.py\\nimport os\\nprint(os.getcwd())\\nPY\\n\\ncat <<'EOF'\\nPlain text: the words if, then, echo and printf are not shell here.\\nEOF\\n```" + `\n\nDone - the retry loop is in and ` + "`TestPutRetry`" + ` passes. Anything else you'd like covered?"}]}}`,
 	// An interrupted turn: the user stops the reply mid-stream. The real CLI
 	// echoes the bracketed marker and ends the turn with an
 	// error_during_execution result, and fires NO Stop hook (spike-verified) -

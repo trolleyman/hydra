@@ -50,14 +50,14 @@ func TestResolvePolicyMergesDefaultsAndAgent(t *testing.T) {
 }
 
 func TestResolveGitIsolation(t *testing.T) {
-	// Unset -> off (fail-open to today's behaviour).
-	if got := (PolicyConfig{}).ResolveGitIsolation(); got != "off" {
-		t.Errorf("unset git_isolation = %q, want off", got)
+	// Unset -> readonly (the protective default).
+	if got := (PolicyConfig{}).ResolveGitIsolation(); got != "readonly" {
+		t.Errorf("unset git_isolation = %q, want readonly", got)
 	}
-	// Valid values pass through; an unrecognized one falls back to off.
+	// Valid values pass through; an unrecognized one falls back to the default.
 	for in, want := range map[string]string{
 		"readonly": "readonly", "off": "off",
-		"refs": "off", "clone": "off", "bogus": "off", "": "off",
+		"refs": "readonly", "clone": "readonly", "bogus": "readonly", "": "readonly",
 	} {
 		s := in
 		if got := string((PolicyConfig{GitIsolation: &s}).ResolveGitIsolation()); got != want {

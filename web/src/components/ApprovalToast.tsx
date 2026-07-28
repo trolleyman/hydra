@@ -5,8 +5,7 @@ import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { Tooltip } from './Tooltip'
-import hljs from '../lib/hljs'
-import { highlightLines } from '../lib/highlightCore'
+import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
 import { useChatCodeLinesStore } from '../lib/chatPrefs'
 
@@ -232,16 +231,11 @@ const CommandLines: React.FC<{ code: string }> = ({ code }) => {
   )
 }
 
-// highlightBash returns highlight.js bash token HTML for a command, or null when
-// highlighting fails (the caller then renders the raw text). highlight.js escapes
-// its input, so the returned HTML is safe to inject.
+// highlightBash returns bash token HTML for a command, or null when highlighting
+// fails (the caller then renders the raw text). The highlighter escapes its
+// input, so the returned HTML is safe to inject.
 function highlightBash(code: string): string | null {
-  if (!code) return null
-  try {
-    return hljs.highlight(code, { language: 'bash', ignoreIllegals: true }).value
-  } catch {
-    return null
-  }
+  return highlightHtml(code, 'bash')
 }
 
 // A muted caption line with a leading icon.
