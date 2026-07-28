@@ -21,7 +21,8 @@ import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { agentTypeColor } from '../lib/agentDisplay'
 
 type WorkSparkProps = {
-  /** Extra classes. Size, colour and optical offset are all baked in. */
+  /** Extra classes. Size and colour are baked in; optical centring is the
+      label's job, via `.optical-center` (see below). */
   className?: string
   still?: boolean
 }
