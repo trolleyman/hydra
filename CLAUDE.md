@@ -152,10 +152,12 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `adopt_mr` spawn field + `GET .../reviews`, `web/.../PRPicker.tsx`; the
   outbound publish flow is docs/non-local-integration.md)
 - **Publishing a head to a forge** (the `[review]` config, Create MR / Push to
-  MR / Pull from MR, the MR lifecycle watcher, publish-when-green, forge auth,
-  the agent's review tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
-  (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go`,
-  `internal/reviewq` on-demand refresh, `mcp__hydra__get_review_*`; also lists
+  MR / Pull from MR, the ahead/behind sync chips, the MR lifecycle watcher,
+  sticky publish/sync-when-green, forge auth, the agent's review AND self-status
+  tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
+  (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go` +
+  `head_status.go`, `internal/reviewq` on-demand refresh,
+  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs`; also lists
   what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)

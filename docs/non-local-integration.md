@@ -129,6 +129,30 @@ between `hydra/<id>` and its upstream review ref and offers:
   head that rewrote its own history where the remote tip still matches what this
   head last pushed; foreign commits always win a pull-first.
 
+Ahead/behind is computed per request in `agentResponseWithReview` from the
+**cached remote-tracking refs** - no fetch on the request path. `ahead` is
+therefore exact (Hydra updates the ref itself on push), and `behind` is only as
+current as the last fetch, which is why the review watcher kicks the same
+throttled `maybeFetchRemote` the sidebar's push status uses (once per
+project+remote per window, shared with it rather than doubling the traffic).
+Without that, a reviewer's push stayed invisible until you happened to pull.
+
+**Where sync state is surfaced.** All three places, because a commit that only
+exists as a line inside a dropdown is a commit that sits there unnoticed:
+
+- the **head's chip row** - `MRSyncChip` in `ReviewControls.tsx`, modelled on the
+  sidebar's repository sync row: amber down-arrow + count, blue up-arrow + count,
+  or a quiet "in sync". Each arrow is its own button (Pull / Push): unlike the
+  sidebar's pull-then-push Sync, these are separate operations with different
+  consequences, so one click must never mean both. Unmeasured (no downstream ref
+  yet) renders nothing rather than claiming "in sync";
+- the **publish button** - it leads with `Push to MR (N)` while the head is
+  ahead and `View MR` otherwise. Whatever it doesn't lead with stays in the
+  dropdown, so nothing is ever reachable only one way;
+- the **sidebar row** - a forge glyph marking which heads have an MR at all, with
+  an up-arrow count when unpushed commits exist. Native `title=` there, per the
+  per-row rule in CLAUDE.md.
+
 ### Lifecycle watcher
 
 `RunReviewWatcher` (`internal/http/review_watcher.go`) polls every MR-linked
@@ -143,10 +167,25 @@ daemon's boot project's). Unlinked heads cost nothing. It:
   the head as `merged` and tear it down. Squash merges are handled because the
   truth is the **MR state, not git ancestry** (the ancestry scan cannot see a
   squash; do not try to make it);
-- auto-publishes armed **publish-when-green** heads once local tests pass and
-  the agent has been finished for the usual dwell - unlinked heads open a DRAFT
-  MR, linked heads plain-push. Never for an adopted PR (pushing into someone
-  else's PR must be deliberate).
+- refreshes the remote-tracking refs (see the ahead/behind note above);
+- auto-publishes armed **publish/sync-when-green** heads once local tests pass
+  and the agent has been finished for the usual dwell - unlinked heads open a
+  DRAFT MR, linked heads plain-push. Never for an adopted PR (pushing into
+  someone else's PR must be deliberate).
+
+  The arm is **sticky**: it survives a successful publish or push, so an armed
+  head keeps its MR in sync for the rest of its life. That is the point - the
+  commit an agent makes *after* the MR opens is exactly the one that used to sit
+  there. One flag covers both faces (`publish_when_green` on the row): before the
+  MR exists it opens a draft one, after it pushes, and the menu label follows
+  whichever the head is about to do ("Publish when green" -> "Sync when green").
+  It is consumed only on failure, so a push that can never succeed (bad
+  credentials, a protected branch) cannot retry every 30s forever. A linked armed
+  head with nothing to push is a no-op: one local rev-list per tick, no network.
+
+  `[review] publish_when_green` arms new heads at spawn (`SpawnHead`), which is
+  what the Settings toggle has always claimed to do - before this it was read
+  back into the config response and applied nowhere.
 
 ### Agent-facing review tools
 
@@ -178,6 +217,40 @@ The user-facing loop is agent-*pull*, not push: "Resolve with agent" on a thread
 and the agent fetches the discussions itself, so the data is fresh when it reads
 rather than when you clicked. A new unresolved discussion notifies the user;
 there is deliberately no automatic prompting of the agent.
+
+### Agent-facing self-status tools
+
+Two more tools ride the same `reviewq` channel, and are wired for **every** head,
+linked or not (`internal/http/head_status.go` renders them):
+
+- `get_head_status` - each configured test runner's verdict for the head's branch
+  tip with the failing case names, each artifact set's state, and the project's
+  supervised services.
+- `get_test_logs` - the tail of one runner's captured output (default 200 lines,
+  cap 2000), named by runner.
+
+They exist because an agent could run its own test command but could not see
+**the thing that actually gates its merge**: the daemon's cached per-runner
+report and `testGateVerdict`. `get_head_status` answers "am I green?" with the
+same verdict the merge and publish gates check, against the branch tip - so it
+deliberately excludes uncommitted work, since a verdict that disagreed with the
+gate would be worse than no verdict.
+
+Design notes worth keeping:
+
+- **Read-only by construction.** Every lookup is a `Peek` (`tests.Manager.Peek` /
+  `PeekCases`, and a new `artifacts.Manager.Peek`), so a status call never starts
+  a run or a generation. A status call that causes the thing it reports is a trap.
+- **Split, not one big tool.** The common call stays a few hundred tokens; only a
+  real failure pays for a log. `get_head_status` names the failing cases (capped
+  at 15, remainder counted) and points at `get_test_logs` for the rest.
+- **The daemon renders the text**, not the sandbox: it owns the state, so the
+  wording lives next to the managers it describes and the in-sandbox side is a
+  thin relay. Services state exists ONLY in daemon memory, so there is nothing in
+  the sandbox to read even in principle - which is what settled the round-trip.
+- **No previews.** Live server previews are a user-facing affordance with no
+  diffable output, and a head cannot reach the preview port under hard egress
+  anyway. `dropServerSpecs` keeps them out.
 
 ### Review threads in the diff viewer
 

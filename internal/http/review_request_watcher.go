@@ -33,12 +33,16 @@ const (
 	reviewReqKeep = 8
 )
 
-// RunReviewRequestWatcher answers on-demand review refreshes for sandboxed heads:
-// the in-sandbox review tools (mcp__hydra__get_review_status /
-// get_review_comments) drop a request into the head's reviewq dir before
-// answering, and this loop re-reads the MR from the forge host-side and rewrites
-// the head's review file, so the agent gets live data instead of whatever the 30s
-// review watcher last cached.
+// RunReviewRequestWatcher answers the requests sandboxed heads drop into their
+// reviewq dir - everything an in-sandbox tool needs the host to do for it:
+//
+//   - review refreshes (mcp__hydra__get_review_status / get_review_comments):
+//     re-read the MR from the forge host-side and rewrite the head's review file,
+//     so the agent gets live data instead of whatever the 30s watcher last cached;
+//   - local-only replies on a review thread;
+//   - the head's own tests/artifacts/services status and test logs
+//     (mcp__hydra__get_head_status / get_test_logs), which live in the daemon's
+//     managers - services state only ever exists in daemon memory.
 //
 // The forge CLIs are host-side only - the sandbox holds no `gh`/`glab`
 // credentials and, under hard egress, has no route to the forge - which is why
@@ -77,14 +81,18 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 			continue
 		}
 		// Refreshes from one head all ask the same thing, so a burst collapses into
-		// one forge round trip and they all get the same answer. Notes carry their
-		// own payload and are handled individually.
+		// one forge round trip and they all get the same answer. Notes and status
+		// requests carry their own payload and are handled individually.
 		var refresh *reviewq.Result
 		for _, r := range reqs {
 			res := reviewq.Result{OK: true}
 			switch r.Op {
 			case reviewq.OpNote:
 				res = s.recordLocalNote(projectRoot, id, r)
+			case reviewq.OpHeadStatus:
+				res = s.headStatusText(ctx, id)
+			case reviewq.OpTestLogs:
+				res = s.testLogsText(ctx, id, r)
 			default:
 				if refresh == nil {
 					v := s.refreshReviewOnDemand(ctx, id)
