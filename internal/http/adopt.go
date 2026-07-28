@@ -11,6 +11,7 @@ import (
 	"github.com/trolleyman/hydra/internal/forge"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/mcpserver"
 )
 
 // adoptTimeout bounds the forge lookup + PR-head fetch a spawn-from-PR performs
@@ -140,7 +141,7 @@ func (s *Server) resolveAdoptSpec(ctx context.Context, projectRoot string, body 
 		return nil, fmt.Sprintf("fetch PR %s head failed: %v", id, err)
 	}
 
-	return &heads.AdoptSpec{
+	spec := &heads.AdoptSpec{
 		Provider:     provider.Name(),
 		ReviewID:     ref.ID,
 		ReviewURL:    ref.URL,
@@ -149,5 +150,27 @@ func (s *Server) resolveAdoptSpec(ctx context.Context, projectRoot string, body 
 		HeadRepoURL:  ref.HeadRepoURL,
 		WorktreeBase: localRef,
 		CanPush:      ref.CanPush,
-	}, ""
+	}
+	spec.Review = ptr(adoptReviewSnapshot(adoptCtx, provider, projectRoot, remote, ref))
+	return spec, ""
+}
+
+// adoptReviewSnapshot fetches the PR's status + unresolved discussions so the
+// spawn can write the head's review file before the agent launches (the agent
+// typically asks for its review comments seconds into its first turn, and the
+// review watcher would not fill the file in for another 30s). Best-effort: a
+// forge hiccup still yields a linked snapshot built from the MRRef, which the
+// watcher then completes on its next tick.
+func adoptReviewSnapshot(ctx context.Context, provider forge.Provider, projectRoot, remote string, ref forge.MRRef) mcpserver.ReviewFile {
+	st := forge.Status{ID: ref.ID, URL: ref.URL, State: ref.State}
+	if s, err := provider.Status(ctx, projectRoot, remote, ref.ID); err == nil {
+		st = s
+	}
+	var discussions []forge.Discussion
+	if st.UnresolvedDiscussions > 0 {
+		if d, err := provider.Discussions(ctx, projectRoot, remote, ref.ID); err == nil {
+			discussions = d
+		}
+	}
+	return reviewSnapshot(ref.URL, ref.ID, provider.Name(), ref.TargetBranch, st, discussions)
 }

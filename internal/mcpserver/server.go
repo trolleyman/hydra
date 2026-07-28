@@ -288,14 +288,22 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 	}
 }
 
+// unlinkedText explains an unlinked head to the agent. It names the two ways a
+// head gets a PR (adopted at spawn, or published later) so the agent asks the
+// user instead of reaching for `gh`/`glab`, which are unauthenticated in the
+// sandbox - every forge call runs host-side in the daemon.
+const unlinkedText = "This head is not linked to a merge/pull request: it was not spawned onto an existing PR, and it has not been published yet. " +
+	"`gh`/`glab` are not authenticated inside the sandbox, so there is no other way to reach the forge from here - " +
+	"ask the user to publish this head (or to respawn it onto the PR) from Hydra's UI."
+
 // reviewStatusText renders this head's MR status for get_review_status.
 func reviewStatusText(deps Deps) string {
 	if deps.GetReview == nil {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	rf := deps.GetReview()
 	if rf == nil || !rf.Linked {
-		return "This head is not linked to a merge/pull request. It has not been published yet."
+		return unlinkedText
 	}
 	var b strings.Builder
 	b.WriteString("Your merge/pull request:\n")
@@ -314,6 +322,9 @@ func reviewStatusText(deps Deps) string {
 		b.WriteString("- Approvals: " + itoa(rf.Approvals) + "/" + itoa(rf.ApprovalsRequired) + "\n")
 	}
 	b.WriteString("- Unresolved discussions: " + itoa(rf.UnresolvedDiscussions) + "\n")
+	if rf.UpdatedAt != "" {
+		b.WriteString("- Fetched from the forge at: " + rf.UpdatedAt + " (Hydra re-polls every ~30s, so call again for fresher state)\n")
+	}
 	if rf.UnresolvedDiscussions > 0 {
 		b.WriteString("Use get_review_comments to read the unresolved discussions.\n")
 	}
@@ -324,14 +335,18 @@ func reviewStatusText(deps Deps) string {
 // get_review_comments.
 func reviewCommentsText(deps Deps) string {
 	if deps.GetReview == nil {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	rf := deps.GetReview()
 	if rf == nil || !rf.Linked {
-		return "This head is not linked to a merge/pull request."
+		return unlinkedText
 	}
 	if len(rf.Comments) == 0 {
-		return "No unresolved review discussions."
+		msg := "No unresolved review discussions on " + rf.URL
+		if rf.UpdatedAt != "" {
+			msg += " as of " + rf.UpdatedAt
+		}
+		return msg + ". Hydra re-polls the forge every ~30s, so call again to pick up newer ones."
 	}
 	var b strings.Builder
 	b.WriteString("Unresolved review discussions on your MR (address them, then commit):\n\n")

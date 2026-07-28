@@ -12,6 +12,31 @@ a live-auth verification pass (see the CAVEAT in step 4); token/REST forge auth
 is still CLI-only; and the fetch-fresh spawn base (NON_LOCAL_INTEGRATION.md 3.6)
 that keeps an adopted head's diff crisp remains unbuilt.
 
+### The review file must be seeded AT SPAWN, not by the watcher
+
+The first cut let the review watcher populate the head's review file on its next
+tick. That is up to 30s away, and an adopted head's first question is invariably
+"what are the review comments?" - in practice ~4s after spawn. The agent read the
+empty `{"linked":false}` seed, was told it had no PR, tried `gh` (unauthenticated
+in the sandbox, by design) and gave up.
+
+So `resolveAdoptSpec` now also fetches `Status` + `Discussions` while it has the
+provider in hand (`adoptReviewSnapshot`), hands them to `SpawnHead` on
+`AdoptSpec.Review`, and the spawn writes the review file **before the sandbox is
+built** (`heads.WriteReviewSnapshot`, shared with the watcher). `seedHead` only
+creates the empty file when none exists, so it leaves the seeded snapshot alone.
+The write truncates in place - the file is bind-mounted into the sandbox by
+inode, so a write-and-rename would leave the agent reading a stale copy forever.
+
+Two supporting changes:
+
+- an adopted head's system prompt gains a note naming the PR, its target branch,
+  its push access and the review tools (`adoptedPrePromptNote`), so the agent
+  knows what it is sitting on before it calls anything;
+- the "not linked" answer from `get_review_status` / `get_review_comments` now
+  explains *why* (not adopted, not published) and that `gh`/`glab` cannot help
+  from inside the sandbox, so the agent asks the user instead of flailing.
+
 ## Problem
 
 Hydra's forge integration is **outbound only**. Every head begins life as a fresh
@@ -191,6 +216,14 @@ listing open PRs with author, target, draft state, and - importantly - a **"can'
 badge** when `CanPush` is false. `ReviewControls.tsx` should label an adopted head as
 adopted rather than showing "Create MR", and hide `DownstreamBranchEditor` (the branch
 name is the PR's, not ours).
+
+The picker lives in the spawn-options popover, first of its four sections (pull
+request -> base branch -> run mode -> git isolation), ordered widest-effect
+first: adopting a PR chooses the base branch for you, which is why the base
+section hides while one is selected. It started out inline in the composer
+footer, but the chip plus the picker trigger overflowed that row; the Spawn
+button switching to "Adopt PR #n" is what keeps the choice visible without
+opening the cog.
 
 ## Rejected alternatives
 

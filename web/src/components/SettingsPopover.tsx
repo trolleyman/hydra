@@ -81,6 +81,15 @@ export function SettingsPopover({
     }
   }, [width, align])
 
+  // Re-place as soon as the panel exists: the first pass has to guess its height
+  // (the portal isn't mounted until `pos` is set), and a panel taller than that
+  // guess would otherwise stay pinned below the button and run off the bottom of
+  // the viewport until something scrolled.
+  const measureRef = useCallback((node: HTMLDivElement | null) => {
+    popRef.current = node
+    if (node) reposition()
+  }, [reposition])
+
   useLayoutEffect(() => {
     if (!open) return
     reposition()
@@ -138,7 +147,7 @@ export function SettingsPopover({
       </Tooltip>
       {open && pos && createPortal(
         <div
-          ref={popRef}
+          ref={measureRef}
           style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: fitContent ? 'max-content' : pos.width, maxWidth: pos.width }}
           className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/config"
@@ -13,7 +12,6 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/mcpserver"
-	"github.com/trolleyman/hydra/internal/paths"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
@@ -99,15 +97,17 @@ func (s *Server) cacheReviewState(projectRoot, headID string, st forge.Status) {
 	s.notifyAgentsChanged(projectRoot, false)
 }
 
-// writeReviewFile writes the per-head review snapshot (status + unresolved
-// discussions) the in-sandbox `hydra mcp` server reads (3.5a). Best-effort.
-func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
+// reviewSnapshot assembles the per-head review file the in-sandbox `hydra mcp`
+// server reads (3.5a) from an MR link plus its freshly-polled forge state. Shared
+// by the watcher and the adopt-spawn seed (docs/pr-adoption.md), so both write
+// the same shape.
+func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, discussions []forge.Discussion) mcpserver.ReviewFile {
 	rf := mcpserver.ReviewFile{
 		Linked:                true,
-		URL:                   a.ReviewURL,
-		ID:                    a.ReviewID,
-		Provider:              a.ReviewProvider,
-		TargetBranch:          a.ReviewTargetBranch,
+		URL:                   url,
+		ID:                    id,
+		Provider:              provider,
+		TargetBranch:          targetBranch,
 		State:                 st.State,
 		CIStatus:              st.CIStatus,
 		Approvals:             st.Approvals,
@@ -121,14 +121,14 @@ func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussion
 			Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
 		})
 	}
-	data, err := json.Marshal(rf)
-	if err != nil {
-		return
-	}
-	// The review file lives in its own dir now (PLAN #26); ensure it exists in
-	// case the watcher writes before the head's sandbox was seeded.
-	_ = os.MkdirAll(paths.GetReviewDirFromProjectRoot(projectRoot), 0o755)
-	_ = os.WriteFile(paths.GetReviewJsonFromProjectRoot(projectRoot, a.ID), data, 0644)
+	return rf
+}
+
+// writeReviewFile writes the per-head review snapshot (status + unresolved
+// discussions) the in-sandbox `hydra mcp` server reads (3.5a). Best-effort.
+func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
+	rf := reviewSnapshot(a.ReviewURL, a.ReviewID, a.ReviewProvider, a.ReviewTargetBranch, st, discussions)
+	_ = heads.WriteReviewSnapshot(projectRoot, a.ID, rf)
 }
 
 // handleRemoteMerge tears down a head whose MR reports merged: fetch, fast-forward
