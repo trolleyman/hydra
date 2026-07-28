@@ -54,8 +54,10 @@ core.*
 # the real one lives in web/)
 /node_modules/
 
-# Self-hosted Iosevka webfonts. Not committed - `cd web && npm run build-fonts`
-# (which `npm run build` runs first) fetches them from the upstream release and
-# subsets them into place. See web/scripts/build-fonts.ts.
+# Self-hosted webfonts (Iosevka, Iosevka Term, the Nerd Fonts symbol fallback).
+# Not committed - `cd web && npm run build-fonts` (which `npm run build` runs
+# first) fetches them from the upstream releases and subsets them into place.
+# See web/scripts/build-fonts.ts.
 /web/public/fonts/iosevka-*.woff2
+/web/public/fonts/nerd-symbols-*.woff2
 /web/.iosevka-build.json

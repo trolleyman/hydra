@@ -1,15 +1,21 @@
 // Fetches and subsets the self-hosted webfonts into public/fonts.
 //
-// Only the fonts that are NOT on Google Fonts are self-hosted: Iosevka and
-// Iosevka Term (see src/lib/fonts.ts - everything else rides the single Google
-// Fonts stylesheet in index.html, which already serves properly subsetted,
-// unicode-range-split CSS). Iosevka has no CDN and no maintained npm build at a
-// current version, so we cut our own.
+// Three families, none of which is on Google Fonts (everything else rides the
+// single Google Fonts stylesheet in index.html, which already serves properly
+// subsetted, unicode-range-split CSS):
+//
+//   Iosevka, Iosevka Term   offered mono families. No CDN and no maintained npm
+//                           build at a current version, so we cut our own.
+//   Nerd Fonts symbols      NOT an offered family - a fallback face appended to
+//                           every mono stack, scoped by unicode-range to the
+//                           private-use blocks. Without it every Powerline
+//                           separator, Devicon and Codicon an agent or a TUI
+//                           prints comes out as a tofu box.
 //
 // The .woff2 output is NOT committed - it is gitignored and produced at build
 // time. `npm run build` runs this first (see the prebuild script), and it is a
 // no-op once the cache stamp matches, so only a fresh checkout, a version bump
-// or a change to the subset below pays the download.
+// or a change to the subsets below pays the download.
 //
 //     cd web && npm run build-fonts          # or: node scripts/build-fonts.ts
 //     cd web && npm run build-fonts -- --force
@@ -42,6 +48,7 @@ import { fileURLToPath } from 'node:url'
 import subsetFont from 'subset-font'
 
 const IOSEVKA_VERSION = '34.8.0'
+const NERD_FONTS_VERSION = '3.4.0'
 
 const WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(WEB_DIR, 'public', 'fonts')
@@ -144,6 +151,34 @@ const EMOJI_PRESENTATION: [number, number][] = [
   [0x26fd, 0x26fd], // ⛽
 ]
 
+// The Nerd Fonts code point map, minus the Material Design block (U+F0001-
+// U+F1AF0, ~7000 glyphs, which would take the face from 600KB to 1.1MB and
+// which almost no prompt or TUI reaches for). These MUST stay in step with the
+// `unicode-range` on the @font-face in src/index.css - a code point cut here but
+// still listed there renders as a blank rather than falling through.
+const NERD_RANGES: [number, number][] = [
+  [0x23fb, 0x23fe], // IEC power symbols
+  [0x2b58, 0x2b58], // heavy circle (the power-off pair)
+  [0xe000, 0xe00a], // Pomicons
+  [0xe0a0, 0xe0a3], // Powerline
+  [0xe0b0, 0xe0d7], // Powerline extras - the prompt separators
+  [0xe200, 0xe2a9], // Font Awesome Extension
+  [0xe300, 0xe3e3], // Weather
+  [0xe5fa, 0xe6b7], // Seti-UI + custom - the file-type icons eza/lsd print
+  [0xe700, 0xe8ef], // Devicons
+  [0xea60, 0xec1e], // Codicons
+  [0xed00, 0xefce], // Font Awesome
+  [0xf000, 0xf2ff], // Font Awesome (legacy range)
+  [0xf300, 0xf381], // Font Logos (distro marks)
+  [0xf400, 0xf533], // Octicons
+]
+
+function expand(ranges: [number, number][]): string {
+  let out = ''
+  for (const [lo, hi] of ranges) for (let cp = lo; cp <= hi; cp++) out += String.fromCodePoint(cp)
+  return out
+}
+
 function codepoints(): number[] {
   const drop = new Set<number>()
   for (const [lo, hi] of EMOJI_PRESENTATION) for (let cp = lo; cp <= hi; cp++) drop.add(cp)
@@ -222,18 +257,25 @@ function readMember(url: string, entry: ZipEntry): Buffer {
 
 const cps = codepoints()
 const text = cps.map((cp) => String.fromCodePoint(cp)).join('')
-const outputs = FAMILIES.flatMap(({ slug }) => FACES.map((f) => `${slug}-${f.weight}-${f.style}.woff2`))
+const nerdText = expand(NERD_RANGES)
+const NERD_OUTPUT = 'nerd-symbols-400-normal.woff2'
+const outputs = [
+  ...FAMILIES.flatMap(({ slug }) => FACES.map((f) => `${slug}-${f.weight}-${f.style}.woff2`)),
+  NERD_OUTPUT,
+]
 
-// The stamp covers everything that decides the bytes: the release, which faces
-// and families we cut, and the exact codepoint set. Anything else changing (a
+// The stamp covers everything that decides the bytes: the releases, which faces
+// and families we cut, and the exact code point sets. Anything else changing (a
 // deleted file, a truncated download) is caught by the size check.
 const signature = createHash('sha256')
   .update(
     JSON.stringify({
       version: IOSEVKA_VERSION,
+      nerd: NERD_FONTS_VERSION,
       families: FAMILIES.map((f) => f.pkg),
       faces: FACES.map((f) => f.file),
       codepoints: cps,
+      nerdCodepoints: nerdText.length,
     }),
   )
   .digest('hex')
@@ -254,12 +296,15 @@ function upToDate(): boolean {
 }
 
 if (upToDate()) {
-  console.log(`fonts: Iosevka v${IOSEVKA_VERSION} already built (${outputs.length} faces) - nothing to do`)
+  console.log(`fonts: already built (${outputs.length} faces) - nothing to do`)
   process.exit(0)
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
-console.log(`fonts: cutting Iosevka v${IOSEVKA_VERSION}, ${cps.length} code points, ${outputs.length} faces`)
+console.log(
+  `fonts: cutting Iosevka v${IOSEVKA_VERSION} (${cps.length} code points) ` +
+    `+ Nerd Fonts symbols v${NERD_FONTS_VERSION} (${nerdText.length})`,
+)
 
 const sizes: Record<string, number> = {}
 for (const { pkg, family, slug } of FAMILIES) {
@@ -286,5 +331,34 @@ for (const { pkg, family, slug } of FAMILIES) {
   }
 }
 
-writeFileSync(STAMP, JSON.stringify({ version: IOSEVKA_VERSION, signature, sizes }, null, 2) + '\n')
+// The Nerd Fonts symbol face. Upstream's "Symbols Only" package is exactly this
+// job - the patch glyphs with no Latin at all - so one face covers every mono
+// family we offer instead of swapping each one for its patched twin (the
+// patched Iosevka release alone is a 357MB zip, and there is no patched build
+// for the system monospace at all).
+//
+// Regular only: these are icons, and neither a bold nor an italic of an icon is
+// a thing anyone needs.
+{
+  const url = `https://github.com/ryanoasis/nerd-fonts/releases/download/v${NERD_FONTS_VERSION}/NerdFontsSymbolsOnly.zip`
+  console.log(`  Nerd Fonts symbols: reading directory of ${url.split('/').pop()}`)
+  const entries = readCentralDirectory(url, contentLength(url))
+  // The "Mono" cut is the one whose glyphs are normalised to a single cell
+  // rather than the ~1.5 cells the proportional cut uses.
+  const member = entries.get('SymbolsNerdFontMono-Regular.ttf')
+  if (!member) throw new Error('SymbolsNerdFontMono-Regular.ttf missing from the release zip')
+  const source = readMember(url, member)
+  const subset = await subsetFont(source, nerdText, { targetFormat: 'woff2' })
+  writeFileSync(join(OUT_DIR, NERD_OUTPUT), subset)
+  sizes[NERD_OUTPUT] = subset.length
+  console.log(
+    `    ${'Symbols'.padEnd(10)} ${(source.length / 1024).toFixed(0).padStart(5)}KB -> ` +
+      `${(subset.length / 1024).toFixed(0).padStart(4)}KB  ${NERD_OUTPUT}`,
+  )
+}
+
+writeFileSync(
+  STAMP,
+  JSON.stringify({ iosevka: IOSEVKA_VERSION, nerdFonts: NERD_FONTS_VERSION, signature, sizes }, null, 2) + '\n',
+)
 console.log(`fonts: done (${(Object.values(sizes).reduce((a, b) => a + b, 0) / 1024 / 1024).toFixed(1)}MB total)`)

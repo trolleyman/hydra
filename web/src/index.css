@@ -79,6 +79,51 @@
 @font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 @font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
 
+/* Nerd Fonts symbols - a FALLBACK face, not an offered family. Agents and TUIs
+   print Powerline separators, Devicons, Codicons and Seti file-type icons out of
+   the Unicode private-use area, and no normal monospace font has them, so
+   without this every one of them is a tofu box. Upstream's "Symbols Only"
+   package is built for exactly this (its own README calls it a fallback), which
+   means one face covers every mono family the selector offers instead of
+   swapping each for its patched twin - the patched Iosevka release alone is a
+   357MB zip, and the system monospace has no patched build at all.
+
+   `unicode-range` keeps it scoped to the private-use blocks, so it is never
+   consulted for a letter and never downloaded by anyone who does not render one.
+   The ranges must stay in step with NERD_RANGES in scripts/build-fonts.ts: a
+   code point listed here but cut there renders blank instead of falling through.
+
+   TWO declarations, one file. The glyphs are drawn one em wide, but a monospace
+   cell is not an em - it is 0.5em in Iosevka and 0.6em in every other family we
+   offer (measured, not assumed). Left unadjusted they come out ~1.6 cells wide,
+   which does not overlap - xterm's DOM renderer flows the row - but pushes the
+   rest of the line along, so box drawing stops lining up and the line wraps
+   early. `size-adjust` scales glyph and advance together, so each stack picks
+   the face cut to its own cell (see monoStack in src/lib/fonts.ts). Both point
+   at the same URL, so it is still one download. */
+@font-face {
+  font-family: 'Hydra Nerd Symbols 50';
+  src: url('/fonts/nerd-symbols-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 50%;
+  unicode-range: U+23FB-23FE, U+2B58, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0D7,
+    U+E200-E2A9, U+E300-E3E3, U+E5FA-E6B7, U+E700-E8EF, U+EA60-EC1E, U+ED00-EFCE,
+    U+F000-F2FF, U+F300-F381, U+F400-F533;
+}
+@font-face {
+  font-family: 'Hydra Nerd Symbols 60';
+  src: url('/fonts/nerd-symbols-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 60%;
+  unicode-range: U+23FB-23FE, U+2B58, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0D7,
+    U+E200-E2A9, U+E300-E3E3, U+E5FA-E6B7, U+E700-E8EF, U+EA60-EC1E, U+ED00-EFCE,
+    U+F000-F2FF, U+F300-F381, U+F400-F533;
+}
+
 /* Hand Tailwind's two font utilities over to the font selector (Settings ->
    Browser -> Fonts). `font-sans` - which is to say the whole app shell, since
    `body` carries no family of its own - follows the Interface choice, and every

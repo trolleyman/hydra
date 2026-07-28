@@ -78,6 +78,27 @@ describe('font catalogue', () => {
     }
   })
 
+  // Without the fallback face, every Powerline separator and Devicon an agent
+  // prints is a tofu box. The size-adjusted variant has to match the family's
+  // own cell, or the symbols push the line and break column alignment.
+  it('gives every mono stack the Nerd Fonts fallback, cut to its own cell', () => {
+    for (const font of FONT_OPTIONS.filter((f) => f.category === 'mono')) {
+      const narrow = font.id.startsWith('iosevka')
+      expect(font.stack).toContain(`'Hydra Nerd Symbols ${narrow ? 50 : 60}'`)
+      expect(font.stack).not.toContain(`'Hydra Nerd Symbols ${narrow ? 60 : 50}'`)
+      // After the real family, so a letter it does cover still wins.
+      if (font.id !== 'system-mono') {
+        expect(font.stack.indexOf('Hydra Nerd Symbols')).toBeGreaterThan(font.stack.indexOf(font.label))
+      }
+    }
+  })
+
+  it('keeps the Nerd Fonts fallback out of the proportional stacks', () => {
+    for (const font of FONT_OPTIONS.filter((f) => f.category !== 'mono')) {
+      expect(font.stack).not.toContain('Hydra Nerd Symbols')
+    }
+  })
+
   it('resolves an unknown or wrong-category id to the role default', () => {
     expect(fontStackFor('code', 'no-such-font')).toBe(FONT_BY_ID.get('iosevka')!.stack)
     // A mono font is a perfectly real font, just not one the chat role offers.

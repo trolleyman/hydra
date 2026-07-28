@@ -71,7 +71,21 @@ const ARROWS = "'Hydra Arrows'"
 const sansStack = (family?: string) => (family ? `'${family}', ${SYSTEM_SANS}` : SYSTEM_SANS)
 const serifStack = (family?: string) =>
   family ? `${ARROWS}, '${family}', ${SYSTEM_SERIF}` : `${ARROWS}, ${SYSTEM_SERIF}`
-const monoStack = (family?: string) => (family ? `'${family}', ${SYSTEM_MONO}` : SYSTEM_MONO)
+
+// Every mono stack carries the Nerd Fonts symbol face (see the @font-face pair
+// in index.css). It is unicode-range-scoped to the private-use blocks, so it is
+// only ever consulted for a Powerline separator or a Devicon and every letter
+// still comes from the real family - but without it those code points are tofu
+// boxes in any font, because no normal monospace draws them.
+//
+// `cellEm` is the family's advance width as a fraction of the em, MEASURED at
+// 1000px rather than assumed: 0.5 for both Iosevka cuts, 0.6 for everything else
+// including the system stack. It picks which of the two size-adjusted faces to
+// use, so a symbol comes out exactly one cell wide instead of the em-wide glyph
+// upstream ships - which would push the rest of the line and break a TUI's
+// column alignment. Both faces are the same file, so this costs one download.
+const monoStack = (family: string | undefined, cellEm: 50 | 60) =>
+  [family && `'${family}'`, `'Hydra Nerd Symbols ${cellEm}'`, SYSTEM_MONO].filter(Boolean).join(', ')
 
 export interface FontOption {
   id: string
@@ -103,12 +117,12 @@ export const FONT_OPTIONS: FontOption[] = [
   { id: 'source-serif', label: 'Source Serif 4', category: 'serif', stack: serifStack('Source Serif 4'), note: 'Lighter, more bookish' },
 
   // ── Mono ──
-  { id: 'system-mono', label: 'System mono', category: 'mono', stack: monoStack(), note: "This device's own monospace" },
+  { id: 'system-mono', label: 'System mono', category: 'mono', stack: monoStack(undefined, 60), note: "This device's own monospace" },
   {
     id: 'iosevka',
     label: 'Iosevka',
     category: 'mono',
-    stack: monoStack('Iosevka'),
+    stack: monoStack('Iosevka', 50),
     note: 'Narrow - fits more diff per line',
     features: IOSEVKA_FEATURES,
   },
@@ -116,17 +130,17 @@ export const FONT_OPTIONS: FontOption[] = [
     id: 'iosevka-term',
     label: 'Iosevka Term',
     category: 'mono',
-    stack: monoStack('Iosevka Term'),
+    stack: monoStack('Iosevka Term', 50),
     // The only difference from Iosevka: the wide symbols (arrows, some math) are
     // drawn one cell across instead of two, which is what keeps a TUI's columns
     // lined up. Harmless outside a terminal, so it is offered for code too.
     note: 'Iosevka with every glyph one cell wide',
     features: IOSEVKA_FEATURES,
   },
-  { id: 'fira-code', label: 'Fira Code', category: 'mono', stack: monoStack('Fira Code'), note: 'Ligatures for => and !=' },
-  { id: 'jetbrains-mono', label: 'JetBrains Mono', category: 'mono', stack: monoStack('JetBrains Mono'), note: 'Tall x-height, roomy' },
-  { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'mono', stack: monoStack('IBM Plex Mono'), note: 'Warmer, slightly wider' },
-  { id: 'source-code-pro', label: 'Source Code Pro', category: 'mono', stack: monoStack('Source Code Pro'), note: 'Plain and unfussy' },
+  { id: 'fira-code', label: 'Fira Code', category: 'mono', stack: monoStack('Fira Code', 60), note: 'Ligatures for => and !=' },
+  { id: 'jetbrains-mono', label: 'JetBrains Mono', category: 'mono', stack: monoStack('JetBrains Mono', 60), note: 'Tall x-height, roomy' },
+  { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'mono', stack: monoStack('IBM Plex Mono', 60), note: 'Warmer, slightly wider' },
+  { id: 'source-code-pro', label: 'Source Code Pro', category: 'mono', stack: monoStack('Source Code Pro', 60), note: 'Plain and unfussy' },
 ]
 
 export const FONT_BY_ID: Map<string, FontOption> = new Map(FONT_OPTIONS.map((f) => [f.id, f]))
