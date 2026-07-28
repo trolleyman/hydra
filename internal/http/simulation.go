@@ -3673,7 +3673,9 @@ var simChatEvents = []string{
 	// the no-op cd, splits the chain, keeps the subshell on one line, and leaves
 	// the heredoc body exactly as written (semicolons and all).
 	`{"type":"assistant","message":{"id":"msg_sim_heredoc","content":[{"type":"tool_use","id":"toolu_sim_heredoc","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}}]}}`,
-	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
+	// `cwd` on the RESULT entry is where the CLI says the shell was left - the
+	// chat prefers it over working the directory out from the commands.
+	`{"type":"user","cwd":"/repo/.hydra/local/worktrees/feat-uploader-retry/web","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
 	// The command after it: the shell is STILL in web/ (one shell per session),
 	// which is why this runs a bare `bun test` - so the card shows the tracked
 	// `cd web` above it. Without that line the command reads as if it ran at the

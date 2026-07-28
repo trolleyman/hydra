@@ -83,6 +83,19 @@ describe('trackShellCwds', () => {
     expect(track([`cat > f <<'EOF'\ncd /etc\nEOF`, 'ls'])).toEqual([WT, WT])
   })
 
+  // The CLI records where it left the shell on the tool result; that beats
+  // anything the walk can work out - including a `cd` the walk gives up on.
+  it('believes the recorded directory over the commands', () => {
+    expect(
+      track([
+        { command: 'cd $TARGET && ls', cwdAfter: `${WT}/web/src` } as ShellStep,
+        'bun test',
+        { command: 'cd ..', cwdAfter: `${WT}/web` } as ShellStep,
+        'ls',
+      ]),
+    ).toEqual([WT, `${WT}/web/src`, `${WT}/web/src`, `${WT}/web`])
+  })
+
   it('takes the provider-reported cwd over the tracked one', () => {
     expect(track(['cd web', { command: 'ls', cwd: '/elsewhere' } as ShellStep, 'ls'])).toEqual([WT, '/elsewhere', '/elsewhere'])
   })

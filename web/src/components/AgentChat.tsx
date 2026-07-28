@@ -265,7 +265,7 @@ type ChatItem =
   // print what was actually sent rather than a reconstruction of it (see
   // toolRawJson). They cost one wrapper object per card: the heavy part of a
   // result is its text, and that string is shared with `result`, not copied.
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown }
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown; cwdAfter?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -410,6 +410,14 @@ interface ProviderEvent {
   // The durable conversation-record id (transcript + stdout share it). Tracked
   // as the anchor for load-older history paging (item 25).
   uuid?: string
+  // The working directory the CLI recorded for this entry. The Bash tool runs
+  // ONE shell for a whole session, so this is the only record of where a command
+  // ran - and it is read from the TOOL RESULT entry, where it is the directory
+  // AFTER the command. (On the assistant entry carrying the tool_use it is
+  // stamped at flush time and can land either side of the call, so it is
+  // ignored.) Absent from live stdout lines on some CLI versions, in which case
+  // the chat infers the directory instead - see lib/shellCwd.
+  cwd?: string
   // stop_reason on a complete assistant message: "end_turn"/"tool_use" are
   // normal, "max_tokens" means the reply was truncated, "refusal" a safety stop
   // - only the abnormal ones are surfaced (item: turn footer).
@@ -647,6 +655,7 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
     isSidechain: p.sidechain === true,
     agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
     parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
+    cwd: typeof p.cwd === 'string' && p.cwd ? p.cwd : undefined,
   }
   const text = typeof p.text === 'string' ? p.text : contentText(p.content)
   const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
@@ -3137,6 +3146,7 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
       command: input.command,
       cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
       output: it.result ?? it.runningOutput,
+      cwdAfter: it.cwdAfter,
       failed: it.isError === true,
       background: input.run_in_background === true,
     })
@@ -4379,7 +4389,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     if (lastTs != null) tsOut?.set(id, lastTs)
     items.push({ ...claimOrphanResult(link, raw), id } as ChatItem)
   }
-  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[], raw?: unknown) => {
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[], raw?: unknown, cwdAfter?: string) => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind === 'tool' && it.toolUseId === toolUseId) {
@@ -4387,6 +4397,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         it.isError = isError
         it.resultImages = images.length ? images : undefined
         it.rawResult = raw
+        it.cwdAfter = cwdAfter
         return
       }
       if (it.kind === 'question' && it.toolUseId === toolUseId) {
@@ -4547,7 +4558,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
-          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block))
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block), ev.cwd)
         }
       }
     } else if (ev.type === 'assistant') {
@@ -5472,7 +5483,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       scheduleSubFlush()
     }
-    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
+    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown, cwdAfter?: string) => {
       const resultImages = images.length > 0 ? images : undefined
       // Replace the item with a fresh object (not an in-place mutation): the
       // memoized ToolCard compares its `item` prop by reference, so mutating the
@@ -5481,7 +5492,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       for (let i = 0; i < sub.items.length; i++) {
         const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
-          sub.items[i] = { ...it, result, isError, resultImages, rawResult: raw }
+          sub.items[i] = { ...it, result, isError, resultImages, rawResult: raw, cwdAfter }
           break
         }
       }
@@ -5666,7 +5677,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (block.type === 'text' && block.text) takePrompt(block.text)
             else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block), ev.cwd)
             }
           }
       } else if (ev.type === 'assistant') {
@@ -5702,7 +5713,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       scheduleSubFlush()
     }
 
-    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
+    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown, cwdAfter?: string) => {
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
       // rendered.
@@ -5714,6 +5725,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         inPending.isError = isError
         inPending.resultImages = resultImages
         inPending.rawResult = raw
+        inPending.cwdAfter = cwdAfter
         return
       }
       if (inPending && inPending.kind === 'question') {
@@ -5729,7 +5741,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       setItems((prev) =>
         prev.map((it) => {
-          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages, rawResult: raw }
+          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages, rawResult: raw, cwdAfter }
           if (it.kind === 'question' && it.toolUseId === toolUseId) return { ...it, result }
           return it
         }),
@@ -6215,7 +6227,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
+              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block), ev.cwd)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
               if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
               if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)

@@ -7,6 +7,12 @@
 // so the chat has to reconstruct it: start at the worktree, apply the `cd`s each
 // command performs, and hand every card the directory its command started in.
 //
+// Where the CLI records the directory itself, that wins: Claude writes a `cwd`
+// on every transcript entry, and the one on a tool RESULT is exactly where the
+// shell was left (the daemon relays it - internal/chat/claude.go). The walk
+// below is the fallback for what that does not cover: live stdout lines on CLI
+// versions that omit the field, and the first command of a conversation.
+//
 // It is deliberately a KNOWN-or-nothing tracker. Anything it cannot resolve - a
 // `cd $DIR`, a `cd -`, a bare `cd` (which goes to $HOME, a path the browser does
 // not know) - makes the directory UNKNOWN rather than a guess, and it stays
@@ -131,6 +137,12 @@ export interface ShellStep {
   // The directory the provider itself reported for this call, when it reports
   // one at all (Codex does). Authoritative: it beats anything tracked.
   cwd?: string
+  // The directory recorded on this command's RESULT, i.e. where the shell was
+  // left afterwards (Claude writes it on every transcript entry - see
+  // internal/chat/claude.go). Ground truth, so it replaces whatever the walk
+  // below worked out, and the next command inherits it. Absent on live stdout
+  // from some CLI versions, which is what the walk is for.
+  cwdAfter?: string
   // The command's output, read only to spot a `cd` that failed.
   output?: string
   // The command exited non-zero (or never ran at all - denied, timed out): its
@@ -151,6 +163,12 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
     const reported = step.cwd && step.cwd !== '.' ? normalize(step.cwd) : ''
     const entry = reported || current
     out.set(step.id, entry)
+    // Where the CLI itself says the shell was left. Nothing below can improve on
+    // that, so the walk is skipped entirely.
+    if (step.cwdAfter) {
+      current = normalize(step.cwdAfter)
+      continue
+    }
     if (step.background) continue
     // A command that did not finish successfully never had its directory
     // captured, so it moved nothing - not even the `cd` that succeeded before

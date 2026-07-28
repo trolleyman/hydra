@@ -30,10 +30,20 @@ type claudeEnvelope struct {
 	AgentID         string   `json:"agentId,omitempty"`
 	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 	Content         string   `json:"content,omitempty"`
-	DurationMS      int64    `json:"duration_ms,omitempty"`
-	MessageID       string   `json:"message_id,omitempty"`
-	TotalCostUSD    float64  `json:"total_cost_usd,omitempty"`
-	Message         struct {
+	// CWD is the working directory the CLI recorded for this entry. The Bash tool
+	// runs ONE shell for the whole session, so a `cd` in an early command is still
+	// in force much later - this is the only place that directory is written down.
+	// Only a tool_result (user) entry's value is trustworthy, where it is the
+	// directory AFTER the command; on an assistant entry it is stamped at flush
+	// time and can land either side of the tool call. So the chat reads a
+	// command's own directory off the PREVIOUS result. Absent on live stdout lines
+	// from some CLI versions, in which case the chat falls back to inferring it
+	// from the commands themselves (web/src/lib/shellCwd.ts).
+	CWD          string  `json:"cwd,omitempty"`
+	DurationMS   int64   `json:"duration_ms,omitempty"`
+	MessageID    string  `json:"message_id,omitempty"`
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	Message      struct {
 		ID         string          `json:"id,omitempty"`
 		Content    json.RawMessage `json:"content,omitempty"`
 		StopReason string          `json:"stop_reason,omitempty"`
@@ -240,6 +250,7 @@ func claudeBlockSource(base string, index int) string {
 
 func richClaudePayload(ev claudeEnvelope, payload map[string]any) map[string]any {
 	payload["uuid"] = ev.UUID
+	payload["cwd"] = ev.CWD
 	payload["usage"] = ev.Message.Usage
 	payload["stop_reason"] = ev.Message.StopReason
 	payload["sidechain"] = ev.IsSidechain || ev.ParentToolUseID != ""

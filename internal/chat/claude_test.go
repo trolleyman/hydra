@@ -31,6 +31,24 @@ func TestNormalizeClaudeToolResultAndTurn(t *testing.T) {
 	}
 }
 
+// The Bash tool keeps one shell per session, so where a command ran is only
+// knowable from the `cwd` the CLI records on the entry. It has to survive
+// normalization or the chat is left inferring it from the commands themselves.
+func TestNormalizeClaudeCarriesCwd(t *testing.T) {
+	line := []byte(`{"type":"user","uuid":"u9","cwd":"/repo/wt/web","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}`)
+	got := normalizeClaude(line)
+	if len(got) != 1 {
+		t.Fatalf("events = %+v", got)
+	}
+	payload, ok := got[0].payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %T", got[0].payload)
+	}
+	if cwd, _ := payload["cwd"].(string); cwd != "/repo/wt/web" {
+		t.Errorf("cwd = %q, want /repo/wt/web", cwd)
+	}
+}
+
 func TestNormalizeClaudeUserEchoIsIgnored(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"user","uuid":"u3","message":{"content":[{"type":"text","text":"hello"}]}}`))
 	if len(got) != 0 {
