@@ -1761,7 +1761,20 @@ func Clean() error {
 		return errtrace.Wrap(fmt.Errorf("failed to remove web/node_modules directory: %w", err))
 	}
 
-	// TODO: Remove .hydra cached files?
+	// Playwright's default outputDir (web/playwright.config.ts sets none) - traces,
+	// screenshots and videos from failed e2e runs, plus .last-run.json.
+	if err := os.RemoveAll("web/test-results"); err != nil {
+		return errtrace.Wrap(fmt.Errorf("failed to remove web/test-results directory: %w", err))
+	}
+
+	// Deliberately NOT removed:
+	//   .hydra/local/* - runtime state, not build output: live head worktrees, the DB,
+	//     chat events, and the agent caches (captured gemini system prompts, the claude
+	//     overlay). Wiping it would break heads that are currently running.
+	//   .hydra/tools/  - pasta/bwrap provisioned by `mage tools:ensure`; removing them
+	//     forces a network re-download and heads cannot start without them.
+	//   the Go build cache - shared with every other Go project on the machine, so
+	//     that is `go clean -cache`, the user's call and not ours.
 
 	fmt.Println("Clean complete.")
 	return nil
