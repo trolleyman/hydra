@@ -604,22 +604,25 @@ const AgentMetaRow = memo(function AgentMetaRow({
       onConfirm: () => onSaveChatMode(next),
     })
   }
-  // The head's own line: its id (the branch minus the `hydra/` prefix - the
-  // prefix is on every head, so it's noise) on the left, and how long ago it was
-  // created on the right. The full branch name is still what the copy button
-  // (and the title on hover) gives you.
+  // The head's own line: what it is (type pill), what it's doing (status chip),
+  // its id (the branch minus the `hydra/` prefix - the prefix is on every head,
+  // so it's noise), and how long ago it was created, on the right. The full
+  // branch name is what the copy button beside the id gives you.
   const headId = agent.branch_name?.replace(/^hydra\//, '') || agent.id
   const identityLine = (
     // min-h-7 (the height of the pane's collapse toggle, and of the inspector
     // bar's "Changes" row across the divider) so this line's contents centre on
     // the same baseline as both - the toolbar rows line up across the split.
-    <div className="flex items-center gap-2 min-w-0 min-h-7">
+    // data-head-identity is the e2e hook for this line, as [data-meta-strip] is
+    // for the chip strip below - so a spec can target a chip by which line it
+    // belongs to rather than by its styling classes.
+    <div data-head-identity className="flex items-center gap-2 min-w-0 min-h-7">
       {/* What this head IS (agent type) and what it is DOING (status), leading the
           head's own name. They were the first two chips of the strip below, but
           they answer the question you ask first, so they belong on the identity
           line - the strip under it is configuration (network, git, base branch,
           MR), which you read second. */}
-      <Tooltip content={agentTypeLabel(agent.agent_type)} className="shrink-0">
+      <Tooltip content={agent.agent_type} className="shrink-0">
         {/* min-h-5 keeps the icon-only pill the same height as text chips. */}
         <Badge
           variant="pill"
