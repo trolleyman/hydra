@@ -292,8 +292,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       // entirely unless allowNonHttpProtocols is set. We take over both:
       //   • a file:// link inside this agent's worktree opens in the in-app
       //     repository view on the agent's branch (no prompt);
-      //   • an http(s) link opens straight away for trusted hosts, and keeps the
-      //     confirm only for everything else.
+      //   • an http(s) link opens straight away for trusted hosts, and for
+      //     everything else raises Hydra's own confirmation dialog.
       // allowNonHttpProtocols lets file:// reach activate; the worktree check in
       // fileUrlToWorktreeRelative is the guard that flag warns to add.
       linkHandler: {
@@ -312,9 +312,25 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
             return
           }
           if (/^https?:/i.test(uri)) {
-            if (isTrustedLinkUrl(uri, window.location.origin) || window.confirm(`Do you want to navigate to ${uri}?`)) {
+            if (isTrustedLinkUrl(uri, window.location.origin)) {
               window.open(uri, '_blank', 'noopener,noreferrer')
+              return
             }
+            // Hydra's own dialog rather than window.confirm: the whole decision
+            // rests on reading the URL, and a native confirm renders it as
+            // unstyled OS chrome, on one squeezed line, with no way to lowlight
+            // the part that says where it really goes. Opening still happens
+            // inside the confirm button's click, so it is a user gesture and no
+            // popup blocker sees it.
+            useDialogStore.getState().show({
+              title: 'Open external link?',
+              message: 'A link in the terminal wants to open outside Hydra. Check where it goes before you follow it - the text an agent prints is not necessarily where it points.',
+              type: 'confirm',
+              variant: 'externalLink',
+              details: { url: uri },
+              confirmLabel: 'Open link',
+              onConfirm: () => window.open(uri, '_blank', 'noopener,noreferrer'),
+            })
             return
           }
           // A file:// link outside the worktree (or any other scheme): the

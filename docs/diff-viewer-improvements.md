@@ -24,7 +24,8 @@ Grounding, because it changes the cost/benefit of everything below.
 | Diff algorithm | Plain Myers (git default). `--diff-algorithm` never passed. |
 | Moved-block detection | Absent. |
 | Per-file "viewed" state | Absent (designed but unbuilt in [docs/diff-review-state.md](diff-review-state.md)). |
-| Function-context hunk headers | Absent - `hunk.header` is stored and used only as a React key; git's `@@ ... @@ <funcname>` trailer is never rendered. |
+| Function-context hunk headers | Built - every collapsed-gap / expander row names the declaration the code below it sits in, syntax-highlighted (item 2 below). |
+| Syntax highlighting | Prism via refractor, per FILE (small files inline, the rest in the `highlight.worker.ts` pool), keyed back onto lines by line number. Each side is highlighted as one string PER CONTIGUOUS RUN of lines - never as one glued string, or a construct truncated at a collapsed gap (a `{/*` whose `*/` is hidden) runs on into every fragment below it. |
 | Whitespace-only / indent-only dimming | Absent. |
 
 Note: git's **indent heuristic** (`--indent-heuristic`, the line-level analogue of
@@ -39,7 +40,7 @@ benefit from it. No action needed there.
 | 0a | **Indent word diff: highlight only the changed columns** | done | - | `wordDiff.ts` (built) |
 | 0b | **Character-level diff + confetti coalesce + subword-boundary snap** | done | - | `wordDiff.ts` (built; char granularity so a highlight lands inside an identifier - `getUserName`->`getUserId` lights `Name`/`Id`; snapping pulls a mid-camelCase edit out to the hump so `handleClick`->`handleClose` shows `Click`/`Close` not `lick`/`lose`, while monocase `counter`->`pointer` stays the precise `cou`/`poi`) |
 | 1 | `--diff-algorithm=histogram` | done | medium | `internal/git/diff.go` (built) |
-| 2 | Render git's existing funcname in hunk separators | done | med-high | `diffBody.ts` `hunkContext` + `DiffViewer.tsx` `HunkContextLabel` (built; muted right-aligned label on each collapsed-gap / expander row, in both the segments and windowed-hunk render paths - same row so it adds no height) |
+| 2 | Render git's existing funcname in hunk separators | done | med-high | `diffBody.ts` `findContextLine`/`hunkContext` + `DiffViewer.tsx` `HunkContextLabel` (built; label beside the "··· N lines ···" count on each collapsed-gap / expander row, carrying the file's own syntax highlighting - same row so it adds no height). Derived from the CONTENT in the whole-file path, since an expanded file arrives as one whole-file hunk whose header has no funcname; git's `@@` trailer is the windowed path's fallback |
 | 3 | Similarity-based del/add line pairing | done | **high** | `wordDiff.ts` `pairLines` + `buildWordRangeMaps` (built; order-preserving Needleman-Wunsch over the del/add block scored by token-multiset similarity, `MIN_PAIR_SIM=0.4`, `MAX_PAIR_CELLS=2500` index-pairing fallback. Note: `buildSideBySide` row layout still uses index pairing; word highlights are keyed per line number so they are correct regardless, but the side-by-side *row* pairing is a separate follow-up) |
 | 4 | Whitespace-only / indent-only classification + dimming | tried, reverted | med-high | Built as a whole-row opacity-50 dim, then removed - fading the whole line (gutter included) read as too heavy. `wordDiff.ts` `isWhitespaceOnlyChange` is kept for a future, subtler treatment (e.g. mute only the code text, or a fainter tint - not a full-row fade) |
 | 5 | Edit-boundary sliding (token-space `cleanupSemanticLossless`) | done | medium | `wordDiff.ts` `slideRange`/`slideRanges` in the refine pipeline (slides each range to its cleanest lossless boundary; whitespace-only ranges are pinned so a re-indent highlight stays on the code-adjacent columns) |
@@ -68,6 +69,16 @@ as a React key. Parse the text after the second `@@` and render it in the hunk
 separator / gap row. ~10 lines for a real readability gain. (Per-language drivers
 need `diff=<name>` in `.gitattributes` to activate for some languages; Go/C/etc.
 have built-in drivers.)
+
+Built, with one correction learned the hard way: git's trailer alone labels
+almost nothing, because the files the viewer expands arrive as a SINGLE
+whole-file hunk, and a hunk that starts at line 1 has no funcname before it. Only
+the big files that stay windowed (several `-U3` hunks) carried labels, which read
+as "it works on some files". So the whole-file path now runs git's own default
+funcname heuristic (`^[A-Za-z_$]`, `xdiff/xemit.c` `def_ff`) backwards over the
+content it already holds - `findContextLine` - and every gap gets a label. The
+label is highlighted by REUSING the highlighted HTML already computed for that
+line (the windowed path, which only has git's string, highlights it standalone).
 
 ### 3. Similarity-based del/add pairing (biggest quality win)
 

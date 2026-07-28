@@ -440,6 +440,13 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 			Behavior     string `json:"behavior"`
 			UpdatedInput struct {
 				Answers map[string]string `json:"answers"`
+				// The free-text note the user attached to an answer, keyed by
+				// question text. Claude's AskUserQuestion takes these natively;
+				// Codex has no such field, so they are folded into the answer
+				// list below.
+				Annotations map[string]struct {
+					Notes string `json:"notes"`
+				} `json:"annotations"`
 			} `json:"updatedInput"`
 		} `json:"response"`
 	}
@@ -466,10 +473,26 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 		_ = json.Unmarshal(request.params, &params)
 		answers := map[string]any{}
 		for _, question := range params.Questions {
-			if answer, exists := envelope.Response.UpdatedInput.Answers[question.Question]; exists {
-				parts := strings.Split(answer, ", ")
-				answers[question.ID] = map[string]any{"answers": parts}
+			answer, exists := envelope.Response.UpdatedInput.Answers[question.Question]
+			note := envelope.Response.UpdatedInput.Annotations[question.Question].Notes
+			if !exists && note == "" {
+				continue
 			}
+			var parts []string
+			if answer != "" {
+				parts = strings.Split(answer, ", ")
+			}
+			// Codex takes a plain list of chosen answers per question, with
+			// nowhere to put a note that qualifies them. Send it as one more
+			// entry, labelled so it does not read as another option the user
+			// picked. A note with nothing selected is a valid answer on its own.
+			if note != "" {
+				parts = append(parts, "note: "+note)
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			answers[question.ID] = map[string]any{"answers": parts}
 		}
 		result["answers"] = answers
 	} else if envelope.Response.Behavior == "allow" {

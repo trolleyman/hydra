@@ -157,6 +157,14 @@ dimmed"), and it never drops characters (`prefix + domain` is always exactly
 the input). The lowlight is `opacity`, not a colour, so the components compose
 into a neutral chip, a muted caption and a blue link alike.
 
+An *editable* host (the network allow/block lists in Settings) goes through
+`HighlightedInput` - the single-line sibling of `HighlightedTextarea`, same
+transparent-input-over-a-backdrop trick. Its two layers only line up if they
+share their box model exactly, so the padding/font classes go in
+`textClassName` (both layers) and the border, background and focus ring on the
+wrapper as `focus-within:` - the input is on top, and a ring drawn there frames
+the text from above.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL
