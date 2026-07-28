@@ -37,6 +37,12 @@ func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, s
 		return GuardedRebaseContinue(worktree, expectedBranch)
 	case gitq.OpRebaseAbort:
 		return GuardedRebaseAbort(worktree, expectedBranch)
+	case gitq.OpMerge:
+		return GuardedMerge(worktree, expectedBranch, req.Ref, req.Message, req.NoFF)
+	case gitq.OpMergeContinue:
+		return GuardedMergeContinue(worktree, expectedBranch)
+	case gitq.OpMergeAbort:
+		return GuardedMergeAbort(worktree, expectedBranch)
 	default:
 		return false, fmt.Sprintf("Unknown git operation %q.", req.Op)
 	}
@@ -140,6 +146,164 @@ func applyOntoHead(worktree, expectedBranch, op, commit string) (ok bool, summar
 	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
 	subject, _ := gitOutput(worktree, "log", "-1", "--pretty=%s")
 	return true, fmt.Sprintf("%s of %s -> new commit %s on %s: %s", op, commit, hash, cur, subject)
+}
+
+// GuardedMerge merges `ref` INTO the head's own branch, inside its worktree.
+// The direction is fixed by the own-branch guard: HEAD is pinned to the head's
+// branch, so this only ever moves that branch - it can never merge the head into
+// main or a sibling. Fast-forwards when it can (pass noFF to force a merge
+// commit); message overrides the default "Merge branch '<ref>'" subject.
+//
+// Unlike revert / cherry-pick, a conflict is LEFT in progress rather than
+// aborted: bringing the base branch back in is exactly the case where the agent
+// is expected to resolve the conflicts and carry on, so it is told to fix the
+// files and call git_merge_continue (or git_merge_abort to back out).
+func GuardedMerge(worktree, expectedBranch, ref, message string, noFF bool) (ok bool, summary string) {
+	cur, ok, msg := ensureOwnBranch(worktree, expectedBranch)
+	if !ok {
+		return false, msg
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false, `merge requires a ref to merge in (e.g. "main", your head's base branch).`
+	}
+	if err := ValidateRef(ref); err != nil {
+		return false, "Invalid ref: " + err.Error()
+	}
+	if _, err := gitOutput(worktree, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+		return false, fmt.Sprintf("No such ref %q in this repository.", ref)
+	}
+	if ref == cur {
+		return false, fmt.Sprintf("Refusing: %q is the branch you are on - a branch cannot be merged into itself.", ref)
+	}
+	if mergeInProgress(worktree) {
+		return false, "A merge is already in progress. Resolve the conflicts and call git_merge_continue, or git_merge_abort to back out, first."
+	}
+	if rebaseInProgress(worktree) {
+		return false, "A rebase is in progress - finish it with git_rebase_continue (or git_rebase_abort) before merging."
+	}
+	// Nothing to do: ref is already an ancestor. Reported as success so a
+	// caller merging its base in on a schedule doesn't read a no-op as a failure.
+	if already, err := gitIsAncestor(worktree, ref, "HEAD"); err == nil && already {
+		return true, fmt.Sprintf("%s is already merged into %s - nothing to do.", ref, cur)
+	}
+
+	if strings.TrimSpace(message) == "" {
+		message = fmt.Sprintf("Merge branch '%s'", ref)
+	}
+	args := []string{"merge", "--no-edit", "-m", message}
+	if noFF {
+		args = append(args, "--no-ff")
+	}
+	args = append(args, ref)
+	out, err := gitCombined(worktree, args...)
+	if err != nil {
+		if !mergeInProgress(worktree) {
+			// Refused before it started - most often uncommitted changes the merge
+			// would overwrite, which is a fix-your-worktree problem, not a conflict.
+			return false, fmt.Sprintf("Merge of %s could not start: %s", ref, firstNonEmpty(strings.TrimSpace(out), err.Error()))
+		}
+		files, detail := summarizeConflict(strings.TrimSpace(out))
+		where := ""
+		if len(files) > 0 {
+			where = " in " + strings.Join(files, ", ")
+		}
+		return false, fmt.Sprintf("Merge of %s into %s hit conflicts%s and is LEFT IN PROGRESS. Resolve the conflict markers in your worktree, then call git_merge_continue - or git_merge_abort to back out and restore %s.\n%s", ref, cur, where, cur, detail)
+	}
+	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
+	return true, fmt.Sprintf("Merged %s into %s; HEAD is now %s.", ref, cur, hash)
+}
+
+// GuardedMergeContinue concludes a merge left in progress by GuardedMerge, once
+// the conflicts have been resolved in the worktree. The still-unmerged paths are
+// staged first - git refuses to conclude a merge while any remain, and the agent
+// has no sanctioned way to stage them itself mid-merge.
+func GuardedMergeContinue(worktree, expectedBranch string) (ok bool, summary string) {
+	cur, ok, msg := ensureOwnBranch(worktree, expectedBranch)
+	if !ok {
+		return false, msg
+	}
+	if !mergeInProgress(worktree) {
+		return false, "No merge is in progress."
+	}
+	unmerged, err := unmergedPaths(worktree)
+	if err != nil {
+		return false, "Could not read the merge state: " + err.Error()
+	}
+	for _, p := range unmerged {
+		if hasConflictMarkers(worktree, p) {
+			return false, fmt.Sprintf("%s still contains conflict markers (<<<<<<< / >>>>>>>). Resolve it before continuing.", p)
+		}
+	}
+	if len(unmerged) > 0 {
+		args := append([]string{"add", "--"}, unmerged...)
+		if out, err := gitCombined(worktree, args...); err != nil {
+			return false, "Staging the resolved files failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+		}
+	}
+	cmd := exec.Command("git", "-C", worktree, "merge", "--continue")
+	cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, "Merge continue failed: " + firstNonEmpty(strings.TrimSpace(string(out)), err.Error())
+	}
+	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
+	return true, fmt.Sprintf("Merge concluded; %s is now at %s.", cur, hash)
+}
+
+// GuardedMergeAbort aborts an in-progress merge, restoring the head's branch.
+func GuardedMergeAbort(worktree, expectedBranch string) (ok bool, summary string) {
+	cur, ok, msg := ensureOwnBranch(worktree, expectedBranch)
+	if !ok {
+		return false, msg
+	}
+	if !mergeInProgress(worktree) {
+		return false, "No merge is in progress."
+	}
+	if out, err := gitCombined(worktree, "merge", "--abort"); err != nil {
+		return false, "Merge abort failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+	}
+	return true, fmt.Sprintf("Merge aborted; %s restored.", cur)
+}
+
+// mergeInProgress reports whether a merge is underway in worktree. Unlike a
+// rebase, HEAD stays on the branch throughout, so MERGE_HEAD is the only marker.
+func mergeInProgress(worktree string) bool {
+	p := gitPath(worktree, "MERGE_HEAD")
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// unmergedPaths returns the paths git still considers conflicted (`diff
+// --diff-filter=U`), i.e. those the agent was asked to resolve.
+func unmergedPaths(worktree string) ([]string, error) {
+	out, err := gitOutput(worktree, "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	var paths []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// conflictMarkerRe matches a leftover merge marker at the start of a line. A
+// file staged with these still in it produces a commit full of `<<<<<<<`, which
+// is worse than the conflict - so git_merge_continue refuses instead.
+var conflictMarkerRe = regexp.MustCompile(`(?m)^(?:<{7}|>{7})(?: |$)`)
+
+func hasConflictMarkers(worktree, path string) bool {
+	data, err := os.ReadFile(filepath.Join(worktree, filepath.FromSlash(path)))
+	if err != nil {
+		return false // unreadable or deleted as the resolution - not our call to block
+	}
+	return conflictMarkerRe.Match(data)
 }
 
 // conflictNoiseRe matches git output lines that are actively wrong once we have

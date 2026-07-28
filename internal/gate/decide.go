@@ -97,7 +97,7 @@ var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|
 // gitToolSubcmdRe matches a raw `git <sub>` write-subcommand that has a
 // mcp__hydra__git_* equivalent, for the readonly-mode redirect. Same boundary +
 // leading-flag skipping as gitCommitRe.
-var gitToolSubcmdRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick)\b`)
+var gitToolSubcmdRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick|merge)\b`)
 
 // gitInvocationRe matches any git invocation at a command boundary, used to
 // confine the read-only advice below to failures that actually came from git.
@@ -133,6 +133,7 @@ func GitReadonlyAdvice(cmd, output string) string {
 		"revert":      "git_revert",
 		"rebase":      "git_rebase (or git_rebase_continue / git_rebase_abort)",
 		"cherry-pick": "git_cherry_pick",
+		"merge":       "git_merge (or git_merge_continue / git_merge_abort)",
 	}[sub]
 	return fmt.Sprintf("%s Use the mcp__hydra__%s tool instead of `git %s` - it runs the operation on your own branch, host-side.", why, tool, sub)
 }

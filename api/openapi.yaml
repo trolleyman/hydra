@@ -3822,6 +3822,14 @@ components:
           type: string
           nullable: true
           description: Compact one-line preview of an mcp_tool call's arguments.
+        description:
+          type: string
+          nullable: true
+          description: >-
+            The agent's own explanation of what it is asking for and why it needs
+            to happen outside the sandbox (`hydra host-run --why`). Shown above
+            the command in the approval card, so the user judges a stated intent
+            rather than reverse-engineering one from a shell script.
         ts:
           type: string
           description: ISO 8601 timestamp the request was raised

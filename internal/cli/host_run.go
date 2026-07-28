@@ -31,13 +31,26 @@ const hostRunExitDenied = 77
 // mirrors as its own exit code. This is a deliberate, heavily-gated last resort -
 // the pre-prompt tells agents it is for extremely rare cases only.
 var hostRunCmd = &cobra.Command{
-	Use:   "host-run [-- ] <command>...",
+	Use:   "host-run [--why <text>] [--] <command>...",
 	Short: "Request the user's approval to run a command on the host (outside the sandbox)",
 	Long: `Ask the user to run a single command on the HOST, outside your sandbox, in your
 worktree. The command is shown to the user for approval; nothing runs unless they
 allow it. This is an escape hatch of last resort - almost everything belongs
 inside the sandbox. Use it only when a task genuinely cannot proceed otherwise,
 and expect most requests to be denied.
+
+Pass --why "<text>" to say what you are doing and why it cannot run inside the
+sandbox. It is shown at the top of the approval card, above the command, and is
+the main thing the user judges the request on - a request that only shows a shell
+script makes them reverse-engineer your intent, and is far more likely to be
+denied. Write it for a human: what you are trying to achieve, and which sandbox
+limitation blocks it (e.g. "the merge has to write .git, which is read-only in my
+sandbox under git_isolation=readonly").
+
+Ask ONCE for the whole job. Every request interrupts the user, so put all the
+steps you need into a single command (` + "`a && b && c`" + `, or a short script) rather
+than firing off a series of small requests - each extra prompt is another
+interruption, and a half-finished sequence is worse than one that runs as a unit.
 
 The command's stdout and stderr are relayed back to you, and this command exits
 with the host command's own exit code (or ` + strconv.Itoa(hostRunExitDenied) + ` if the request is denied or
@@ -56,6 +69,13 @@ times out).`,
 // stdout/stderr here (this is a leaf CLI the agent reads directly), unlike the
 // gate/mcp hooks which speak a machine protocol.
 func runHostRun(args []string) int {
+	// Flag parsing is disabled (the argv after `host-run` is the command
+	// verbatim), so --why is peeled off by hand ahead of the separator.
+	why, args, err := takeWhyFlag(args)
+	if err != "" {
+		fmt.Fprintln(os.Stderr, "host-run: "+err)
+		return hostRunExitDenied
+	}
 	// A leading "--" is a conventional separator; drop one if present.
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
@@ -65,6 +85,12 @@ func runHostRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "host-run: no command given")
 		return hostRunExitDenied
 	}
+	if why == "" {
+		// Not fatal - an un-explained request still goes through, since refusing
+		// would strand an agent that just didn't know about the flag. But the card
+		// is much weaker without it, so say so where the agent will read it.
+		fmt.Fprintln(os.Stderr, `host-run: no --why given. Pass --why "<what this does and why it can't run in the sandbox>" - the user sees it above the command and is far more likely to allow a request that explains itself.`)
+	}
 
 	dir := os.Getenv(gate.EnvApprovalDir)
 	if dir == "" {
@@ -73,15 +99,22 @@ func runHostRun(args []string) int {
 	}
 
 	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
+	// The summary is the one-liner that reaches the surfaces with no room for the
+	// card - the OS notification, the head's last_message - so fold the agent's
+	// explanation in when it gave one.
 	summary := "wants to run a command on the host"
+	if why != "" {
+		summary += ": " + summaryWhy(why)
+	}
 	req := gate.Request{
-		ReqID:   reqid,
-		Tool:    "host-run",
-		Kind:    "host_command",
-		Target:  command,
-		Reason:  "the agent asked to run a command outside its sandbox, on the host",
-		Summary: summary,
-		TS:      time.Now().Format(time.RFC3339Nano),
+		ReqID:       reqid,
+		Tool:        "host-run",
+		Kind:        "host_command",
+		Target:      command,
+		Reason:      "the agent asked to run a command outside its sandbox, on the host",
+		Summary:     summary,
+		Description: why,
+		TS:          time.Now().Format(time.RFC3339Nano),
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
 		fmt.Fprintf(os.Stderr, "host-run: failed to submit the request: %v\n", err)
@@ -113,6 +146,65 @@ func runHostRun(args []string) int {
 		}
 		time.Sleep(askPollInterval)
 	}
+}
+
+// maxWhyLen caps the stored explanation. It is rendered in an approval card and
+// an OS notification, both of which a wall of text would swamp - and an
+// explanation that long is a sign the request should have been a conversation.
+const maxWhyLen = 600
+
+// takeWhyFlag peels a leading --why/--description (in either `--why <text>` or
+// `--why=<text>` form) off the argv, returning the text and the remaining args.
+// It only looks at the front: past the first non-flag word every byte belongs to
+// the command, so a `--why` appearing there is the command's own argument and is
+// left alone. A non-empty error string is a usage mistake to report.
+func takeWhyFlag(args []string) (why string, rest []string, errMsg string) {
+	for len(args) > 0 {
+		a := args[0]
+		name, value, hasValue := strings.Cut(a, "=")
+		if name != "--why" && name != "--description" {
+			break
+		}
+		if hasValue {
+			why, args = value, args[1:]
+			continue
+		}
+		if len(args) < 2 {
+			return "", nil, name + " needs a value: --why \"<what this does and why it can't run in the sandbox>\""
+		}
+		why, args = args[1], args[2:]
+	}
+	why = strings.TrimSpace(why)
+	if len(why) > maxWhyLen {
+		why = strings.TrimSpace(why[:maxWhyLen]) + "..."
+	}
+	return why, args, ""
+}
+
+// maxSummaryWhyLen caps how much of the explanation rides in the summary. The
+// full text goes in Description and is shown in the card; the summary is for the
+// one-line surfaces (the OS notification body, the head's last_message), where a
+// paragraph reads as a wall.
+const maxSummaryWhyLen = 120
+
+// summaryWhy condenses the explanation to one short line for those surfaces.
+func summaryWhy(s string) string {
+	line := firstLine(s)
+	if len(line) <= maxSummaryWhyLen {
+		return line
+	}
+	// Prefer breaking at a space so the cut doesn't land mid-word.
+	cut := line[:maxSummaryWhyLen]
+	if i := strings.LastIndexByte(cut, ' '); i > maxSummaryWhyLen/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:-") + "..."
+}
+
+// firstLine is the leading line of s.
+func firstLine(s string) string {
+	head, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(head)
 }
 
 // hostRunCommandText renders the argv left after `--` as the single shell script

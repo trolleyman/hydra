@@ -328,6 +328,18 @@ export const ApprovalCard: React.FC<{
           <BodyLine data={data} />
         </p>
 
+        {/* The agent's own account of what it is asking for and why it can't stay
+            in the sandbox (host-run --why). It sits between the ask and the
+            command because that is the reading order the decision needs: what is
+            this for, then what exactly will run. Quoted rather than styled as
+            Hydra's own prose - it is the agent talking, and an agent can be
+            wrong or lying, so it must never read as the system vouching for it. */}
+        {data.description && (
+          <blockquote className="mt-2.5 border-l-2 border-gray-300 dark:border-gray-600 pl-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-gray-600 dark:text-gray-300">
+            {data.description}
+          </blockquote>
+        )}
+
         <div className="mt-2.5 space-y-2">
           <Preview data={data} />
           {data.kind === 'mcp' && (

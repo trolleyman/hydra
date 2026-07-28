@@ -930,6 +930,9 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
       const plan = Array.isArray(obj.plan) ? obj.plan : []
       return { text: `${plan.length} step${plan.length === 1 ? '' : 's'} above ${str('base')}`, prose: true }
     }
+    case 'git_merge':
+      // The --no-ff flag is in the heading, so the summary is just what came in.
+      return { text: str('ref'), prose: false }
     default:
       return null
   }
@@ -1089,6 +1092,9 @@ const GIT_TOOL_LABELS: Record<string, string> = {
   git_rebase: 'git rebase',
   git_rebase_continue: 'git rebase --continue',
   git_rebase_abort: 'git rebase --abort',
+  git_merge: 'git merge',
+  git_merge_continue: 'git merge --continue',
+  git_merge_abort: 'git merge --abort',
 }
 
 // gitToolHeading is GIT_TOOL_LABELS plus the flags this particular call used, so
@@ -1107,6 +1113,7 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
     return `${label} --${mode}`
   }
   if (tool === 'git_commit' && input.amend === true) return `${label} --amend`
+  if (tool === 'git_merge' && input.no_ff === true) return `${label} --no-ff`
   return label
 }
 
@@ -2217,6 +2224,17 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
     )
   }
 
+  if (tool === 'git_merge') {
+    // Direction is the thing worth stating: the tool only ever merges INTO this
+    // head's branch, never the other way, so name both ends.
+    return (
+      <div className={note}>
+        Merged {sha(str('ref'))} into this branch
+        {input.no_ff === true ? <> &middot; forced a merge commit</> : null}
+      </div>
+    )
+  }
+
   if (tool === 'git_rebase') {
     const plan = Array.isArray(input.plan) ? input.plan : []
     return (
@@ -2394,6 +2412,9 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   mcp__hydra__git_rebase: GitCommitHorizontal,
   mcp__hydra__git_rebase_continue: GitCommitHorizontal,
   mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_merge: GitMerge,
+  mcp__hydra__git_merge_continue: GitMerge,
+  mcp__hydra__git_merge_abort: GitMerge,
 }
 
 function LowlitPath({ path }: { path: string }) {

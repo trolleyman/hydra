@@ -173,7 +173,7 @@ func TestGitCommitToolAdvertisedAndCalled(t *testing.T) {
 	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, n := range []string{"git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick"} {
+	for _, n := range []string{"git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick", "git_merge", "git_merge_continue", "git_merge_abort"} {
 		if !names[n] {
 			t.Errorf("%s not advertised: %v", n, names)
 		}

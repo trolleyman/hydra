@@ -84,6 +84,7 @@ func gitOpFromMCP(req mcpserver.GitOpRequest) mcpserver.GitOpResult {
 		Add:    add,
 		Commit: req.Commit,
 		Base:   req.Base, Plan: plan,
+		Ref: req.Ref, NoFF: req.NoFF,
 	})
 	return mcpserver.GitOpResult{OK: res.OK, Message: res.Message}
 }

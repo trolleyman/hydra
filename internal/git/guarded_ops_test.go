@@ -162,3 +162,195 @@ func TestGuardedRebaseSquash(t *testing.T) {
 func oneRange(path string, lo, hi int) []gitq.AddSpec {
 	return []gitq.AddSpec{{Path: path, Ranges: [][2]int{{lo, hi}}}}
 }
+
+// mergeRepo extends opRepo with a `feature` branch carrying one commit, so a
+// merge into hydra/test has something to bring in.
+func mergeRepo(t *testing.T, file, content string) (string, func(...string) string) {
+	t.Helper()
+	dir, run := opRepo(t)
+	run("checkout", "-q", "-b", "feature")
+	write(t, dir, file, content)
+	run("add", "-A")
+	run("commit", "-q", "-m", "feature work")
+	run("checkout", "-q", "hydra/test")
+	return dir, run
+}
+
+func TestGuardedMergeFastForward(t *testing.T) {
+	dir, run := mergeRepo(t, "f.txt", "feature\n")
+
+	ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", false)
+	if !ok {
+		t.Fatalf("merge failed: %s", msg)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "f.txt")); err != nil {
+		t.Errorf("the merged file is missing: %v", err)
+	}
+	// Fast-forward: HEAD is feature's commit, not a new merge commit.
+	if parents := run("rev-list", "--parents", "-n", "1", "HEAD"); len(strings.Fields(parents)) != 2 {
+		t.Errorf("expected a fast-forward (single parent), got %q", parents)
+	}
+	if branch := run("symbolic-ref", "--short", "HEAD"); branch != "hydra/test" {
+		t.Errorf("merge moved off the head's branch: now on %q", branch)
+	}
+}
+
+func TestGuardedMergeNoFFMakesAMergeCommit(t *testing.T) {
+	dir, run := mergeRepo(t, "f.txt", "feature\n")
+
+	if ok, msg := GuardedMerge(dir, "hydra/test", "feature", "bring feature in", true); !ok {
+		t.Fatalf("merge failed: %s", msg)
+	}
+	if parents := run("rev-list", "--parents", "-n", "1", "HEAD"); len(strings.Fields(parents)) != 3 {
+		t.Errorf("expected a two-parent merge commit, got %q", parents)
+	}
+	if subject := run("log", "-1", "--pretty=%s"); subject != "bring feature in" {
+		t.Errorf("subject = %q, want the message we passed", subject)
+	}
+}
+
+func TestGuardedMergeDefaultSubject(t *testing.T) {
+	dir, run := mergeRepo(t, "f.txt", "feature\n")
+	if ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", true); !ok {
+		t.Fatalf("merge failed: %s", msg)
+	}
+	if subject := run("log", "-1", "--pretty=%s"); subject != "Merge branch 'feature'" {
+		t.Errorf("subject = %q, want the git-style default", subject)
+	}
+}
+
+// A conflict is left in progress (not aborted) so the agent can resolve it -
+// the whole point of having a merge tool rather than reusing cherry-pick.
+func TestGuardedMergeLeavesConflictInProgress(t *testing.T) {
+	dir, run := opRepo(t)
+	run("checkout", "-q", "-b", "feature")
+	write(t, dir, "c.txt", "theirs\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "theirs")
+	run("checkout", "-q", "hydra/test")
+	write(t, dir, "c.txt", "ours\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "ours")
+
+	ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", false)
+	if ok {
+		t.Fatalf("expected the conflicting merge to report failure, got %q", msg)
+	}
+	for _, want := range []string{"c.txt", "LEFT IN PROGRESS", "git_merge_continue", "git_merge_abort"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("conflict message should mention %q, got %q", want, msg)
+		}
+	}
+	if !mergeInProgress(dir) {
+		t.Fatal("the merge should still be in progress for the agent to resolve")
+	}
+
+	// Still conflicted: continuing must refuse rather than commit the markers.
+	if ok, msg := GuardedMergeContinue(dir, "hydra/test"); ok || !strings.Contains(msg, "conflict markers") {
+		t.Errorf("continue with markers left in should be refused, got ok=%v msg=%q", ok, msg)
+	}
+
+	write(t, dir, "c.txt", "resolved\n")
+	ok, msg = GuardedMergeContinue(dir, "hydra/test")
+	if !ok {
+		t.Fatalf("continue after resolving failed: %s", msg)
+	}
+	if mergeInProgress(dir) {
+		t.Error("the merge should be concluded")
+	}
+	if parents := run("rev-list", "--parents", "-n", "1", "HEAD"); len(strings.Fields(parents)) != 3 {
+		t.Errorf("expected a two-parent merge commit, got %q", parents)
+	}
+	if body := run("show", "HEAD:c.txt"); body != "resolved" {
+		t.Errorf("merged c.txt = %q, want the resolution", body)
+	}
+}
+
+func TestGuardedMergeAbortRestoresBranch(t *testing.T) {
+	dir, run := opRepo(t)
+	run("checkout", "-q", "-b", "feature")
+	write(t, dir, "c.txt", "theirs\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "theirs")
+	run("checkout", "-q", "hydra/test")
+	write(t, dir, "c.txt", "ours\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "ours")
+	before := run("rev-parse", "HEAD")
+
+	if ok, _ := GuardedMerge(dir, "hydra/test", "feature", "", false); ok {
+		t.Fatal("expected a conflict")
+	}
+	if ok, msg := GuardedMergeAbort(dir, "hydra/test"); !ok {
+		t.Fatalf("abort failed: %s", msg)
+	}
+	if mergeInProgress(dir) {
+		t.Error("the merge should be gone after abort")
+	}
+	if head := run("rev-parse", "HEAD"); head != before {
+		t.Errorf("HEAD = %s, want %s restored", head, before)
+	}
+	if body := run("show", "HEAD:c.txt"); body != "ours" {
+		t.Errorf("c.txt = %q, want our side back", body)
+	}
+}
+
+// The own-branch guard is what makes the direction safe: on any branch that
+// isn't the head's, the merge is refused outright.
+func TestGuardedMergeRefusesWrongBranch(t *testing.T) {
+	dir, run := mergeRepo(t, "f.txt", "feature\n")
+	run("checkout", "-q", "-b", "main")
+	if ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", false); ok || !strings.Contains(msg, "Refusing") {
+		t.Errorf("merge on the wrong branch should be refused, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+func TestGuardedMergeRejectsBadRefs(t *testing.T) {
+	dir, _ := mergeRepo(t, "f.txt", "feature\n")
+	for name, ref := range map[string]string{
+		"empty":     "",
+		"no such":   "does-not-exist",
+		"flag-like": "--hard",
+		"itself":    "hydra/test",
+	} {
+		if ok, msg := GuardedMerge(dir, "hydra/test", ref, "", false); ok {
+			t.Errorf("%s ref %q should be refused, got %q", name, ref, msg)
+		}
+	}
+}
+
+// Merging an already-merged ref is a no-op, and reported as success so a caller
+// keeping itself up to date doesn't read "nothing to do" as a failure.
+func TestGuardedMergeAlreadyMerged(t *testing.T) {
+	dir, _ := mergeRepo(t, "f.txt", "feature\n")
+	if ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", false); !ok {
+		t.Fatalf("first merge failed: %s", msg)
+	}
+	ok, msg := GuardedMerge(dir, "hydra/test", "feature", "", false)
+	if !ok || !strings.Contains(msg, "already merged") {
+		t.Errorf("re-merging should be a successful no-op, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+func TestGuardedMergeContinueAndAbortWithoutMerge(t *testing.T) {
+	dir, _ := opRepo(t)
+	if ok, msg := GuardedMergeContinue(dir, "hydra/test"); ok || !strings.Contains(msg, "No merge") {
+		t.Errorf("continue without a merge should be refused, got ok=%v msg=%q", ok, msg)
+	}
+	if ok, msg := GuardedMergeAbort(dir, "hydra/test"); ok || !strings.Contains(msg, "No merge") {
+		t.Errorf("abort without a merge should be refused, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+// The gitq dispatch reaches the merge ops, so a host-side (readonly-isolation)
+// request behaves the same as an in-sandbox call.
+func TestRunGuardedOpDispatchesMerge(t *testing.T) {
+	dir, run := mergeRepo(t, "f.txt", "feature\n")
+	ok, msg := RunGuardedOp(dir, "hydra/test", gitq.Request{Op: gitq.OpMerge, Ref: "feature", NoFF: true})
+	if !ok {
+		t.Fatalf("RunGuardedOp merge failed: %s", msg)
+	}
+	if parents := run("rev-list", "--parents", "-n", "1", "HEAD"); len(strings.Fields(parents)) != 3 {
+		t.Errorf("expected a merge commit, got %q", parents)
+	}
+}
