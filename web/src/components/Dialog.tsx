@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, X, Clock, LoaderCircle, Bot } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
-import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
+import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import { BranchPill } from './BranchPill'
+import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -117,6 +118,15 @@ export const Dialog: React.FC = () => {
           onSecondary={onSecondary ? handleSecondary : undefined}
           onCancel={handleCancel}
         />
+      ) : variant === 'sendPrompt' ? (
+        <SendPromptPanel
+          title={title}
+          description={message}
+          details={details}
+          confirmLabel={confirmLabel ?? 'Send to agent'}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        />
       ) : variant === 'mergeGate' ? (
         <MergeGatePanel
           title={title}
@@ -214,6 +224,72 @@ function RichConfirmPanel({
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
         <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
         <DialogConfirmButton tone={tone} icon={confirmIcon} onClick={onConfirm}>
+          {confirmLabel}
+        </DialogConfirmButton>
+      </div>
+    </div>
+  )
+}
+
+// The send-a-prompt confirmation: a one-click action somewhere in the UI wants
+// to start an agent turn on your behalf (the tests panel's "fix this test"
+// sparkle). Starting a turn isn't something to discover after the fact, so the
+// panel shows the message VERBATIM - what you approve is the exact text that
+// goes to the agent, not a description of it. Long messages scroll; a failing
+// test's output can be arbitrarily long, and truncating it here would hide the
+// part you'd most want to check.
+function SendPromptPanel({
+  title,
+  description,
+  details,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  description: string
+  details?: DialogDetails
+  confirmLabel: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      className="bg-white dark:bg-[#141a26] dark:border dark:border-[#252d3b] rounded-2xl shadow-2xl w-full max-w-[560px] overflow-hidden animate-in zoom-in-95 duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+    >
+      <div className="px-5 pt-5 pb-4 flex flex-col gap-3.5">
+        <div className="flex items-start gap-3.5">
+          <DialogIconTile tone="indigo">
+            <Sparkles className="w-5 h-5" />
+          </DialogIconTile>
+          <div className="flex flex-col gap-1 min-w-0 pt-0.5">
+            <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+              {title}
+            </h3>
+            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{description}</p>
+          </div>
+        </div>
+        <div>
+          {/* mb-1 (replacing the label's default mb-2) pulls the caption down
+              onto the panel it names - the default gap reads as a separation
+              once what follows is a bordered block. */}
+          <DialogSectionLabel className="mb-1">Message</DialogSectionLabel>
+          {/* Rendered as markdown, not a mono dump: this is how the message will
+              look in the chat once it is sent, so the confirmation should show
+              it that way. The output is fenced in the source, so it still lands
+              as a code block - the surrounding prose just reads as prose. */}
+          <Markdown
+            text={details?.prompt ?? ''}
+            className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-[13px] text-gray-700 dark:text-[#8b94a6]"
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
+        <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        <DialogConfirmButton tone="indigo" icon={<Sparkles className="w-4 h-4" />} onClick={onConfirm}>
           {confirmLabel}
         </DialogConfirmButton>
       </div>

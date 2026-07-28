@@ -34,10 +34,15 @@ export function DialogIconTile({ tone, children }: { tone: DialogTone; children:
   )
 }
 
-// A small, letter-spaced section label (e.g. "Conflicting files").
-export function DialogSectionLabel({ children }: { children: ReactNode }) {
+// A small, letter-spaced section label (e.g. "Conflicting files"). `className`
+// REPLACES the default mb-2 rather than adding to it - two margin-bottom
+// utilities on one element resolve by stylesheet order, not by the order they
+// appear in the attribute, so an override has to be the only one present. A
+// caller whose labelled content is a bordered panel wants the tighter gap;
+// there, mb-2 reads as a separation rather than a caption.
+export function DialogSectionLabel({ children, className = 'mb-2' }: { children: ReactNode; className?: string }) {
   return (
-    <p className="text-[11px] font-semibold tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+    <p className={`text-[11px] font-semibold tracking-wider text-gray-400 dark:text-gray-500 ${className}`.trim()}>
       {children}
     </p>
   )
