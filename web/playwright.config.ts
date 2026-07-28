@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { proxyLaunchOptions } from './scripts/lib/browserProxy'
 
 // Smoke-test config. The webServer boots a real hydra binary in --simulation
 // mode (mock data, no daemon) via e2e/serve.ts and the specs drive the actual
@@ -19,8 +20,11 @@ export default defineConfig({
     baseURL,
     headless: true,
     // Chromium's own sandbox needs user namespaces; disable it so the browser
-    // launches inside Hydra's bwrap sandbox and in CI containers.
-    launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'] },
+    // launches inside Hydra's bwrap sandbox and in CI containers. The proxy makes
+    // the specs render with the real webfonts inside a head, instead of silently
+    // falling back (see scripts/lib/browserProxy.ts); the loopback bypass it
+    // carries keeps the simulation server reachable directly.
+    launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'], ...proxyLaunchOptions() },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

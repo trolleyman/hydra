@@ -13,6 +13,7 @@ import { createServer } from 'node:net'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from '../lib/browserProxy.ts'
 
 const SRC = join(import.meta.dirname, '..', '..', '..')
 const BIN = process.env.HYDRA_BIN || '/tmp/hydra-vidshot'
@@ -53,7 +54,7 @@ const server: ChildProcess = spawn(BIN, ['server', '--simulation'], {
 
 try {
   await waitForServer(base + '/', 30_000)
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu', '--force-color-profile=srgb', '--autoplay-policy=no-user-gesture-required'] })
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu', '--force-color-profile=srgb', '--autoplay-policy=no-user-gesture-required'], ...proxyLaunchOptions() })
 
   for (const theme of ['dark', 'light'] as const) {
     for (const mode of MODES) {

@@ -41,6 +41,7 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'no
 import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from '../lib/browserProxy.ts'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
@@ -436,7 +437,7 @@ try {
     '--hide-scrollbars',
     '--disable-features=PaintHolding',
   ]
-  const browser = await chromium.launch({ headless: true, args: flags })
+  const browser = await chromium.launch({ headless: true, args: flags, ...proxyLaunchOptions() })
   try {
     // `scrollTo` names a section <h2> to pin to the top of its scroll container
     // before a non-fullPage capture - used when the interesting content sits

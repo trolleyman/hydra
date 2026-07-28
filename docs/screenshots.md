@@ -42,6 +42,19 @@ encoder/metadata differences are ignored and only real visual changes surface.
 The script still pins the clock and freezes timers/animation (see its header) to
 keep diffs clean, but minor encoding nondeterminism is tolerated.
 
+**Chromium needs the egress proxy handed to it explicitly.** Every browser launch
+here spreads `proxyLaunchOptions()` (`web/scripts/lib/browserProxy.ts`) into its
+options, and it must. curl, node and git read `HTTPS_PROXY` from the environment;
+Chromium does not, so inside a sandboxed head it resolves names itself in a
+network namespace with no resolver and every external request dies with
+`ERR_NAME_NOT_RESOLVED`. That silently cost the shots their webfonts - Merriweather
+and Roboto Flex come from `fonts.googleapis.com`, which was on the allow-list and
+reachable all along - so a screenshot generated in a head rendered in fallback
+fonts while the same script on the host rendered correctly. The helper's loopback
+bypass is equally load-bearing: Playwright appends Chromium's `<-loopback>` when a
+proxy is set, undoing its built-in "never proxy loopback" rule, which would
+otherwise send the simulation server's own traffic to the proxy.
+
 The generator emits a `::hydra:artifact:: <name>.png` marker after writing each
 shot, so its tiles **stream** into the diff viewer as they render rather than
 appearing all at once at the end (see the streaming section in
