@@ -584,6 +584,12 @@ const ALIGN_SETTLE_MS = 1_000
 // enough that a tool card landing reads as a slide rather than a jump.
 const FOLLOW_TAU_MS = 70
 
+// Growth at or under this (px) is followed exactly rather than glided (see
+// followBottom): one wrapped line of chat text is ~21px, plus paragraph
+// spacing. Deliberately below the height of the smallest thing that "arrives"
+// - a collapsed tool card row - so those keep their slide.
+const FOLLOW_SNAP_PX = 40
+
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
 function formatDuration(ms: number): string {
@@ -4990,6 +4996,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
   const followRafRef = useRef<number | null>(null)
   const followPrevTimeRef = useRef(0)
+  // Content height at the previous follow, so followBottom can tell a line of
+  // streamed text arriving apart from a whole card landing.
+  const followPrevHeightRef = useRef(0)
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -7057,15 +7066,27 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const el = scrollRef.current
     if (!el) return
     const gap = el.scrollHeight - el.clientHeight - el.scrollTop
+    const grew = el.scrollHeight - followPrevHeightRef.current
+    followPrevHeightRef.current = el.scrollHeight
     // Jump outright when asked, while the replayed history is still landing
     // (opening a conversation should show its end, not scroll down to it), when
     // the user opted out of motion, and when the gap is more than a couple of
     // viewports - that size of jump is a bulk render, not "a new thing
     // arrived", and gliding it would just fling unreadable text past.
+    //
+    // Text streaming in is the other instant case, and the important one: a
+    // wrapped line grows the content by ~a line, and easing that gap shut means
+    // the last line and the working indicator under it drop a line and then
+    // crawl back up, over and over, for the whole turn. Matching the growth
+    // exactly instead nails them in place while the text scrolls under them -
+    // which is what the eye is actually tracking. Only genuinely small steps
+    // (see FOLLOW_SNAP_PX) qualify, so a tool card or a message landing still
+    // slides rather than teleports.
     if (
       instant ||
       !liveUiRef.current ||
       gap > el.clientHeight * 2 ||
+      (gap <= FOLLOW_SNAP_PX && grew <= FOLLOW_SNAP_PX) ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
       stopFollow()
