@@ -9361,7 +9361,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <Plus className="w-4 h-4" />
                 </button>
               </Tooltip>
-              <div className="ml-auto flex items-center gap-1.5">
+              {/* items-BASELINE, not items-center. This group holds three runs of
+                  text at three different sizes - "Enter to queue" at 10px, the
+                  context percentage at 11px, the model name at 12px - and
+                  centring aligns each one's LINE BOX. A bigger line box reserves
+                  more room above the cap and below the baseline, so centring
+                  three different ones puts three different baselines on screen
+                  and the row reads as slightly jumbled. Aligning the baselines
+                  is what makes them read as one line of text.
+                  The model control keeps its own padding and hit area; baseline
+                  alignment moves the button box, not its contents, so only where
+                  it sits changes. */}
+              <div className="ml-auto flex items-baseline gap-1.5">
                 {/* Item 6: surface what Enter will do only when it isn't the
                     obvious thing - i.e. the message will queue, draining into
                     the running turn at its next step (terminal-style
@@ -9398,14 +9409,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     <button
                       onClick={() => setModelMenuOpen((o) => !o)}
                       disabled={!connected}
-                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
+                      // items-baseline, not items-center: per Flexbox 8.3 a flex
+                      // container only exposes a baseline to ITS parent if at
+                      // least one of its own items takes part in baseline
+                      // alignment. With items-center none do, so this button
+                      // synthesized a baseline from its border box and landed
+                      // 4px above the labels beside it however the group was
+                      // aligned. Letting the label participate is what lets the
+                      // row line up; the chevron keeps its own centring below.
+                      className={`flex items-baseline gap-1 rounded-lg px-2 py-1 text-xs transition-colors cursor-pointer disabled:opacity-40 ${
                         modelMenuOpen
                           ? 'bg-stone-100 dark:bg-white/[0.08] text-stone-700 dark:text-stone-200'
                           : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
                       }`}
                     >
                       {modelLabel}
-                      <ChevronDown className="w-3 h-3" />
+                      {/* self-center: the button is baseline-aligned (above), and
+                          a chevron sitting ON the text baseline hangs high. */}
+                      <ChevronDown className="w-3 h-3 self-center" />
                     </button>
                   </Tooltip>
                   {modelMenuOpen && (

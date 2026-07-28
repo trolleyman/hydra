@@ -42,13 +42,26 @@ export function AgentNameLink({
   // (green/emerald merge, red kill+error, amber warn, blue restart), so the
   // marker can own it without ever colliding with the tile it sits next to.
   const iconCls = `${title ? 'w-3.5 h-3.5' : 'w-3 h-3'} shrink-0 text-violet-500 dark:text-violet-400`
+  // A title can wrap to two lines, and `items-center` would then centre the Bot
+  // between BOTH of them - it floated down into the gap and stopped reading as a
+  // marker on the name. So the title row aligns to the start and the Bot gets a
+  // box exactly one cap-height tall to centre inside.
+  //
+  // `1cap` is the font's own cap height, which is the same quantity
+  // `.optical-center` trims the label down to - so the label's box top IS the
+  // cap top, and centring the glyph in a cap-tall box puts it on the first
+  // line's optical centre, identical to what items-center produced when the
+  // title fit on one line. A hard-coded `mt-px` would land in the same place at
+  // this one size in whichever font happened to load, which is exactly what
+  // CLAUDE.md says not to do.
+  const iconWrapCls = title ? 'flex h-[1cap] shrink-0 items-center' : 'contents'
   // Sans, both sizes. The serif that means "an agent is speaking" in chat prose
   // was tried here on the agent title and dropped: at 15px semibold in a card
   // this size Merriweather reads heavy and sits oddly against the sans it is
   // surrounded by - the status pill, the subtitle, the branch pills and the
   // action buttons are all sans, so the title was the only serif thing on the
   // card and read as a mistake rather than a signal.
-  const rowCls = `flex max-w-full items-center ${title ? 'gap-1.5' : 'gap-1'} ${
+  const rowCls = `flex max-w-full ${title ? 'items-start gap-1.5' : 'items-center gap-1'} ${
     title
       ? 'text-sm font-semibold text-gray-900 dark:text-gray-100'
       : 'text-[11px] text-gray-500 dark:text-gray-400'
@@ -62,7 +75,7 @@ export function AgentNameLink({
 
   const body = (
     <>
-      <Bot className={iconCls} />
+      <span className={iconWrapCls}><Bot className={iconCls} /></span>
       {/* A title wraps to a second line rather than clipping: it is the headline
           of the card, agent titles are arbitrary-length human phrases, and at a
           fixed card width most of them would otherwise end in an ellipsis. The
