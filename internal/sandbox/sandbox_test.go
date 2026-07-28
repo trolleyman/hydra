@@ -1,11 +1,14 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 func TestNetworkModeSynonyms(t *testing.T) {
@@ -67,6 +70,16 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+// claudeArgv is the fixed head of every Claude argv - the skip-permissions flag
+// plus the inline --mcp-config that carries the Hydra control server - followed
+// by whatever the case under test adds. The MCP flag is built rather than
+// spelled out so these cases stay about the flags they are testing; its content
+// is asserted on its own in TestAgentArgvCarriesHydraMCPServer.
+func claudeArgv(extra ...string) []string {
+	argv := append([]string{"claude", "--dangerously-skip-permissions"}, claudeMCPConfigArgs("claude")...)
+	return append(argv, extra...)
+}
+
 func TestAgentArgv(t *testing.T) {
 	cases := []struct {
 		agent  AgentType
@@ -113,13 +126,13 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		sessionID string
 		want      []string
 	}{
-		{"chat fresh", false, true, "", append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...)},
-		{"chat resume no id", true, true, "", append(append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...), "--continue")},
-		{"chat resume with id", true, true, "abc-123", append(append([]string{"claude", "--dangerously-skip-permissions"}, chatFlags...), "--resume", "abc-123")},
-		{"terminal resume with id", true, false, "abc-123", []string{"claude", "--dangerously-skip-permissions", "--resume", "abc-123"}},
-		{"terminal resume no id", true, false, "", []string{"claude", "--dangerously-skip-permissions", "--continue"}},
+		{"chat fresh", false, true, "", claudeArgv(chatFlags...)},
+		{"chat resume no id", true, true, "", append(claudeArgv(chatFlags...), "--continue")},
+		{"chat resume with id", true, true, "abc-123", append(claudeArgv(chatFlags...), "--resume", "abc-123")},
+		{"terminal resume with id", true, false, "abc-123", claudeArgv("--resume", "abc-123")},
+		{"terminal resume no id", true, false, "", claudeArgv("--continue")},
 		// The session id only matters on resume; a fresh spawn ignores it.
-		{"fresh ignores id", false, false, "abc-123", []string{"claude", "--dangerously-skip-permissions"}},
+		{"fresh ignores id", false, false, "abc-123", claudeArgv()},
 	}
 	for _, c := range cases {
 		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID)
@@ -133,6 +146,58 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 
 	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, ""); err == nil {
 		t.Error("chat mode for gemini: expected error, got nil")
+	}
+}
+
+// TestAgentArgvCarriesHydraMCPServer pins the fix for heads launching with no
+// hydra tools at all: the control server must reach Claude through argv, not
+// only through the seeded ~/.claude.json, because that file is a bind mount the
+// host can drop by replacing the path (see claudeMCPConfigArgs).
+func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
+	for _, chatMode := range []bool{false, true} {
+		for _, resume := range []bool{false, true} {
+			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1")
+			if err != nil {
+				t.Fatalf("chat=%v resume=%v: %v", chatMode, resume, err)
+			}
+			i := slices.Index(argv, "--mcp-config")
+			if i < 0 || i == len(argv)-1 {
+				t.Fatalf("chat=%v resume=%v: no --mcp-config value in %q", chatMode, resume, argv)
+			}
+			// Variadic flag: whatever follows the value must be another flag (or
+			// nothing), else Claude reads it as a second config path.
+			if next := i + 2; next < len(argv) && !strings.HasPrefix(argv[next], "-") {
+				t.Errorf("chat=%v resume=%v: --mcp-config value is followed by %q, which it would swallow", chatMode, resume, argv[next])
+			}
+			var cfg struct {
+				MCPServers map[string]struct {
+					Type    string   `json:"type"`
+					Command string   `json:"command"`
+					Args    []string `json:"args"`
+				} `json:"mcpServers"`
+			}
+			if err := json.Unmarshal([]byte(argv[i+1]), &cfg); err != nil {
+				t.Fatalf("chat=%v resume=%v: --mcp-config value is not JSON: %v", chatMode, resume, err)
+			}
+			srv, ok := cfg.MCPServers[gate.HydraControlServer]
+			if !ok {
+				t.Fatalf("chat=%v resume=%v: %q missing from %s", chatMode, resume, gate.HydraControlServer, argv[i+1])
+			}
+			if srv.Type != "stdio" || srv.Command != HydraBinPath || !slices.Equal(srv.Args, []string{"mcp", "claude"}) {
+				t.Errorf("chat=%v resume=%v: server spec = %+v, want stdio %s mcp claude", chatMode, resume, srv, HydraBinPath)
+			}
+		}
+	}
+
+	// Only Claude takes the flag; the others are configured by seeded files.
+	for _, a := range []AgentType{AgentTypeGemini, AgentTypeCodex, AgentTypeBash} {
+		argv, err := AgentArgv(a, false, "", "task", "", false, "")
+		if err != nil {
+			t.Fatalf("%s: %v", a, err)
+		}
+		if slices.Contains(argv, "--mcp-config") {
+			t.Errorf("%s: unexpected --mcp-config in %q", a, argv)
+		}
 	}
 }
 
@@ -157,8 +222,8 @@ func TestAgentArgvModel(t *testing.T) {
 		resume bool
 		want   []string
 	}{
-		{AgentTypeClaude, false, []string{"claude", "--dangerously-skip-permissions", "--model", "opus"}},
-		{AgentTypeClaude, true, []string{"claude", "--dangerously-skip-permissions", "--continue"}},
+		{AgentTypeClaude, false, claudeArgv("--model", "opus")},
+		{AgentTypeClaude, true, claudeArgv("--continue")},
 		{AgentTypeGemini, false, []string{"gemini", "--approval-mode=yolo", "--model", "opus"}},
 		{AgentTypeGemini, true, []string{"gemini", "--approval-mode=yolo", "--resume", "latest"}},
 		{AgentTypeCodex, false, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--model", "opus"}},

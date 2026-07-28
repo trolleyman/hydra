@@ -417,6 +417,16 @@ every other event.
   inert.
 - Net: branch `.mcp.json` is inert by default (Step 0); the seeded user-scope
   config is filtered to the allow-list; runtime hook (Step 2) is the backstop.
+- ⚠️ **The filtered config is a bind mount over a file the host still owns, and
+  that bind is not permanent**: anything host-side that replaces `~/.claude.json`
+  by `rename()` (which is how Claude Code saves its own config) drops the mount
+  from every running head's sandbox, and the path falls through to the host's
+  real, unfiltered config. So the stripping is best-effort in practice and the
+  runtime gate is the property that actually holds. It also cost the agent its
+  hydra tools until the control server moved into argv (`--mcp-config`, see
+  `sandbox.claudeMCPConfigArgs`); a `--strict-mcp-config` argv carrying the whole
+  allow-list would make the filtering argv-borne too, but `MCPServerSpecs` only
+  renders stdio servers today, so http/sse allow-listed servers would be lost.
 
 ### Step 4 — The "ask" round-trip (reuse the file-polling channel)
 

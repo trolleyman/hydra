@@ -20,11 +20,9 @@ import (
 )
 
 // SandboxHydraBinPath is the well-known path the hydra binary is bound to inside
-// every sandbox. /tmp is always a fresh, per-head writable mount in our bwrap
-// config (a private host-backed dir on Linux, else a tmpfs - see
-// sandbox.Options.TmpDir), so it is a reliable mountpoint and these seeded binds
-// nest on top of it. Hooks and the namespace-host supervisor invoke it here.
-const SandboxHydraBinPath = "/tmp/hydra-internal"
+// every sandbox - see sandbox.HydraBinPath, which is the same path (it lives
+// there because AgentArgv has to name it too, and heads already imports sandbox).
+const SandboxHydraBinPath = sandbox.HydraBinPath
 
 // GateSandboxPolicyPath is the well-known path the read-only gate policy.json is
 // bound to inside the sandbox (again under the reliable per-head /tmp mount). The
@@ -213,7 +211,12 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		})
 
 		hostClaudeJSON := readHostFile(filepath.Join(home, ".claude.json"))
-		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
+		// Per-head, like every other seeded file: one shared copy was rewritten
+		// from scratch by every spawn and resume in the project, so a launch
+		// truncated the very file its siblings' sandboxes were reading through
+		// this bind. The per-project cache dir is not itself per-head, hence the
+		// id prefix (as with <id>-gate-policy.json).
+		claudeJSONHost := filepath.Join(cacheDir, id+"-claude.json")
 		cfg, err := sandbox.BuildClaudeConfig(hostClaudeJSON, worktreePath, mcpKeep, stableHydraBin, string(agentType))
 		if err != nil {
 			return nil, errtrace.Wrap(err)

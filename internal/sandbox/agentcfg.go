@@ -410,6 +410,44 @@ func HydraMCPServer(hydraBin, agentType string) (name, command string, args []st
 	return gate.HydraControlServer, hydraBin, []string{"mcp", agentType}
 }
 
+// HydraBinPath is the well-known path the hydra binary is bound to inside every
+// sandbox. /tmp is always a fresh, per-head writable mount in our bwrap config (a
+// private host-backed dir on Linux, else a tmpfs - see Options.TmpDir), so it is a
+// reliable mountpoint and the seeded binds nest on top of it. Hooks, the
+// namespace-host supervisor and the control MCP server are all invoked here.
+const HydraBinPath = "/tmp/hydra-internal"
+
+// claudeMCPConfigArgs renders the Hydra control server as a `--mcp-config` flag,
+// so Claude learns about it from its own argv rather than from a file.
+//
+// The server is ALSO written into the seeded ~/.claude.json (BuildClaudeConfig),
+// but that file is bind-mounted over the host's real one, and a bind mount on a
+// FILE only survives as long as the path keeps pointing at the same dentry: the
+// moment anything on the host replaces ~/.claude.json by rename() - which is
+// exactly how Claude Code saves its own config - the mount is dropped from every
+// running head's sandbox, silently. The sandbox then falls through to the host's
+// ~/.claude.json, which declares no hydra server, and any Claude that starts (or
+// re-reads its config) after that comes up with NO hydra tools: no connection
+// attempt, no error, and no recovery for the rest of the session. That was
+// roughly half of all resumes/restarts. argv can't be swapped out from under us.
+//
+// Declaring the same server in both places is additive, not a conflict - it
+// resolves to a single connection (spike-verified against the CLI).
+func claudeMCPConfigArgs(agentType string) []string {
+	name, command, args := HydraMCPServer(HydraBinPath, agentType)
+	data, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			name: map[string]any{"type": "stdio", "command": command, "args": args},
+		},
+	})
+	if err != nil {
+		// The value is built here from constants, so this cannot fail; if it ever
+		// did, dropping the flag leaves the seeded-config path as it was.
+		return nil
+	}
+	return []string{"--mcp-config", string(data)}
+}
+
 // AgentSupportsGitTools reports whether the agent type gets the Hydra control MCP
 // server (and thus the git_* tools) seeded - the set seedHead seeds it for
 // (claude/codex/gemini). Only these can commit under git_isolation=readonly, where
@@ -554,6 +592,11 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 	switch agentType {
 	case AgentTypeClaude:
 		argv := []string{"claude", "--dangerously-skip-permissions"}
+		// --mcp-config is VARIADIC (it takes space-separated configs), so it eats
+		// every following non-flag token: `--mcp-config <json> mcp list` reads
+		// "mcp" and "list" as two more config paths. It goes here, at the front,
+		// where everything that can follow is a flag, `--`, or nothing at all.
+		argv = append(argv, claudeMCPConfigArgs(string(agentType))...)
 		if systemPrompt != "" {
 			argv = append(argv, "--append-system-prompt", systemPrompt)
 		}
