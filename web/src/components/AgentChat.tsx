@@ -61,13 +61,18 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
-import { ImageLightbox } from './ImageLightbox'
+import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+// langFromPath (the extension -> Prism language map a Read tool's output is
+// highlighted by, item 3) now lives in lib/fileKind, beside the file-type
+// classifier, so the lightbox's text viewer highlights by the same table.
+import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -1233,23 +1238,6 @@ function readLineInfo(input: Record<string, unknown> | null): string {
   if (offset != null) return `from line ${offset}`
   if (limit != null) return `first ${limit} lines`
   return ''
-}
-
-// LANG_BY_EXT maps a file extension to a highlight.js language, so a Read tool's
-// output can be syntax highlighted by the file it read (item 3).
-const LANG_BY_EXT: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  mjs: 'javascript', cjs: 'javascript', json: 'json', go: 'go', py: 'python',
-  rb: 'ruby', rs: 'rust', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
-  hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin',
-  sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', yml: 'yaml', yaml: 'yaml',
-  toml: 'ini', ini: 'ini', md: 'markdown', markdown: 'markdown', html: 'xml',
-  xml: 'xml', svg: 'xml', css: 'css', scss: 'scss', sql: 'sql', lua: 'lua',
-  dockerfile: 'dockerfile', diff: 'diff', patch: 'diff',
-}
-function langFromPath(path: string): string {
-  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase()
-  return ext ? (LANG_BY_EXT[ext] ?? '') : ''
 }
 
 // parseToolResult flattens a tool_result block's content into displayable text
@@ -3328,8 +3316,8 @@ const ToolCard = memo(function ToolCard({
       {/* Read of an image returns image blocks (item 4); clicking one opens it
           full-size in the shared lightbox, like an attachment image. */}
       {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
-        <ImageLightbox
-          images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
+        <Lightbox
+          items={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
           origin={imgOrigin}
           onIndexChange={setImgLightbox}
@@ -5026,8 +5014,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  const openable = openableAttachments(attachments)
+  const lightboxItems = attachmentLightboxItems(attachments)
   return (
     <div className="flex flex-col items-end gap-1">
       {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
@@ -5040,9 +5028,9 @@ const ChatUserMessage = memo(function ChatUserMessage({
             attachments={attachments}
             size="sm"
             className={body ? 'mt-2' : ''}
-            onOpenImage={(id, origin) => {
+            onOpen={(id, origin) => {
               setLightboxOrigin(origin)
-              setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+              setLightboxIndex(openable.findIndex((a) => a.id === id))
             }}
           />
         )}
@@ -5050,10 +5038,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
       {/* No "Sending..." row: the dimmed (opacity-75) bubble already signals the
           in-flight state, and a row that appears then vanishes on confirm shifted
           the whole transcript below it. */}
-      {lightboxIndex !== null && lightboxImages.length > 0 && (
-        <ImageLightbox
-          images={lightboxImages}
-          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <Lightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
@@ -8895,9 +8883,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         nextN++
       }
       const id = nextAttachmentId()
-      const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      if (previewUrl) objectUrlsRef.current.add(previewUrl)
-      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+      // One object URL per file, whatever it is: it backs the lightbox for every
+      // attachment, and doubles as the thumbnail source for the images.
+      const objectUrl = URL.createObjectURL(file)
+      objectUrlsRef.current.add(objectUrl)
+      const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
       uploadFile(projectId, file)
         .then((res) => reconcile(id, { path: res.path, uploading: false }))
@@ -8957,8 +8947,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
-  const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
+  // Every attachment is openable, in chip order - the lightbox navigates this list
+  // and each chip opens at its own index (see lib/attachmentLightbox).
+  const openable = openableAttachments(attachments)
+  const lightboxItems = attachmentLightboxItems(attachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
 
   // --- Composer: slash commands ----------------------------------------------
@@ -10112,9 +10104,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               size="sm"
               className="px-3 pt-2.5"
               onRemove={removeAttachment}
-              onOpenImage={(id, origin) => {
+              onOpen={(id, origin) => {
                 setLightboxOrigin(origin)
-                setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+                setLightboxIndex(openable.findIndex((a) => a.id === id))
               }}
             />
             <HighlightedTextarea
@@ -10253,10 +10245,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         </div>
       )}
 
-      {lightboxIndex !== null && lightboxImages.length > 0 && (
-        <ImageLightbox
-          images={lightboxImages}
-          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+      {lightboxIndex !== null && lightboxItems.length > 0 && (
+        <Lightbox
+          items={lightboxItems}
+          index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}

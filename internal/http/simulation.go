@@ -3961,11 +3961,14 @@ var simChatEvents = []string{
 	// chat must render NOTHING for this line.
 	`{"type":"user","uuid":"sim-image-resize","message":{"role":"user","content":"[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"},"isMeta":true}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
-	// An assistant reply that embeds a screenshot IT took, by the path it wrote it
-	// to (inside the head's private /tmp). The chat markdown renderer resolves that
-	// through the agent-files endpoint and shows the picture inline - see
-	// MarkdownImage / HandleAgentFileBlob.
-	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
+	// An assistant reply that embeds screenshots IT took, by the paths it wrote
+	// them to (inside the head's private /tmp). The chat markdown renderer
+	// resolves those through the agent-files endpoint and shows the pictures
+	// inline - see MarkdownImage / HandleAgentFileBlob. TWO of them, which is the
+	// real shape of a before/after report and what makes the lightbox a gallery:
+	// the two are one message, so ←/→ step between them and stop there (see
+	// lib/markdownGallery).
+	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, before](/tmp/hydra-sim/popover-before@2x.png)\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
 	// A background Bash command plus its completion <task-notification>
 	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
 	// deduped to ONE notice chip). The notification carries the <output-file>

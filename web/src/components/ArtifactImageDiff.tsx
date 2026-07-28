@@ -1,13 +1,13 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
-  IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen,
+  IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen, openGalleryAt,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { CheckerLayer } from './CheckerLayer'
 import { ABControlsContext } from './artifactDiffContext'
-import { useImageLightbox } from '../stores/imageLightboxStore'
-import type { LightboxImage } from './ImageLightbox'
+import { useLightbox } from '../stores/lightboxStore'
+import type { LightboxItem } from './Lightbox'
 import { Tooltip } from './Tooltip'
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
@@ -28,35 +28,6 @@ export type ArtifactABControls = {
   toggleView: () => void
 }
 
-// A single artifact image as a lightbox entry; size is unknown here (the diff
-// viewer doesn't carry byte sizes) so it's left out of the caption.
-function lightboxImage(url: string, name: string): LightboxImage {
-  return { url, filename: name, size: 0 }
-}
-
-type OpenLightbox = (images: LightboxImage[], index?: number, origin?: Element | null) => void
-
-// Open this tile's entry in the lightbox. When the grid threaded down its `gallery`
-// (one entry per visible image file, carrying the before/after pair + mode) and this
-// tile's `index`, open the whole gallery there - so ←/→ step between files and the
-// lightbox shows the diff comparison. Otherwise fall back to just this one image
-// (e.g. the unit tests, or any caller that doesn't supply a gallery).
-//
-// `origin` is the tile element the click landed on: the lightbox flies the picture out
-// of that exact box. It's passed even though the tile may be showing the other side of
-// the pair - where the click landed is where the picture should come from.
-function openGalleryAt(
-  open: OpenLightbox,
-  gallery: LightboxImage[] | undefined,
-  index: number | undefined,
-  fallbackUrl: string,
-  name: string,
-  origin?: Element | null,
-) {
-  if (gallery && index != null) open(gallery, index, origin)
-  else open([lightboxImage(fallbackUrl, name)], 0, origin)
-}
-
 function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
   url?: string | null
   label: string
@@ -66,13 +37,13 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
   aspect?: number
   // The grid's diff gallery + this tile's index in it, so a click opens the lightbox
   // there and ←/→ walk the files. Omitted → opens just this image.
-  gallery?: LightboxImage[]
+  gallery?: LightboxItem[]
   index?: number
   // Set when this view is *already* inside the lightbox, so a click shouldn't open a
   // (nested) lightbox - it just stays a static image.
   disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
+  const openImage = useLightbox()
   return (
     // flex-1 min-w-0 so the two cells split their row evenly and the width-driven
     // images (w-full) each fill their half.
@@ -171,9 +142,9 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 // "No image" placeholder; middle-click opens the currently-shown image in a new tab.
 function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
-  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
+  gallery?: LightboxItem[]; index?: number; disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
+  const openImage = useLightbox()
   const canDiff = !!left && !!right
   // Prefer the panel-wide controls (diff viewer) when present; otherwise keep this
   // tile's own local toggles (repository browser). See ABControlsContext.
@@ -255,9 +226,9 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
 // open, so the image click is inert and only the divider acts.
 function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
-  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
+  gallery?: LightboxItem[]; index?: number; disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
+  const openImage = useLightbox()
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   // The pointer that grabbed the divider, so another finger's moves (multi-touch)
@@ -346,9 +317,9 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
 // (disableOpen) the image click is inert.
 function OnionCompare({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
-  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
+  gallery?: LightboxItem[]; index?: number; disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
+  const openImage = useLightbox()
   const [opacity, setOpacity] = useState(50)
   const sizer = (right ?? left) as string
   return (
@@ -478,7 +449,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
 // span two masonry columns in this mode, so there's room - see FileGrid).
 function SideBySide({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
-  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
+  gallery?: LightboxItem[]; index?: number; disableOpen?: boolean
 }) {
   return (
     <div className="flex gap-3 w-full">
@@ -505,7 +476,7 @@ export function ImageDiffView({ left, right, mode, name, aspect, gallery, index,
   // fades into a pre-sized box with no reflow. Undefined → height follows the
   // loaded image (the old measured behaviour) for entries the server didn't size.
   aspect?: number
-  gallery?: LightboxImage[]; index?: number
+  gallery?: LightboxItem[]; index?: number
   // Set when rendered inside the lightbox itself, so the click/middle-click "open in
   // lightbox" affordances are suppressed (you're already in it).
   disableOpen?: boolean

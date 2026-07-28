@@ -47,12 +47,16 @@ export function parseUploadAttachments(
     if (seen.has(full)) continue
     seen.add(full)
     const base = full.split('/').pop() ?? full
+    const blob = uploadBlobUrl(projectId, base)
     attachments.push({
       id: id++,
       // Drop the "<unixnano>-" prefix uniqueUploadName adds, for a tidy label.
       filename: base.replace(/^\d+-/, ''),
       path: full,
-      previewUrl: IMAGE_EXT_RE.test(base) ? uploadBlobUrl(projectId, base) : undefined,
+      // Every stored upload can be served back, whatever it is - the thumbnail is
+      // the image-only part.
+      url: blob,
+      previewUrl: IMAGE_EXT_RE.test(base) ? blob : undefined,
       size: 0,
       uploading: false,
     })

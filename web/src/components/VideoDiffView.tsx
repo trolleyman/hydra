@@ -18,10 +18,12 @@
 import { useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
-  checkerStyle, IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen,
+  checkerStyle, IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen, openGalleryAt,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
+import { useLightbox } from '../stores/lightboxStore'
+import type { LightboxItem } from './Lightbox'
 import { Tooltip } from './Tooltip'
 import { ABControlsContext } from './artifactDiffContext'
 
@@ -211,6 +213,33 @@ function useVideoSync(fps?: number | null) {
 
 type Controller = ReturnType<typeof useVideoSync>
 
+// What every mode needs to open itself in the lightbox: the file's name, the grid's
+// gallery + this file's place in it, and whether opening is available at all.
+type OpenProps = {
+  name: string
+  gallery?: LightboxItem[]
+  index?: number
+  // Set when this view is *already* inside the lightbox: there is nothing left to
+  // open, so a click keeps the mode's own gesture (the A/B flip) instead.
+  disableOpen?: boolean
+}
+
+// Click-to-open, shared by the four video modes. A plain click puts this clip in the
+// fullscreen lightbox at its place in the grid's gallery - the same gesture, and the
+// same destination, as an image tile - so a .webm is no longer the one artifact you
+// can't click. A no-op under `disableOpen` (already in the lightbox); each mode also
+// tests that flag itself to decide whether to bind its own gesture instead.
+function useOpenInLightbox({ name, gallery, index, disableOpen }: OpenProps) {
+  const open = useLightbox()
+  return useCallback(
+    (url: string, origin: Element | null) => {
+      if (disableOpen) return
+      openGalleryAt(open, gallery, index, url, name, origin)
+    },
+    [open, gallery, index, name, disableOpen],
+  )
+}
+
 // A bare attached <video>. muted/playsInline are set both as attributes (so the
 // browser's autoplay policy is satisfied at parse time) and again in configure.
 function VideoNode({ url, attach, className, style }: {
@@ -254,22 +283,29 @@ function VideoSizer({ url, aspect }: { url: string; aspect?: number }) {
 
 // Side-by-side cell, the video twin of ImageCell. flex-1 so the pair splits the
 // tile width evenly and each width-driven (w-full) frame fills its half.
-function VideoCell({ url, attach, label, aspect }: {
+function VideoCell({ url, attach, label, aspect, open, disableOpen }: {
   url?: string | null
   attach: (el: HTMLVideoElement | null) => void
   label: string
   aspect?: number
+  open: (url: string, origin: Element | null) => void
+  disableOpen?: boolean
 }) {
   return (
     <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        // A plain click opens the .webm in a new tab via the <a>; the frame fills
-        // the cell width and its height follows the aspect ratio. draggable=false:
-        // links are natively draggable, which would hijack the tile's drag-to-resize.
-        <a href={url} target="_blank" rel="noreferrer" draggable={false} className="block">
+        // A plain click opens the clip in the fullscreen lightbox (like an image
+        // cell); a middle click opens the raw .webm in a new browser tab. The frame
+        // fills the cell width and its height follows the aspect ratio.
+        <button
+          type="button"
+          onClick={disableOpen ? undefined : (e) => open(url, e.currentTarget)}
+          onAuxClick={makeAuxOpen(() => url)}
+          className={`relative block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
+        >
           <VideoNode url={url} attach={attach} className={IMG_CLASS} style={{ ...checkerStyle, aspectRatio: aspect }} />
-        </a>
+        </button>
       ) : (
         <NoVideo className="w-full h-32 rounded-md border border-gray-200 dark:border-gray-700" />
       )}
@@ -277,11 +313,14 @@ function VideoCell({ url, attach, label, aspect }: {
   )
 }
 
-function VideoSideBySide({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
+function VideoSideBySide({ controller, left, right, aspect, open, disableOpen }: {
+  controller: Controller; left?: string | null; right?: string | null; aspect?: number
+  open: (url: string, origin: Element | null) => void; disableOpen?: boolean
+}) {
   return (
     <div className="flex gap-3 w-full">
-      <VideoCell url={left} attach={controller.attachLeft} label="Before" aspect={aspect} />
-      <VideoCell url={right} attach={controller.attachRight} label="After" aspect={aspect} />
+      <VideoCell url={left} attach={controller.attachLeft} label="Before" aspect={aspect} open={open} disableOpen={disableOpen} />
+      <VideoCell url={right} attach={controller.attachRight} label="After" aspect={aspect} open={open} disableOpen={disableOpen} />
     </div>
   )
 }
@@ -293,7 +332,10 @@ function VideoSideBySide({ controller, left, right, aspect }: { controller: Cont
 // recomputed continuously as the synced pair plays/scrubs, on top of whichever side
 // is shown - so the changes stay marked as you flip Before↔After. Highlight is
 // disabled when only one side exists (an added/removed file - nothing to diff).
-function VideoAB({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
+function VideoAB({ controller, left, right, aspect, open, disableOpen }: {
+  controller: Controller; left?: string | null; right?: string | null; aspect?: number
+  open: (url: string, origin: Element | null) => void; disableOpen?: boolean
+}) {
   const canDiff = !!left && !!right
   // Panel-wide controls (diff viewer) win when present; else this tile's own toggles
   // (repository browser). Mirrors the image ABSwitch - see ABControlsContext.
@@ -392,9 +434,14 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
           </Tooltip>
         </div>
       )}
+      {/* In the grid a click opens the fullscreen lightbox at this file (←/→ walks the
+          gallery there); flipping Before↔After is done with this tile's own pill.
+          Inside the lightbox (disableOpen) there is nothing to open, so a click flips
+          instead - exactly how the image A/B tile behaves. */}
       <div
-        className={`relative w-full cursor-pointer select-none ${STACK_CLASS}`}
-        onClick={flip}
+        data-lb-picture
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? flip : (e) => open((view === 'before' ? left : right) || sizer, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
         <VideoSizer url={sizer} aspect={aspect} />
@@ -413,7 +460,10 @@ function VideoAB({ controller, left, right, aspect }: { controller: Controller; 
 // of the frame behaves like the other video modes (and, in the grid, a horizontal
 // drag on it resizes the tile). A middle click opens the side under the cursor in a
 // new tab. The cursor advertises the divider (ew-resize) against the plain frame.
-function VideoSlider({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
+function VideoSlider({ controller, left, right, aspect, open, disableOpen }: {
+  controller: Controller; left?: string | null; right?: string | null; aspect?: number
+  open: (url: string, origin: Element | null) => void; disableOpen?: boolean
+}) {
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   // The pointer that grabbed the divider, so another finger's moves (multi-touch)
@@ -446,16 +496,21 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
     }
   }, [dragging, update])
 
+  // The side sitting under a given clientX, for the click/middle-click open. Takes
+  // the element from the event rather than reading the ref, so nothing reads a ref
+  // during render (mirrors the image slider).
+  const sideAt = (el: Element, clientX: number) => {
+    const r = el.getBoundingClientRect()
+    return (((clientX - r.left) / r.width) * 100 < pos ? left : right) || sizer
+  }
+
   return (
     <div
       ref={ref}
-      className={`relative w-full select-none ${STACK_CLASS}`}
-      onAuxClick={makeAuxOpen((e) => {
-        // Use the event target's rect (not the ref) so no ref is read at render.
-        const r = e.currentTarget.getBoundingClientRect()
-        const x = ((e.clientX - r.left) / r.width) * 100
-        return (x < pos ? left : right) || sizer
-      })}
+      data-lb-picture
+      className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
+      onClick={disableOpen ? undefined : (e) => open(sideAt(e.currentTarget, e.clientX), e.currentTarget)}
+      onAuxClick={makeAuxOpen((e) => sideAt(e.currentTarget, e.clientX))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -490,13 +545,18 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
 
 // Onion skin (twin of OnionCompare): "before" base with "after" blended over it at
 // a slider-controlled opacity.
-function VideoOnion({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
+function VideoOnion({ controller, left, right, aspect, open, disableOpen }: {
+  controller: Controller; left?: string | null; right?: string | null; aspect?: number
+  open: (url: string, origin: Element | null) => void; disableOpen?: boolean
+}) {
   const [opacity, setOpacity] = useState(50)
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
-        className={`relative w-full select-none ${STACK_CLASS}`}
+        data-lb-picture
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? undefined : (e) => open((opacity >= 50 ? right : left) || sizer, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
         <VideoSizer url={sizer} aspect={aspect} />
@@ -586,13 +646,26 @@ function VideoTransport({ controller }: { controller: Controller }) {
 // shared transport. The mode set mirrors the image viewer so a .webm artifact honours
 // the same diff-viewer setting; the controller (one per file row) keeps the pair in
 // lockstep across whichever mode is showing.
-export function VideoDiffView({ left, right, mode, fps, aspect }: { left?: string | null; right?: string | null; mode: ImageDiffMode; fps?: number | null; aspect?: number }) {
+export function VideoDiffView({ left, right, mode, fps, aspect, name, gallery, index, disableOpen }: {
+  left?: string | null; right?: string | null; mode: ImageDiffMode; fps?: number | null; aspect?: number
+  // The file's name and its place in the grid's lightbox gallery, so a click opens
+  // the fullscreen viewer here and ←/→ walk the rest of the set - the same wiring
+  // the image tiles get (see ImageDiffView).
+  name: string
+  gallery?: LightboxItem[]
+  index?: number
+  // Set when rendered inside the lightbox itself, which suppresses the open
+  // affordance (you are already in it).
+  disableOpen?: boolean
+}) {
   const controller = useVideoSync(fps)
+  const open = useOpenInLightbox({ name, gallery, index, disableOpen })
+  const shared = { controller, left, right, aspect, open, disableOpen }
   let body: React.ReactNode
-  if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide controller={controller} left={left} right={right} aspect={aspect} />
-  else if (mode === 'ab') body = <VideoAB controller={controller} left={left} right={right} aspect={aspect} />
-  else if (mode === 'slider') body = <VideoSlider controller={controller} left={left} right={right} aspect={aspect} />
-  else body = <VideoOnion controller={controller} left={left} right={right} aspect={aspect} />
+  if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide {...shared} />
+  else if (mode === 'ab') body = <VideoAB {...shared} />
+  else if (mode === 'slider') body = <VideoSlider {...shared} />
+  else body = <VideoOnion {...shared} />
   return (
     <div className="min-w-0">
       {body}

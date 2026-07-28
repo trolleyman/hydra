@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { applyABShortcut, type ABShortcutTarget } from './abShortcuts'
 
 // The shared X/B/A/H comparator shortcut mapping, used by both the diff grid
-// (ArtifactsPanel) and the lightbox comparator (ImageLightbox). Regression for the
+// (ArtifactsPanel) and the lightbox comparator (Lightbox). Regression for the
 // grid only ever binding B: X must flip, B/A must jump to a side, everywhere.
 
 function target(view: 'before' | 'after' = 'after', highlight = false) {

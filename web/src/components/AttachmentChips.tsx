@@ -3,11 +3,13 @@ import { X, FileText, LoaderCircle } from 'lucide-react'
 import type { Attachment } from '../lib/spawnDrafts'
 
 // A row of attachment chips, shared by the spawn form and the agent terminal.
-// Image attachments show a thumbnail and open a fullscreen lightbox on click
-// (the parent owns the lightbox and resolves the clicked id to an image index);
-// other files show a generic icon and aren't clickable. An upload in progress
-// shows a spinner; a failed one is flagged. `className` styles the outer row so
-// each caller can place/pad it to fit its layout. Renders nothing when empty.
+// EVERY chip opens the fullscreen lightbox on click - an image at its thumbnail,
+// a text file in the text viewer, anything else as a card with a download link -
+// so a chip is never a dead end just because it isn't a picture. (The parent owns
+// the lightbox and resolves the clicked id to an entry index; see
+// lib/attachmentLightbox.) An upload in progress shows a spinner; a failed one is
+// flagged. `className` styles the outer row so each caller can place/pad it to fit
+// its layout. Renders nothing when empty.
 // The row is capped at two chip rows and scrolls beyond that, so a big batch
 // of images can't crowd out the prompt text around it.
 // memo: rendered inside the spawn composer, which re-renders on every
@@ -17,7 +19,7 @@ export const AttachmentChips = memo(function AttachmentChips({
   attachments,
   size,
   onRemove,
-  onOpenImage,
+  onOpen,
   className,
 }: {
   attachments: Attachment[]
@@ -26,7 +28,7 @@ export const AttachmentChips = memo(function AttachmentChips({
   onRemove?: (id: number) => void
   /** `origin` is the chip that was activated - the lightbox flies the picture out of
    *  its box (and back into it on close) rather than fading in over it. */
-  onOpenImage: (id: number, origin: Element) => void
+  onOpen: (id: number, origin: Element) => void
   className?: string
 }) {
   if (attachments.length === 0) return null
@@ -40,20 +42,23 @@ export const AttachmentChips = memo(function AttachmentChips({
     // the (wrapped) chip row inside a queued message bubble.
     <div className={`flex flex-wrap gap-1.5 overflow-y-auto overflow-x-hidden ${maxH} ${className ?? ''}`}>
       {attachments.map((a) => {
-        const isImage = !!a.previewUrl
-        const open = isImage
-          ? (e: React.SyntheticEvent<HTMLDivElement>) => onOpenImage(a.id, e.currentTarget)
+        // Openable as soon as there are bytes behind it - which is immediately for
+        // a locally attached file (an object URL), so a chip doesn't go from inert
+        // to clickable as its upload lands.
+        const canOpen = !!a.url
+        const open = canOpen
+          ? (e: React.SyntheticEvent<HTMLDivElement>) => onOpen(a.id, e.currentTarget)
           : undefined
         return (
           <div
             key={a.id}
             onClick={open}
             onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e) } } : undefined}
-            role={isImage ? 'button' : undefined}
-            tabIndex={isImage ? 0 : undefined}
-            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-stone-200 bg-stone-50 dark:border-stone-600 dark:bg-stone-700/60'}`}
-            title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
-            aria-label={isImage ? `View ${a.filename}` : undefined}
+            role={canOpen ? 'button' : undefined}
+            tabIndex={canOpen ? 0 : undefined}
+            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${canOpen ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-stone-200 bg-stone-50 dark:border-stone-600 dark:bg-stone-700/60'}`}
+            title={a.error ? a.error : canOpen ? `View ${a.filename}` : a.filename}
+            aria-label={canOpen ? `View ${a.filename}` : undefined}
           >
             {a.previewUrl ? (
               <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover shrink-0`} />
