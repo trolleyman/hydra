@@ -44,7 +44,7 @@ artifact_concurrency = 2
 # artifact_prefetch = true
 
 ## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
-# test_concurrency = 1
+test_concurrency = 2
 
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
@@ -136,6 +136,9 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 [policy]
 ## enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).
 # gate_enabled = true
+
+## how much of the repo's shared .git the head may write: "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. See docs/git-isolation.md.
+# git_isolation = "readonly"
 
 ## MCP server names the agent may use (whole-server grant covers all its tools); any other server is stripped before launch and denied at runtime (default none).
 # mcp_allowed = []
@@ -315,9 +318,13 @@ ready_timeout_sec = 900
 ##   ::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected 3 got 2
 ##   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement
 ##   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
+##   ::hydra:test:pass:38:: internal/artifacts › TestFast       (38 = duration in ms)
 ## The token before the first › is the location (path[:line[:col]] or dotted class),
 ## middle › tokens are scope levels, the last is the test name, text after | is the
-## message. A marker is one line; in the message an escape sequence expands -
+## message. A verb takes an optional :<ms> duration suffix, giving a streamed case
+## the timing a JUnit report carries in its `time` attribute; it rides on the verb
+## (a closed set) so a test name can never be mistaken for it, and omitting it stays
+## valid. A marker is one line; in the message an escape sequence expands -
 ## backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return
 ## (so a multi-line stack trace fits on the one line) - and a doubled backslash
 ## becomes one literal backslash. Any other escape is left as-is.
