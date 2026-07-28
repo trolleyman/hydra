@@ -8,9 +8,12 @@
 // return null when there is no layout, e.g. jsdom).
 
 // A replacement for the textarea's whole value plus where the caret ends up.
+// `caretEnd` makes the result a SELECTION rather than a caret (auto-pairing
+// wraps a selection and leaves it selected); absent means a plain caret.
 export interface TextareaEdit {
   value: string
   caret: number
+  caretEnd?: number
 }
 
 // A markdown list item's prefix: indent + bullet/number + the spacing after it,
@@ -78,18 +81,25 @@ export function enterEdit(value: string, selStart: number, selEnd: number): Text
 // the dispatch so handlers that read selectionStart (e.g. the composers' undo
 // snapshots) capture the right position.
 export function applyEdit(ta: HTMLTextAreaElement, edit: TextareaEdit) {
+  const end = edit.caretEnd ?? edit.caret
+  // A pure caret move (auto-pairing stepping over a closer it already inserted):
+  // there is no edit to report, so move the caret and leave React alone.
+  if (edit.value === ta.value) {
+    ta.setSelectionRange(edit.caret, end)
+    return
+  }
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
   if (setter) setter.call(ta, edit.value)
   else ta.value = edit.value
-  ta.setSelectionRange(edit.caret, edit.caret)
+  ta.setSelectionRange(edit.caret, end)
   ta.dispatchEvent(new Event('input', { bubbles: true }))
   // React re-renders with the same value, so the DOM node is left alone and the
   // caret survives - but re-assert it on the next frame in case a consumer
   // normalises the text on the way through (which would rewrite value and drop
   // the caret to the end).
   requestAnimationFrame(() => {
-    if (ta.value === edit.value && ta.selectionStart !== edit.caret) {
-      ta.setSelectionRange(edit.caret, edit.caret)
+    if (ta.value === edit.value && (ta.selectionStart !== edit.caret || ta.selectionEnd !== end)) {
+      ta.setSelectionRange(edit.caret, end)
     }
   })
 }

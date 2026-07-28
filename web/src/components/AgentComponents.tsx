@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Clock } from 'lucide-react'
+import { Clock, GitPullRequest } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
@@ -11,6 +11,34 @@ import {
   agentDotClass, agentDotAnimate, agentTypeColor,
   agentStatusBadge, agentStatusDetail, archivedEndStateBadge,
 } from '../lib/agentDisplay'
+
+// MRSidebarMarker is the sidebar row's linked-MR indicator: a small forge glyph
+// so you can see at a glance which heads have an MR open, carrying an up-arrow
+// count while the head has commits the MR branch does not. That count is the
+// whole point - an unpushed commit is the state you want to notice from the list
+// without opening the head (docs/non-local-integration.md).
+//
+// Native `title=` rather than <Tooltip>, per the per-row rule in CLAUDE.md: this
+// renders once per agent in a list that re-renders about once a second, and a
+// portal-mounting tooltip per row is a real perf regression.
+function MRSidebarMarker({ review }: { review: NonNullable<AgentResponse['review']> }) {
+  const ahead = review.ahead ?? 0
+  const noun = review.adopted ? 'PR' : 'MR'
+  const title = ahead > 0
+    ? `${noun} ${review.id}: ${ahead} commit${ahead === 1 ? '' : 's'} not yet pushed`
+    : `${noun} ${review.id}`
+  return (
+    <span
+      title={title}
+      className={`shrink-0 inline-flex items-center gap-0.5 text-[10px] tabular-nums ${
+        ahead > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'
+      }`}
+    >
+      <GitPullRequest className="w-3 h-3 shrink-0" />
+      {ahead > 0 ? <>&uarr;{ahead}</> : null}
+    </span>
+  )
+}
 
 // memo: the sidebar renders one of these per agent and the list re-renders on
 // every agent-store refresh (about once a second while an agent is working).
@@ -100,6 +128,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         {!archived && agent.merge_when_green ? (
           <Clock className="w-3 h-3 text-green-600 dark:text-green-400 shrink-0" aria-label="auto-merge armed" />
         ) : null}
+        {!archived && agent.review ? <MRSidebarMarker review={agent.review} /> : null}
       </div>
       {((!archived && agent.agent_status) || agent.created_at) && (
         // Bottom line: live activity / last message on the left, with the relative

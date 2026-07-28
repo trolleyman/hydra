@@ -61,6 +61,15 @@ type Deps struct {
 	// the command finishes). The sandbox escape hatch of last resort. Nil - no
 	// approval channel - hides the tool rather than letting it fail on use.
 	HostRun func(HostRunRequest) HostRunResult
+	// HeadStatus returns a rendered summary of this head's own tests, artifacts and
+	// services. The daemon owns that state (services exist only in its memory), and
+	// it renders the text too, so the wording lives next to the managers it
+	// describes. Read-only: it never starts a run. Nil hides the tool.
+	HeadStatus func() (message string, ok bool)
+	// TestLogs returns the tail of one test runner's captured output for this head.
+	// Split from HeadStatus so the common "am I green?" call stays cheap and only a
+	// real failure pays for a log. Nil hides the tool.
+	TestLogs func(runner string, tail int) (message string, ok bool)
 }
 
 // HostRunRequest is one host_run call: the command to run and the agent's
@@ -273,6 +282,34 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.HostRun != nil {
 		defs = append(defs, hostRunToolDef())
 	}
+	if deps.HeadStatus != nil {
+		defs = append(defs, map[string]any{
+			"name": "get_head_status",
+			"description": "Get the status of YOUR OWN work as Hydra sees it: the verdict of each configured test runner - with the failing cases NAMED and their failure messages included, so this is usually all you need to start fixing - plus the state of each artifact/screenshot set and the project's supervised services. " +
+				"This is the same state the user is looking at in Hydra's panels, and the test verdicts are what the merge and publish gates check - so this, not your own ad-hoc test command, is the answer to \"am I green?\". " +
+				"Everything is measured against your branch's latest COMMIT, so commit before calling it if you want your newest work judged. " +
+				"Read-only and cheap: it reports cached results and never starts a test run or a generation.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+			"annotations": map[string]any{"readOnlyHint": true},
+		})
+	}
+	if deps.TestLogs != nil {
+		defs = append(defs, map[string]any{
+			"name": "get_test_logs",
+			"description": "Get the captured output of ONE of your test runners' latest run, for when get_head_status is not enough - it already gives you the failing case names and their messages, so reach for this only if you need the surrounding output (a stack trace, a build error, the cases it had to truncate). " +
+				"Take the runner name from get_head_status; call that first rather than guessing one. " +
+				"Returns the END of the log (where a failure almost always is), 200 lines by default - raise \"tail\" only if the answer is genuinely cut off, since a long log costs you context you could spend fixing the test.",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"runner"},
+				"properties": map[string]any{
+					"runner": map[string]any{"type": "string", "description": "The test runner's name, as reported by get_head_status."},
+					"tail":   map[string]any{"type": "integer", "description": "How many lines from the END of the log to return. Default 200, maximum 2000."},
+				},
+			},
+			"annotations": map[string]any{"readOnlyHint": true},
+		})
+	}
 	if deps.GetReview != nil {
 		defs = append(defs,
 			map[string]any{
@@ -350,6 +387,26 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		r := deps.HostRun(hr)
 		return textResult(r.Message, r.Failed)
+	case "get_head_status":
+		if deps.HeadStatus == nil {
+			return textResult("get_head_status is not available in this session.", true)
+		}
+		msg, ok := deps.HeadStatus()
+		return textResult(msg, !ok)
+	case "get_test_logs":
+		if deps.TestLogs == nil {
+			return textResult("get_test_logs is not available in this session.", true)
+		}
+		var args struct {
+			Runner string `json:"runner"`
+			Tail   int    `json:"tail"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.Runner) == "" {
+			return textResult("get_test_logs needs a \"runner\". Call get_head_status to see which runners this project configures.", true)
+		}
+		msg, ok := deps.TestLogs(strings.TrimSpace(args.Runner), args.Tail)
+		return textResult(msg, !ok)
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)
 	case "get_review_comments":

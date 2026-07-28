@@ -25,6 +25,26 @@
     Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
 }
 
+/* Optically centre a label sitting beside an icon in a flex row.
+   `align-items: center` centres the label's LINE BOX, which reserves room for
+   ascenders and descenders the word may not use - so a word like "Rename" (no
+   descenders) is centred as if it had them and reads visibly high against the
+   icon next to it, by ~1.7px at the top bar's size. `text-box: trim-both cap
+   alphabetic` trims the box to the cap top and the baseline, so what gets
+   centred is the part you actually see.
+   Progressive enhancement: unsupported browsers (Firefox as of writing) simply
+   ignore it and render exactly as before, so this can never make things worse.
+
+   It SHRINKS the label's box, so only use it where nothing depends on that box's
+   height (see CLAUDE.md for the audit): the container must set its own height
+   (h-7/h-8, like the top-bar buttons), and the label must not clip its overflow -
+   `whitespace-nowrap` is fine, `truncate` is not, because `overflow: hidden` on a
+   cap-trimmed box slices the descenders off ("project" -> "proiect"). Not on
+   running prose either: trimming collapses the leading between lines. */
+.optical-center {
+  text-box: trim-both cap alphabetic;
+}
+
 :root {
   color-scheme: light;
 }
@@ -358,6 +378,29 @@ body {
   background-image: linear-gradient(90deg, #78716c 35%, #e7e5e4 50%, #78716c 65%);
 }
 
+/* The "working" spark (components/WorkSpark.tsx): the whole sparkle turns
+   slowly while a pulse of brightness + length travels around its spokes (each
+   spoke carries a negative animation-delay, so the wave is already mid-flight
+   on the first frame). */
+@keyframes work-spark-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes work-spark-pulse {
+  0%, 100% { opacity: 0.28; transform: scaleY(0.58); }
+  30%      { opacity: 1;    transform: scaleY(1); }
+}
+.work-spark {
+  transform-origin: center;
+  animation: work-spark-spin 6s linear infinite;
+}
+.work-spark-spoke {
+  /* Origin = the spoke's inner end, in viewBox units of the parent (rotated)
+     group, so the pulse grows outward along the spoke's own axis. */
+  transform-box: view-box;
+  transform-origin: 12px 9.2px;
+  animation: work-spark-pulse 1.32s ease-in-out infinite;
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }
@@ -370,6 +413,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
   .animate-chat-sheet-up,
+  .work-spark,
+  .work-spark-spoke,
   .repo-file-in { animation: none; }
   .chat-text-shimmer {
     animation: none;
