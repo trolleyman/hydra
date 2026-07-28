@@ -132,9 +132,17 @@ describe('extensionMime', () => {
 })
 
 describe('pasteMarkerText', () => {
-  it('wraps each filename in brackets with a trailing space', () => {
-    expect(pasteMarkerText(['image1.png'])).toBe('[image1.png] ')
-    expect(pasteMarkerText(['image1.png', 'image2.png'])).toBe('[image1.png] [image2.png] ')
+  it('wraps each filename in brackets, with no trailing space', () => {
+    expect(pasteMarkerText(['image1.png'])).toBe('[image1.png]')
+    expect(pasteMarkerText(['image1.png', 'image2.png'])).toBe('[image1.png] [image2.png]')
+  })
+
+  it('adds a leading space only when the text before the caret needs one', () => {
+    expect(pasteMarkerText(['image1.png'], 'fix')).toBe(' [image1.png]')
+    expect(pasteMarkerText(['image1.png'], '[image0.png]')).toBe(' [image1.png]')
+    expect(pasteMarkerText(['image1.png'], 'fix ')).toBe('[image1.png]')
+    expect(pasteMarkerText(['image1.png'], 'fix\n')).toBe('[image1.png]')
+    expect(pasteMarkerText(['image1.png'], '')).toBe('[image1.png]')
   })
 })
 
