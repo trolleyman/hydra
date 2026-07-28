@@ -284,6 +284,39 @@ command = "bun run shots.ts"
 	}
 }
 
+// TestMediaTypeIsDropped covers the other half of the type key's retirement:
+// artifacts have no kinds any more, so an explicit type = "media" is consumed on
+// read and gone from [artifacts.<name>] on the next save, exactly as a
+// type = "server" is (that one having moved to [previews.<name>]).
+func TestMediaTypeIsDropped(t *testing.T) {
+	for _, typ := range []string{`type = "media"`, `type = ""`, `type = "typoe"`} {
+		cfg, err := decodeConfig([]byte("[artifacts.shots]\n" + typ + "\ncommand = \"x\"\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig %s: %v", typ, err)
+		}
+		if len(cfg.Artifacts) != 1 {
+			t.Fatalf("%s: expected the entry to stay an artifact, got %+v", typ, cfg.Artifacts)
+		}
+		if cfg.Artifacts[0].Type != "" {
+			t.Errorf("%s: Type survived decode as %q", typ, cfg.Artifacts[0].Type)
+		}
+
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if err := SaveToFile(path, cfg); err != nil {
+			t.Fatalf("SaveToFile: %v", err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		for ln := range strings.SplitSeq(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(ln), "type =") {
+				t.Errorf("%s: saved config still writes %q", typ, ln)
+			}
+		}
+	}
+}
+
 // TestPreviewPatchViaArtifactsEntry covers the layering escape hatch: a later
 // layer disabling a preview writes a plain [artifacts.<name>] table (that is how
 // such overrides were always written), so Merge must route it to the preview of

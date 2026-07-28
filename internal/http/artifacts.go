@@ -283,7 +283,7 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 		if _, dup := byName[spec.Name]; dup {
 			continue
 		}
-		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, spec.Type)] {
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, hostKindArtifact)] {
 			// A version-sourced command not authorized on the host by the trusted
 			// config must run confined, regardless of what the version claims.
 			spec.UnsafeHost = false
@@ -328,22 +328,34 @@ func trustedHostCommands(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, s := range cfg.Artifacts {
 		if s.UnsafeHost && s.Name != "" && s.Command != "" {
-			trusted[hostKey(s.Name, s.Command, s.Type)] = true
+			trusted[hostKey(s.Name, s.Command, hostKindArtifact)] = true
 		}
 	}
 	return trusted
 }
 
-// hostKey keys the trusted-host set by name, command AND type. The NUL
-// separator can't appear in the fields, so distinct tuples never collide. Type
-// is included so a branch cannot repurpose a trusted one-shot media command
-// into a persistent host-resident server (or vice versa) by flipping type
-// while keeping the authorized name+command. ""/"media" are the same type.
-func hostKey(name, command, typ string) string {
-	if typ == "media" {
-		typ = ""
+// hostKindArtifact / hostKindPreview are the script KINDS hostKey scopes trust
+// to. They are not read from config - artifacts and previews are separate config
+// sections now, so the kind is fixed at each call site. hostKindArtifact keeps
+// the old empty-string spelling so a trust key computed before the split still
+// matches.
+const (
+	hostKindArtifact = ""
+	hostKindPreview  = config.ArtifactTypeServer
+)
+
+// hostKey keys the trusted-host set by name, command AND kind. The NUL separator
+// can't appear in the fields, so distinct tuples never collide. The kind is
+// included so trust granted to a one-shot media generator can never be spent on
+// a persistent host-resident preview (or vice versa) by reusing the authorized
+// name+command under the other section. "media" is accepted as an alias for the
+// artifact kind: config no longer carries a type at all (decodeConfig clears it),
+// but an explicit "media" must key identically if one ever reaches here.
+func hostKey(name, command, kind string) string {
+	if kind == "media" {
+		kind = hostKindArtifact
 	}
-	return name + "\x00" + command + "\x00" + typ
+	return name + "\x00" + command + "\x00" + kind
 }
 
 // buildArtifactSet generates/loads both sides for one script (matched by name)

@@ -59,7 +59,7 @@ func previewSpecsByName(projectRoot string, worktreeDir, ref string, liveCfg con
 		if _, dup := byName[spec.Name]; dup {
 			continue
 		}
-		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, config.ArtifactTypeServer)] {
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, hostKindPreview)] {
 			spec.UnsafeHost = false
 		}
 		byName[spec.Name] = spec
@@ -73,7 +73,7 @@ func trustedHostPreviews(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, p := range cfg.Previews {
 		if p.UnsafeHost && p.Name != "" && p.Command != "" {
-			trusted[hostKey(p.Name, p.Command, config.ArtifactTypeServer)] = true
+			trusted[hostKey(p.Name, p.Command, hostKindPreview)] = true
 		}
 	}
 	return trusted

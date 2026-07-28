@@ -397,16 +397,17 @@ type ArtifactScript struct {
 	// strict (the safer behavior); a script needing lenient execution sets it
 	// false or leads its command with `set +e`.
 	Strict *bool `toml:"strict"`
-	// Type is LEGACY. Live previews used to be artifacts with type = "server";
-	// they are now their own [previews.<name>] section (see PreviewScript). The
-	// field is still decoded so an older config - or an older git ref's config,
-	// which is read as-is when a diff is generated - keeps working: decodeConfig
-	// moves every type = "server" entry out of Artifacts and into Previews (see
-	// upgradeServerArtifacts). Nothing else reads it, and the renderer never
-	// writes it back, so a save migrates the file to [previews.<name>].
-	// ""/"media" was, and remains, the only artifact behavior: a
-	// run-to-completion generator whose image/video outputs the diff viewer
-	// compares.
+	// Type is LEGACY, and is always "" past decodeConfig. Live previews used to be
+	// artifacts with type = "server"; they are now their own [previews.<name>]
+	// section (see PreviewScript). The field is still decoded so an older config -
+	// or an older git ref's config, which is read as-is when a diff is generated -
+	// keeps working, but upgradeServerArtifacts consumes it at the end of
+	// decodeConfig: a "server" entry moves to Previews, and any other value
+	// ("media", "", a typo) is cleared, since all of them meant the one artifact
+	// behavior there has ever been (a run-to-completion generator whose
+	// image/video outputs the diff viewer compares). The renderer never writes it
+	// back either, so a save drops the key from [artifacts.<name>] whichever value
+	// it held.
 	Type string `toml:"type"`
 	// IdleTimeoutSec is LEGACY, decoded only to carry a type = "server" entry's
 	// value across the upgrade to PreviewScript.IdleTimeoutSec.
@@ -535,6 +536,13 @@ func upgradeServerArtifacts(cfg *Config) {
 	kept := make([]ArtifactScript, 0, len(cfg.Artifacts))
 	for _, a := range cfg.Artifacts {
 		if !a.IsServer() {
+			// Every OTHER value - "media", "", or a typo - meant the one artifact
+			// behavior there has ever been, so the key carries no information and
+			// is cleared here rather than left to confuse a reader (or a future
+			// caller) into thinking artifacts still have kinds. Cleared in memory
+			// AND unrendered, so a `type = "media"` disappears from the file on the
+			// next save exactly as a `type = "server"` does.
+			a.Type = ""
 			kept = append(kept, a)
 			continue
 		}
