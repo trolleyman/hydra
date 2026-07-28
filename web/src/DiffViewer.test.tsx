@@ -130,3 +130,69 @@ describe('bodyShape matches what the body renders', () => {
     expect(bodyShape(file({ hunks: [] }), false, false, 3)).toEqual({ kind: 'notice' })
   })
 })
+
+// A windowed diff shows fragments of a file, and gluing them together to
+// highlight them invents code that isn't there: a `{/*` on the last visible line
+// of one hunk has no `*/` until a line the diff never shows, so every fragment
+// below it came back as comment. Whole files of AgentChat.tsx read italic grey
+// from one JSX comment. Each contiguous run is highlighted on its own now.
+describe('highlighting does not leak across a collapsed gap', () => {
+  const truncatedComment = () => file({
+    path: 'a.tsx', expanded: false, additions: 1, deletions: 0,
+    hunks: [
+      hunk([ctx('const before = 1', 10), ctx('  {/* an opening comment', 11)], 10, 10),
+      hunk([ctx('const after = 2', 60), add('const added = 3', 61)], 60, 60),
+    ],
+  })
+
+  const codeCells = (c: HTMLElement) =>
+    Array.from(c.querySelectorAll(`span[class^="${UNIFIED_CODE_CLASS}"]`), (el) => el.innerHTML)
+
+  it('leaves the fragments below an unterminated comment un-commented', () => {
+    const { container } = render(
+      <FileDiff
+        file={truncatedComment()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    const cells = codeCells(container)
+    // Sanity: the run that really does open the comment still marks it as one.
+    expect(cells.find((h) => h.includes('an opening comment'))).toContain('comment')
+    for (const html of cells.filter((h) => h.includes('const a'))) {
+      expect(html).not.toContain('comment')
+      expect(html).toContain('token') // ...and is highlighted, not left plain
+    }
+  })
+})
+
+// Every collapsed gap says which declaration the code below it belongs to. The
+// server ships an expanded file as ONE whole-file hunk, whose header starts at
+// line 1 and so carries no `@@ ... @@ <context>` trailer at all - which is why
+// the label is derived from the content rather than read off the header.
+describe('expander context labels', () => {
+  function fileWithHiddenFunction(): DiffFile {
+    const lines: DiffLine[] = []
+    lines.push(add('const first = 1', 1))
+    for (let i = 2; i <= 20; i++) lines.push(ctx(`  body ${i}`, i))
+    lines.push(ctx('function theEnclosingOne() {', 21))
+    for (let i = 22; i <= 40; i++) lines.push(ctx(`  body ${i}`, i))
+    lines.push(add('  const second = 2', 41))
+    return file({ path: 'a.ts', expanded: true, additions: 2, deletions: 0, hunks: [hunk(lines)] })
+  }
+
+  it('names the declaration enclosing the code below the gap, highlighted', () => {
+    const { container } = render(
+      <FileDiff
+        file={fileWithHiddenFunction()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    const row = Array.from(container.querySelectorAll(`div[class="${EXPANDER_ROW}"]`))
+      .find((el) => el.textContent?.includes('lines'))
+    expect(row?.textContent).toContain('function theEnclosingOne() {')
+    // The label carries the file's own token markup rather than flat grey text.
+    expect(row?.innerHTML).toContain('token keyword')
+  })
+})

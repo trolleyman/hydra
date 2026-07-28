@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { ImageLightbox, type LightboxImage } from './ImageLightbox'
+import { Lightbox, type LightboxItem } from './Lightbox'
 
 // Two regression suites for the fullscreen lightbox:
 //
@@ -32,15 +32,15 @@ afterAll(() => vi.unstubAllGlobals())
 
 // A plain (non-diff) entry: the closing suite only needs the single image + the
 // backdrop around it.
-const plainImage: LightboxImage = { url: 'shot.png', filename: 'shot.png', size: 1234 }
+const plainImage: LightboxItem = { url: 'shot.png', filename: 'shot.png', size: 1234 }
 
 function renderPlainLightbox() {
   const onClose = vi.fn()
-  render(<ImageLightbox images={[plainImage]} index={0} onIndexChange={() => {}} onClose={onClose} />)
+  render(<Lightbox items={[plainImage]} index={0} onIndexChange={() => {}} onClose={onClose} />)
   return { onClose, backdrop: screen.getByRole('dialog') }
 }
 
-describe('ImageLightbox closing', () => {
+describe('Lightbox closing', () => {
   it('closes when the backdrop is pressed and clicked directly', () => {
     const { onClose, backdrop } = renderPlainLightbox()
     fireEvent.pointerDown(backdrop)
@@ -84,7 +84,7 @@ describe('ImageLightbox closing', () => {
 
 // A diff entry, so the lightbox renders the before/after comparator whose
 // Before/After toggle (aria-pressed) makes the X/B/A effects observable.
-const diffImage: LightboxImage = {
+const diffImage: LightboxItem = {
   url: 'after.png',
   filename: 'home.png',
   size: 123,
@@ -93,7 +93,7 @@ const diffImage: LightboxImage = {
 
 function renderDiffLightbox() {
   return render(
-    <ImageLightbox images={[diffImage]} index={0} onIndexChange={vi.fn()} onClose={vi.fn()} />,
+    <Lightbox items={[diffImage]} index={0} onIndexChange={vi.fn()} onClose={vi.fn()} />,
   )
 }
 
@@ -107,7 +107,7 @@ function focusedTerminalInput() {
 
 afterEach(() => document.querySelectorAll('textarea').forEach((t) => t.remove()))
 
-describe('ImageLightbox focus management', () => {
+describe('Lightbox focus management', () => {
   it('steals focus from the opener on mount and restores it on close', () => {
     const terminal = focusedTerminalInput()
     const { unmount } = renderDiffLightbox()
@@ -145,5 +145,60 @@ describe('ImageLightbox focus management', () => {
     input.focus()
     fireEvent.keyDown(input, { key: 'b' })
     expect(screen.getByRole('button', { name: 'After' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+// Kinds - the lightbox is the one destination for every artifact and attachment,
+// so each kind has to land on its own viewer rather than on a broken <img>. These
+// pin the routing (and that a caller which supplies no kind still gets a picture,
+// which every pre-existing caller relies on).
+describe('Lightbox kinds', () => {
+  const open = (item: LightboxItem) =>
+    render(<Lightbox items={[item]} index={0} onIndexChange={vi.fn()} onClose={vi.fn()} />)
+
+  it('renders a binary as a download card rather than a picture', () => {
+    open({ url: '/blob?f=app.apk', filename: 'app-debug.apk', size: 48522619, kind: 'binary' })
+    // The lightbox portals to <body>, so everything here queries the document.
+    expect(document.body.querySelector('img')).toBeNull()
+    // The card names the file, its size, and offers the one thing that can be
+    // done with it.
+    expect(screen.getAllByText('app-debug.apk').length).toBeGreaterThan(0)
+    expect(screen.getByText('No preview available')).toBeTruthy()
+    // The size comes from the caption, which every kind shares - the card
+    // deliberately doesn't repeat it.
+    expect(screen.getByText('46.3 MB')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Download/ })).toHaveAttribute('href', '/blob?f=app.apk')
+  })
+
+  it('offers both sides of a binary pair as separate downloads', () => {
+    open({
+      url: '/blob?f=app.apk&side=right',
+      filename: 'app-debug.apk',
+      size: 10,
+      kind: 'binary',
+      diff: { left: '/blob?f=app.apk&side=left', right: '/blob?f=app.apk&side=right', mode: 'ab' },
+    })
+    expect(screen.getByRole('link', { name: /Before/ })).toHaveAttribute('href', '/blob?f=app.apk&side=left')
+    expect(screen.getByRole('link', { name: /After/ })).toHaveAttribute('href', '/blob?f=app.apk&side=right')
+    // ...and no comparator: there is nothing to compare visually.
+    expect(screen.queryByRole('button', { name: 'Highlight' })).toBeNull()
+  })
+
+  it('plays a lone video instead of rendering it as a broken image', () => {
+    open({ url: '/blob?f=loader.webm', filename: 'loader.webm', size: 2048, kind: 'video' })
+    const video = document.body.querySelector('video')
+    expect(video).toBeTruthy()
+    expect(video).toHaveAttribute('src', '/blob?f=loader.webm')
+    expect(video?.controls).toBe(true)
+  })
+
+  it('embeds a PDF in the browser viewer', () => {
+    open({ url: '/blob?f=spec.pdf', filename: 'spec.pdf', size: 900, kind: 'pdf' })
+    expect(document.body.querySelector('iframe')).toHaveAttribute('src', '/blob?f=spec.pdf')
+  })
+
+  it('defaults to a picture when the caller names no kind', () => {
+    open(plainImage)
+    expect(screen.getByAltText('shot.png')).toBeTruthy()
   })
 })

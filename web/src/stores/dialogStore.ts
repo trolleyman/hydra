@@ -7,7 +7,7 @@ export type DialogType = 'info' | 'error' | 'warning' | 'confirm'
 // (an icon tile, a stacked title/description and a details chip) matching the
 // agent-action redesign. They flow through the same store so the single mounted
 // <Dialog/> and every `isOpen` guard around the app keep working unchanged.
-export type DialogVariant = 'generic' | 'merge' | 'kill' | 'restart' | 'updateBase' | 'mergeGate' | 'sendPrompt'
+export type DialogVariant = 'generic' | 'merge' | 'kill' | 'restart' | 'updateBase' | 'mergeGate' | 'sendPrompt' | 'externalLink'
 
 // Extra structured content for the rich variants, filled in (and patched in
 // asynchronously via `update`) by the merge/kill handlers.
@@ -37,6 +37,11 @@ export interface DialogDetails {
   // point of the confirmation is that you approve the exact text, not a
   // description of it.
   prompt?: string
+  // externalLink: the URL a terminal hyperlink wants to open, VERBATIM. Shown in
+  // full (the panel wraps rather than truncates) with the registrable domain at
+  // full strength - the question being asked is where this actually goes, and a
+  // clipped URL is precisely how a lookalike host would get past you.
+  url?: string
   // mergeGate: when the merge is gated because the AGENT itself hasn't finished
   // (still working, or blocked asking you a question) rather than by a test
   // verdict, this says which - the panel renders that reason instead of a test

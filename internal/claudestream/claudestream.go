@@ -13,6 +13,7 @@ package claudestream
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 
@@ -116,6 +117,16 @@ const ResumeContinuePrompt = "Continue from where you left off."
 // rather than receiving from the API.
 const syntheticModel = "<synthetic>"
 
+// imageResizeNotice matches the bookkeeping record the CLI writes every time it
+// downscales an image before sending it (a Read of a screenshot, a pasted
+// attachment): an isMeta user message reading "[Image: original 2088x160,
+// displayed at 2000x153. Multiply coordinates by 1.04 to map to original
+// image.]". It is addressed to the MODEL - it explains how to map a coordinate
+// in the image it saw back onto the file - and carries nothing a reader can act
+// on. Anchored on the two dimension pairs rather than the whole sentence so a
+// reworded tail still matches.
+var imageResizeNotice = regexp.MustCompile(`^\[Image: original \d+x\d+, displayed at \d+x\d+\.`)
+
 // hiddenMsgProbe is the minimal decode used by IsHiddenChatMessage.
 type hiddenMsgProbe struct {
 	Type    string `json:"type"`
@@ -127,21 +138,28 @@ type hiddenMsgProbe struct {
 }
 
 // IsHiddenChatMessage reports whether a stream-json / transcript line is one of
-// the CLI's internal resume placeholders that its own UI hides, and which the
-// chat view therefore must not render:
+// the CLI's internal placeholders that its own UI hides, and which the chat view
+// therefore must not render:
 //
 //   - any assistant message stamped with the synthetic model (the local
-//     "No response requested." / "(no content)" placeholders), and
+//     "No response requested." / "(no content)" placeholders),
 //   - the isMeta ResumeContinuePrompt user turn the CLI injects when resuming an
-//     interrupted turn.
+//     interrupted turn, and
+//   - the isMeta image-downscale notice it writes after every image it sends
+//     (see imageResizeNotice).
 //
-// Without this these two surface as a spurious "Continue from where you left
+// Without this the first two surface as a spurious "Continue from where you left
 // off." user bubble answered by "No response requested." - noise the user can't
 // act on (the agent is separately nudged to continue for real, see
-// heads.nudgeResumedChatAgent). They appear only in transcript backfill (a
-// resumed process replays nothing on stdout), but the predicate is cheap and
-// applied on every relay path for safety. A line that isn't a JSON object
-// returns false (relayed unchanged).
+// heads.nudgeResumedChatAgent) - and the third as an "Injected context" card.
+// All three appear ONLY in transcript backfill (a resumed process replays
+// nothing on stdout; the CLI logs the image notice without emitting it), which
+// is what makes them worth dropping rather than tolerating: the backfill is a
+// one-shot append onto an existing event log, so an entry the live stream never
+// carried lands at the TAIL of the conversation - a mid-turn note about an
+// image read minutes ago, stuck to the end of a finished answer. The predicate
+// is cheap, so it is applied on every relay path. A line that isn't a JSON
+// object returns false (relayed unchanged).
 func IsHiddenChatMessage(line []byte) bool {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 || line[0] != '{' {
@@ -155,7 +173,11 @@ func IsHiddenChatMessage(line []byte) bool {
 	case "assistant":
 		return p.Message.Model == syntheticModel
 	case "user":
-		return p.IsMeta && messageContentText(p.Message.Content) == ResumeContinuePrompt
+		if !p.IsMeta {
+			return false
+		}
+		text := messageContentText(p.Message.Content)
+		return text == ResumeContinuePrompt || imageResizeNotice.MatchString(text)
 	}
 	return false
 }

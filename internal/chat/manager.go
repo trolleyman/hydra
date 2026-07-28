@@ -139,6 +139,18 @@ func (w *worker) run(id string) {
 			close(item.done)
 			continue
 		}
+		// The CLI's internal placeholders (the resume nudge and its synthetic
+		// reply, the notice it logs whenever it downscales an image) must not
+		// reach the durable timeline. They exist only in the transcript, so the
+		// one-shot history import is what picks them up - appending them at the
+		// TAIL of an event log the live stream already filled, where a note about
+		// an image read mid-turn renders as an "Injected context" card stuck to
+		// the end of a finished answer. This is the one point both the live and
+		// the backfill relay pass through; the raw claude_event relay has its own
+		// call in sendChatEventLine.
+		if (item.provider == "claude" || item.provider == "claude_history") && claudestream.IsHiddenChatMessage(item.line) {
+			continue
+		}
 		var specs []eventSpec
 		switch item.provider {
 		case "claude":

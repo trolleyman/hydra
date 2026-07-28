@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImageDiffView, SegmentedToggle, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
+import { VideoDiffView } from './VideoDiffView'
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
 import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
 
-// LightboxDiff renders a before/after artifact pair fullscreen inside the image
+// LightboxDiff renders a before/after artifact pair fullscreen inside the
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
-// onion blend, side-by-side) but sized to fill the viewport.
+// onion blend, side-by-side) but sized to fill the viewport. It covers both media
+// kinds the grid compares - a still pair goes through ImageDiffView, a .webm pair
+// through VideoDiffView (which brings its own synced transport) - because the modes,
+// the control row and the keyboard shortcuts are the same for both.
 //
-// It reuses the grid's (width-driven) ImageDiffView, feeding it an explicit width
+// It reuses the grid's (width-driven) views, feeding them an explicit width
 // computed from the pair's aspect ratio so the overlay layers stay aligned and the
 // result is also bounded by viewport height. `disableOpen` stops the inner view from
 // re-opening a (nested) lightbox. The whole thing is forced to the dark theme (`dark`)
@@ -17,7 +21,7 @@ import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
 // the app's current theme.
 //
 // This is ONLY the comparator: its control row (the mode selector + the A/B
-// toggle/Highlight) lives in LightboxDiffControls, rendered by ImageLightbox
+// toggle/Highlight) lives in LightboxDiffControls, rendered by Lightbox
 // OUTSIDE its per-index keyed wrapper. This component remounts on every ←/→
 // navigation (replaying the slide-in), and controls that remounted with it faded
 // out and back in on every step - a distracting flicker on chrome that isn't
@@ -26,10 +30,16 @@ import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
 // slides. The comparison mode + Before/After view + Highlight are CONTROLLED by
 // the lightbox for the same persistence reason (the X/B/A/H keyboard also lives
 // there).
-export function LightboxDiff({ left, right, name, mode, view, onViewChange, highlight, aspect: aspectHint, onDims }: {
+export function LightboxDiff({ left, right, name, kind = 'image', fps, mode, view, onViewChange, highlight, aspect: aspectHint, onDims }: {
   left?: string | null
   right?: string | null
   name: string
+  // Which pair this is. 'video' swaps ImageDiffView for VideoDiffView and measures
+  // the aspect ratio off a <video>'s metadata rather than a decoded <img>.
+  kind?: 'image' | 'video'
+  // Frame rate for the video transport's single-frame step, from the artifact's
+  // .meta sidecar. Ignored for images.
+  fps?: number | null
   mode: ImageDiffMode
   view: 'before' | 'after'
   // Clicking the image in A/B mode flips Before↔After (via the ABControlsContext
@@ -51,21 +61,34 @@ export function LightboxDiff({ left, right, name, mode, view, onViewChange, high
   const aspect = measured ?? aspectHint ?? null
 
   // Measure the pair's aspect ratio (from whichever side exists) so the comparator can
-  // be sized to the displayed image and capped to the viewport height - and report the
-  // natural pixel size up for the caption.
+  // be sized to the displayed media and capped to the viewport height - and report the
+  // natural pixel size up for the caption. A video reports its size on
+  // loadedmetadata (preload="metadata" is enough - we never need its frames here),
+  // an image once it has decoded.
   useEffect(() => {
     const url = right ?? left
     if (!url) return
     let cancelled = false
-    const img = new Image()
-    img.onload = () => {
-      if (cancelled || !img.naturalWidth || !img.naturalHeight) return
-      setMeasured(img.naturalWidth / img.naturalHeight)
-      onDims?.({ w: img.naturalWidth, h: img.naturalHeight })
+    const report = (w: number, h: number) => {
+      if (cancelled || !w || !h) return
+      setMeasured(w / h)
+      onDims?.({ w, h })
     }
+    if (kind === 'video') {
+      const el = document.createElement('video')
+      el.preload = 'metadata'
+      el.muted = true
+      el.onloadedmetadata = () => report(el.videoWidth, el.videoHeight)
+      el.src = url
+      // Drop the source so a cancelled probe stops downloading (an <img> is
+      // garbage-collected on its own; a <video> holds its network request).
+      return () => { cancelled = true; el.removeAttribute('src'); el.load() }
+    }
+    const img = new Image()
+    img.onload = () => report(img.naturalWidth, img.naturalHeight)
     img.src = url
     return () => { cancelled = true }
-  }, [left, right, onDims])
+  }, [left, right, kind, onDims])
 
   // Provide the before/after view + highlight to the inner ImageDiffView so its A/B
   // tile reads them (and hides its own per-tile pill) - the lightbox's control row
@@ -100,9 +123,14 @@ export function LightboxDiff({ left, right, name, mode, view, onViewChange, high
         {/* LIGHTBOX_MEDIA_CLASS marks the frame as the comparator's own box (it hugs
             the fit-sized content exactly at rest), so the lightbox's open/navigate
             flights measure the picture rather than the wrapper around it. */}
-        <ZoomPan minimapSrc={right ?? left} className={`${LIGHTBOX_MEDIA_CLASS} max-w-[94vw]`} maxWidth="94vw" maxHeight="80vh">
+        {/* The minimap thumbnail is an <img>, so it only has something to show for a
+            still pair; a video's frame can't be sampled into one, and pointing it at
+            the .webm would render a broken image over the corner. */}
+        <ZoomPan minimapSrc={kind === 'video' ? null : right ?? left} className={`${LIGHTBOX_MEDIA_CLASS} max-w-[94vw]`} maxWidth="94vw" maxHeight="80vh">
           <div style={{ width }}>
-            <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
+            {kind === 'video'
+              ? <VideoDiffView left={left} right={right} mode={mode} name={name} fps={fps} disableOpen />
+              : <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />}
           </div>
         </ZoomPan>
       </div>
@@ -111,10 +139,10 @@ export function LightboxDiff({ left, right, name, mode, view, onViewChange, high
 }
 
 // The lightbox diff's control row: the Before/After toggle + Highlight (A/B mode
-// only) and the comparison-mode selector. Rendered by ImageLightbox OUTSIDE its
+// only) and the comparison-mode selector. Rendered by Lightbox OUTSIDE its
 // keyed slide wrapper so it persists across ←/→ navigation - no fade/remount, no
 // layout shove - while the comparator above it slides per image. The keyboard (X
-// flips, B/A jump, H highlight) drives the same state from ImageLightbox.
+// flips, B/A jump, H highlight) drives the same state from Lightbox.
 export function LightboxDiffControls({ mode, onModeChange, view, onViewChange, highlight, onHighlightChange, canDiff }: {
   mode: ImageDiffMode
   onModeChange: (m: ImageDiffMode) => void
@@ -136,7 +164,8 @@ export function LightboxDiffControls({ mode, onModeChange, view, onViewChange, h
               options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
             />
           </Tooltip>
-          <Tooltip content={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}>
+          {/* Neutral wording: this same row drives a still pair and a .webm pair. */}
+          <Tooltip content={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after version'}>
             <label
               className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
                 canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'

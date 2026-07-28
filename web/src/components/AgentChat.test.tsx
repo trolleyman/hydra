@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, normalizedToProviderEvents, reduceHistoryEvents, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
+import { ChatPane, normalizedToProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -312,6 +312,42 @@ describe('reduceHistoryEvents across page boundaries', () => {
 
 })
 
+// The CLI logs an isMeta record every time it downscales an image before sending
+// it. It never reaches stdout, so it arrives only via the transcript backfill -
+// which appends onto an already-filled event log, landing a mid-turn note at the
+// very END of the conversation, as an "Injected context" card hanging off a
+// finished answer. The daemon drops it now, but existing event logs still hold
+// it, so the reducer has to drop it too.
+describe('the image-downscale notice is not injected context', () => {
+  const meta = (text: string) => [{ type: 'user', isMeta: true, message: { content: [{ type: 'text', text }] } }]
+  const alloc = () => {
+    let id = -1
+    return () => id--
+  }
+
+  it('drops the notice in both the shapes the CLI writes it', () => {
+    expect(reduceHistoryEvents(meta('[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]'), alloc())).toHaveLength(0)
+    expect(reduceHistoryEvents(
+      [{ type: 'user', isMeta: true, message: { content: '[Image: original 1384x3128, displayed at 885x2000. Multiply coordinates by 1.56 to map to original image.]' } }],
+      alloc(),
+    )).toHaveLength(0)
+  })
+
+  it('keeps injected context that is not the notice', () => {
+    expect(reduceHistoryEvents(meta('some other injected context'), alloc())).toMatchObject([{ kind: 'meta' }])
+    // Only the CLI's bookkeeping shape goes; a bracketed image mention stays.
+    expect(reduceHistoryEvents(meta('[Image: /tmp/shot.png]'), alloc())).toMatchObject([{ kind: 'meta' }])
+  })
+
+  it('keeps a real user turn that quotes the notice', () => {
+    const items = reduceHistoryEvents(
+      [{ type: 'user', message: { content: [{ type: 'text', text: '[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]' }] } }],
+      alloc(),
+    )
+    expect(items).toMatchObject([{ kind: 'user' }])
+  })
+})
+
 // A ToolSearch card's header used to show the raw query, i.e. the wire tool name
 // with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
 describe('summarizeToolSearchQuery', () => {
@@ -475,5 +511,81 @@ describe('toolRawJson', () => {
 
   it('falls back to input/result for a card Hydra synthesized', () => {
     expect(raw({ input: { description: '2 tasks' }, result: 'Plan updated' })).toEqual({ input: { description: '2 tasks' }, result: 'Plan updated' })
+  })
+})
+
+// ── Step folding ────────────────────────────────────────────────────────────
+// A run of settled thoughts + tool calls collapses into one "N steps" line
+// (planStepRows), which is what keeps a long transcript from reading as a wall.
+// What must NEVER fold is anything the reader still has to act on or watch.
+describe('planStepRows', () => {
+  type Item = Parameters<typeof planStepRows>[0][number]
+  let nextId = 0
+  const tool = (name: string, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'tool', id: ++nextId, toolUseId: `t${nextId}`, name, input: {}, result: 'ok', ...extra }) as Item
+  const thought = (durationMs?: number) => ({ kind: 'thinking', id: ++nextId, text: 'hmm', durationMs }) as Item
+  const said = (text: string) => ({ kind: 'assistant', id: ++nextId, text }) as Item
+  const plan = (items: Item[]) => planStepRows(items, {}, true)
+  const kinds = (rows: ReturnType<typeof plan>) =>
+    rows.map((r) => (r.row === 'group' ? `group:${r.items.length}` : r.item.kind))
+
+  it('folds a run of settled steps and leaves prose alone', () => {
+    const rows = plan([said('doing it'), thought(), tool('Read'), tool('Edit'), tool('Bash'), said('done')])
+    expect(kinds(rows)).toEqual(['assistant', 'group:4', 'assistant'])
+  })
+
+  it('leaves a lone tool call (and the thought behind it) unfolded', () => {
+    expect(kinds(plan([thought(), tool('Read'), said('found it')]))).toEqual(['thinking', 'tool', 'assistant'])
+  })
+
+  // The running step folds in with the rest: leaving it outside meant every step
+  // grew a card and took it away again a second later, so a live turn pulsed.
+  // The header names it instead (stepSummary().running).
+  it('folds the running step in and names it on the group', () => {
+    const rows = plan([tool('Read'), tool('Grep'), tool('Bash', { result: undefined })])
+    expect(kinds(rows)).toEqual(['group:3'])
+    const group = rows[0]
+    expect(group.row === 'group' && stepSummary(group.items).running).toBe('Bash')
+  })
+
+  it('reports no running step once every call has landed', () => {
+    expect(stepSummary([tool('Read'), tool('Bash', { ended: true, result: undefined })]).running).toBe('')
+  })
+
+  // A plan put up for approval and a command headed for the host are addressed
+  // to the reader, not to the machine.
+  it('never folds a plan or a host run', () => {
+    const rows = plan([tool('Read'), tool('ExitPlanMode'), tool('Grep'), tool('mcp__hydra__host_run'), tool('Read')])
+    expect(kinds(rows)).toEqual(['tool', 'tool', 'tool', 'tool', 'tool'])
+  })
+
+  it('leaves a Task card that became a sub-agent card standing on its own', () => {
+    const task = tool('Task')
+    const rows = planStepRows(
+      [tool('Read'), task, tool('Bash'), tool('Read')],
+      { [task.kind === 'tool' ? task.toolUseId : '']: { agentId: 'sub-1', status: 'done', items: [] } },
+      true,
+    )
+    expect(kinds(rows)).toEqual(['tool', 'tool', 'group:2'])
+  })
+
+  // A red card that scrolled past is how you notice the agent hit a wall, so the
+  // fold counts the failures rather than hiding them.
+  it('counts failed steps in the summary', () => {
+    expect(stepSummary([tool('Bash', { isError: true }), tool('Bash'), tool('Read')]).failed).toBe(1)
+  })
+
+  it('folds nothing when the preference is off', () => {
+    expect(kinds(planStepRows([tool('Read'), tool('Edit'), tool('Bash')], {}, false))).toEqual(['tool', 'tool', 'tool'])
+  })
+
+  // The whole list, most-used first: the header clips it with a CSS ellipsis
+  // rather than spending its last characters on "+N more".
+  it('summarizes a run by its tools, most-used first', () => {
+    const s = stepSummary([tool('Read'), tool('Read'), tool('Bash'), tool('Edit'), tool('Write'), thought(4000), thought(2000)])
+    expect(s.label).toBe('5 steps')
+    expect(s.tools).toBe('Read x2 · Bash · Edit · Write')
+    expect(s.thinkingMs).toBe(6000)
+    expect(s.failed).toBe(0)
   })
 })

@@ -5,21 +5,29 @@ import { useApplyTheme } from '../lib/theme'
 interface AuthStatus {
   auth_required: boolean
   authenticated: boolean
+  // Whether this browser is off-machine. Only affects the wording: a localhost
+  // browser sees the login screen too when require_local_auth is set, and
+  // "accessed from outside its machine" would be a lie there. Optional because
+  // the simulation server's stub status doesn't send it.
+  remote?: boolean
 }
 
 type Phase = 'checking' | 'login' | 'ready'
 
-// AuthGate sits above the router. Localhost connections are always trusted, so
-// this is a no-op there: GET /api/auth/status returns auth_required=false and we
-// render the app immediately. From a non-localhost device (e.g. a phone) the
-// server reports auth_required=true until the correct key is presented, so we
-// show a login screen. A successful login sets an HttpOnly cookie that every
-// subsequent API and WebSocket request carries automatically.
+// AuthGate sits above the router. Localhost connections are trusted by default,
+// so this is normally a no-op there: GET /api/auth/status returns
+// auth_required=false and we render the app immediately. From a non-localhost
+// device (e.g. a phone) - or from anywhere at all when deploy.toml sets
+// require_local_auth - the server reports auth_required=true until the correct
+// key is presented, so we show a login screen. A successful login sets an
+// HttpOnly cookie that every subsequent API and WebSocket request carries
+// automatically.
 export function AuthGate({ children }: { children: ReactNode }) {
   // Keep the login screen on-theme even though it renders before the router.
   useApplyTheme()
 
   const [phase, setPhase] = useState<Phase>('checking')
+  const [remote, setRemote] = useState(true)
   const [key, setKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +46,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           return
         }
         const status: AuthStatus = await res.json()
+        setRemote(status.remote !== false)
         setPhase(status.auth_required && !status.authenticated ? 'login' : 'ready')
       } catch {
         setPhase('ready')
@@ -91,8 +100,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
             Hydra
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
-            This Hydra is being accessed from outside its machine. Enter the auth key
-            to continue.
+            {remote
+              ? 'This Hydra is being accessed from outside its machine. Enter the auth key to continue.'
+              : 'This Hydra requires an auth key on every connection, including this one. Enter it to continue.'}
           </p>
           <input
             type="password"

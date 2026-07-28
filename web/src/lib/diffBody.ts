@@ -139,7 +139,7 @@ export interface RenderSeg {
   top?: number     // resolved context lines shown at the region's top
   bot?: number     // resolved context lines shown at the region's bottom
   length?: number  // total lines in the region
-  context?: string // enclosing function/section of the change just below the gap
+  context?: DiffLine // enclosing function/section line of the code just below the gap
 }
 
 export const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
@@ -153,6 +153,39 @@ export function hunkContext(header: string): string {
   return close < 0 ? '' : header.slice(close + 2).trim()
 }
 
+// Git's DEFAULT funcname heuristic (xdiff/xemit.c def_ff), used when no
+// per-language diff driver is configured: a line is "a function line" if it
+// starts with a letter, `_` or `$`. Crude - it catches `export function foo(` and
+// `type X = {` alike - but it is what the `@@ ... @@ <context>` trailer already
+// shows everywhere else, so deriving our own labels this way keeps the two paths
+// saying the same thing.
+const FUNC_LINE = /^[A-Za-z_$]/
+
+// findContextLine searches backwards from `from` for the line git would name in
+// a hunk header there - the nearest preceding top-level declaration.
+//
+// Why we do this ourselves rather than read the `@@` trailers: a file the server
+// sent in FULL (the whole-file reveal model below) arrives as a single
+// whole-file hunk, whose one header starts at line 1 and therefore carries no
+// context at all. Every collapsed gap in it would be unlabelled while the big
+// files that stay windowed - the ones still shipped as several `-U3` hunks, each
+// with its own trailer - kept their labels. Scanning the content we already hold
+// labels every gap, and lets the label carry the line's own highlighting.
+//
+// Deletions are skipped: the label describes the file as it now reads. A file
+// with nothing but deletions (a delete) has no such line, so the second pass
+// takes whatever is there.
+function findContextLine(lines: DiffLine[], from: number): DiffLine | undefined {
+  for (let i = from - 1; i >= 0; i--) {
+    const l = lines[i]
+    if (l.type !== 'deletion' && FUNC_LINE.test(l.content)) return l
+  }
+  for (let i = from - 1; i >= 0; i--) {
+    if (FUNC_LINE.test(lines[i].content)) return lines[i]
+  }
+  return undefined
+}
+
 // buildSegments turns a fully-fetched file (every line as a diff line) plus the
 // user's per-region reveal state into a flat list of render segments: runs of
 // visible lines interleaved with collapsed-region expanders. Each unchanged run
@@ -161,7 +194,7 @@ export function hunkContext(header: string): string {
 // (short gaps, the file's true top/bottom once fully revealed) are omitted, so
 // e.g. a 1-line gap simply renders the line and the top expander vanishes at
 // line 1 / the bottom expander at EOF.
-export function buildSegments(fullLines: DiffLine[], reveal: RevealMap, funcByKey?: Map<string, string>): RenderSeg[] {
+export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
   const n = fullLines.length
   const runs: { change: boolean; s: number; e: number }[] = []
   let i = 0
@@ -192,11 +225,12 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap, funcByKe
       return
     }
     if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })
-    // The change directly below this gap starts the next (change) run; label the
-    // gap with that change's enclosing function, so revealing it is unnecessary
-    // to know what you're looking at. The trailing edge has no change below it.
-    const below = isTrail ? undefined : runs[ri + 1]
-    const context = below ? funcByKey?.get(regionKey(fullLines[below.s])) : undefined
+    // Label the gap with the declaration enclosing the code that resumes just
+    // below it, so you needn't reveal it to know what you're looking at. The
+    // search starts at the first row the reader sees under the expander. The
+    // trailing edge has nothing below it, so it stays unlabelled - as git also
+    // leaves the tail of a file.
+    const context = isTrail ? undefined : findContextLine(fullLines, run.e - bot)
     segs.push({
       kind: isLead ? 'topedge' : isTrail ? 'botedge' : 'gap',
       key: `g${run.s}`, regionId: id, hidden, top, bot, length: L, context,

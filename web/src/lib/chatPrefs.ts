@@ -108,6 +108,38 @@ export const useChatStreamStore = create<ChatSmoothState>()(
   ),
 )
 
+// Reads the persisted step-folding preference. Absent (or anything but 'off') =
+// on, the default. Exported for non-React callers / unit testing.
+export function loadChatStepGroups(): boolean {
+  return readLocal(StorageKeys.chatStepGroups) !== 'off'
+}
+
+interface ChatStepsState {
+  grouped: boolean
+  setGrouped: (grouped: boolean) => void
+}
+
+// Step folding in the chat transcript: a run of settled thoughts and finished
+// tool calls collapses into one "N steps" line that expands in place. On by
+// default - the reply the agent wrote is the thing you came back to read, and a
+// turn's dozen tool cards around it are what buried it. Stored as the bare 'off'
+// marker, like the smooth-streaming toggle.
+export const useChatStepsStore = create<ChatStepsState>()(
+  persist(
+    (set) => ({
+      grouped: loadChatStepGroups(),
+      setGrouped: (grouped) => set({ grouped }),
+    }),
+    {
+      name: StorageKeys.chatStepGroups,
+      storage: singleFieldStorage('grouped', loadChatStepGroups, (grouped) =>
+        writeLocal(StorageKeys.chatStepGroups, grouped ? null : 'off'),
+      ),
+      partialize: (s) => ({ grouped: s.grouped }),
+    },
+  ),
+)
+
 // Reads the persisted code line-number preference. Absent (or anything but
 // 'off') = on, the default. Exported for non-React callers / unit testing.
 export function loadChatCodeLineNumbers(): boolean {

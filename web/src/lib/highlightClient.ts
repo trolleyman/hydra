@@ -22,11 +22,10 @@ const pending = new Map<number, Pending>()
 
 // syncFallback resolves a request on the main thread - used when no worker pool
 // exists and to drain in-flight requests if a worker errors out.
-function syncFallback(req: { lang: string; old: string | null; new: string | null }): HighlightSides {
-  return {
-    old: req.old != null ? highlightLines(req.old, req.lang) : null,
-    new: req.new != null ? highlightLines(req.new, req.lang) : null,
-  }
+function syncFallback(req: { lang: string; old: string[] | null; new: string[] | null }): HighlightSides {
+  const runs = (side: string[] | null) =>
+    side != null ? side.flatMap((run) => highlightLines(run, req.lang)) : null
+  return { old: runs(req.old), new: runs(req.new) }
 }
 
 function teardownAndFallback() {
@@ -62,8 +61,11 @@ function ensureWorkers(): Worker[] | null {
 }
 
 // highlightSides highlights the old and new sides of a file off the main thread,
-// returning per-line HTML for each side (null when that side is empty).
-export function highlightSides(lang: string, oldCode: string | null, newCode: string | null): Promise<HighlightSides> {
+// returning per-line HTML for each side (null when that side is empty). Each
+// side is passed as one string per contiguous run of lines - never glued into a
+// single string, which would let a construct truncated at a collapsed gap run on
+// into the fragments below it (see DiffViewer's contiguousRuns).
+export function highlightSides(lang: string, oldCode: string[] | null, newCode: string[] | null): Promise<HighlightSides> {
   const ws = ensureWorkers()
   if (!ws) return Promise.resolve(syncFallback({ lang, old: oldCode, new: newCode }))
   const id = nextId++
