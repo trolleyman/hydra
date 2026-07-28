@@ -181,7 +181,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                               onClick={() => { setMenuOpen(false); void run('agent', () => actions.resolveWithAgent(thread)) }}
                               className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer disabled:opacity-50"
                             >
-                              <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" />
+                              <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" fill="currentColor" />
                               <span>
                                 <span className="block text-xs text-gray-700 dark:text-gray-200">Resolve with agent</span>
                                 <span className="block text-[10px] text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>

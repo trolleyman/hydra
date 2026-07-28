@@ -5,7 +5,7 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
-import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon, ProviderIcon } from './ReviewControls'
+import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
@@ -20,7 +20,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -1808,8 +1808,8 @@ export function AgentDetail({
           disabled: busy,
           shortcut: SHORTCUT_MERGE,
           menu: ([
-            { label: 'Merge and continue', description: `Merge into ${toBranch} but keep the agent running.`, icon: <GitPullRequestArrow className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
-            { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
+            { label: 'Merge and continue', description: `Merge into \`${toBranch}\` but keep the agent running.`, icon: <GitPullRequestArrow className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
+            { label: 'Force merge', description: `Merge this commit to \`${toBranch}\` right now.`, icon: <TriangleAlert className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
             { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
           ] as AgentTopBarMenuItem[]),
         }
@@ -1911,7 +1911,13 @@ export function AgentDetail({
         }
       : {
           label: 'Create MR',
-          icon: <MRIcon linked={false} className="w-4 h-4" />,
+          // The FORGE mark, not a generic lucide one: this button opens the
+          // "Create merge request" dialog, which leads with the same mark, and
+          // the two wearing different glyphs for one action was the giveaway
+          // that they were designed apart. It also says WHICH forge before you
+          // open anything. Falls back to a generic PR glyph when the project has
+          // no provider configured (see ProviderIcon).
+          icon: <ProviderIcon provider={reviewConfig?.provider} className="w-4 h-4" />,
           onClick: () => void openCreateMR(),
           variant: 'blue',
           disabled: busy || publishing,

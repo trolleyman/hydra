@@ -1,4 +1,4 @@
-import { Check, X, AlertTriangle, Clock, SkipForward } from 'lucide-react'
+import { Check, X, TriangleAlert, Clock, SkipForward } from 'lucide-react'
 import { Badge } from './Badge'
 import { Tooltip } from './Tooltip'
 import { verdictTone } from './badgeTones'
@@ -18,7 +18,7 @@ function VerdictIcon({ status, className = 'w-3 h-3 shrink-0' }: { status: TestS
       // matches the design mockup's spinner.
       return <span className={`${className} inline-block rounded-full border-2 border-current border-t-transparent animate-spin`} />
     case 'errored':
-      return <AlertTriangle className={className} />
+      return <TriangleAlert className={className} />
     case 'stale':
       return <Clock className={className} />
     default:
@@ -55,7 +55,7 @@ function WarningCount({ n }: { n: number }) {
   return (
     <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
       <ChipSep />
-      <AlertTriangle className="w-2.5 h-2.5" />
+      <TriangleAlert className="w-2.5 h-2.5" />
       {n}
     </span>
   )

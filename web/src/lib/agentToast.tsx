@@ -3,6 +3,7 @@ import {
   CircleDot,
   Clock,
   GitMerge,
+  GitPullRequestArrow,
   MessageCircleQuestion,
   RotateCcw,
   TriangleAlert,
@@ -24,11 +25,17 @@ import { TILE_TONE, TILE_BAR, tileToneForBadge, type TileTone } from './tileTone
 // Statuses with no entry fall through to the neutral CircleDot rather than
 // inventing a mark - a status that reaches here unmapped is a bug, and a vague
 // dot is the honest way to render one.
+// The merge marks are a deliberate split, not two independent picks (they used to
+// be the same glyph for both). `GitPullRequestArrow` is the merge ACTION and its
+// in-flight state - it is also what the top-bar Merge button and its menu rows
+// wear, so the glyph on the toast is the glyph on the button you pressed.
+// `GitMerge` is the settled state, "this IS merged". Publishing to a forge is the
+// third case and wears the FORGE's own mark (ProviderIcon), not a lucide one.
 const STATUS_TILE: Record<string, ComponentType<{ className?: string }>> = {
   needs_input: MessageCircleQuestion,
   errored: TriangleAlert,
   finished: CircleCheck,
-  merging: GitMerge,
+  merging: GitPullRequestArrow,
   merged: GitMerge,
   restarting: RotateCcw,
   killed: Trash2,

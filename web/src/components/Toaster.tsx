@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { Check, AlertCircle, TriangleAlert, Info, X } from 'lucide-react'
 import { useToastStore, ToastDismissContext, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
@@ -18,7 +18,7 @@ import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; tone: TileTone }> = {
   success: { Icon: Check, tone: 'green' },
   error: { Icon: AlertCircle, tone: 'red' },
-  warning: { Icon: AlertTriangle, tone: 'amber' },
+  warning: { Icon: TriangleAlert, tone: 'amber' },
   info: { Icon: Info, tone: 'blue' },
 }
 

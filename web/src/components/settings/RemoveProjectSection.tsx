@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Trash2, Loader2 } from 'lucide-react'
+import { Trash2, LoaderCircle } from 'lucide-react'
 import type { ProjectInfo } from '../../api'
 import { api } from '../../stores/apiClient'
 import { formatError } from '../../api/format_error'
@@ -68,7 +68,7 @@ export function RemoveProjectSection({ project }: { project: ProjectInfo }) {
         disabled={removing}
         className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
       >
-        {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+        {removing ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
         {removing ? 'Removing...' : 'Remove project'}
       </button>
     </div>

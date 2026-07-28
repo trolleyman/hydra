@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
+import { Check, X, TriangleAlert, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
@@ -455,7 +455,7 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
     case 'running':
       return <LoaderCircle className="w-3 h-3 animate-spin" />
     default:
-      return <AlertTriangle className="w-3 h-3" />
+      return <TriangleAlert className="w-3 h-3" />
   }
 }
 
@@ -763,7 +763,7 @@ function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOp
   }, [open])
   const showBody = open || mounted
   const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
-    : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+    : status === 'warning' ? <TriangleAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
       : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
         : <Check className="w-3.5 h-3.5 text-green-600 shrink-0" strokeWidth={3} />
   return (
@@ -843,7 +843,7 @@ function Summary({ runner }: { runner: TestRunResult }) {
       ) : null}
       {(runner.warnings ?? 0) > 0 ? (
         <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-          <AlertTriangle className="w-3 h-3" />
+          <TriangleAlert className="w-3 h-3" />
           {runner.warnings}
         </span>
       ) : null}

@@ -4778,7 +4778,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
         className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
-        <Sparkles className="w-3 h-3 shrink-0" />
+        <Sparkles className="w-3 h-3 shrink-0" fill="currentColor" />
         <span className="truncate">Skill loaded: {name}</span>
         <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>

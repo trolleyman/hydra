@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { MoreHorizontal, ChevronDown, Sparkles, Loader2 } from 'lucide-react'
+import { MoreHorizontal, ChevronDown, Sparkles, LoaderCircle } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
 import { Tooltip } from './Tooltip'
 import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
+import { withBranchPills } from '../lib/branchPills'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -23,7 +24,10 @@ export interface AgentTopBarMenuItem {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
-  // A second, muted line under the label in the (rich) dropdown - what the option does.
+  // A second, muted line under the label in the (rich) dropdown - what the option
+  // does. `backtick` spans become inline branch pills, the same convention the
+  // toasts and dialogs use - a menu row that says "Merge into `main`" sits one
+  // click from a dialog and a toast that both render that branch as a pill.
   description?: string
   // Colour of the option's icon tile in the rich dropdown. Defaults to red when
   // `danger`, else neutral.
@@ -252,7 +256,7 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
               <MenuTile tone={m.tone ?? (m.danger ? 'red' : 'neutral')}>{m.icon}</MenuTile>
               <span className="flex flex-col gap-0.5 min-w-0 pt-0.5">
                 <span className={`text-[13px] font-semibold leading-tight ${m.danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-[#eef1f6]'}`}>{m.label}</span>
-                {m.description && <span className="text-[12px] leading-snug text-gray-500 dark:text-[#8b94a6]">{m.description}</span>}
+                {m.description && <span className="text-[12px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(m.description)}</span>}
               </span>
             </button>
           ))}
@@ -666,7 +670,7 @@ export function AgentTopBarContent({
                 className="shrink-0 h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[12.5px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
               >
                 {rename.generating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   // Filled, not outlined. At 14px lucide's Sparkles is three
                   // hairline outlines and reads as noise next to the solid label

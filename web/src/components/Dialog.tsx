@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
+import { AlertCircle, TriangleAlert, ArrowRight, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
@@ -55,7 +55,7 @@ export const Dialog: React.FC = () => {
       case 'error':
         return <DialogIconTile tone="red" size="sm"><AlertCircle className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'warning':
-        return <DialogIconTile tone="amber" size="sm"><AlertTriangle className="w-[18px] h-[18px]" /></DialogIconTile>
+        return <DialogIconTile tone="amber" size="sm"><TriangleAlert className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'confirm':
         return <DialogIconTile tone="blue" size="sm"><HelpCircle className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'info':
@@ -377,7 +377,7 @@ function MergeGatePanel({
         <div className="flex items-start gap-3.5">
           {/* Blue spinner while work is in progress (agent or tests); amber warning otherwise. */}
           <DialogIconTile tone={spinner ? 'blue' : 'amber'}>
-            {spinner ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <AlertTriangle className="w-5 h-5" />}
+            {spinner ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <TriangleAlert className="w-5 h-5" />}
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
@@ -417,7 +417,7 @@ function MergeGatePanel({
 function CautionNote({ note }: { note: string }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-xs font-medium text-amber-700 dark:text-amber-300">
-      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+      <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
       <span>{withBranchPills(note)}</span>
     </div>
   )
@@ -557,7 +557,7 @@ function KillDetails({ details }: { details?: DialogDetails }) {
     <>
       {lost > 0 && (
         <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 text-xs font-medium text-red-600 dark:text-red-400">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
           <span>
             {lost} unmerged file{lost !== 1 ? 's' : ''} in this worktree will be lost.
           </span>
