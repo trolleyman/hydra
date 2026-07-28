@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
@@ -321,6 +322,22 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         },
       },
     })
+
+    // Unicode 11 character widths. xterm's built-in table is Unicode 6, which
+    // predates the emoji width rules: it gives ✅ 🚀 and friends ONE column,
+    // where the browser paints them at ~2 (measured: 16px of ink in an 8px cell).
+    // Everything on the other end of the PTY - glibc's wcwidth, ncurses, Go's
+    // runewidth, the agent CLIs - has said 2 for years, so the built-in table is
+    // the odd one out, and matching it is what keeps a TUI's columns lined up.
+    //
+    // The unicode11 addon rather than unicode-graphemes: the latter is the only
+    // one that would also widen an explicit ⚠️ (U+26A0 U+FE0F) to two columns,
+    // because it clusters the variation selector with its base - but upstream
+    // marks it experimental and warns it "may introduce unexpected and
+    // non-standard behaviour", which is not a thing to put under every agent's
+    // terminal by default.
+    term.loadAddon(new Unicode11Addon())
+    term.unicode.activeVersion = '11'
 
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
