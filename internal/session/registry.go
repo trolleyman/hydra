@@ -207,6 +207,22 @@ func (r *Registry) ChatPlanJSON(id string) string {
 	return s.PlanJSON()
 }
 
+// PendingQuestions reports which AskUserQuestion requests the session's CLI is
+// still blocked on, so the chat client can tell a live question card from a
+// dead one whose request_id merely replayed with the transcript. ok is false
+// when it isn't knowable (a driver-backed provider); an UNREGISTERED session
+// answers an authoritative empty list - a request the process that raised it no
+// longer exists to receive is as dead as one it dropped.
+func (r *Registry) PendingQuestions(id string) ([]claudestream.PendingAsk, bool) {
+	r.mu.RLock()
+	s, ok := r.sessions[id]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, true
+	}
+	return s.PendingAsks()
+}
+
 func (r *Registry) SetChatDriver(id string, driver ChatDriver) error {
 	r.mu.RLock()
 	s, ok := r.sessions[id]

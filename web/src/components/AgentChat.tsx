@@ -4262,8 +4262,18 @@ function QuestionCard({
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
   const [otherSel, setOtherSel] = useState<boolean[]>(() => specs.map(() => false))
+  // Two ways a card settles locally, kept apart because one of them can be
+  // taken back: `submitted` is an answer handed to the CLI's control channel
+  // (optimistic - the daemon can still come back and say that request was
+  // already retired), `sent` is answers posted as an ordinary message, which
+  // is simply gone.
   const [submitted, setSubmitted] = useState(false)
-  const answered = submitted || answeredText != null
+  const [sent, setSent] = useState(false)
+  // `submitted` stops counting the moment the card is known expired: that is
+  // the daemon reporting it never delivered the answer (question_expired), so
+  // the optimistic "Answered" was a lie and the card unlocks for the message
+  // route. `sent` and a recorded result are final either way.
+  const answered = (submitted && !expired) || sent || answeredText != null
 
   // On a resume the card mounts already-answered with no local selection - and
   // the same holds if it was answered in another tab. Recover the chosen
@@ -4326,7 +4336,9 @@ function QuestionCard({
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
     }
-    if (onSubmit(answers)) setSubmitted(true)
+    if (!onSubmit(answers)) return
+    if (expired) setSent(true)
+    else setSubmitted(true)
   }
 
   return (
@@ -4472,7 +4484,7 @@ function QuestionCard({
           }`}
         >
           {expired
-            ? submitted
+            ? sent
               ? 'Sent'
               : 'Send as message'
             : answered
@@ -5496,6 +5508,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // state update, instead of a render per event. Live events after that
     // flush per microtask batch.
     let replaying = true
+    // The request ids the daemon says the CLI is STILL blocked on, from the
+    // pending_questions frame it sends just before replay_done - the authority
+    // on which replayed question cards are answerable (see expireQuestions).
+    // null means it didn't say (a driver-backed provider, or the simulation),
+    // and the head-status heuristic decides instead.
+    let livePendingQuestions: Set<string> | null = null
     // Assistant events arrive one content block per event but share the API
     // message id; if a CLI version ever re-emits blocks cumulatively, this
     // per-message seen-set keeps the reducer idempotent.
@@ -6111,8 +6129,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // request_id itself is durable - it is replayed out of the stored
     // interaction_requested event on every reload - so without this the dead
     // card came back looking perfectly live, and "Submit" did nothing at all.
-    const expireQuestions = () => {
-      const stale = (it: ChatItem) => it.kind === 'question' && it.result === undefined && !it.expired
+    // `only` narrows it to particular cards (the daemon naming the requests it
+    // is still blocked on, or rejecting one answer); by default every
+    // unanswered one goes.
+    const expireQuestions = (only?: (it: Extract<ChatItem, { kind: 'question' }>) => boolean) => {
+      const stale = (it: ChatItem) =>
+        it.kind === 'question' && it.result === undefined && !it.expired && (!only || only(it))
       for (const it of pending) if (stale(it)) (it as Extract<ChatItem, { kind: 'question' }>).expired = true
       setItems((prev) =>
         prev.some(stale) ? prev.map((it) => (stale(it) ? { ...it, expired: true } : it)) : prev,
@@ -6960,6 +6982,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         normalizedEvents?: NormalizedChatEvent[]
         id?: string
         chunk?: string
+        // pending_questions / question_expired: the daemon's word on which
+        // AskUserQuestion requests the CLI is still blocked on (see below).
+        requests?: { requestId?: string; toolUseId?: string }[]
+        requestId?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -7253,6 +7279,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           return
         }
+        case 'pending_questions':
+          // Sent once per connection, immediately before replay_done: the
+          // requests the CLI is still blocked on right now. An empty list is a
+          // definite "none" (every replayed question card is dead); the frame
+          // not arriving at all leaves the fallback in place.
+          livePendingQuestions = new Set(
+            (msg.requests ?? []).map((r) => r.requestId).filter((id): id is string => !!id),
+          )
+          return
+        case 'question_expired':
+          // The daemon refused to forward an answer: that request was already
+          // retired, so the card must stop claiming it was answered and offer
+          // the message route instead.
+          if (msg.requestId) {
+            const dead = msg.requestId
+            expireQuestions((it) => it.requestId === dead)
+          }
+          return
         case 'replay_done':
           // History that ends on a completed turn (no trailing user message to
           // settle it, and no result event in the replay to supersede it) gets
@@ -7263,14 +7307,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
-          // Same for a question the history left unanswered, unless the head is
-          // still working or parked on needs_input: that (and only that) is a
-          // reload during a turn still blocked on the answer, where the
-          // request_id replayed with it is genuinely still pending. Any other
-          // unanswered question is from a turn that is long over - the turn-end
-          // path above only catches the ones whose `result` line made it into
-          // the replay window.
-          if (!questionMayBeLiveRef.current) expireQuestions()
+          // Same for a question the history left unanswered: keep only the ones
+          // the daemon says the CLI is still blocked on. Where it couldn't say,
+          // fall back to the head's status - still working, or parked on
+          // needs_input, is the one situation a reload during a genuinely
+          // pending question lands in. (The turn-end path above only catches
+          // the ones whose `result` line made it into the replay window.)
+          if (livePendingQuestions) {
+            const live = livePendingQuestions
+            expireQuestions((it) => it.requestId == null || !live.has(it.requestId))
+          } else if (!questionMayBeLiveRef.current) {
+            expireQuestions()
+          }
           // A BACKGROUND sub-agent settles only off its <task-notification>. That
           // record lives in the main transcript, which the backfill replays
           // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification

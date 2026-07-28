@@ -197,19 +197,23 @@ type controlRequest struct {
 	Type      string `json:"type"`
 	RequestID string `json:"request_id"`
 	Request   struct {
-		Subtype  string          `json:"subtype"`
-		ToolName string          `json:"tool_name"`
-		Input    json.RawMessage `json:"input"`
+		Subtype   string          `json:"subtype"`
+		ToolName  string          `json:"tool_name"`
+		ToolUseID string          `json:"tool_use_id"`
+		Input     json.RawMessage `json:"input"`
 	} `json:"request"`
 }
 
 // ToolPermissionRequest is a parsed can_use_tool control_request: the CLI asking
 // the client to approve ToolName's call. RequestID is the channel the answer goes
 // back on (via ApproveToolLine / ControlResponseLine); Input is the tool input,
-// echoed back verbatim as updatedInput on an allow.
+// echoed back verbatim as updatedInput on an allow. ToolUseID is the tool_use
+// block the request belongs to - the id its eventual tool_result quotes, which
+// is how the ask tracker knows the request was answered.
 type ToolPermissionRequest struct {
 	RequestID string
 	ToolName  string
+	ToolUseID string
 	Input     json.RawMessage
 }
 
@@ -229,8 +233,27 @@ func ParseToolPermissionRequest(line []byte) (ToolPermissionRequest, bool) {
 	return ToolPermissionRequest{
 		RequestID: cr.RequestID,
 		ToolName:  cr.Request.ToolName,
+		ToolUseID: cr.Request.ToolUseID,
 		Input:     cr.Request.Input,
 	}, true
+}
+
+// controlResponse is the minimal decode of a control_response payload (the
+// object a chat client sends back, unwrapped from its stdin envelope).
+type controlResponse struct {
+	RequestID string `json:"request_id"`
+}
+
+// ControlResponseRequestID reads the request_id a client's control_response
+// answers, or "" if the payload isn't shaped like one. The daemon uses it to
+// check the answer against the requests the CLI is actually still blocked on
+// before writing it to stdin.
+func ControlResponseRequestID(payload json.RawMessage) string {
+	var cr controlResponse
+	if json.Unmarshal(payload, &cr) != nil {
+		return ""
+	}
+	return cr.RequestID
 }
 
 // ApproveToolLine builds the control_response stdin line that ALLOWS a
@@ -482,6 +505,87 @@ type RingFilter struct {
 	// released to attachers only once the chunk stream reaches a line boundary
 	// (see Filter) so they never splice into a half-buffered line.
 	pendingInjected []byte
+	// pendingAsks are the AskUserQuestion can_use_tool requests this process is
+	// still blocked on, in arrival order - see PendingAsks.
+	pendingAsks []PendingAsk
+}
+
+// PendingAsk is one AskUserQuestion the CLI is waiting on an answer to.
+// RequestID is the control channel the answer must quote; ToolUseID identifies
+// the question card it belongs to.
+type PendingAsk struct {
+	RequestID string `json:"requestId"`
+	ToolUseID string `json:"toolUseId"`
+}
+
+// PendingAsks returns the AskUserQuestion requests the CLI is STILL blocked on,
+// as of the last line filtered. This is the authority on whether a question
+// card can be answered: the request_id is durable (it is stored and replayed
+// with the transcript on every reload) but the request behind it lives only as
+// long as the turn that raised it, so a control_response quoting a dropped one
+// is discarded in silence. A request leaves the set when its tool_result
+// arrives (answered) or when the turn ends (a `result` line - an interrupt or a
+// mid-question /model switch both land here), and the whole set dies with the
+// process, since a new one gets a fresh filter.
+//
+// Same concurrency rule as Pending: read under the session lock, on the
+// read-loop side.
+func (f *RingFilter) PendingAsks() []PendingAsk {
+	if len(f.pendingAsks) == 0 {
+		return nil
+	}
+	out := make([]PendingAsk, len(f.pendingAsks))
+	copy(out, f.pendingAsks)
+	return out
+}
+
+// dropAsk removes an answered request from the pending set.
+func (f *RingFilter) dropAsk(toolUseID string) {
+	for i, a := range f.pendingAsks {
+		if a.ToolUseID == toolUseID {
+			f.pendingAsks = append(f.pendingAsks[:i], f.pendingAsks[i+1:]...)
+			return
+		}
+	}
+}
+
+// askResultLine is the minimal decode used to spot the tool_result that answers
+// a pending ask.
+type askResultLine struct {
+	Message struct {
+		Content []struct {
+			Type      string `json:"type"`
+			ToolUseID string `json:"tool_use_id"`
+		} `json:"content"`
+	} `json:"message"`
+}
+
+// trackAsks folds one parsed line into the pending-ask set (see PendingAsks).
+// Cheap by construction: the set is empty for all but the seconds a question is
+// actually open, and the tool_result decode is gated on a substring probe.
+func (f *RingFilter) trackAsks(ev Event, line []byte) {
+	switch {
+	case ev.Type == "control_request":
+		req, ok := ParseToolPermissionRequest(line)
+		if ok && req.ToolName == "AskUserQuestion" && req.ToolUseID != "" {
+			f.pendingAsks = append(f.pendingAsks, PendingAsk{RequestID: req.RequestID, ToolUseID: req.ToolUseID})
+		}
+	case len(f.pendingAsks) == 0:
+		// Nothing open: no line can retire anything.
+	case ev.Type == "result":
+		// The turn is over, so every request it was blocked on is gone with it.
+		f.pendingAsks = nil
+	case ev.Type == "user" && bytes.Contains(line, toolResultMarker):
+		var res askResultLine
+		if json.Unmarshal(line, &res) != nil {
+			return
+		}
+		for _, b := range res.Message.Content {
+			if b.Type == "tool_result" && b.ToolUseID != "" {
+				f.dropAsk(b.ToolUseID)
+			}
+		}
+	}
 }
 
 // nowFunc is the clock thinkingTimer reads; a package var so tests can pin it.
@@ -605,6 +709,9 @@ func (f *RingFilter) Filter(chunk []byte) (kept, injected []byte) {
 			if req, isReq := ParseToolPermissionRequest(line); isReq && req.ToolName == "ExitPlanMode" {
 				f.OnPlanApproval(req.RequestID, req.Input)
 			}
+		}
+		if ok {
+			f.trackAsks(ev, line)
 		}
 		if ok && f.Plan != nil && f.Plan.Feed(line) && f.OnPlanChange != nil {
 			f.OnPlanChange(f.Plan.JSON())

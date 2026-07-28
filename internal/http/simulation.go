@@ -4967,6 +4967,15 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	for _, line := range simAskEvents {
 		sendSimChatEvent(conn, line)
 	}
+	// Only the second question is still open - the first one's turn ended
+	// without it (see simExpiredQuestionInput), which is exactly the
+	// distinction the real daemon draws from the live stdout stream.
+	if frame, err := json.Marshal(chatPendingQuestionsFrame{
+		terminalEvent: terminalEvent{Type: "pending_questions"},
+		Requests:      []claudestream.PendingAsk{{RequestID: "sim-ask-req-1", ToolUseID: "toolu_ask_1"}},
+	}); err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, frame)
+	}
 	sendTerminalEvent(conn, "replay_done")
 
 	turn := 0
@@ -4977,6 +4986,17 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 		}
 		switch msg.Type {
 		case "control_response":
+			// An answer to anything but the open question is refused, as the
+			// daemon refuses one for a request the CLI has already retired.
+			if reqID := claudestream.ControlResponseRequestID(msg.Response); reqID != "sim-ask-req-1" {
+				if frame, err := json.Marshal(chatQuestionExpiredFrame{
+					terminalEvent: terminalEvent{Type: "question_expired"},
+					RequestID:     reqID,
+				}); err == nil {
+					_ = conn.WriteMessage(websocket.TextMessage, frame)
+				}
+				continue
+			}
 			// Extract the answers map the question card submitted.
 			var payload struct {
 				Response struct {
