@@ -328,9 +328,20 @@ function convert(node: Node, ctx: Ctx): string {
     // text, breaking lines at block boundaries the way the browser would - but
     // never tighten a wider gap a nested markdown root asked for, or a bubble
     // <div> wrapping a message would glue it to the next one.
-    const inner = children(el, ctx)
-    if (!BLOCK_TAGS.has(tag) || !inner.trim()) return inner
-    return gap(inner, 1) + inner.trim() + gap(inner, 1, true)
+    //
+    // Two things here are line breaks the DOM does not spell as block elements:
+    // a <pre> holds its newlines in a text node (collapsing them would run a
+    // whole script together), and a line-numbered code panel lays its lines out
+    // as grid ROWS - a span per line, so a long line wraps under its own number
+    // rather than scrolling the block sideways. data-copy-code marks such a
+    // panel: inside it whitespace is verbatim (indentation is content) and every
+    // data-copy-line ends a line.
+    const pre = ctx.pre || tag === 'PRE' || el.hasAttribute('data-copy-code')
+    const inner = children(el, pre === ctx.pre ? ctx : { ...ctx, pre })
+    if (el.hasAttribute('data-copy-line')) return inner.replace(/\n+$/, '') + '\n'
+    if ((!BLOCK_TAGS.has(tag) && !el.hasAttribute('data-copy-code')) || !inner.trim()) return inner
+    // Trimming a preformatted block would eat the first line's indentation.
+    return gap(inner, 1) + (pre ? inner.replace(/^\n+|\n+$/g, '') : inner.trim()) + gap(inner, 1, true)
   }
 
   switch (tag) {

@@ -35,7 +35,37 @@ const actionClass = (variant?: 'primary' | 'danger') => {
 
 // Shared body styling for a toast's code block, used by both the highlighted and
 // the plain-text render so the two are pixel-identical apart from token colour.
-const codeClass = 'max-h-40 overflow-auto px-2.5 pb-2 text-[11px] leading-relaxed font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words'
+const codeClass = 'max-h-40 overflow-auto text-[11px] font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words'
+
+// The two size scales a toast renders at. `compact` is for a glance-and-gone
+// acknowledgement (a copy confirmation): same anatomy, but the padding, the icon
+// tile and the gaps all step down so a two-word title over a one-line value
+// doesn't sit in a card that is mostly whitespace. Everything else keeps the
+// roomier default, where the body is text you actually stop to read.
+const SIZE = {
+  default: {
+    card: 'min-w-[17rem] max-w-[22rem] rounded-2xl',
+    pad: 'p-4',
+    row: 'gap-3',
+    tile: 'w-9 h-9 rounded-xl',
+    message: 'text-sm leading-relaxed',
+    codeWrap: 'mt-2 rounded-md',
+    code: 'px-2.5 pb-2 leading-relaxed',
+    codeTop: { tagged: 'pt-1', plain: 'pt-2' },
+    actions: 'mt-3 pl-12',
+  },
+  compact: {
+    card: 'max-w-[20rem] rounded-xl',
+    pad: 'p-2.5',
+    row: 'gap-2.5',
+    tile: 'w-7 h-7 rounded-lg',
+    message: 'text-[13px] leading-snug',
+    codeWrap: 'mt-1.5 rounded',
+    code: 'px-2 pb-1.5 leading-snug',
+    codeTop: { tagged: 'pt-1', plain: 'pt-1.5' },
+    actions: 'mt-2 pl-9',
+  },
+} as const
 
 const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, onDismiss }) => {
   // Only auto-expiring toasts (duration > 0) get a countdown bar, and it's hidden
@@ -63,10 +93,11 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   }
 
   const base = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
+  const size = toast.compact ? SIZE.compact : SIZE.default
   // The tile glyph, tile tint and countdown-bar colour all default to the type
   // identity; a toast may override the glyph (`icon`, e.g. a Bot for agent rows)
   // and the tint+bar pair (`accent`, e.g. the emerald "merge queued" card).
-  const iconNode = toast.icon ?? <base.Icon className="w-[18px] h-[18px]" />
+  const iconNode = toast.icon ?? <base.Icon className={toast.compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} />
   const wrap = toast.accent?.wrap ?? base.wrap
   const bar = toast.accent?.bar ?? base.bar
   // A plain string message is a single line, vertically centred against the tile;
@@ -84,41 +115,44 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     <ToastDismissContext.Provider value={onDismiss}>
     <div
       role="status"
-      className={`relative min-w-[17rem] max-w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${
+      className={`relative overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${size.card} ${
         toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
       }`}
     >
       {showProjectHeader && (
         <CrossProjectBanner project={pc!.projectName} tone="neutral" projectId={pc!.projectId} icon={pc!.icon} />
       )}
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
+      <div className={size.pad}>
+        <div className={`flex items-start ${size.row}`}>
+          <div className={`shrink-0 flex items-center justify-center ${size.tile} ${wrap}`}>
             {iconNode}
           </div>
           <div className={`min-w-0 flex-1 ${isStringMessage ? 'self-center' : ''}`}>
             {isStringMessage
-              ? <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message as string)}</p>
+              ? <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>{withBranchPills(toast.message as string)}</p>
               : toast.message}
             {toast.code && (
-              <div className="mt-2 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-900/60">
+              // w-fit: the block hugs its content instead of stretching to the
+              // toast's width. A short value (a branch name, a path) otherwise
+              // trailed a band of empty tint out to the right edge.
+              <div className={`w-fit max-w-full overflow-hidden bg-gray-100 dark:bg-gray-900/60 ${size.codeWrap}`}>
                 {toast.codeLang && (
-                  <div className="px-2.5 pt-1.5 text-[10px] font-mono tracking-wide text-gray-400 dark:text-gray-500">
+                  <div className={`pt-1.5 text-[10px] font-mono tracking-wide text-gray-400 dark:text-gray-500 ${toast.compact ? 'px-2' : 'px-2.5'}`}>
                     {toast.codeLang}
                   </div>
                 )}
                 {codeHtml
-                  ? <pre className={`${codeClass} ${toast.codeLang ? 'pt-1' : 'pt-2'}`} dangerouslySetInnerHTML={{ __html: codeHtml }} />
-                  : <pre className={`${codeClass} ${toast.codeLang ? 'pt-1' : 'pt-2'}`}>{toast.code}</pre>}
+                  ? <pre className={`${codeClass} ${size.code} ${toast.codeLang ? size.codeTop.tagged : size.codeTop.plain}`} dangerouslySetInnerHTML={{ __html: codeHtml }} />
+                  : <pre className={`${codeClass} ${size.code} ${toast.codeLang ? size.codeTop.tagged : size.codeTop.plain}`}>{toast.code}</pre>}
               </div>
             )}
           </div>
-          <IconButton onClick={onDismiss}>
-            <X className="w-4 h-4" />
+          <IconButton onClick={onDismiss} className={toast.compact ? '-mt-0.5 -mr-0.5' : ''}>
+            <X className={toast.compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           </IconButton>
         </div>
         {hasActions && (
-          <div className="mt-3 flex items-center gap-2 flex-wrap pl-12">
+          <div className={`flex items-center gap-2 flex-wrap ${size.actions}`}>
             {toast.actions!.map((action) => (
               <button
                 key={action.label}

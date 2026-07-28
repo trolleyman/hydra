@@ -144,6 +144,40 @@ describe('selectionToMarkdown', () => {
     expect(selectionToMarkdown(sel(range))).toBe('**hi** there\n\nRead\nsrc/main.go\n\n- a\n- b')
   })
 
+  // A tool card's code panel (GutterCodePanel): the line numbers are a
+  // select-none gutter and each line is a grid CELL, not a block element - so
+  // without the data-copy-* markers the whole script copies as one line.
+  it('keeps the lines of a line-numbered code panel apart', () => {
+    const lines = ['cd web &&', '(fuser -k 21765/tcp; true) &&', '    node scripts/probe.ts']
+    const { container } = render(
+      <div>
+        <div data-copy-code>
+          {lines.map((l, i) => (
+            <span key={i}>
+              <span style={{ userSelect: 'none' }}>{i + 1}</span>
+              <span data-copy-line>{l}</span>
+            </span>
+          ))}
+        </div>
+      </div>,
+    )
+    const range = document.createRange()
+    range.selectNodeContents(container)
+    expect(selectionToMarkdown(sel(range))).toBe(lines.join('\n'))
+  })
+
+  it('keeps the newlines and indentation of a pre panel', () => {
+    const { container } = render(
+      <div>
+        <div>Output</div>
+        <pre>{'ok\n    indented\n\nlast'}</pre>
+      </div>,
+    )
+    const range = document.createRange()
+    range.selectNodeContents(container)
+    expect(selectionToMarkdown(sel(range))).toBe('Output\nok\n    indented\n\nlast')
+  })
+
   it('skips control labels, which a drag cannot select anyway', () => {
     const { container } = render(
       <div>

@@ -387,6 +387,29 @@ body {
   background-image: linear-gradient(90deg, #78716c 35%, #e7e5e4 50%, #78716c 65%);
 }
 
+/* The "working" spark (components/WorkSpark.tsx): the whole sparkle turns
+   slowly while a pulse of brightness + length travels around its spokes (each
+   spoke carries a negative animation-delay, so the wave is already mid-flight
+   on the first frame). */
+@keyframes work-spark-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes work-spark-pulse {
+  0%, 100% { opacity: 0.28; transform: scaleY(0.58); }
+  30%      { opacity: 1;    transform: scaleY(1); }
+}
+.work-spark {
+  transform-origin: center;
+  animation: work-spark-spin 6s linear infinite;
+}
+.work-spark-spoke {
+  /* Origin = the spoke's inner end, in viewBox units of the parent (rotated)
+     group, so the pulse grows outward along the spoke's own axis. */
+  transform-box: view-box;
+  transform-origin: 12px 9.2px;
+  animation: work-spark-pulse 1.32s ease-in-out infinite;
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }
@@ -399,6 +422,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
   .animate-chat-sheet-up,
+  .work-spark,
+  .work-spark-spoke,
   .repo-file-in { animation: none; }
   .chat-text-shimmer {
     animation: none;
