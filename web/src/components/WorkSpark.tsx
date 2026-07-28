@@ -49,7 +49,7 @@ export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
       // glyphs, whose cap-height centre sits ~0.6px higher at 11px/16.5px.
       // Under align-items:center a negative top margin shrinks the margin box,
       // so this nudges the mark up by half of it - which is the amount wanted.
-      className={`shrink-0 w-3.5 h-3.5 -mt-px ${accent} ${still ? '' : 'work-spark'} ${className}`}
+      className={`shrink-0 w-4 h-4 -mt-px ${accent} ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0

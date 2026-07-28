@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -55,6 +56,13 @@ type SimulationServer struct {
 	approvalMu   sync.Mutex
 	approvalKind string
 	approvalGen  int
+
+	// askRunning is true while agent-ask's answered turn is streaming. The chat's
+	// live "working" indicator keys off the AGENT RECORD's status (the store's
+	// list), not the WS status frame, so a fixture pinned to needs_input can
+	// never show it - even mid-stream. Flipping this makes ListAgents/GetAgent
+	// report `running` for exactly as long as the turn is in flight.
+	askRunning atomic.Bool
 }
 
 // setSimApproval parks (or with "" clears) the picked approval kind.
@@ -325,9 +333,32 @@ func simAgentCodex() api.AgentResponse {
 const simAgentAskPrompt = "Refactor the config loader to support per-environment overrides."
 
 // simAgentAsk is the AskUserQuestion demo agent, shared by ListAgents and
-// GetAgent.
-func simAgentAsk() api.AgentResponse {
+// GetAgent. It reports needs_input while parked on its question and running
+// while the answered turn streams (see askRunning), so the chat's live working
+// indicator - which reads this record, not the WS status frame - lights up for
+// that stretch and settles when the result footer lands.
+func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 	createdAt := simNow().Add(-20 * time.Minute).Unix()
+	if s.askRunning.Load() {
+		return api.AgentResponse{
+			Id:            "agent-ask",
+			Title:         ptr("Per-environment config overrides"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-config-overrides"),
+			SessionPid:    1007,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        simAgentAskPrompt,
+			ChatMode:      ptr(true),
+			Model:         ptr("claude-opus-4-8"),
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wiring the per-environment overlay into `Load`"),
+			},
+		}
+	}
 	return api.AgentResponse{
 		Id:            "agent-ask",
 		Title:         ptr("Per-environment config overrides"),
@@ -499,7 +530,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		simAgentCodex(),
 		// Chat-mode agent blocked on a native AskUserQuestion - its page shows
 		// a live, answerable question card.
-		simAgentAsk(),
+		s.simAgentAsk(),
 		// Chat-mode agent parked mid-turn: the only place the live working
 		// indicator is visible in simulation.
 		simAgentWorking(),
@@ -735,7 +766,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if id == "agent-ask" {
-		write(simAgentAsk())
+		write(s.simAgentAsk())
 		return
 	}
 	if id == "agent-working" {
@@ -4855,7 +4886,7 @@ var simAskEvents = []string{
 // handleSimAskWS speaks the chat framing for agent-ask: replay the pending
 // question, then answer the control_response with the tool_result +
 // assistant acknowledgement the real CLI would produce.
-func handleSimAskWS(conn *safeConn) {
+func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	sendStatusUpdate(conn, "needs_input")
 	for _, line := range simAskEvents {
 		sendSimChatEvent(conn, line)
@@ -4896,8 +4927,12 @@ func handleSimAskWS(conn *safeConn) {
 			sendSimChatEvent(conn, string(toolResult))
 			// Answering the question kicks off the big streamed implementation turn
 			// (interleaved tools + thinking, then a long markdown block typed in
-			// slowly) so the demo shows a large chat streaming in live.
+			// slowly) so the demo shows a large chat streaming in live. The head's
+			// RECORD has to say running for that stretch too, or the live working
+			// line above the stream never appears (see askRunning).
+			s.askRunning.Store(true)
 			streamSimAskImplementation(conn, "sim-ask")
+			s.askRunning.Store(false)
 			sendStatusUpdate(conn, "waiting")
 		case "set_model":
 			sendSimUserText(conn, "sim-ask", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
@@ -5051,7 +5086,7 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {
-		handleSimAskWS(conn)
+		s.handleSimAskWS(conn)
 		return
 	}
 	if agentID == "agent-approvals" && r.URL.Query().Get("shell") != "true" {
@@ -5127,6 +5162,10 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 		}
 	}()
 	_, gen := s.simApproval()
+	// agent-ask's record flips running <-> needs_input around its answered turn,
+	// and the chat's live working indicator reads that record - so the list has
+	// to be refetched when it moves, exactly like the approval picker.
+	asking := s.askRunning.Load()
 	ticker := time.NewTicker(simEventPollInterval)
 	defer ticker.Stop()
 	for {
@@ -5134,11 +5173,14 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 		case <-done:
 			return
 		case <-ticker.C:
-			if _, current := s.simApproval(); current != gen {
-				gen = current
-				if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
-					return
-				}
+			_, current := s.simApproval()
+			live := s.askRunning.Load()
+			if current == gen && live == asking {
+				continue
+			}
+			gen, asking = current, live
+			if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
+				return
 			}
 		}
 	}
