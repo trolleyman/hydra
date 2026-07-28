@@ -3512,7 +3512,12 @@ func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, pay
 	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
-// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. It
+// handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. Its
+// tool payloads carry the status (and, for the command, the `_raw` native item)
+// that codexToolPayload always sends: that pair is what tells the chat a card
+// came from Codex rather than Claude, so the Raw panel shows Codex's own item
+// instead of an Anthropic block it never sent.
+// It
 // includes the regressions that are otherwise difficult to reproduce on demand:
 // a rich multi-file edit, a spawn whose transport result is merely "completed",
 // and a later closeAgent control that must remain an ordinary tool rather than
@@ -3538,18 +3543,18 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"user_message", map[string]any{"id": "sim-codex-user", "content": simAgentCodexPrompt}},
 		{"assistant_delta", map[string]any{"message_id": "sim-codex-seed", "text": " and finished after."}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
-		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": "."}}},
+		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "_raw": map[string]any{"id": "sim-codex-bash", "item_type": "command_execution", "command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "status": "in_progress"}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/codex-chat.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Codex chat\n+# Codex chat support\n"},
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "TOOL_DEMO.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-draft\n+complete\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-single-edit", "name": "Edit", "output": "File updated", "status": "completed"}},
-		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "input": map[string]any{"changes": []any{
+		{"tool_started", map[string]any{"id": "sim-codex-write", "name": "Write", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/sim-added.md", "kind": map[string]any{"type": "add"}, "diff": "# Added document\n First character and indentation preserved\n+literal plus preserved\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-write", "name": "Write", "output": "File updated", "status": "completed"}},
