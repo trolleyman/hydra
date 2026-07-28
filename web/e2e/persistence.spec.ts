@@ -136,7 +136,7 @@ test.describe('project trust gate (decided at add time)', () => {
     // The native folder dialog isn't available headless, so ProjectDropdown
     // falls back to its manual absolute-path form.
     await page.getByRole('button', { name: 'Open folder...', exact: true }).click()
-    const path = page.getByPlaceholder('/absolute/path/to/project')
+    const path = page.getByPlaceholder('/absolute/path')
     await path.fill('/tmp/an-untrusted-project')
     await path.press('Enter')
 
@@ -148,5 +148,29 @@ test.describe('project trust gate (decided at add time)', () => {
     await page.getByRole('button', { name: "Don't trust" }).click()
     await expect(page.getByText('Trust this project?')).toHaveCount(0)
     expect(posts).toEqual([])
+  })
+
+  // A hand-typed path is shorthand: "~/x" (and a bare relative "x") mean
+  // something only the server can work out, so the UI resolves it through
+  // /api/resolve-path and shows - and trusts - the absolute result.
+  test('a typed ~ path is expanded before the gate names it', async ({ page }) => {
+    await page.goto(PROJECT)
+    await page.getByLabel('Select project').click()
+    await page.getByRole('button', { name: 'Open folder...', exact: true }).click()
+    const path = page.getByPlaceholder('/absolute/path')
+    await path.fill('~/an-untrusted-project')
+
+    // The live preview under the input shows where that lands: an absolute
+    // path, whatever this machine's home directory happens to be.
+    const resolved = /^\/.+\/an-untrusted-project$/
+    await expect(page.getByText(resolved)).toBeVisible()
+
+    // ...and so does the trust prompt, rather than the "~/..." that was typed.
+    await path.press('Enter')
+    await expect(page.getByText('Trust this project?')).toBeVisible()
+    await expect(page.getByRole('dialog').getByText(resolved)).toBeVisible()
+
+    await page.getByRole('button', { name: "Don't trust" }).click()
+    await expect(page.getByText('Trust this project?')).toHaveCount(0)
   })
 })
