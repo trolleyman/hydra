@@ -9,6 +9,7 @@ import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
 import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
+import { markdownGalleryAt } from './markdownGallery'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
@@ -151,9 +152,11 @@ function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
 
 // MarkdownImage renders a markdown image. Anything that resolves is shown at its
 // logical size (natural px / the @2x density in its name, capped to the column)
-// and opens in the app-wide lightbox on click; anything that doesn't - an
-// unservable path, or a scratch file that has since been reclaimed - degrades to
-// a muted chip naming it, rather than the browser's broken-image icon.
+// and opens in the app-wide lightbox on click - as a gallery of the images in
+// its own markdown block, so ←/→ walk the pictures of that one message (see
+// lib/markdownGallery). Anything that doesn't resolve - an unservable path, or a
+// scratch file that has since been reclaimed - degrades to a muted chip naming
+// it, rather than the browser's broken-image icon.
 function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
   const openLightbox = useLightbox()
   // The source that failed to load, rather than a bare flag: a streamed message
@@ -195,9 +198,15 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       data-md-src={src}
       loading="lazy"
       onError={() => setFailedSrc(src ?? null)}
-      // The <img> itself is handed over as the open origin, so the lightbox flies the
-      // picture out of exactly this box rather than fading in over it.
-      onClick={(e) => openLightbox([{ url, filename: label, size: 0, dpi: density }], 0, e.currentTarget)}
+      // Opens the whole markdown block's images, at this one - so ←/→ step
+      // between the pictures of THIS message and stop at its edges (see
+      // lib/markdownGallery). The <img> itself is handed over as the open origin,
+      // so the lightbox flies the picture out of exactly this box rather than
+      // fading in over it.
+      onClick={(e) => {
+        const { items, index } = markdownGalleryAt(e.currentTarget)
+        openLightbox(items, index, e.currentTarget)
+      }}
     />
   )
 }
