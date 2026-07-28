@@ -62,9 +62,12 @@ type Head struct {
 	HasUnreadChanges bool
 	// Archived is true for a finished (killed/merged) head retained in the
 	// history list; such heads have no live session or worktree and are
-	// read-only. EndState records how it ended ("killed" | "merged").
-	Archived bool
-	EndState string
+	// read-only. EndState records how it ended ("killed" | "merged") and
+	// ArchivedAt when (Unix timestamp; 0 for a live head or a legacy archived
+	// row with no soft-delete timestamp).
+	Archived   bool
+	EndState   string
+	ArchivedAt int64
 	// MergeWhenGreen is true when auto-merge is armed for this head (PLAN #68).
 	MergeWhenGreen bool
 
@@ -313,12 +316,17 @@ func GetArchivedHeadByID(store *db.Store, id string) (*Head, error) {
 // archivedHead builds a read-only Head from an archived DB record. Its worktree
 // and branch no longer exist on disk, so Worktree is nil; BranchName is kept for
 // display only. The status reflects the last reported activity status (not the
-// transient head_status left over from the kill/merge operation).
+// transient head_status left over from the kill/merge operation), and ArchivedAt
+// comes from the soft-delete stamp ArchiveAgent wrote when it was killed/merged.
 func archivedHead(a *db.Agent) Head {
 	var branch *string
 	if a.BranchName != "" {
 		b := a.BranchName
 		branch = &b
+	}
+	var archivedAt int64
+	if a.DeletedAt.Valid {
+		archivedAt = a.DeletedAt.Time.Unix()
 	}
 	return Head{
 		ID:             a.ID,
@@ -340,6 +348,7 @@ func archivedHead(a *db.Agent) Head {
 		AgentStatus:    archivedAgentStatus(a),
 		Archived:       true,
 		EndState:       a.EndState,
+		ArchivedAt:     archivedAt,
 	}
 }
 
