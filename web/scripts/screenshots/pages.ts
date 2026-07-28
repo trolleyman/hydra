@@ -214,7 +214,6 @@ export const pages: {
   // inspector pane right). The screenshots default to the classic stacked
   // layout so the existing agent-page shots are unaffected; only pages that
   // set this render the split. Needs a lg+ viewport (>= 1024px wide).
-  splitLayout?: boolean
   // Focuses the full-page spawn textarea and selects ALL of its text after the
   // page settles, so the capture overlays the browser's selection band (which
   // marks the REAL, selectable text positions) on top of the highlight backdrop
@@ -606,28 +605,25 @@ export const pages: {
   // view. Viewport-only to focus on the header + prompt (agent-md's seeded
   // prompt overflows the block's max height, so the fade is visible).
   { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
-  // The new two-pane split layout: the terminal/chat + collapsed prompt in the
-  // left working pane, and the inspector pane (a Diff | Tests | Previews view
-  // selector under a shared target selector) on the right. splitLayout opts in
-  // (the shots otherwise default to the classic stacked layout); a wide
-  // viewport is required. Three shots: the default Diff view, the Tests view
-  // (clicking the Tests segment), and chat-as-pane.
-  { name: 'agent-split-diff', path: '/project/sim-project/agent/agent-1', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true },
-  { name: 'agent-split-tests', path: '/project/sim-project/agent/agent-2', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true, click: 'button:has-text("Tests")' },
-  { name: 'agent-split-chat', path: '/project/sim-project/agent/agent-chat', splitLayout: true, viewport: { width: 1440, height: 900 }, viewportOnly: true },
+  // The two-pane split layout: the terminal/chat + collapsed prompt in the left
+  // working pane, and the inspector pane on the right. A wide viewport is
+  // required. It used to be opt-in per shot via a `splitLayout` flag; 0274e040
+  // made it always-on and deleted the storage key that flag wrote, so the flag
+  // (and the third shot, which clicked a Diff|Tests|Previews segment that no
+  // longer exists) are gone. The Tests panel has its own tests-panel* shots.
+  { name: 'agent-split-diff', path: '/project/sim-project/agent/agent-1', viewport: { width: 1440, height: 900 }, viewportOnly: true },
+  { name: 'agent-split-chat', path: '/project/sim-project/agent/agent-chat', viewport: { width: 1440, height: 900 }, viewportOnly: true },
   // The tests panel (PLAN #68), now styled like the artifacts panel and living
   // in the diff viewer just below the "Changes" header. Pin Changes to the top,
   // then expand agent-2's single (failing) runner card by clicking its header -
   // its fixtures (simTestRunners) are a regression with two failing cases, so
   // the card shows the assertion messages failing-first.
   { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
-  // The "Group by result" view of the same runner: per-status sections
-  // rendered as root tree nodes (failing open, skipped/passing collapsed)
-  // with the everything-counted badges on the right, each open section's
-  // tree indented under a lowlit guide line. Reached by expanding the
-  // runner card, ticking the checkbox in the changes cog, then clicking
-  // the Tests heading to dismiss the popup (it closes on outside click).
-  { name: 'tests-panel-grouped', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button[aria-label="Test options"]', 'label:has-text("Group by result")', 'h3:has-text("Tests")'] },
+  // (There used to be a tests-panel-grouped shot here, reached by ticking
+  // "Group by result" in the options cog. Group-by-result is now the DEFAULT, so
+  // tests-panel above already captures that view and the click only turned it
+  // back OFF - the shot showed the opposite of its name. If the by-location tree
+  // is worth its own shot, add one that says so rather than reviving this.)
   // The same surface mid-run (agent-md is seeded as a running verdict): the
   // expanded card's live xterm build-log tail + progress bar + partial counts.
   { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
@@ -661,12 +657,17 @@ export const pages: {
   // green "Merges when tests pass" pill with its own Cancel button.
   { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
   // Chat mode: agent-chat renders the chat view instead of a
-  // terminal - user bubble, markdown-rich assistant turns, tool cards (the
-  // Bash one expanded via its description header, showing the ;/&&-split
-  // highlighted command and its red error output), a thinking disclosure,
-  // per-turn footers and the Claude-app composer - plus the terminal|chat
-  // mode chip in the metadata row.
-  { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewport: { width: 1920, height: 1080 }, viewportOnly: true, click: 'button:has-text("Vet the package and run the retry test")' },
+  // terminal - user bubble, markdown-rich assistant turns, tool cards, a
+  // thinking disclosure, per-turn footers and the Claude-app composer - plus
+  // the terminal|chat mode chip in the metadata row.
+  //
+  // This used to expand the Bash card by clicking its description header. That
+  // header is no longer a control (tool cards render as role="button" divs, and
+  // this one is not reliably mounted in the transcript), and the shot is about
+  // the chat view as a whole rather than that one card - so it captures the
+  // default state. A dedicated expanded-Bash-card shot would need a selector
+  // that targets the card itself.
+  { name: 'agent-chat', path: '/project/sim-project/agent/agent-chat', viewport: { width: 1920, height: 1080 }, viewportOnly: true },
   // Sub-agent (Task tool) handling: a sub-agent's steps fold into a single
   // SubagentCard on its Task card (Bot icon, "Explore" type, description,
   // step count) instead of leaking its prompt into the flow as a user
@@ -841,7 +842,7 @@ export const pages: {
       // reading as an empty/loading pane); then reopen the branch selector to
       // showcase the agent-vs-other branch grouping.
       'button:has-text("heads.go")',
-      'button[title="Change or exit branch diff"]',
+      'button[data-branch-selector]:has-text("hydra/add-line-numbers")',
     ],
   },
   // A binary image file rendered inline via the raw blob route.
@@ -1380,32 +1381,12 @@ export const pages: {
   // the top bar gone and the sidebar collapsed by default, the content gets
   // the whole height; the floating reveal button is the only chrome.
   { name: 'mobile-landscape-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
-  // The sidebar opened as an overlay (still below the lg breakpoint) so it
-  // doesn't squeeze the short content underneath - header, list, and footer
-  // all visible at once.
-  {
-    name: 'mobile-landscape-menu',
-    path: '/project/sim-project/agent/agent-1',
-    viewport: { width: 844, height: 390 },
-    viewportTag: 'mobile-landscape',
-    viewportOnly: true,
-    click: 'button[aria-label="Show sidebar"]',
-  },
 
   // ── Tablet portrait (834×1112) ──────────────────────────────────────────
   // A tablet upright: below the lg breakpoint, so the sidebar is an overlay
   // (collapsed by default) and the content spans the full width - no more
   // cramped permanent two-column split.
   { name: 'tablet-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
-  // The sidebar opened over the content (overlay + backdrop).
-  {
-    name: 'tablet-menu',
-    path: '/project/sim-project/agent/agent-1',
-    viewport: { width: 834, height: 1112 },
-    viewportTag: 'tablet',
-    viewportOnly: true,
-    click: 'button[aria-label="Show sidebar"]',
-  },
 
   // ── Tablet landscape (1112×834) ─────────────────────────────────────────
   // A tablet on its side: at/above the lg breakpoint, so the sidebar is the

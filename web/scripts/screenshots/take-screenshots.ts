@@ -481,12 +481,6 @@ try {
             // ignore storage failures
           }
         }, { key: StorageKeys.themeMode, mode: theme })
-        // Default every shot to the classic stacked agent layout (split flag off)
-        // so the existing agent-page shots are unchanged; pages opt into the new
-        // two-pane split with splitLayout: true.
-        await ctx.addInitScript(({ key, on }) => {
-          try { localStorage.setItem(key, on ? '1' : '0') } catch { /* ignore */ }
-        }, { key: StorageKeys.splitLayoutEnabled, on: pg.splitLayout === true })
         // Emulate a touch device's coarse pointer by forcing the fine-pointer
         // media query false, so keyboard-only chrome (shortcut hints) hides like it
         // does on a real phone. Delegates every other query to the real matchMedia
