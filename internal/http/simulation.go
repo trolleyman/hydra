@@ -559,6 +559,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		// Chat-mode agent parked mid-turn: the only place the live working
 		// indicator is visible in simulation.
 		simAgentWorking(),
+		// A long, finished conversation that never streams - the still transcript
+		// to scroll, fold and copy (see handleSimHistoryWS).
+		simAgentHistory(),
 		// The approval picker: its question card raises any one of the gate's
 		// approval cards on demand (nothing is parked until you pick).
 		s.simAgentApprovals(),
@@ -801,6 +804,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 	if id == "agent-working" {
 		write(simAgentWorking())
+		return
+	}
+	if id == "agent-history" {
+		write(simAgentHistory())
 		return
 	}
 	if id == "agent-approvals" {
@@ -4692,32 +4699,24 @@ var simAskImplMarkdown = strings.Join([]string{
 // are reading - which is the case where a fold could shove the text you are
 // mid-sentence in (see the scroll-stability checks on the step group).
 var simAskPlanMarkdown = strings.Join([]string{
-	"Before I touch the loader, here is the shape of the change, so the diff",
-	"doesn't arrive as a surprise.",
+	// Paragraphs are ONE line each: the chat renderer honours a single newline as
+	// a line break, so wrapping the source mid-sentence breaks the rendered text
+	// in the same place.
+	"Before I touch the loader, here is the shape of the change, so the diff doesn't arrive as a surprise.",
 	"",
 	"### Where the layering goes",
 	"",
-	"`Load` is the only entry point that reads config today, and every caller",
-	"passes a project root. That makes it the right seam: it grows an `env`",
-	"argument, reads the base file exactly as it does now, and then hands the",
-	"parsed map to a new `applyEnvOverlay` before anything validates it.",
+	"`Load` is the only entry point that reads config today, and every caller passes a project root. That makes it the right seam: it grows an `env` argument, reads the base file exactly as it does now, and then hands the parsed map to a new `applyEnvOverlay` before anything validates it.",
 	"",
-	"The overlay file is *optional*. A missing `config.<env>.toml` is not an",
-	"error - it means the environment adds nothing, and the base config stands",
-	"on its own. Only a malformed one fails the load.",
+	"The overlay file is *optional*. A missing `config.<env>.toml` is not an error - it means the environment adds nothing, and the base config stands on its own. Only a malformed one fails the load.",
 	"",
 	"### The merge rule, precisely",
 	"",
-	"- **Tables merge** field by field, recursively, so an override can set one",
-	"  key of `[network]` without restating the rest of it.",
-	"- **Scalars and arrays replace** wholesale. An `allowed_hosts` in the",
-	"  overlay is the list, not an addition to the base list - the alternative",
-	"  (append) has no way to spell \"remove a host\".",
-	"- **Validation runs once**, on the merged result, so an override is allowed",
-	"  to fill in a key the base leaves out.",
+	"- **Tables merge** field by field, recursively, so an override can set one key of `[network]` without restating the rest of it.",
+	"- **Scalars and arrays replace** wholesale. An `allowed_hosts` in the overlay is the list, not an addition to the base list - the alternative (append) has no way to spell \"remove a host\".",
+	"- **Validation runs once**, on the merged result, so an override is allowed to fill in a key the base leaves out.",
 	"",
-	"That last one is the reason validation moves after the merge rather than",
-	"staying where it is. Everything else is additive.",
+	"That last one is the reason validation moves after the merge rather than staying where it is. Everything else is additive.",
 	"",
 	"Let me read the loader and the callers before I start.",
 }, "\n")
@@ -5173,6 +5172,186 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	}
 }
 
+// --- Simulated long history (agent-history) -----------------------------------
+
+// simAgentHistoryPrompt seeds the long-history demo agent. agent-chat is the
+// feature-rich transcript and agent-ask is the one that STREAMS; this one exists
+// for the cases that want a lot of conversation and no motion at all - scrolling
+// a long pane, step folding at scale, copy-as-markdown, per-agent scroll
+// restoration. It replays a finished conversation on attach and then sits
+// perfectly still.
+const simAgentHistoryPrompt = "Port the storage layer from hand-written SQL to sqlc, one table at a time."
+
+func simAgentHistory() api.AgentResponse {
+	createdAt := simNow().Add(-6 * time.Hour).Unix()
+	return api.AgentResponse{
+		Id:            "agent-history",
+		Title:         ptr("Port the storage layer to sqlc"),
+		AgentType:     "claude",
+		BaseBranch:    "main",
+		BranchName:    ptr("hydra/sqlc-port"),
+		SessionPid:    1009,
+		SessionStatus: "running",
+		CreatedAt:     &createdAt,
+		Prompt:        simAgentHistoryPrompt,
+		ChatMode:      ptr(true),
+		WorktreePath:  ptr("/repo/.hydra/local/worktrees/sqlc-port"),
+		Model:         ptr("claude-opus-4-8"),
+		AgentStatus: &api.AgentStatusInfo{
+			Status:    api.Finished,
+			Timestamp: simNow().Format(time.RFC3339),
+		},
+	}
+}
+
+// simHistoryTables drives the canned conversation: one turn per table, each
+// asked for by the user and answered with a run of tool calls. Deliberately
+// varied in shape - the step counts, the failing run and the silent turn are
+// what make it a fair test of how a long transcript reads.
+var simHistoryTables = []struct {
+	name    string
+	queries int
+	note    string
+}{
+	{"users", 9, "the upsert is the only one with a conflict clause"},
+	{"sessions", 6, "two of these join agents, so the generated row structs nest"},
+	{"agents", 14, "much the biggest, and the status filter is dynamic"},
+	{"projects", 5, "trivial - four selects and an insert"},
+	{"artifacts", 11, "the blob column wants []byte, not string"},
+	{"tests", 8, "the JUnit rollup is one query with a GROUP BY"},
+	{"reviews", 7, "nullable timestamps everywhere; sqlc gives sql.NullTime"},
+	{"approvals", 4, "short, but the enum column needs a type override"},
+}
+
+// simHistoryEvents builds the canned transcript: for each table a user request,
+// a thought, an opening paragraph, a run of tool calls (one of them failing,
+// once), a closing paragraph and a turn footer. Everything is derived from the
+// table above, so the whole conversation is deterministic - a screenshot of it
+// is stable, and it costs a few dozen lines rather than a thousand.
+func simHistoryEvents() (lines []string, thoughts map[string]int64) {
+	thoughts = map[string]int64{}
+	ev := func(v any) {
+		line, _ := json.Marshal(v)
+		lines = append(lines, string(line))
+	}
+	assistant := func(id string, content ...map[string]any) {
+		ev(map[string]any{"type": "assistant", "message": map[string]any{"id": id, "content": content}, "session_id": "sim-history"})
+	}
+	toolResult := func(useID, content string, failed bool) {
+		ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{
+			{"type": "tool_result", "tool_use_id": useID, "content": content, "is_error": failed},
+		}}})
+	}
+	ev(map[string]any{"type": "system", "subtype": "init", "session_id": "sim-history", "model": "claude-opus-4-8", "apiKeySource": "none"})
+	ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "text", "text": simAgentHistoryPrompt}}}})
+
+	for i, t := range simHistoryTables {
+		if i > 0 {
+			ev(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []map[string]any{
+				{"type": "text", "text": fmt.Sprintf("Good. Now do %s.", t.name)},
+			}}})
+		}
+		msg := fmt.Sprintf("msg_hist_%d", i)
+		thinkID := msg + "_think"
+		thoughts[thinkID] = int64(3000 + 1700*(i%5))
+		assistant(thinkID, map[string]any{"type": "thinking", "thinking": fmt.Sprintf(
+			"store/%s.go has %d queries; %s. I'll write the .sql file first, generate, then swap the callers over and run the package's tests.",
+			t.name, t.queries, t.note)})
+		assistant(msg+"_open", map[string]any{"type": "text", "text": fmt.Sprintf(
+			"Porting **%s** - %d queries. %s.",
+			t.name, t.queries, strings.ToUpper(t.note[:1])+t.note[1:])})
+
+		// The run of steps. Its length varies with the table so the folded counts
+		// in the transcript are not all the same number.
+		steps := []struct {
+			name   string
+			input  map[string]any
+			result string
+			failed bool
+		}{
+			{"Read", map[string]any{"file_path": fmt.Sprintf("internal/store/%s.go", t.name)}, fmt.Sprintf("// %d queries, hand-written\nfunc (s *Store) Get%s(ctx context.Context, id string) (*%s, error) {", t.queries, strings.ToUpper(t.name[:1])+t.name[1:], t.name), false},
+			{"Grep", map[string]any{"pattern": fmt.Sprintf("store\\.%s", t.name), "path": "internal", "output_mode": "files_with_matches"}, "internal/http/server.go\ninternal/heads/heads.go", false},
+			{"Write", map[string]any{"file_path": fmt.Sprintf("internal/db/query/%s.sql", t.name), "content": fmt.Sprintf("-- name: Get%s :one\nSELECT * FROM %s WHERE id = ? LIMIT 1;\n", strings.ToUpper(t.name[:1])+t.name[1:], t.name)}, fmt.Sprintf("File created successfully at: internal/db/query/%s.sql", t.name), false},
+			{"Bash", map[string]any{"command": "sqlc generate", "description": "Regenerate the typed queries"}, fmt.Sprintf("generated %d queries into internal/db/gen", t.queries), false},
+			{"Edit", map[string]any{"file_path": fmt.Sprintf("internal/store/%s.go", t.name), "old_string": "rows, err := s.db.QueryContext(ctx, q)", "new_string": fmt.Sprintf("rows, err := s.q.List%s(ctx)", strings.ToUpper(t.name[:1])+t.name[1:])}, fmt.Sprintf("Applied 1 edit to internal/store/%s.go", t.name), false},
+			{"Bash", map[string]any{"command": "go test ./internal/store/... ./internal/db/...", "description": "Run the storage tests"}, "ok  \tgithub.com/trolleyman/hydra/internal/store\t0.184s\nok  \tgithub.com/trolleyman/hydra/internal/db\t0.061s", false},
+		}
+		// A couple of turns do more, so the folded runs differ in size; the
+		// biggest table also hits a failure and recovers from it.
+		if t.queries > 8 {
+			steps = append(steps,
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Bash", map[string]any{"command": "go vet ./internal/db/...", "description": "Vet the generated package"}, fmt.Sprintf("internal/db/gen/%s.sql.go:41:2: composite literal uses unkeyed fields", t.name), true},
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Edit", map[string]any{"file_path": "sqlc.yaml", "old_string": "emit_empty_slices: false", "new_string": "emit_empty_slices: true\n    emit_result_struct_pointers: true"}, "Applied 1 edit to sqlc.yaml", false},
+				struct {
+					name   string
+					input  map[string]any
+					result string
+					failed bool
+				}{"Bash", map[string]any{"command": "sqlc generate && go vet ./internal/db/...", "description": "Regenerate and re-vet"}, "generated cleanly", false},
+			)
+		}
+		for j, s := range steps {
+			useID := fmt.Sprintf("toolu_hist_%d_%d", i, j)
+			assistant(fmt.Sprintf("%s_tool_%d", msg, j), map[string]any{"type": "tool_use", "id": useID, "name": s.name, "input": s.input})
+			toolResult(useID, s.result, s.failed)
+		}
+
+		assistant(msg+"_close", map[string]any{"type": "text", "text": fmt.Sprintf(
+			"`%s` is on sqlc: %d queries generated, the callers now take the typed rows, and both packages' tests pass. %s",
+			t.name, t.queries, map[bool]string{true: "The generator's unkeyed literals needed an `sqlc.yaml` tweak, which applies to every table from here on.", false: "Nothing else in the package touches raw SQL now."}[t.queries > 8])})
+		ev(map[string]any{
+			"type": "result", "subtype": "success",
+			"duration_ms":    int64(48000 + 9000*i),
+			"total_cost_usd": 0.08 + 0.02*float64(i),
+			"usage":          map[string]any{"input_tokens": 900 + 40*i, "output_tokens": 1400 + 120*i, "cache_read_input_tokens": 30000 + 2000*i},
+			"session_id":     "sim-history",
+		})
+	}
+	return lines, thoughts
+}
+
+// handleSimHistoryWS replays the long finished conversation and then does
+// nothing: no live stream, no working indicator, no timers. A message typed into
+// it still gets a short canned reply, so the composer is not a dead end.
+func handleSimHistoryWS(conn *safeConn) {
+	sendStatusUpdate(conn, "finished")
+	lines, thoughts := simHistoryEvents()
+	// Measured thinking durations first, as the daemon's backfill delivers them.
+	for id, ms := range thoughts {
+		sendSimThinking(conn, id, ms)
+	}
+	for _, line := range lines {
+		sendSimChatEvent(conn, line)
+	}
+	sendTerminalEvent(conn, "replay_done")
+	turn := 0
+	for {
+		msg, ok := readSimChatClientMsg(conn)
+		if !ok {
+			return
+		}
+		switch msg.Type {
+		case "user_message":
+			turn++
+			userEv, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": msg.Content}})
+			sendSimChatEvent(conn, string(userEv))
+			streamSimReply(conn, "sim-history", fmt.Sprintf("msg_hist_reply_%d", turn), "Simulated reply: the sqlc port is done for every table above.")
+		case "set_model":
+			sendSimUserText(conn, "sim-history", fmt.Sprintf("<local-command-stdout>Set model to %s</local-command-stdout>", msg.Model))
+		}
+	}
+}
+
 // --- Simulated mid-turn agent (agent-working) ---------------------------------
 
 // simWorkingEvents is the settled part of agent-working's turn: the prompt, an
@@ -5305,6 +5484,10 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	}
 	if agentID == "agent-working" && r.URL.Query().Get("shell") != "true" {
 		handleSimWorkingWS(conn)
+		return
+	}
+	if agentID == "agent-history" && r.URL.Query().Get("shell") != "true" {
+		handleSimHistoryWS(conn)
 		return
 	}
 	if agentID == "agent-ask" && r.URL.Query().Get("shell") != "true" {

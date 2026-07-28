@@ -425,9 +425,18 @@ describe('planStepRows', () => {
     expect(kinds(plan([thought(), tool('Read'), said('found it')]))).toEqual(['thinking', 'tool', 'assistant'])
   })
 
-  it('keeps a running step out of the group so a live turn stays watchable', () => {
+  // The running step folds in with the rest: leaving it outside meant every step
+  // grew a card and took it away again a second later, so a live turn pulsed.
+  // The header names it instead (stepSummary().running).
+  it('folds the running step in and names it on the group', () => {
     const rows = plan([tool('Read'), tool('Grep'), tool('Bash', { result: undefined })])
-    expect(kinds(rows)).toEqual(['group:2', 'tool'])
+    expect(kinds(rows)).toEqual(['group:3'])
+    const group = rows[0]
+    expect(group.row === 'group' && stepSummary(group.items).running).toBe('Bash')
+  })
+
+  it('reports no running step once every call has landed', () => {
+    expect(stepSummary([tool('Read'), tool('Bash', { ended: true, result: undefined })]).running).toBe('')
   })
 
   // A plan put up for approval and a command headed for the host are addressed
