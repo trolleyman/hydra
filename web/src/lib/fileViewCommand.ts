@@ -173,7 +173,11 @@ function isOperand(word: string): boolean {
 
 // parseView turns one step into the file view it performs, or null when the
 // step is not a plain read of a single named file.
-function parseView(words: string[], raw: string): FileView | null {
+//
+// Exported for lib/shellSections, which asks the same question of a step inside
+// a script it will NOT promote to a Read card. The lexing differs (that module
+// tolerates pipes and unknown commands); what counts as a file view must not.
+export function parseView(words: string[], raw: string): FileView | null {
   const base = { path: '', start: null as number | null, end: null as number | null, numbered: false, command: raw }
   const tool = words[0]
   const args = words.slice(1)

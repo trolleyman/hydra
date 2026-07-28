@@ -130,7 +130,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         ) : null}
         {!archived && agent.review ? <MRSidebarMarker review={agent.review} /> : null}
       </div>
-      {((!archived && agent.agent_status) || agent.created_at) && (
+      {((!archived && agent.agent_status) || agent.created_at || agent.archived_at) && (
         // Bottom line: live activity / last message on the left, with the relative
         // created-at timestamp pinned to the bottom-right. The timestamp lives here
         // (rather than on the badge row above) so the badge row keeps its full width
@@ -156,7 +156,20 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
               ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })
               : null}
           </span>
-          {agent.created_at ? (
+          {/* An archived row shows when it ENDED, not when it was spawned: the
+              history list is ordered by that (see db.ListArchivedAgents), and a
+              list sorted on one timestamp while showing another reads as
+              unsorted. Falls back to created_at for a legacy row archived
+              before the timestamp was recorded. Native title (not <Tooltip>) -
+              this renders once per sidebar row, see CLAUDE.md. */}
+          {archived && agent.archived_at ? (
+            <span
+              className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
+              title={`${archivedEndStateBadge(agent.end_state).label} ${new Date(agent.archived_at * 1000).toLocaleString()}`}
+            >
+              <RelativeTime createdAt={agent.archived_at} />
+            </span>
+          ) : agent.created_at ? (
             <span
               className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
               title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}

@@ -686,8 +686,18 @@ func simArchivedAgents() []api.AgentResponse {
 	archived := true
 	finished := api.Finished
 	stopped := api.Stopped
-	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, ageHours time.Duration) api.AgentResponse {
-		createdAt := simNow().Add(-ageHours * time.Hour).Unix()
+	// createdHours / archivedHours are independent so the seeded history shows
+	// what the real list does: it is ordered by when a head was killed/merged,
+	// not by when it was spawned (a long-running head archived recently sorts
+	// above a short one spawned after it). archivedHours < 0 seeds a legacy row
+	// with no recorded archive time.
+	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, createdHours, archivedHours time.Duration) api.AgentResponse {
+		createdAt := simNow().Add(-createdHours * time.Hour).Unix()
+		var archivedAt *int64
+		if archivedHours >= 0 {
+			ts := simNow().Add(-archivedHours * time.Hour).Unix()
+			archivedAt = &ts
+		}
 		es := endState
 		return api.AgentResponse{
 			Id:            id,
@@ -700,18 +710,20 @@ func simArchivedAgents() []api.AgentResponse {
 			CreatedAt:     &createdAt,
 			Archived:      &archived,
 			EndState:      &es,
+			ArchivedAt:    archivedAt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    status,
 				Timestamp: simNow().Format(time.RFC3339),
 			},
 		}
 	}
+	// Listed newest-archived first, as the real ListArchivedAgents orders them.
 	return []api.AgentResponse{
-		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5),
-		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8),
-		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26),
-		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30),
-		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49),
+		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5, 2),
+		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30, 4),
+		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8, 7),
+		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26, 25),
+		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49, -1),
 	}
 }
 
@@ -3855,6 +3867,14 @@ var simChatEvents = []string{
 	// file its own numbered block.
 	`{"type":"assistant","message":{"id":"msg_sim_sed2","content":[{"type":"tool_use","id":"toolu_sim_sed2","name":"Bash","input":{"command":"sed -n 1,4p web/src/lib/lineRange.ts; echo '--- 8< ---'; sed -n 10,16p web/src/lib/lineRange.ts"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sed2","content":"// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- 8< ---\nexport function parseLineRange(hash: string): LineRange | null {\n  const m = /^#?L(\\d+)(?:-L?(\\d+))?/.exec(hash || '')\n  if (!m) return null\n  const a = parseInt(m[1], 10)\n  const b = m[2] ? parseInt(m[2], 10) : a\n  return { start: Math.min(a, b), end: Math.max(a, b) }\n}"}]}}`,
+	// An investigation script: a `cd`, greps, a tail, and the `echo` headings an
+	// agent writes between them. Not a pure read, so the card stays a Bash card -
+	// but its OUTPUT is split back at those headings and each stretch rendered as
+	// what produced it: grep's own line numbers in the gutter with the file's
+	// language, the tail highlighted as markdown, the headings coloured as the
+	// strings they are. See web/src/lib/shellSections.ts.
+	`{"type":"assistant","message":{"id":"msg_sim_probe","content":[{"type":"tool_use","id":"toolu_sim_probe","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry\ngrep -n \"rclone\" mise/config.toml || echo \"no rclone in mise/config.toml\"\necho \"=== retry helpers ===\"\ngrep -n \"backoff\\|attempt\" internal/artifacts/upload.go | head\necho \"=== docs tail ===\"\ntail -6 docs/artifacts.md\necho \"=== docs headings ===\"\ngrep -n '^#' docs/artifacts.md","description":"Check rclone config, the retry helpers and the docs structure"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_probe","content":"no rclone in mise/config.toml\n=== retry helpers ===\n88:// sleepBackoff waits out the jittered exponential delay for one attempt.\n100:func sleepBackoff(attempt int) {\n101:\tbase := 100 * time.Millisecond\n102:\td := base << attempt\n118:\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n=== docs tail ===\nArtifacts are generated per head and diffed against the base ref, so a run\nonly uploads what actually changed.\n\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n=== docs headings ===\n1:# Artifacts\n12:## Generating\n40:## TODO"}]}}`,
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,

@@ -43,9 +43,11 @@ export function BranchTag({
       }}
     >
       {icon && <GitBranch className="w-3.5 h-3.5 shrink-0" />}
-      {/* Native title (not Tooltip): a plain non-interactive span showing text
-          that can truncate - see the tooltip conventions in CLAUDE.md. */}
-      <span className="truncate" title={label != null && label !== branch ? branch : undefined}>{label ?? branch}</span>
+      {/* No native title on the name. It only ever fired for a `label` caller (the
+          agent header's bare head id), where it repeated the full branch name that
+          the copy button's tooltip - right next to it - already shows, in OS
+          chrome with its own delay. One tooltip on this row is enough. */}
+      <span className="truncate">{label ?? branch}</span>
       <Tooltip
         content={
           <>

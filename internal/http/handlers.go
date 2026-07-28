@@ -679,6 +679,10 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		es := h.EndState
 		endState = &es
 	}
+	var archivedAt *int64
+	if h.ArchivedAt != 0 {
+		archivedAt = &h.ArchivedAt
+	}
 	var netEnf *string
 	if m := string(heads.EgressModeFor(h.ID)); m != "" {
 		netEnf = &m
@@ -705,6 +709,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		HasUnreadChanges:   &h.HasUnreadChanges,
 		Archived:           &archived,
 		EndState:           endState,
+		ArchivedAt:         archivedAt,
 		MergeWhenGreen:     &h.MergeWhenGreen,
 		PublishWhenGreen:   &h.PublishWhenGreen,
 	}

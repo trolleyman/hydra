@@ -43,6 +43,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
+import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
@@ -61,6 +62,7 @@ import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { ToolApproval } from './ToolApproval'
+import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -2155,6 +2157,131 @@ function FileViewSections({ sections }: { sections: FileViewSection[] }) {
   )
 }
 
+// One rendered line of a shell script's sectioned output.
+interface ScriptOutputRow {
+  // The line's number in the file it came from ('' when it has none).
+  num: string
+  // The line's content, already highlighted.
+  html: string
+  // The `path:` a multi-file search printed in front of the line, shown lowlit
+  // so the file it names does not read as part of the line's code.
+  prefix?: string
+  // 'code' is a line of some file, 'marker' a separator the script echoed, and
+  // 'plain' output nothing could be said about.
+  tone: 'code' | 'marker' | 'plain'
+}
+
+// scriptMatchRows renders a search's output: the file line numbers grep printed
+// in the gutter, the rest highlighted as the file it came from. Consecutive
+// lines from the SAME file are highlighted together - a search prints
+// non-contiguous lines, so this is as much context as the highlighter can
+// honestly be given, and it keeps a multi-file search from colouring one file's
+// lines by another's language.
+function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
+  const only = section.match.paths.length === 1 ? section.match.paths[0] : ''
+  const rows: ScriptOutputRow[] = []
+  let run: MatchLine[] = []
+  let runLang = ''
+  const flush = () => {
+    if (run.length === 0) return
+    const html = highlightLines(run.map((l) => l.text).join('\n'), runLang || 'plaintext')
+    run.forEach((l, i) => rows.push({ num: l.num, html: html[i] ?? '', prefix: l.path || undefined, tone: 'code' }))
+    run = []
+  }
+  for (const line of parseMatchLines(section.lines, section.match.paths)) {
+    if (line.separator) {
+      flush()
+      rows.push({ num: '', html: '', tone: 'plain' })
+      continue
+    }
+    const lang = langFromPath(line.path || only)
+    if (lang !== runLang) flush()
+    runLang = lang
+    run.push(line)
+  }
+  flush()
+  return rows
+}
+
+// scriptOutputRows turns the sections of a shell script's output (lib/
+// shellSections) into the rows the panel below renders: file content highlighted
+// by its own extension and numbered by its own line numbers, the script's `echo`
+// separators coloured as the strings they are, and anything unattributed left as
+// the plain terminal text it was.
+function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
+  const rows: ScriptOutputRow[] = []
+  for (const section of sections) {
+    if (section.kind === 'matches') {
+      rows.push(...scriptMatchRows(section))
+      continue
+    }
+    if (section.kind !== 'view') {
+      // 'plaintext' is not a grammar, so this is just the escaped lines - which
+      // is what both a separator and unattributable output want.
+      const escaped = highlightLines(section.lines.join('\n'), 'plaintext')
+      const marker = section.kind === 'marker'
+      escaped.forEach((html) => rows.push({
+        num: '',
+        html: marker ? `<span class="token string">${html}</span>` : html,
+        tone: marker ? 'marker' : 'plain',
+      }))
+      continue
+    }
+    const view = section.view
+    // A `cat -n` brought its own numbers; a range knows where it started; a
+    // plain `tail` counts back from an end nothing here knows, so it gets the
+    // highlighting without the gutter.
+    const nums: string[] = []
+    const code: string[] = []
+    for (const line of section.lines) {
+      const numbered = view.numbered ? /^\s{0,6}(\d+)\t(.*)$/.exec(line) : null
+      nums.push(numbered ? numbered[1] : view.start != null && !view.numbered ? String(view.start + code.length) : '')
+      code.push(numbered ? numbered[2] : line)
+    }
+    const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
+    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', tone: 'code' }))
+  }
+  return rows
+}
+
+// ScriptOutputPanel renders a Bash step's output as the sections its own script
+// produced (see lib/shellSections) instead of as one anonymous wall of terminal
+// text: each stretch highlighted as the file it came from, numbered by that
+// file's line numbers, with the `echo` separators between them coloured as the
+// strings the script printed.
+//
+// It stays ONE panel with one scrollbar - this is still the command's output,
+// read top to bottom - and the gutter column only appears when some line in it
+// actually has a number to show.
+function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
+  const rows = useMemo(() => scriptOutputRows(sections), [sections])
+  const gutter = rows.some((r) => r.num !== '')
+  return (
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+      {/* data-copy-code / data-copy-line: the rows are grid cells, not block
+          elements, so without them a copy hands over every line run together
+          (see lib/copyMarkdown). */}
+      <div data-copy-code className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-[11px] leading-4 font-mono`}>
+        {rows.map((row, i) => (
+          <Fragment key={i}>
+            {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
+            {gutter && (
+              <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{row.num}</span>
+            )}
+            <span
+              data-copy-line
+              className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
+            >
+              {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
+              <span dangerouslySetInnerHTML={{ __html: row.html }} />
+            </span>
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // EditDiffPanel shows an Edit as a unified diff instead of two disembodied
 // blobs: lines the edit leaves alone are context, the rest are -/+ rows, and
 // the characters that actually changed are marked with the same word-diff
@@ -2806,6 +2933,23 @@ const ToolCard = memo(function ToolCard({
       ? splitFileViewOutput(fileViewSteps, stripAnsi(renderedResult))
       : null
 
+  // A script that is not ALL reads still says a great deal about its own output.
+  // The constant `echo`s an agent puts between its steps mark where each
+  // command's output begins, and the command in between names the file its lines
+  // came from - so the wall of terminal text can be given back its structure:
+  // file content highlighted by extension, grep's own line numbers in a gutter,
+  // the separators coloured as strings (see lib/shellSections).
+  //
+  // Only where the Read presentation above did not already claim the output, and
+  // never over ANSI colour (a `grep --color` line is not the file's own text) or
+  // an error (stderr interleaves with stdout in an order no parse of the script
+  // can predict, so every section boundary would be a guess).
+  const scriptSteps = isBash && fileViewSections === null ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
+  const scriptSections =
+    scriptSteps && renderedResult !== undefined && !item.isError && !hasAnsi(renderedResult)
+      ? splitScriptOutput(scriptSteps, renderedResult)
+      : null
+
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is
   // "simple" (fully described by the header, so the Input panel is hidden), and
@@ -3055,7 +3199,7 @@ const ToolCard = memo(function ToolCard({
               ) : isGlob ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
               ) : isWebFetch ? (
-                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline">{input!.url as string}</a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline"><UrlText url={input!.url as string} /></a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
               ) : isFileChanges ? (
                 <FileChangesPanel changes={input?.changes} worktree={worktree} />
               ) : isWrite ? (
@@ -3139,6 +3283,8 @@ const ToolCard = memo(function ToolCard({
                           ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : fileViewSections
                           ? <FileViewSections sections={fileViewSections} />
+                        : scriptSections
+                          ? <ScriptOutputPanel sections={scriptSections} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
@@ -4953,6 +5099,10 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
 // the comparator so a change to any of them still refreshes the list.
 interface SettledMessagesProps {
   items: ChatItem[]
+  // The in-flight streamed reply, rendered as the list's last row so the
+  // settled event can take that row over in place. Kept out of `items` so the
+  // settled rows' memo survives a per-frame stream update.
+  liveItem: ChatItem | null
   liveFromId: number | null
   renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   serif: boolean
@@ -5020,28 +5170,38 @@ const SettledRow = memo(
 )
 
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
-    return (
-      <>
-        {items.map((item) => (
-          <SettledRow
-            key={item.id}
-            item={item}
-            animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
-            renderItem={renderItem}
-            shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
-            serif={serif}
-            connected={connected}
-            worktreePath={worktreePath}
-            subByToolUse={subByToolUse}
-            subagents={subagents}
-          />
-        ))}
-      </>
+  function SettledMessages({ items, liveItem, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
+    const row = (item: ChatItem) => (
+      <SettledRow
+        key={item.id}
+        item={item}
+        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        renderItem={renderItem}
+        shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
+        serif={serif}
+        connected={connected}
+        worktreePath={worktreePath}
+        subByToolUse={subByToolUse}
+        subagents={subagents}
+      />
     )
+    // The settled rows are memoized as ELEMENTS, not just per-row components: a
+    // streamed reply re-renders this list once per animation frame (it is the
+    // last row, see liveItem), and handing React the identical element objects
+    // back lets it bail on each settled subtree instead of rebuilding an element
+    // per row 60 times a second. The deps are exactly this component's memo keys
+    // below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
+    const rows = useMemo(() => items.map(row), [items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds])
+    // ONE keyed list, live row included. It has to be the same list the settled
+    // row lands in: a separate slot beside it would be a separate position, and
+    // React would tear the live node down to build the settled one - which is
+    // the whole thing this arrangement exists to avoid.
+    return <>{liveItem ? [...rows, row(liveItem)] : rows}</>
   },
   (a, b) =>
     a.items === b.items &&
+    a.liveItem === b.liveItem &&
     a.liveFromId === b.liveFromId &&
     a.renderItem === b.renderItem &&
     a.shellCwds === b.shellCwds &&
@@ -5138,9 +5298,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // re-renders and the whole connection's worth of durations stays in hand.
   const thoughtDurationsRef = useRef<Map<string, number>>(new Map())
   // The in-flight streamed content block (token streaming via stream_event
-  // deltas), rendered live below the settled items and superseded by the
-  // complete assistant event that follows it.
-  const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string } | null>(null)
+  // deltas), superseded by the complete assistant event that follows it. A
+  // streamed REPLY renders as the transcript's last row (see liveItem); a
+  // streamed THOUGHT renders as its own card below it.
+  // `id` is the transcript-item id the block is rendered under, so the settled
+  // event can take the row over in place (see liveId in the reducer).
+  const [stream, setStream] = useState<{ kind: 'assistant' | 'thinking'; text: string; id: number } | null>(null)
   // The agent's current plan (its latest TodoWrite), shown in the floating
   // PlanPanel (item 17). Empty until the agent writes a to-do list.
   // Seeded from the persisted plan (planStore) so navigating away and back shows
@@ -5559,8 +5722,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const batch = pending.splice(0, pending.length)
       setItems((prev) => [...prev, ...batch])
     }
-    const push = (raw: DistributiveOmit<ChatItem, 'id'>) => {
-      const id = nextId++
+    // `forcedId` re-uses an id already on screen (the live streamed block's, see
+    // liveId) so the settled row lands on the same React key and keeps its DOM.
+    const push = (raw: DistributiveOmit<ChatItem, 'id'>, forcedId?: number) => {
+      const id = forcedId ?? nextId++
       // Stamp the item's wall-clock time for the commit-chip interleave:
       // replayed events use the transcript's timestamp (prevEventTs carries it
       // forward over ring lines, which have none), live items arrival time.
@@ -5603,6 +5768,41 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     let streamBuf: { kind: 'assistant' | 'thinking'; text: string } | null = null
     let revealed = 0
     let streamFrame: number | null = null
+    // The item id the in-flight block is rendered under. A live text block is a
+    // real row in the transcript list (see liveItem), keyed by this id, and the
+    // settled event that supersedes it REUSES the id - so React updates that row
+    // in place instead of unmounting one node and mounting an identical one.
+    // That is what keeps a text selection alive across the swap: a selection
+    // anchored in a text node dies the moment the browser sees that node
+    // removed, which is why selecting a reply while it streamed used to clear
+    // itself a beat later. Allocated on the first rendered frame of a block,
+    // consumed by the settle, and reset by the next block.
+    let liveId: number | null = null
+    // The kind and text last rendered under liveId, so a turn that ends without
+    // the settled event ever arriving can still commit what was streamed.
+    let liveKind: 'assistant' | 'thinking' | null = null
+    let liveText: string | null = null
+    const takeLiveId = () => {
+      if (liveId == null) {
+        liveId = nextId++
+        // Stamp it like a pushed item so an interleaved commit chip sorts around
+        // it the same way before and after it settles (see mergedItems).
+        itemTsRef.current.set(liveId, Date.now())
+      }
+      return liveId
+    }
+    // The id to settle a finished block under: the one it is already rendered
+    // with when this is the block we streamed, otherwise undefined (push then
+    // allocates a fresh one as usual). Consumed, so a second block in the same
+    // message can't claim the same row.
+    const takeLive = (kind: 'assistant' | 'thinking'): number | undefined => {
+      if (liveKind !== kind || liveId == null) return undefined
+      const id = liveId
+      liveId = null
+      liveKind = null
+      liveText = null
+      return id
+    }
     // Which block kinds this message streamed live. `message_stop` clears
     // streamBuf (to drop the in-flight node) BEFORE the settled assistant/thinking
     // event arrives, so streamBuf can't tell the settle "you were already on
@@ -5662,10 +5862,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const REVEAL_CAP = 40 // max chars/frame so a big burst never dumps at once
     const onStreamFrame = () => {
       streamFrame = null
-      if (!streamBuf) {
-        setStream(null)
-        return
-      }
+      if (!streamBuf) return
       const full = streamBuf.text.length
       if (smoothStreamRef.current) {
         if (revealed < full) {
@@ -5676,7 +5873,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       } else {
         revealed = full
       }
-      setStream({ kind: streamBuf.kind, text: streamBuf.text.slice(0, revealed) })
+      liveKind = streamBuf.kind
+      liveText = streamBuf.text.slice(0, revealed)
+      setStream({ kind: liveKind, text: liveText, id: takeLiveId() })
       // Keep animating until the reveal catches up, even after deltas stop.
       if (revealed < full) scheduleStreamFlush()
     }
@@ -5693,16 +5892,58 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       streamBuf = { kind, text }
       revealed = text.length
       streamedKinds.add(kind)
-      setStream({ kind, text })
+      liveId = null
+      liveKind = kind
+      liveText = text
+      setStream({ kind, text, id: takeLiveId() })
     }
-    const clearStream = () => {
-      streamBuf = null
+    const stopStreamFrame = () => {
       revealed = 0
       if (streamFrame != null) {
         cancelAnimationFrame(streamFrame)
         streamFrame = null
       }
+    }
+    const clearStream = () => {
+      streamBuf = null
+      liveId = null
+      liveKind = null
+      liveText = null
+      stopStreamFrame()
       setStream(null)
+    }
+    // The block is finished but its settled event hasn't arrived yet
+    // (message_stop lands first, as its own frame). Keep the rendered row -
+    // blanking it here is what made the text flash out and, worse, tore down the
+    // node any selection in it was anchored to. It stays until the settled event
+    // supersedes it in place, or the turn ends (see settleLiveStream).
+    const endStream = () => {
+      const full = streamBuf?.text ?? null
+      const kind = streamBuf?.kind ?? null
+      streamBuf = null
+      stopStreamFrame()
+      // Show the whole block: the paced reveal may still have been catching up,
+      // and the settled event about to land would jump to the full text anyway.
+      if (full != null && kind != null && full !== liveText) {
+        liveKind = kind
+        liveText = full
+        setStream({ kind, text: full, id: takeLiveId() })
+      }
+    }
+    // Commit whatever is still rendered live as a real item, under the same id,
+    // when nothing else will: the turn ended (or was interrupted) without the
+    // settled event that normally supersedes it.
+    const settleLiveStream = () => {
+      const kind = streamBuf?.kind ?? liveKind
+      // The buffer (everything received) beats the revealed prefix: a turn cut
+      // short should keep all of what the agent actually said.
+      const text = streamBuf?.text ?? liveText
+      if (kind == null || !text?.trim()) {
+        clearStream()
+        return
+      }
+      push({ kind, text, noEntrance: true }, takeLiveId())
+      clearStream()
     }
 
     // --- Sub-agent (Task tool) routing -------------------------------------
@@ -6331,12 +6572,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // Codex can be interrupted before it emits item/completed. Preserve
         // everything received so far as the assistant's partial response
         // before closing the presentation stream and adding the boundary.
-        if (streamBuf?.text.trim()) {
-          push(streamBuf.kind === 'assistant'
-            ? { kind: 'assistant', text: streamBuf.text, noEntrance: true }
-            : { kind: 'thinking', text: streamBuf.text, noEntrance: true })
-        }
-        clearStream()
+        settleLiveStream()
         push({ kind: 'interrupted' })
         interruptPending = true
         endPendingTools()
@@ -6622,7 +6858,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               // the text is already on screen, so a fade-in on swap flickers
               // (item 56). streamedKinds (not streamBuf, which message_stop has
               // already nulled) remembers we streamed this text.
-              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid })
+              //
+              // takeLive hands over the id that block is ALREADY rendered under,
+              // so this settles it in place - same React key, same DOM nodes,
+              // and anything selected inside it stays selected.
+              push({ kind: 'assistant', text: block.text, noEntrance: streamedKinds.has('assistant'), uuid: ev.uuid }, takeLive('assistant'))
             } else if (block.type === 'thinking') {
               // Duration comes from the daemon (a hydra_thinking event keyed by
               // this message id, already in hand - sent before the backfill and
@@ -6638,6 +6878,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 dur = Math.max(0, evTs - prevTs)
               }
               if (block.thinking?.trim() || dur != null) {
+                // No id hand-over here (unlike the text block above): a live
+                // thought renders as its own card below the transcript, not as a
+                // row in it, so there is no node to settle in place.
                 push({ kind: 'thinking', msgId: msgId || undefined, text: block.thinking ?? '', durationMs: dur, noEntrance: streamedKinds.has('thinking'), uuid: ev.uuid })
               }
             } else if (block.type === 'tool_use' && block.id) {
@@ -6701,8 +6944,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const sr = ev.message?.stop_reason
           if (sr && sr !== 'tool_use') histStopReason = sr
           // The complete event supersedes any in-flight streamed block (finals
-          // always follow their own deltas). Cleared in the same batch as the
-          // push above, so the text swaps without a flash.
+          // always follow their own deltas). The settled item is flushed in the
+          // SAME batch as the clear (the normalized path does this too): left to
+          // its microtask, React can render the gap between them - the text
+          // blinks, and the live row is torn down and rebuilt instead of updated
+          // in place, taking any selection inside it with it.
+          if (!replaying) flush()
           clearStream()
           return
         }
@@ -6742,10 +6989,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             clearSending()
             // tool_use input streaming (input_json_delta) is not rendered; the
             // tool card appears with the complete assistant event.
-            streamBuf = bt === 'text' ? { kind: 'assistant', text: '' } : bt === 'thinking' ? { kind: 'thinking', text: '' } : null
-            revealed = 0
-            if (streamBuf) streamedKinds.add(streamBuf.kind)
-            scheduleStreamFlush()
+            const kind = bt === 'text' ? 'assistant' : bt === 'thinking' ? 'thinking' : null
+            if (kind) {
+              // A new block gets its own row. If the previous one is somehow
+              // still live (its settled event never arrived), commit it first
+              // rather than let this one overwrite it.
+              settleLiveStream()
+              streamBuf = { kind, text: '' }
+              revealed = 0
+              streamedKinds.add(kind)
+              scheduleStreamFlush()
+            }
           } else if (e.type === 'content_block_delta' && streamBuf) {
             const d = e.delta
             if (d?.type === 'text_delta' && typeof d.text === 'string') {
@@ -6774,7 +7028,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             turnTokensRef.current += curMsgTokensRef.current
             curMsgTokensRef.current = 0
             setTurnTokens(turnTokensRef.current)
-            clearStream()
+            endStream()
           }
           return
         }
@@ -6816,7 +7070,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }
           }
           if (changed) scheduleSubFlush()
-          clearStream()
+          // The turn is over: anything still rendered live was never settled by
+          // an assistant event, so commit it rather than blank it.
+          settleLiveStream()
           endPendingTools()
           // The turn is over, so any question it left unanswered can no longer
           // be answered through the CLI (see expireQuestions).
@@ -8899,6 +9155,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
+  // The in-flight streamed reply is the LAST ROW of the transcript, not a
+  // separate node underneath it: it carries the id its settled event will land
+  // on, so the swap is an in-place update of one row (see liveId). Rendering it
+  // outside the list is what used to make it a different DOM node from the
+  // message it became - the browser dropped any selection inside it, and the
+  // text blinked out for the frame between the two.
+  //
+  // A closing fence is faked while the text ends inside an open ``` block, so
+  // the partial code renders as a code block rather than raw backticks.
+  // (A streamed THOUGHT still renders as its own card below - see `stream`
+  // further down: a live thought is a different shape from a settled one.)
+  const liveItem = useMemo<ChatItem | null>(
+    () =>
+      stream && stream.kind === 'assistant'
+        ? { id: stream.id, kind: 'assistant', text: closeOpenFence(stream.text), noEntrance: true }
+        : null,
+    [stream],
+  )
   // The turn's end-of-turn "Crunched for Xs" footer (a result item) has landed.
   // The agent status flip that clears isTurnRunning can lag a frame behind it, so
   // gate the live "working" indicator on this too - otherwise both the footer and
@@ -9029,6 +9303,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           <SettledMessages
             items={mergedItems}
+            liveItem={liveItem}
             liveFromId={liveFromId}
             renderItem={renderItem}
             serif={serif}
@@ -9038,20 +9313,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             subagents={subagents}
             shellCwds={shellCwds}
           />
-          {/* The in-flight streamed block: markdown-rendered live (with a
-              virtual closing fence while inside a code block); streamed thinking
-              uses the same collapsed card as settled thoughts, its preview
+          {/* The in-flight streamed REPLY is rendered as the transcript's last
+              row (see liveItem); only a streamed thought lands here, using the
+              same collapsed card as settled thoughts with its preview
               auto-updating as tokens arrive. It's the current turn's response,
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
-              no blinking caret or per-word opacity animation is applied here:
-              either one makes reparsed Markdown visibly flicker as delimiters
+              no blinking caret or per-word opacity animation is applied to
+              either: one makes reparsed Markdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
-          {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>
-              <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
-            </div>
-          )}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
               and the running output-token count when the CLI reports it. While a
