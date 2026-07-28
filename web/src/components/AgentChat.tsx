@@ -8306,13 +8306,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     )
   }
 
-  // Insert text into the composer at the caret, as its own undo step - used for
-  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
-  // paired with the chip's own step, walks the whole paste back).
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" paste markers into the composer at the caret, as their
+  // own undo step, so a single Ctrl+Z removes them (and, paired with the chip's
+  // own step, walks the whole paste back). The text before the caret decides
+  // whether they need a leading space; they never carry a trailing one, so the
+  // caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
+    const insert = pasteMarkerText(names, input.slice(0, start))
     const caret = start + insert.length
     commit(
       (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
@@ -8332,7 +8335,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
