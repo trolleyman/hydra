@@ -247,6 +247,12 @@ type Meta struct {
 	// Log is the captured stdout+stderr lines of an in-flight generation, surfaced
 	// live so the UI can show a full scrollable log. Transient, like Progress.
 	Log []LogLine `json:"-"`
+	// Queued is the entry's 1-based place in the generation queue while it is
+	// waiting for a slot, and 0 once it is actually running. An entry is marked
+	// in-flight BEFORE it acquires a slot, so without this a queued generation is
+	// indistinguishable from a running one - same StatusGenerating, same ticking
+	// StartedAt, same empty log. Transient, like Progress.
+	Queued int `json:"-"`
 }
 
 // ChangeType classifies an artifact file across the two compared versions.
@@ -947,7 +953,7 @@ func (m *Manager) Peek(script string, v Version) (Meta, bool, error) {
 		return meta, true, nil
 	}
 	if _, inFlight := m.gens[dir]; inFlight {
-		meta := Meta{Script: script, Key: key, Ref: ref, Status: StatusGenerating, Progress: m.progress[dir], StartedAt: m.startedAt[dir]}
+		meta := Meta{Script: script, Key: key, Ref: ref, Status: StatusGenerating, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Queued: m.sched.queuePosition(dir)}
 		m.mu.Unlock()
 		return meta, true, nil
 	}
@@ -977,6 +983,9 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		}
 		prog := m.progress[dir]
 		started := m.startedAt[dir]
+		// Read the queue position under the same lock as the rest of the snapshot,
+		// so "generating" and "2nd in the queue" describe the same instant.
+		queued := m.sched.queuePosition(dir)
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		// Include the files streamed so far (via FileMarker) so a late subscriber or
 		// the polling fallback sees the partial tiles instead of an empty card.
@@ -985,7 +994,7 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		if fg {
 			m.sched.promote(dir)
 		}
-		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy, Files: filesCopy}, nil
+		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy, Files: filesCopy, Queued: queued}, nil
 	}
 	started := time.Now().Unix()
 	// A cancellable context per generation so the prefetcher can preempt a stale
@@ -1392,11 +1401,11 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	// so mise-managed toolchains (go, bun, ...) resolve inside the run dir.
 	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
 
-	command := spec.Command
+	command := spec.Script
 	if spec.IsStrict() {
 		// Fail-fast: a broken render whose last step happens to exit 0 must not be
 		// cached as a success (set strict = false on the script to opt out).
-		command = sandbox.StrictScript(spec.Command)
+		command = sandbox.StrictScript(spec.Script)
 	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash, // a plain command, not an agent

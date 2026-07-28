@@ -99,7 +99,7 @@ Hydra to `0.0.0.0` with an auth key so it still checks the password.
 
 ## Live server previews over HTTPS
 
-Previews ([artifacts] `type = "server"`, see `docs/artifacts.md`) each run behind
+Previews (`[previews.<name>]`, see `docs/artifacts.md`) each run behind
 their own proxy port in `26601-26699`, separate from the main web port. Two things
 make them work behind a TLS front:
 

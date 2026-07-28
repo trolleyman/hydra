@@ -56,15 +56,15 @@ func fastManager() *Manager {
 }
 
 // pythonServerSpec is a server artifact that serves the checkout over HTTP.
-func pythonServerSpec(t *testing.T) config.ArtifactScript {
+func pythonServerSpec(t *testing.T) config.PreviewScript {
 	t.Helper()
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not available")
 	}
-	return config.ArtifactScript{
-		Name:       "demo",
-		Type:       config.ArtifactTypeServer,
-		Command:    `exec python3 -m http.server "$HYDRA_PREVIEW_PORT" --bind 127.0.0.1 --directory .`,
+	return config.PreviewScript{
+		Name: "demo",
+
+		Script:     `exec python3 -m http.server "$HYDRA_PREVIEW_PORT" --bind 127.0.0.1 --directory .`,
 		UnsafeHost: true,
 	}
 }
@@ -127,7 +127,7 @@ func get(t *testing.T, port int, path string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-func waitState(t *testing.T, m *Manager, root string, spec config.ArtifactScript, v Version, want State, timeout time.Duration) Status {
+func waitState(t *testing.T, m *Manager, root string, spec config.PreviewScript, v Version, want State, timeout time.Duration) Status {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var st Status
@@ -207,9 +207,9 @@ func TestLoadingPageWhileStarting(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	spec := config.ArtifactScript{
-		Name: "slow", Type: config.ArtifactTypeServer,
-		Command: "sleep 60", UnsafeHost: true,
+	spec := config.PreviewScript{
+		Name:   "slow",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -286,9 +286,9 @@ func TestReadyMarker(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	spec := config.ArtifactScript{
-		Name: "marker", Type: config.ArtifactTypeServer,
-		Command: `echo "` + ReadyMarker + `"; sleep 60`, UnsafeHost: true,
+	spec := config.PreviewScript{
+		Name:   "marker",
+		Script: `echo "` + ReadyMarker + `"; sleep 60`, UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -308,9 +308,9 @@ func TestNeverReadyErrorsWithLog(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	spec := config.ArtifactScript{
-		Name: "wedged", Type: config.ArtifactTypeServer,
-		Command: "echo building things; sleep 60", UnsafeHost: true,
+	spec := config.PreviewScript{
+		Name:   "wedged",
+		Script: "echo building things; sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.readyDefault = 400 * time.Millisecond
@@ -343,9 +343,9 @@ func TestWorktreeGoneReaper(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	spec := config.ArtifactScript{
-		Name: "wt", Type: config.ArtifactTypeServer,
-		Command: "sleep 60", UnsafeHost: true,
+	spec := config.PreviewScript{
+		Name:   "wt",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -375,9 +375,9 @@ func TestStopHeadAndStopAll(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	spec := config.ArtifactScript{
-		Name: "sleeper", Type: config.ArtifactTypeServer,
-		Command: "sleep 60", UnsafeHost: true,
+	spec := config.PreviewScript{
+		Name:   "sleeper",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute

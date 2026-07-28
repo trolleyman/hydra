@@ -164,6 +164,11 @@ area; do not re-derive it by reading source. Skip them otherwise.
 - **Adding a screenshot or artifact** (or working on `take-screenshots.ts` /
   `internal/artifacts`) -> [docs/screenshots.md](docs/screenshots.md); the
   user-facing artifacts feature is [docs/artifacts.md](docs/artifacts.md)
+- **Working on live previews** (`[previews.<name>]`, `internal/preview`, the
+  Previews row / `PreviewPanel.tsx`) -> the Previews section of
+  [docs/artifacts.md](docs/artifacts.md). Previews are their OWN config section,
+  not an artifact type; the legacy `[artifacts.<name>] type = "server"` spelling
+  is upgraded on read by `upgradeServerArtifacts`
 - **Working on macOS/darwin support** (`internal/sandbox/darwin.go`, Seatbelt
   profile, config seeding on macOS) -> [docs/macos-support.md](docs/macos-support.md)
   (audit of the darwin backend + phased implementation plan)

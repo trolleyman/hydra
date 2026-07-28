@@ -282,7 +282,11 @@ export function LiveLogPanes({ set }: { set: ArtifactSet }) {
   const left = useLiveLogLines(`${set.name}\0left`)
   const right = useLiveLogLines(`${set.name}\0right`)
   return (
-    <div className="flex gap-2 my-2">
+    // No vertical margin of its own: the card body's own p-3 already insets this,
+    // and stacking my-2 on top of it left ~20px of dead space above "Before" and
+    // below the log boxes. Spacing from the tiles that stream in below is the
+    // grid's job (its wrapper adds it), so it only exists when there ARE tiles.
+    <div className="flex gap-2">
       <LiveLogColumn label="Before" log={left} logUrl={set.left_log_url} error={set.left_error} />
       <LiveLogColumn label="After" log={right} logUrl={set.right_log_url} error={set.right_error} />
     </div>

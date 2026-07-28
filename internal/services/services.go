@@ -54,7 +54,7 @@ const pausedMessage = "No active agents in this project - services start when an
 // Status is a snapshot of one supervised service for the API/UI.
 type Status struct {
 	Name        string `json:"name"`
-	Command     string `json:"command"`
+	Script      string `json:"script"`
 	Host        bool   `json:"host"`
 	State       State  `json:"state"`
 	Restarts    int    `json:"restarts"`
@@ -222,7 +222,7 @@ func (m *Manager) StartProject(root string) {
 	}
 	ps := &projectServices{}
 	for _, spec := range cfg.Services {
-		if strings.TrimSpace(spec.Command) == "" {
+		if strings.TrimSpace(spec.Script) == "" {
 			continue
 		}
 		if !spec.IsEnabled() {
@@ -238,7 +238,7 @@ func (m *Manager) StartProject(root string) {
 			},
 			status: Status{
 				Name:        spec.Name,
-				Command:     spec.Command,
+				Script:      spec.Script,
 				Host:        spec.Host,
 				State:       StateRunning,
 				MaxRestarts: maxRestarts(spec),
@@ -580,11 +580,11 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	)
 	env = append(env, sandbox.MiseTrustEnv(root, root)...)
 
-	command := sv.spec.Command
+	command := sv.spec.Script
 	if sv.spec.IsStrict() {
 		// Fail-fast: a service that fails its setup mid-script must surface as a
 		// crash (and restart) rather than a healthy process (strict = false opts out).
-		command = sandbox.StrictScript(sv.spec.Command)
+		command = sandbox.StrictScript(sv.spec.Script)
 	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash,

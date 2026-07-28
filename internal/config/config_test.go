@@ -167,8 +167,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestArtifactsRoundTrip(t *testing.T) {
 	cfg := Config{
 		Artifacts: []ArtifactScript{
-			{Name: "web screenshots", Command: "bun run shots.ts", TimeoutSec: 600},
-			{Name: "docs", Command: "make docs-png"},
+			{Name: "web screenshots", Script: "bun run shots.ts", TimeoutSec: 600},
+			{Name: "docs", Script: "make docs-png"},
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestArtifactsRoundTrip(t *testing.T) {
 	if loaded == nil || len(loaded.Artifacts) != 2 {
 		t.Fatalf("expected 2 artifacts, got %+v", loaded)
 	}
-	if loaded.Artifacts[0].Name != "web screenshots" || loaded.Artifacts[0].Command != "bun run shots.ts" || loaded.Artifacts[0].TimeoutSec != 600 {
+	if loaded.Artifacts[0].Name != "web screenshots" || loaded.Artifacts[0].Script != "bun run shots.ts" || loaded.Artifacts[0].TimeoutSec != 600 {
 		t.Errorf("artifact[0] mismatch: %+v", loaded.Artifacts[0])
 	}
 	if loaded.Artifacts[1].Name != "docs" || loaded.Artifacts[1].TimeoutSec != 0 {
@@ -192,16 +192,14 @@ func TestArtifactsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestServerArtifactRoundTrip covers the server-preview fields: type,
-// idle_timeout_sec and ready_timeout_sec must survive a save/load cycle (a
-// dropped field would silently demote a preview to a diffed-media script).
-func TestServerArtifactRoundTrip(t *testing.T) {
+// TestPreviewRoundTrip covers the [previews.<name>] fields: command,
+// idle_timeout_sec and ready_timeout_sec must survive a save/load cycle, and a
+// media artifact saved alongside must stay in the artifacts section.
+func TestPreviewRoundTrip(t *testing.T) {
 	ports := "26610-26620"
 	cfg := Config{
-		Artifacts: []ArtifactScript{
-			{Name: "demo", Type: ArtifactTypeServer, Command: "run-demo.sh", IdleTimeoutSec: 60, ReadyTimeoutSec: 120},
-			{Name: "shots", Command: "bun run shots.ts"},
-		},
+		Artifacts:    []ArtifactScript{{Name: "shots", Script: "bun run shots.ts"}},
+		Previews:     []PreviewScript{{Name: "demo", Script: "run-demo.sh", IdleTimeoutSec: 60, ReadyTimeoutSec: 120}},
 		PreviewPorts: &ports,
 	}
 
@@ -213,18 +211,199 @@ func TestServerArtifactRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if len(loaded.Artifacts) != 2 {
-		t.Fatalf("expected 2 artifacts, got %+v", loaded.Artifacts)
+	if len(loaded.Previews) != 1 {
+		t.Fatalf("expected 1 preview, got %+v", loaded.Previews)
 	}
-	demo := loaded.Artifacts[0]
-	if !demo.IsServer() || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
-		t.Errorf("server artifact mismatch: %+v", demo)
+	demo := loaded.Previews[0]
+	if demo.Script != "run-demo.sh" || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
+		t.Errorf("preview mismatch: %+v", demo)
 	}
-	if loaded.Artifacts[1].IsServer() {
-		t.Errorf("media artifact wrongly server: %+v", loaded.Artifacts[1])
+	if len(loaded.Artifacts) != 1 || loaded.Artifacts[0].Name != "shots" {
+		t.Errorf("artifacts mismatch: %+v", loaded.Artifacts)
 	}
 	if lo, hi := loaded.ResolvePreviewPortRange(); lo != 26610 || hi != 26620 {
 		t.Errorf("preview port range = %d-%d, want 26610-26620", lo, hi)
+	}
+}
+
+// TestServerArtifactUpgradesToPreview covers the back-compat path: a config
+// still spelling a preview as an [artifacts.<name>] with type = "server" is
+// read as a PreviewScript (fields and all), leaves the artifacts list holding
+// only real media scripts, and is rewritten under [previews.<name>] on save.
+func TestServerArtifactUpgradesToPreview(t *testing.T) {
+	const legacy = `
+[artifacts.demo]
+type = "server"
+command = "run-demo.sh"
+idle_timeout_sec = 60
+ready_timeout_sec = 120
+
+[artifacts.shots]
+command = "bun run shots.ts"
+`
+	cfg, err := decodeConfig([]byte(legacy))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	if len(cfg.Previews) != 1 {
+		t.Fatalf("expected the server artifact to become a preview, got %+v", cfg.Previews)
+	}
+	demo := cfg.Previews[0]
+	if demo.Name != "demo" || demo.Script != "run-demo.sh" || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
+		t.Errorf("upgraded preview mismatch: %+v", demo)
+	}
+	if !cfg.PreviewsNamed {
+		t.Error("PreviewsNamed should follow the artifacts syntax that carried the entry")
+	}
+	if len(cfg.Artifacts) != 1 || cfg.Artifacts[0].Name != "shots" {
+		t.Errorf("server entry left in artifacts: %+v", cfg.Artifacts)
+	}
+
+	// Saving the upgraded config migrates the file.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	out := string(data)
+	if !strings.Contains(out, "[previews.demo]") {
+		t.Errorf("saved config has no [previews.demo]:\n%s", out)
+	}
+	if strings.Contains(out, "[artifacts.demo]") {
+		t.Errorf("saved config still has [artifacts.demo]:\n%s", out)
+	}
+	// The doc block mentions the legacy spelling, so only an uncommented
+	// assignment counts as "still written".
+	for ln := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "type =") {
+			t.Errorf("saved config still writes the legacy type key: %q\n%s", ln, out)
+		}
+	}
+}
+
+// TestMediaTypeIsDropped covers the other half of the type key's retirement:
+// artifacts have no kinds any more, so an explicit type = "media" is consumed on
+// read and gone from [artifacts.<name>] on the next save, exactly as a
+// type = "server" is (that one having moved to [previews.<name>]).
+func TestMediaTypeIsDropped(t *testing.T) {
+	for _, typ := range []string{`type = "media"`, `type = ""`, `type = "typoe"`} {
+		cfg, err := decodeConfig([]byte("[artifacts.shots]\n" + typ + "\ncommand = \"x\"\n"))
+		if err != nil {
+			t.Fatalf("decodeConfig %s: %v", typ, err)
+		}
+		if len(cfg.Artifacts) != 1 {
+			t.Fatalf("%s: expected the entry to stay an artifact, got %+v", typ, cfg.Artifacts)
+		}
+		if cfg.Artifacts[0].Type != "" {
+			t.Errorf("%s: Type survived decode as %q", typ, cfg.Artifacts[0].Type)
+		}
+
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if err := SaveToFile(path, cfg); err != nil {
+			t.Fatalf("SaveToFile: %v", err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		for ln := range strings.SplitSeq(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(ln), "type =") {
+				t.Errorf("%s: saved config still writes %q", typ, ln)
+			}
+		}
+	}
+}
+
+// TestCommandKeyUpgradesToScript covers the `command` -> `script` rename across
+// all four script sections: the old key still parses (a diffed git ref's config
+// can be arbitrarily old), lands in Script, and is gone from the file after a
+// save. `script` wins when an entry sets both.
+func TestCommandKeyUpgradesToScript(t *testing.T) {
+	const legacy = `
+[artifacts.shots]
+command = "render.sh"
+
+[previews.demo]
+command = "serve.sh"
+
+[services.pool]
+command = "pool.sh"
+
+[tests.unit]
+command = "go test ./..."
+`
+	cfg, err := decodeConfig([]byte(legacy))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	for _, tc := range []struct{ name, got, want string }{
+		{"artifact", cfg.Artifacts[0].Script, "render.sh"},
+		{"preview", cfg.Previews[0].Script, "serve.sh"},
+		{"service", cfg.Services[0].Script, "pool.sh"},
+		{"test", cfg.Tests[0].Script, "go test ./..."},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s: Script = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+	if c := cfg.Artifacts[0].LegacyCommand; c != "" {
+		t.Errorf("LegacyCommand survived decode: %q", c)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	out := string(data)
+	for ln := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "command =") {
+			t.Errorf("saved config still writes the legacy key: %q", ln)
+		}
+	}
+	if n := strings.Count(out, "script = "); n < 4 {
+		t.Errorf("expected 4 rendered script keys, got %d:\n%s", n, out)
+	}
+
+	// script wins over a same-entry command, and the fold is idempotent.
+	both, err := decodeConfig([]byte("[tests.unit]\ncommand = \"old\"\nscript = \"new\"\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig both: %v", err)
+	}
+	if both.Tests[0].Script != "new" {
+		t.Errorf("script should win over command, got %q", both.Tests[0].Script)
+	}
+}
+
+// TestPreviewPatchViaArtifactsEntry covers the layering escape hatch: a later
+// layer disabling a preview writes a plain [artifacts.<name>] table (that is how
+// such overrides were always written), so Merge must route it to the preview of
+// that name rather than dropping it into the artifacts list.
+func TestPreviewPatchViaArtifactsEntry(t *testing.T) {
+	base, err := decodeConfig([]byte("[previews.demo]\ncommand = \"run-demo.sh\"\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig base: %v", err)
+	}
+	over, err := decodeConfig([]byte("[artifacts.demo]\nenabled = false\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig over: %v", err)
+	}
+	base.Merge(over)
+
+	if len(base.Previews) != 1 || base.Previews[0].IsEnabled() {
+		t.Errorf("preview not disabled by the artifacts-shaped override: %+v", base.Previews)
+	}
+	if base.Previews[0].Script != "run-demo.sh" {
+		t.Errorf("override clobbered the inherited command: %+v", base.Previews[0])
+	}
+	if len(base.Artifacts) != 0 {
+		t.Errorf("override leaked into the artifacts list: %+v", base.Artifacts)
 	}
 }
 
@@ -271,7 +450,7 @@ echo hi
 	}
 
 	cfg := Config{Artifacts: []ArtifactScript{
-		{Name: "screenshots", Command: command, TimeoutSec: 900},
+		{Name: "screenshots", Script: command, TimeoutSec: 900},
 	}}
 	if err := SaveToFile(path, cfg); err != nil {
 		t.Fatalf("SaveToFile: %v", err)
@@ -321,8 +500,8 @@ func TestKeyCommentSurvivesMultilineArray(t *testing.T) {
 }
 
 func TestArtifactsMergeReplaces(t *testing.T) {
-	base := Config{Artifacts: []ArtifactScript{{Name: "a", Command: "x"}}}
-	base.Merge(Config{Artifacts: []ArtifactScript{{Name: "b", Command: "y"}}})
+	base := Config{Artifacts: []ArtifactScript{{Name: "a", Script: "x"}}}
+	base.Merge(Config{Artifacts: []ArtifactScript{{Name: "b", Script: "y"}}})
 	if len(base.Artifacts) != 1 || base.Artifacts[0].Name != "b" {
 		t.Errorf("expected merge to replace artifacts, got %+v", base.Artifacts)
 	}
@@ -336,8 +515,8 @@ func TestArtifactsMergeReplaces(t *testing.T) {
 func TestTestsRoundTrip(t *testing.T) {
 	cfg := Config{
 		Tests: []TestScript{
-			{Name: "go", Command: "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./...", TimeoutSec: 600},
-			{Name: "web", Command: "bun vitest run", Strict: boolPtr(false), Enabled: boolPtr(false)},
+			{Name: "go", Script: "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./...", TimeoutSec: 600},
+			{Name: "web", Script: "bun vitest run", Strict: boolPtr(false), Enabled: boolPtr(false)},
 		},
 		TestConcurrency: intPtr(2),
 	}
@@ -365,8 +544,8 @@ func TestTestsRoundTrip(t *testing.T) {
 }
 
 func TestTestsMergeReplaces(t *testing.T) {
-	base := Config{Tests: []TestScript{{Name: "a", Command: "x"}}}
-	base.Merge(Config{Tests: []TestScript{{Name: "b", Command: "y"}}})
+	base := Config{Tests: []TestScript{{Name: "a", Script: "x"}}}
+	base.Merge(Config{Tests: []TestScript{{Name: "b", Script: "y"}}})
 	if len(base.Tests) != 1 || base.Tests[0].Name != "b" {
 		t.Errorf("expected merge to replace tests, got %+v", base.Tests)
 	}
@@ -404,7 +583,7 @@ command = "x"
 	if cfg.Tests[0].Name != "go" || cfg.Tests[0].TimeoutSec != 600 {
 		t.Errorf("tests[0] mismatch: %+v", cfg.Tests[0])
 	}
-	if cfg.Tests[1].Name != "web lint" || cfg.Tests[1].Command != "eslint ." {
+	if cfg.Tests[1].Name != "web lint" || cfg.Tests[1].Script != "eslint ." {
 		t.Errorf("tests[1] (quoted key) mismatch: %+v", cfg.Tests[1])
 	}
 	if cfg.Tests[2].Name != "real-name" {
@@ -428,8 +607,8 @@ command = "x"
 // replaces wholesale.
 func TestNamedTestsMergeByName(t *testing.T) {
 	base := Config{Tests: []TestScript{
-		{Name: "go", Command: "go test ./...", TimeoutSec: 600},
-		{Name: "lint", Command: "eslint ."},
+		{Name: "go", Script: "go test ./...", TimeoutSec: 600},
+		{Name: "lint", Script: "eslint ."},
 	}}
 	over, err := decodeConfig([]byte(`
 [tests.lint]
@@ -448,18 +627,18 @@ command = "go test -short ./..."
 	if len(base.Tests) != 3 {
 		t.Fatalf("expected 3 tests after named merge, got %+v", base.Tests)
 	}
-	if base.Tests[0].Name != "go" || base.Tests[0].Command != "go test -short ./..." || base.Tests[0].TimeoutSec != 600 {
+	if base.Tests[0].Name != "go" || base.Tests[0].Script != "go test -short ./..." || base.Tests[0].TimeoutSec != 600 {
 		t.Errorf("go entry not patched (command overridden, timeout inherited): %+v", base.Tests[0])
 	}
-	if base.Tests[1].Name != "lint" || base.Tests[1].Command != "eslint ." || base.Tests[1].IsEnabled() {
+	if base.Tests[1].Name != "lint" || base.Tests[1].Script != "eslint ." || base.Tests[1].IsEnabled() {
 		t.Errorf("lint entry not patched (disabled, command kept): %+v", base.Tests[1])
 	}
-	if base.Tests[2].Name != "e2e" || base.Tests[2].Command != "playwright test" {
+	if base.Tests[2].Name != "e2e" || base.Tests[2].Script != "playwright test" {
 		t.Errorf("e2e entry not appended: %+v", base.Tests[2])
 	}
 
 	// A subsequent legacy-array layer still replaces wholesale.
-	base.Merge(Config{Tests: []TestScript{{Name: "only", Command: "z"}}})
+	base.Merge(Config{Tests: []TestScript{{Name: "only", Script: "z"}}})
 	if len(base.Tests) != 1 || base.Tests[0].Name != "only" {
 		t.Errorf("legacy layer should replace wholesale, got %+v", base.Tests)
 	}
@@ -469,19 +648,19 @@ command = "go test -short ./..."
 // counterparts of TestNamedTestsMergeByName.
 func TestNamedArtifactsServicesMergeByName(t *testing.T) {
 	cfg := Config{
-		Artifacts: []ArtifactScript{{Name: "shots", Command: "run shots", TimeoutSec: 900}},
-		Services:  []ServiceScript{{Name: "emu", Command: "emu up", MaxRestarts: intPtr(3)}},
+		Artifacts: []ArtifactScript{{Name: "shots", Script: "run shots", TimeoutSec: 900}},
+		Services:  []ServiceScript{{Name: "emu", Script: "emu up", MaxRestarts: intPtr(3)}},
 	}
 	cfg.Merge(Config{
 		ArtifactsNamed: true,
-		Artifacts:      []ArtifactScript{{Name: "shots", Enabled: boolPtr(false)}, {Name: "vids", Command: "run vids"}},
+		Artifacts:      []ArtifactScript{{Name: "shots", Enabled: boolPtr(false)}, {Name: "vids", Script: "run vids"}},
 		ServicesNamed:  true,
 		Services:       []ServiceScript{{Name: "emu", Enabled: boolPtr(false)}},
 	})
-	if len(cfg.Artifacts) != 2 || cfg.Artifacts[0].IsEnabled() || cfg.Artifacts[0].Command != "run shots" || cfg.Artifacts[1].Name != "vids" {
+	if len(cfg.Artifacts) != 2 || cfg.Artifacts[0].IsEnabled() || cfg.Artifacts[0].Script != "run shots" || cfg.Artifacts[1].Name != "vids" {
 		t.Errorf("artifacts named merge wrong: %+v", cfg.Artifacts)
 	}
-	if len(cfg.Services) != 1 || cfg.Services[0].IsEnabled() || cfg.Services[0].Command != "emu up" || *cfg.Services[0].MaxRestarts != 3 {
+	if len(cfg.Services) != 1 || cfg.Services[0].IsEnabled() || cfg.Services[0].Script != "emu up" || *cfg.Services[0].MaxRestarts != 3 {
 		t.Errorf("services named merge wrong: %+v", cfg.Services)
 	}
 }
@@ -491,8 +670,8 @@ func TestNamedArtifactsServicesMergeByName(t *testing.T) {
 // needs a quoted key).
 func TestNamedTestsRenderRoundTrip(t *testing.T) {
 	out := renderConfig(nil, Config{Tests: []TestScript{
-		{Name: "go", Command: "go test ./...", TimeoutSec: 600},
-		{Name: "web lint", Command: "eslint .", Enabled: boolPtr(false)},
+		{Name: "go", Script: "go test ./...", TimeoutSec: 600},
+		{Name: "web lint", Script: "eslint .", Enabled: boolPtr(false)},
 	}})
 	if !contains(out, "[tests.go]") || !contains(out, "[tests.\"web lint\"]") {
 		t.Fatalf("expected named-table headers:\n%s", out)
@@ -517,8 +696,8 @@ func TestNamedTestsRenderRoundTrip(t *testing.T) {
 	// Duplicate names stay representable: the second key is uniquified and an
 	// explicit name field carries the real name back through a decode.
 	dup := renderConfig(nil, Config{Tests: []TestScript{
-		{Name: "go", Command: "a"},
-		{Name: "go", Command: "b"},
+		{Name: "go", Script: "a"},
+		{Name: "go", Script: "b"},
 	}})
 	dcfg, err := decodeConfig([]byte(dup))
 	if err != nil {
@@ -581,7 +760,7 @@ command = "go test ./..."
 	if len(arts) != 1 || arts[0].Name != "shots" {
 		t.Errorf("artifacts = %+v", arts)
 	}
-	if len(tests) != 1 || tests[0].Name != "go" || tests[0].Command != "go test ./..." {
+	if len(tests) != 1 || tests[0].Name != "go" || tests[0].Script != "go test ./..." {
 		t.Errorf("tests = %+v", tests)
 	}
 }
@@ -619,7 +798,7 @@ timeout_sec = 30
 	if len(got) != 2 {
 		t.Fatalf("got %d artifacts, want 2: %+v", len(got), got)
 	}
-	if got[0].Name != "home" || got[0].Command != "shot home" {
+	if got[0].Name != "home" || got[0].Script != "shot home" {
 		t.Errorf("artifact[0] = %+v", got[0])
 	}
 	if got[1].Name != "about" || got[1].TimeoutSec != 30 {
@@ -882,8 +1061,8 @@ command = "make docs"
 	// Simulate an editor save: artifacts sent explicitly. "shots" is edited,
 	// "docs" is deleted, and a brand-new "extra" is added.
 	cfg := Config{Artifacts: []ArtifactScript{
-		{Name: "shots", Command: "bun newshots.ts", TimeoutSec: 120},
-		{Name: "extra", Command: "echo hi"},
+		{Name: "shots", Script: "bun newshots.ts", TimeoutSec: 120},
+		{Name: "extra", Script: "echo hi"},
 	}}
 	out := renderConfig([]byte(existing), cfg)
 	t.Logf("rendered:\n%s", out)
@@ -895,7 +1074,7 @@ command = "make docs"
 	if len(loaded.Artifacts) != 2 {
 		t.Fatalf("want 2 artifacts, got %+v", loaded.Artifacts)
 	}
-	if loaded.Artifacts[0].Name != "shots" || loaded.Artifacts[0].Command != "bun newshots.ts" || loaded.Artifacts[0].TimeoutSec != 120 {
+	if loaded.Artifacts[0].Name != "shots" || loaded.Artifacts[0].Script != "bun newshots.ts" || loaded.Artifacts[0].TimeoutSec != 120 {
 		t.Errorf("edit not applied: %+v", loaded.Artifacts[0])
 	}
 	if loaded.Artifacts[1].Name != "extra" {
@@ -952,11 +1131,11 @@ func TestStrictDefaultAndRoundTrip(t *testing.T) {
 
 	cfg := Config{
 		Artifacts: []ArtifactScript{
-			{Name: "lenient", Command: "bun shots.ts", Strict: boolPtr(false)},
-			{Name: "strict-default", Command: "make docs"},
+			{Name: "lenient", Script: "bun shots.ts", Strict: boolPtr(false)},
+			{Name: "strict-default", Script: "make docs"},
 		},
 		Services: []ServiceScript{
-			{Name: "lenient-svc", Command: "run.sh", Strict: boolPtr(false)},
+			{Name: "lenient-svc", Script: "run.sh", Strict: boolPtr(false)},
 		},
 	}
 	out := renderConfig(nil, cfg)
@@ -1128,10 +1307,12 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 		"# [copilot]",
 		docPrefix + " Codex-specific overrides",
 		"# [codex]",
-		// Artifacts documentation + commented example are always present.
+		// Artifacts + previews documentation and commented examples are always present.
 		docPrefix + " [artifacts.<name>]:",
 		"# [artifacts.screenshots]",
-		`# command = "bun run screenshots.ts"`,
+		"# node scripts/take-screenshots.ts",
+		docPrefix + " [previews.<name>]:",
+		"# [previews.app]",
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {

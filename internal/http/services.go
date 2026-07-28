@@ -14,7 +14,7 @@ func toServiceStatusResponse(sts []services.Status) api.ServiceStatusResponse {
 		pid, msg := s.PID, s.Message
 		out.Services = append(out.Services, api.ServiceStatus{
 			Name:        s.Name,
-			Command:     s.Command,
+			Script:      s.Script,
 			Host:        s.Host,
 			State:       api.ServiceStatusState(s.State),
 			Restarts:    s.Restarts,

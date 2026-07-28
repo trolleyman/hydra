@@ -5,6 +5,7 @@
 import type { AgentConfig } from './AgentConfig';
 import type { ArtifactScript } from './ArtifactScript';
 import type { McpServer } from './McpServer';
+import type { PreviewScript } from './PreviewScript';
 import type { ResourceLimits } from './ResourceLimits';
 import type { ReviewConfig } from './ReviewConfig';
 import type { ServiceScript } from './ServiceScript';
@@ -20,6 +21,10 @@ export type ConfigResponse = {
      * Per-project visual-artifact generation scripts ([artifacts.<name>] in config.toml)
      */
     artifacts?: Array<ArtifactScript> | null;
+    /**
+     * Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
+     */
+    previews?: Array<PreviewScript> | null;
     /**
      * Per-project long-running supervised commands ([services.<name>] in config.toml)
      */

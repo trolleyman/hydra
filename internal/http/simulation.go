@@ -1337,6 +1337,14 @@ func simTestRunners(id string) []api.TestRunResult {
 				},
 			},
 			{
+				// QUEUED, not running: test concurrency defaults to 1, so a project with
+				// several runners normally has some of them waiting rather than running.
+				// A run is marked in-flight before it takes a slot, so this looked
+				// exactly like a running one - and its clock read as time spent testing.
+				Name: "e2e", Status: api.TestStatusRunning,
+				Queued: ptr(2), StartedAt: ptr(simNow().Add(-95 * time.Second).Unix()),
+			},
+			{
 				Name: "playwright", Status: api.TestStatusRunning,
 				// No declared ::hydra:test:total::, but a prior run seeded an ESTIMATED
 				// denominator (48). TotalEstimated flags it approximate → the panel shows
@@ -2591,6 +2599,18 @@ func simArtifactSets(id string) []api.ArtifactSet {
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},
+		// Queued, not running: an entry is marked in-flight before it acquires a
+		// generation slot, so this is the state that used to be indistinguishable
+		// from the one above - spinner, climbing clock, no output. Both sides are
+		// waiting, so the card says so and names the clock as the wait.
+		{
+			Name:        "screenshots",
+			Status:      api.ArtifactSetStatusGenerating,
+			StartedAt:   &startedAt,
+			LeftQueued:  ptr(2),
+			RightQueued: ptr(3),
+			Files:       []api.ArtifactFile{},
+		},
 		// Failure: both sides failed, so the card surfaces the build log as two
 		// red-bordered terminals (the script's stderr is the error) instead of a
 		// separate error box. refresh retries.
@@ -3418,10 +3438,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			},
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
-			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
+			{Name: "screenshots", Script: "cd web\nnpm install\nnode scripts/take-screenshots.ts\n", TimeoutSec: ptr(900)},
+		}
+		resp.Previews = &[]api.PreviewScript{
+			{Name: "demo", Script: "cd web\nnpm install\nnpm run build\ncd ..\ngo run ./ server --simulation --addr \"$HYDRA_PREVIEW_ADDR\"\n", ReadyTimeoutSec: ptr(900)},
 		}
 		resp.Services = &[]api.ServiceScript{
-			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
+			{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
 		}
 	}
 	// Review overrides per scope: the shared forge settings live in the project
@@ -3456,7 +3479,7 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 	if projectId == "mobile-app" {
 		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 			Services: []api.ServiceStatus{
-				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
+				{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
 					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration - /dev/kvm not found)")},
 			},
 		})
@@ -3464,7 +3487,7 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 	}
 	api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 		Services: []api.ServiceStatus{
-			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},
+			{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},
 		},
 	})
 }

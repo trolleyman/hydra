@@ -23,6 +23,7 @@
 //   if (typeof window !== 'undefined') { const w = window as any; w.__rc = w.__rc || {}; w.__rc.Foo = (w.__rc.Foo||0)+1 }
 // then `await page.evaluate(() => (window as any).__rc)`.
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from './lib/browserProxy.ts'
 
 const PORT = process.env.PORT ?? '26600'
 const BASE = `http://localhost:${PORT}`
@@ -77,7 +78,7 @@ function top(byName: Record<string, number>, n = 25): string {
 }
 
 async function main() {
-  const browser = await chromium.launch()
+  const browser = await chromium.launch(proxyLaunchOptions())
   const page = await browser.newPage()
   await page.addInitScript({ content: initScript })
   page.on('pageerror', (e) => console.log('PAGEERROR:', e.message.split('\n')[0]))

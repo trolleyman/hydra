@@ -82,7 +82,7 @@ export function ServicesEditor({
     onChange(services.filter((_, i) => i !== index))
   }
   function add() {
-    onChange([...services, { name: '', command: '' }])
+    onChange([...services, { name: '', script: '' }])
   }
   async function restartAll() {
     if (!projectId || restarting) return
@@ -107,7 +107,7 @@ export function ServicesEditor({
         <InfoTooltip title="Project Services">
           <p>Long-running commands the daemon supervises while this project is open - e.g. a host-side pool of Android emulators shared by every head.</p>
           <p className="mt-1.5">Each service starts when the project opens, restarts with backoff if it exits unexpectedly (up to <strong>max restarts</strong>), and is process-group-killed on shutdown, project removal, or a config save.</p>
-          <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> from the project root, with <code className="text-blue-300">HYDRA_PROJECT_ROOT</code> and <code className="text-blue-300">HYDRA_SERVICE_NAME</code> set.</p>
+          <p className="mt-1.5">The script runs via <code className="text-blue-300">bash -c</code> from the project root, with <code className="text-blue-300">HYDRA_PROJECT_ROOT</code> and <code className="text-blue-300">HYDRA_SERVICE_NAME</code> set.</p>
         </InfoTooltip>
         <div className="flex-1" />
         <Tooltip content="Stop and restart this project's services (picks up saved config)">
@@ -220,10 +220,10 @@ export function ServicesEditor({
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
+                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Script</label>
                     <ShellEditor
-                      value={svc.command}
-                      onChange={(val) => update(index, { command: val })}
+                      value={svc.script}
+                      onChange={(val) => update(index, { script: val })}
                       placeholder="# e.g. scripts/emu-pool.sh up 3 --foreground"
                       rows={4}
                     />

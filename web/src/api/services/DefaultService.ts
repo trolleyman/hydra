@@ -957,8 +957,8 @@ export class DefaultService {
         });
     }
     /**
-     * List live server previews ([artifacts.<name>] type = "server") for a head
-     * Returns, per configured server-type artifact script, the preview instance status for the requested version (the head's uncommitted working tree or a specific commit - the same selection contract as the artifacts and tests endpoints), plus any still-running instances of those scripts at other versions. Purely a read: nothing is spawned. Returns an empty list when the project configures no server scripts.
+     * List live server previews ([previews.<name>]) for a head
+     * Returns, per configured [previews.<name>] script, the preview instance status for the requested version (the head's uncommitted working tree or a specific commit - the same selection contract as the artifacts and tests endpoints), plus any still-running instances of those scripts at other versions. Purely a read: nothing is spawned. Returns an empty list when the project configures no server scripts.
      *
      * @param projectId Project ID
      * @param id
@@ -992,11 +992,11 @@ export class DefaultService {
     }
     /**
      * Start (or ensure) a live server preview instance
-     * Ensures the named server-type artifact script has a proxy listener for the requested version and spawns its server if not already running. Returns the instance status including the URL to open; the server may still be "starting" (building) - opening the URL shows a live loading page until it is ready.
+     * Ensures the named preview script has a proxy listener for the requested version and spawns its server if not already running. Returns the instance status including the URL to open; the server may still be "starting" (building) - opening the URL shows a live loading page until it is ready.
      *
      * @param projectId Project ID
      * @param id
-     * @param name The server artifact script name
+     * @param name The preview script name
      * @param headRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
      * @param includeUncommitted Preview the agent's uncommitted working tree (its live worktree).
      * @returns PreviewStatus OK
@@ -1033,7 +1033,7 @@ export class DefaultService {
      *
      * @param projectId Project ID
      * @param id
-     * @param name The server artifact script name
+     * @param name The preview script name
      * @param headRef Commit SHA or ref whose instance to stop. Defaults to the agent's branch tip.
      * @param includeUncommitted Stop the instance for the agent's uncommitted working tree.
      * @returns void
