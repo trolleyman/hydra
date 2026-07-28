@@ -52,13 +52,20 @@ const ChipClause: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span className="whitespace-nowrap">{children}</span>
 )
 
-// Per-kind visual identity: icon, its tinted square, the card title, and the
-// kind/RW badge.
+// HOST_SURFACE is the amber card body a host_command wears, matching the amber
+// container the chat's host-run tool card uses. Every other kind keeps the
+// neutral surface: amber here means "this one leaves the sandbox", and it only
+// says that if it isn't worn by the routine asks too.
+const HOST_SURFACE = 'bg-amber-50/70 dark:bg-amber-500/10 border-amber-300/70 dark:border-amber-500/30'
+
+// Per-kind visual identity: icon, its tinted square, the card title, the
+// kind/RW badge, and (optionally) a non-default card surface.
 function kindVisual(data: ApprovalToastData): {
   Icon: React.ComponentType<{ className?: string }>
   iconWrap: string
   title: string
   badge: { text: string; tone: BadgeTone } | null
+  surface?: string
 } {
   switch (data.kind) {
     case 'mcp':
@@ -84,9 +91,12 @@ function kindVisual(data: ApprovalToastData): {
       return { Icon: Shield, iconWrap: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', title: 'Allow unrecognized tool', badge: { text: 'Tool', tone: 'amber' } }
     case 'host_command':
       // The sandbox escape hatch: the agent is asking to run a command OUTSIDE its
-      // sandbox, on the host. The most dangerous ask there is, so it wears the
-      // loudest red identity to make sure it's never rubber-stamped.
-      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host (outside sandbox)', badge: { text: 'Host', tone: 'red' } }
+      // sandbox, on the host. Deliberately identical to the chat's host-run tool
+      // card - the amber surface, the red alert glyph, and the same "outside
+      // sandbox" badge beside a "Run on host" heading - because the two are two
+      // views of ONE request, and a user who answers it in either place should
+      // not have to work out that they are looking at the same thing.
+      return { Icon: TriangleAlert, iconWrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', title: 'Run on host', badge: { text: 'outside sandbox', tone: 'red' }, surface: HOST_SURFACE }
     default:
       return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'Shell', tone: 'gray' } }
   }
@@ -265,7 +275,7 @@ export const ApprovalCard: React.FC<{
   toastId: number
   onDismiss: () => void
 }> = ({ data, actions, toastId, onDismiss }) => {
-  const { Icon, iconWrap, title, badge } = kindVisual(data)
+  const { Icon, iconWrap, title, badge, surface } = kindVisual(data)
   // The subtitle links through to the requesting agent (when we know where it
   // lives). Navigating leaves the approval pending - it does NOT dismiss the card
   // (a non-silent dismiss would deny the call). A real <Link> also lets
@@ -281,7 +291,7 @@ export const ApprovalCard: React.FC<{
     <div
       role="alertdialog"
       aria-label={title}
-      className="relative w-[28rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl"
+      className={`relative w-[28rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border shadow-xl ${surface ?? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
     >
       {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">

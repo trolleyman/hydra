@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/gate"
 )
@@ -52,12 +53,31 @@ steps you need into a single command (` + "`a && b && c`" + `, or a short script
 than firing off a series of small requests - each extra prompt is another
 interruption, and a half-finished sequence is worse than one that runs as a unit.
 
+How the command is parsed: the argv left after --why/-- is joined into ONE script
+and run on the host with ` + "`bash -lc <script>`" + `, in your worktree. Your OWN shell
+parses your command line first, so any pipe, redirection or chaining you write
+unquoted is consumed by the SANDBOX shell and never reaches the host:
+
+    host-run -- ss -Hltn | head        # ` + "`ss -Hltn`" + ` on the host, ` + "`head`" + ` in the sandbox
+    host-run -- 'ss -Hltn | head'      # the whole pipeline on the host
+    host-run -- bash -c 'a && b'       # same (the bash -c wrapper is unwrapped)
+
+So quote the whole script whenever it contains shell syntax. What the user
+approves is what runs: the approval card shows the joined script exactly.
+
 The command's stdout and stderr are relayed back to you, and this command exits
 with the host command's own exit code (or ` + strconv.Itoa(hostRunExitDenied) + ` if the request is denied or
 times out).`,
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true, // the whole argv after `host-run` is the command
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Flag parsing is off, so cobra never gets to handle -h/--help itself -
+		// without this `host-run --help` parks an approval asking the user to run
+		// a host command literally named `--help`. Anyone typing it wants the
+		// usage text, and an escape-hatch prompt is an expensive way to find out.
+		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+			return errtrace.Wrap(cmd.Help())
+		}
 		code := runHostRun(args)
 		os.Exit(code)
 		return nil
