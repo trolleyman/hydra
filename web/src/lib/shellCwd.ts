@@ -17,9 +17,25 @@
 // that.
 import { topLevelStatements, unwrapBashLoginCommand } from './bashFormat'
 
+// How the tool carries the directory forward, measured against Claude Code's
+// Bash tool rather than assumed (each row was run and the next command's `pwd`
+// read back):
+//
+//   cd web/src        then  pwd  ->  <root>/web/src      persists
+//   cd lib            then  pwd  ->  <root>/web/src/lib  relative to the last one
+//   cd web/src; false then  pwd  ->  <root>              a FAILED command moves nothing
+//   cd lib; exit 0    then  pwd  ->  <root>/web/src      an early exit moves nothing
+//   cd /tmp           then  pwd  ->  <root>              plus "Shell cwd was reset to <root>"
+//   (cd ..; pwd)      then  pwd  ->  unchanged           a subshell never escapes
+//
+// So it is not "wherever the script ended up": the directory is captured only
+// when the script runs to completion with status 0, and only while it stays
+// inside the directory the agent started in. Both rules are applied below.
 // A `cd` that failed - the shell stayed where it was. Bash reports it through
 // whatever wrapper it was launched from ("<snapshot>.sh: line 53: cd: web: No
 // such file or directory"), so the message is matched, not the line prefix.
+// Still needed alongside the exit-status rule: `cd nope; echo ok` ends with
+// status 0, so the directory IS captured - just not where the `cd` asked for.
 const CD_FAILED = /\bcd: (?:[^\n:]*: )?[^\n]*: (?:No such file or directory|Not a directory|Permission denied)/
 
 // What a statement does to the working directory.
@@ -117,6 +133,9 @@ export interface ShellStep {
   cwd?: string
   // The command's output, read only to spot a `cd` that failed.
   output?: string
+  // The command exited non-zero (or never ran at all - denied, timed out): its
+  // directory is never captured, so none of its `cd`s outlive it.
+  failed?: boolean
   // A backgrounded command runs in its own shell, so its `cd`s do not outlive it.
   background?: boolean
 }
@@ -126,15 +145,23 @@ export interface ShellStep {
 // point. `worktree` is where the session's shell starts.
 export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map<string, string | null> {
   const out = new Map<string, string | null>()
-  let current: string | null = worktree ? normalize(worktree) : null
+  const root = worktree ? normalize(worktree) : null
+  let current: string | null = root
   for (const step of steps) {
     const reported = step.cwd && step.cwd !== '.' ? normalize(step.cwd) : ''
     const entry = reported || current
     out.set(step.id, entry)
     if (step.background) continue
-    // A failed `cd` leaves the shell where it was, and under `&&` it takes the
-    // rest of the command with it - so the whole command is treated as having
-    // moved nothing.
+    // A command that did not finish successfully never had its directory
+    // captured, so it moved nothing - not even the `cd` that succeeded before
+    // the failure. `cd web && bun test` with failing tests leaves the shell
+    // exactly where it was.
+    if (step.failed) {
+      current = entry
+      continue
+    }
+    // A failed `cd` in a command that still exited 0 (`cd nope; echo ok`) is the
+    // same story for that one statement.
     if (step.output && CD_FAILED.test(step.output)) {
       current = entry
       continue
@@ -151,7 +178,13 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
       // absolute one re-anchors the tracking.
       at = target.path.startsWith('/') ? normalize(target.path) : at ? resolveCwd(at, target.path) : null
     }
-    current = at
+    // Wandering outside the directory the agent started in does not stick: the
+    // tool resets it ("Shell cwd was reset to <root>") the moment the command
+    // ends. Only for a directory we tracked ourselves - a provider that reports
+    // its own cwd is telling us where the command really ran, and will report
+    // the next one too.
+    const escaped = !reported && root && at && !(at === root || at.startsWith(root + '/'))
+    current = escaped ? root : at
   }
   return out
 }

@@ -3137,6 +3137,7 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
       command: input.command,
       cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
       output: it.result ?? it.runningOutput,
+      failed: it.isError === true,
       background: input.run_in_background === true,
     })
   }

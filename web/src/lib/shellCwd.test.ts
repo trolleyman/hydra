@@ -45,16 +45,29 @@ describe('trackShellCwds', () => {
   })
 
   it('leaves the directory where it was when the cd failed', () => {
-    const failed = { command: 'cd web && node x.ts', output: 'snapshot-bash.sh: line 53: cd: web: No such file or directory' }
+    const failed = { command: 'cd web; node x.ts', output: 'snapshot-bash.sh: line 53: cd: web: No such file or directory' }
     expect(track(['cd web', failed as ShellStep, 'node x.ts'])).toEqual([WT, `${WT}/web`, `${WT}/web`])
   })
 
-  it('still applies a cd when the command it chained to failed', () => {
-    expect(track([{ command: 'cd web && bun test', output: '2 tests failed' } as ShellStep, 'ls'])).toEqual([WT, `${WT}/web`])
+  // Measured: the tool captures the directory only when the script completes
+  // with status 0, so a failure discards even the cd that succeeded before it.
+  it('drops a cd from a command that failed', () => {
+    expect(track([{ command: 'cd web && bun test', failed: true } as ShellStep, 'ls'])).toEqual([WT, WT])
+  })
+
+  it('does not let a directory outside the worktree stick', () => {
+    expect(track(['cd /tmp/scratch && ls', 'pwd', 'cd web', 'ls'])).toEqual([WT, WT, WT, `${WT}/web`])
   })
 
   it('gives up on a cd it cannot resolve, and re-anchors on an absolute one', () => {
-    expect(track(['cd $TARGET', 'ls', 'cd web', 'ls', 'cd /tmp/x', 'ls'])).toEqual([WT, null, null, null, null, '/tmp/x'])
+    expect(track(['cd $TARGET', 'ls', 'cd web', 'ls', `cd ${WT}/web/src`, 'ls'])).toEqual([
+      WT,
+      null,
+      null,
+      null,
+      null,
+      `${WT}/web/src`,
+    ])
   })
 
   it.each([['cd'], ['cd -'], ['cd ~/code'], ['cd "$HOME"'], ['cd build-*']])('treats %j as unknown', (command) => {
