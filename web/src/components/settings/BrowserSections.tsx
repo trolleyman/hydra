@@ -3,14 +3,15 @@ import { ComposerSection } from './ComposerSection'
 import { ChatSection } from './ChatSection'
 import { StreamingSection } from './StreamingSection'
 import { CodeLineNumbersSection } from './CodeLineNumbersSection'
+import { BashIndentSection } from './BashIndentSection'
 import { ChatHeightSection } from './ChatHeightSection'
 import { TerminalSection } from './TerminalSection'
 import { NotificationsSection } from './NotificationsSection'
 
 // The Browser tab of the settings pages: the client-only preferences (theme /
-// chat font / smooth streaming / code line numbers / chat height / terminal /
-// desktop notifications) that live in this browser's localStorage. They save instantly on change - no
-// config file, no Save button.
+// chat font / smooth streaming / code line numbers / shell command indent / chat
+// height / terminal / desktop notifications) that live in this browser's
+// localStorage. They save instantly on change - no config file, no Save button.
 export function BrowserSections() {
   return (
     <>
@@ -19,6 +20,7 @@ export function BrowserSections() {
       <ChatSection />
       <StreamingSection />
       <CodeLineNumbersSection />
+      <BashIndentSection />
       <ChatHeightSection />
       <TerminalSection />
       <NotificationsSection />

@@ -11,6 +11,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { DEFAULT_BASH_INDENT, MAX_BASH_INDENT } from './bashFormat'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
 // Reads the persisted preference. Absent (or anything but 'sans') = serif, the
@@ -134,6 +135,41 @@ export const useChatCodeLinesStore = create<ChatCodeLinesState>()(
         writeLocal(StorageKeys.chatCodeLineNumbers, lineNumbers ? null : 'off'),
       ),
       partialize: (s) => ({ lineNumbers: s.lineNumbers }),
+    },
+  ),
+)
+
+// Reads the persisted bash block-indent width. Absent or unparseable = the
+// built-in default. Exported for non-React callers / unit testing.
+export function loadChatBashIndent(): number {
+  const raw = readLocal(StorageKeys.chatBashIndent)
+  if (raw === null) return DEFAULT_BASH_INDENT
+  const n = parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_BASH_INDENT
+  return Math.min(MAX_BASH_INDENT, n)
+}
+
+interface ChatBashIndentState {
+  indent: number
+  setIndent: (indent: number) => void
+}
+
+// How far the shell-command formatter indents the body of a for/while/if/case
+// block it has split onto its own lines (0 = flush left). Stored as the bare
+// number, and only when it differs from the default, so the key stays absent for
+// anyone who never touched it - same shape as the other chat prefs.
+export const useChatBashIndentStore = create<ChatBashIndentState>()(
+  persist(
+    (set) => ({
+      indent: loadChatBashIndent(),
+      setIndent: (indent) => set({ indent }),
+    }),
+    {
+      name: StorageKeys.chatBashIndent,
+      storage: singleFieldStorage('indent', loadChatBashIndent, (indent) =>
+        writeLocal(StorageKeys.chatBashIndent, indent === DEFAULT_BASH_INDENT ? null : String(indent)),
+      ),
+      partialize: (s) => ({ indent: s.indent }),
     },
   ),
 )

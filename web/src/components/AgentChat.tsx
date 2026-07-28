@@ -65,7 +65,7 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
@@ -2458,8 +2458,9 @@ const ToolCard = memo(function ToolCard({
   // The host command runs in the head's worktree whatever the agent's own cwd
   // was, so a `cd` preamble would be a lie - drop it for a host run.
   const bashSource = hostRunScript ?? command
-  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd) : ''
-  const executableCommand = isBash ? formatBashForDisplay(bashSource, '') : ''
+  const bashIndent = useChatBashIndentStore((s) => s.indent)
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
+  const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
   const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult
