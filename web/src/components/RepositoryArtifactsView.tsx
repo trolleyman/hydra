@@ -84,7 +84,10 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             className="w-full flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 cursor-zoom-in hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <CardIcon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
-            <span className="min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
+            {/* optical-center: the label reads high against the icon otherwise.
+                The row's height comes from the w-6 icon, so the trim can't
+                shorten it. */}
+            <span className="optical-center min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
               {file.size != null ? formatBytes(file.size) : isPdfArtifact(file.name) ? 'PDF' : 'download'}
             </span>
             <Tooltip content="Download">

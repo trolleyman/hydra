@@ -214,7 +214,9 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
                 className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <Download className="w-3 h-3" />
-                {side.label}
+                {/* optical-center on the label, not a nudge on the icon (see
+                    index.css); the h-6 keeps the row's height its own. */}
+                <span className="optical-center">{side.label}</span>
               </a>
             </Tooltip>
           ))}
@@ -1631,7 +1633,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
           <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>, configured in <code className="text-blue-300">.hydra/config.toml</code> under <code className="text-blue-300">[[artifacts]]</code>. Hydra runs it against both the base ref and the head ref (or your uncommitted working tree) and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The <strong>build log</strong> button (the scroll icon in the card header) shows both sides' output; <strong>refresh</strong> beside it re-runs that script, handy to retry a failure or re-render when nothing visibly changed.</p>
-          <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
+          <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video / pdf / download) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
           <p className="text-gray-500 dark:text-gray-400">Writing an artifact script - environment variables, streaming markers, tag sidecars, how each format is compared - is covered in <code className="text-blue-300">docs/artifacts.md</code>.</p>
         </InfoTooltip>
         {/* leading-4, not the inherited 1.5: 11px * 1.5 = 16.5px, a half pixel,

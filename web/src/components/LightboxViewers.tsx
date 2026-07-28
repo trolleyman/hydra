@@ -46,7 +46,9 @@ function DownloadLink({ url, label, tip }: { url: string; label: string; tip: st
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-white/15 bg-white/5 text-[11px] font-medium text-white/80 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
       >
         <Download className="w-3.5 h-3.5" />
-        {label}
+        {/* The label carries the trim, never the icon - see .optical-center. The
+            anchor keeps its own h-7, so trimming the label can't shrink the row. */}
+        <span className="optical-center">{label}</span>
       </a>
     </Tooltip>
   )
@@ -176,7 +178,13 @@ export function LightboxText({ url, filename, diff }: {
     <div className={`${PANEL_CLASS} flex flex-col w-[min(1100px,90vw)] h-[82vh]`} data-lb-picture>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 shrink-0">
         <FileText className="w-4 h-4 shrink-0 text-white/40" />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-white/60">{filename}</span>
+        {/* optical-center: flexbox centres the label's LINE box, which reserves
+            room for ascenders/descenders the name may not use, so it reads high
+            beside the icon. Trimming to the cap-to-baseline box centres what you
+            actually see. Safe under `truncate` - the class pads the box and takes
+            the same amount back as a negative margin, so a descender (the p/y/g
+            in "upload-retry.log") isn't sliced off by the overflow clip. */}
+        <span className="optical-center min-w-0 flex-1 truncate text-[11px] font-mono text-white/60">{filename}</span>
         {state.status === 'ready' && state.truncated && (
           <Tooltip content={`Only the first ${formatBytes(MAX_TEXT_BYTES)} is shown - download the file for the rest`}>
             <span className="flex items-center gap-1 text-[10px] font-medium text-amber-400">

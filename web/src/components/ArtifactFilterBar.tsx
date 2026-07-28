@@ -279,7 +279,7 @@ function ArtifactFilterBarImpl({
   const collectedTags = useMemo(() => collectTags(files, pendingTags), [files, pendingTags])
   const hasTags = collectedTags.scoped.length > 0 || collectedTags.free.length > 0
 
-  // The built-in "type" filter (image / video), derived from the files' own
+  // The built-in "type" filter (image / video / pdf / download), derived from the files' own
   // extensions rather than their tags. Values are the media types actually present.
   const fileTypes = useMemo(() => {
     const types = new Set<string>()
