@@ -43,6 +43,8 @@ func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, s
 		return GuardedMergeContinue(worktree, expectedBranch)
 	case gitq.OpMergeAbort:
 		return GuardedMergeAbort(worktree, expectedBranch)
+	case gitq.OpStash:
+		return GuardedStash(worktree, expectedBranch, req.Stash, req.StashRef, req.Message, req.IncludeUntracked)
 	default:
 		return false, fmt.Sprintf("Unknown git operation %q.", req.Op)
 	}
@@ -264,6 +266,192 @@ func GuardedMergeAbort(worktree, expectedBranch string) (ok bool, summary string
 		return false, "Merge abort failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
 	}
 	return true, fmt.Sprintf("Merge aborted; %s restored.", cur)
+}
+
+// hydraStashRef is where a head's stash entries live. It is deliberately NOT
+// git's own refs/stash: that ref lives in the shared .git and is therefore
+// visible to every worktree, so with plain `git stash` one head could push work
+// and a DIFFERENT head pop it - silently handing over changes and losing them
+// for the head that saved them.
+//
+// refs/worktree/* is one of the few namespaces git keeps per-worktree (alongside
+// HEAD and refs/bisect), so an entry stored here is invisible to sibling heads.
+// The mechanism is otherwise exactly git's: `git stash create` builds the same
+// stash commit, the ref's reflog is the same stack, and `git stash apply` reads
+// it back - only the ref it hangs off is private.
+const hydraStashRef = "refs/worktree/hydra-stash"
+
+// stashRefRe matches the only stash spelling accepted from a caller. The value
+// reaches a git command line, so an unconstrained string is not worth the risk
+// for a field whose entire vocabulary is "stash@{N}". Callers speak the familiar
+// stash@{N}; stashEntry maps it onto the private ref.
+var stashRefRe = regexp.MustCompile(`^stash@\{(\d+)\}$`)
+
+// stashSelectorRe matches the reflog selector git prints for the private ref, in
+// either the full or the abbreviated spelling it chooses, so `list` can present
+// entries under the stash@{N} name callers pass back.
+var stashSelectorRe = regexp.MustCompile(`(?:refs/)?worktree/hydra-stash@\{`)
+
+// stashEntry turns a caller's "stash@{N}" (or "" for the most recent) into the
+// private ref's reflog entry.
+func stashEntry(ref string) string {
+	m := stashRefRe.FindStringSubmatch(ref)
+	if m == nil {
+		return hydraStashRef + "@{0}"
+	}
+	return hydraStashRef + "@{" + m[1] + "}"
+}
+
+// stashCount returns how many entries the private stash holds (0 when the ref
+// does not exist yet).
+func stashCount(worktree string) int {
+	out, err := gitOutput(worktree, "reflog", "show", hydraStashRef, "--format=%gd")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return 0
+	}
+	return len(strings.Split(strings.TrimSpace(out), "\n"))
+}
+
+// GuardedStash sets uncommitted work aside and brings it back: push / pop /
+// apply / list / drop. It is the missing piece next to git_merge - the way out
+// of "your local changes would be overwritten by merge" without either throwing
+// the work away (git_reset --hard) or committing it half-done just to move it.
+//
+// The stash is worktree-wide rather than branch-scoped, but the own-branch guard
+// still applies: a head that has wandered onto another branch should not be
+// moving work on or off it.
+func GuardedStash(worktree, expectedBranch, sub, ref, message string, includeUntracked bool) (ok bool, summary string) {
+	if _, ok, msg := ensureOwnBranch(worktree, expectedBranch); !ok {
+		return false, msg
+	}
+	sub = strings.ToLower(strings.TrimSpace(sub))
+	if sub == "" {
+		sub = "push"
+	}
+	ref = strings.TrimSpace(ref)
+	if ref != "" && !stashRefRe.MatchString(ref) {
+		return false, fmt.Sprintf("%q is not a stash reference - use the stash@{N} form from git_stash list, or omit it for the most recent.", ref)
+	}
+	// Mid-merge/rebase the index holds conflict state that a stash would capture
+	// and a pop would not put back cleanly. Finish or abort first.
+	if sub != "list" && (mergeInProgress(worktree) || rebaseInProgress(worktree)) {
+		return false, "A merge or rebase is in progress - finish it (git_merge_continue / git_rebase_continue) or back out (git_merge_abort / git_rebase_abort) before stashing. Stashing conflict state does not restore cleanly."
+	}
+
+	switch sub {
+	case "list":
+		if stashCount(worktree) == 0 {
+			return true, "Your stash is empty."
+		}
+		out, _ := gitOutput(worktree, "reflog", "show", hydraStashRef, "--format=%gd: %gs")
+		// %gd renders the ref abbreviated ("worktree/hydra-stash@{0}"); show the
+		// familiar stash@{0}, which is also what pop/apply/drop take back.
+		out = stashSelectorRe.ReplaceAllString(out, "stash@{")
+		return true, "Your stash entries (newest first):\n" + out
+	case "push":
+		msg := strings.TrimSpace(message)
+		if msg == "" {
+			msg = "hydra stash"
+		}
+		// Untracked files are staged rather than passed to `stash create -u`:
+		// create bails out entirely when the tracked side is clean, so a
+		// worktree holding ONLY new files would silently stash nothing. Staging
+		// makes them part of the commit create builds, and the `reset --hard`
+		// below then removes them - no `git clean` needed, which is a good deal
+		// safer than turning one loose in the worktree. They come back staged.
+		var staged []string
+		if includeUntracked {
+			out, err := gitOutput(worktree, "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard")
+			if err != nil {
+				return false, "Could not list untracked files: " + err.Error()
+			}
+			for line := range strings.SplitSeq(out, "\n") {
+				if p := strings.TrimSpace(line); p != "" {
+					staged = append(staged, p)
+				}
+			}
+			if len(staged) > 0 {
+				if out, err := gitCombined(worktree, append([]string{"add", "--"}, staged...)...); err != nil {
+					return false, "Could not stage the untracked files for stashing: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+				}
+			}
+		}
+		unstage := func() {
+			if len(staged) > 0 {
+				_, _ = gitCombined(worktree, append([]string{"reset", "--quiet", "HEAD", "--"}, staged...)...)
+			}
+		}
+		// `create` builds the stash commit but touches neither refs/stash nor the
+		// worktree, which is exactly what lets the entry be filed privately.
+		sha, err := gitOutput(worktree, "stash", "create", msg)
+		if err != nil {
+			unstage()
+			return false, "Stash failed: " + err.Error()
+		}
+		if strings.TrimSpace(sha) == "" {
+			untracked := ""
+			if !includeUntracked {
+				untracked = " (untracked files are only stashed with include_untracked)"
+			}
+			return true, "Nothing to stash - your worktree has no uncommitted changes" + untracked + "."
+		}
+		if out, err := gitCombined(worktree, "update-ref", "--create-reflog", hydraStashRef, sha, "-m", msg); err != nil {
+			unstage()
+			return false, "Could not file the stash entry: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+		}
+		// Only now clear the worktree - the commit above is what makes this
+		// recoverable, so it must exist before anything is discarded.
+		if out, err := gitCombined(worktree, "reset", "--hard", "--quiet"); err != nil {
+			return false, "Stash entry saved, but clearing the worktree failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+		}
+		return true, fmt.Sprintf("Stashed your uncommitted changes as stash@{0} (%q); the worktree is now clean. Restore them with git_stash pop. The entry is private to this head - no sibling head can see or pop it.", msg)
+	case "pop", "apply":
+		if stashCount(worktree) == 0 {
+			return false, "Your stash is empty - there is nothing to restore. (Entries are private to this head; another head's stash is not visible here.)"
+		}
+		entry := stashEntry(ref)
+		out, err := gitCombined(worktree, "stash", "apply", entry)
+		if err != nil {
+			text := firstNonEmpty(strings.TrimSpace(out), err.Error())
+			files, detail := summarizeConflict(text)
+			if len(files) > 0 {
+				// Left in the worktree deliberately, and the entry is kept: the work
+				// is recoverable either way.
+				return false, fmt.Sprintf("Restoring the stash hit conflicts in %s. The conflict markers are in your worktree - resolve them, then git_stash drop the entry (it is kept when a pop conflicts).\n%s", strings.Join(files, ", "), detail)
+			}
+			return false, "Could not restore the stash: " + text
+		}
+		if sub == "apply" {
+			return true, "Applied the stashed changes into your worktree; the entry is still there.\n" + strings.TrimSpace(out)
+		}
+		if ok, msg := dropStashEntry(worktree, entry); !ok {
+			return true, "Restored the stashed changes, but the entry could not be dropped (" + msg + ") - remove it with git_stash drop.\n" + strings.TrimSpace(out)
+		}
+		return true, "Restored the stashed changes into your worktree and dropped the entry.\n" + strings.TrimSpace(out)
+	case "drop":
+		if stashCount(worktree) == 0 {
+			return false, "Your stash is empty - there is nothing to drop."
+		}
+		if ok, msg := dropStashEntry(worktree, stashEntry(ref)); !ok {
+			return false, "Could not drop the stash entry: " + msg
+		}
+		return true, "Dropped the stash entry - those changes are gone."
+	default:
+		return false, fmt.Sprintf("unknown stash operation %q (use push, pop, apply, list, or drop).", sub)
+	}
+}
+
+// dropStashEntry removes one reflog entry from the private stash, deleting the
+// ref outright once the last one goes (git's own stash does the same, and a ref
+// with an empty reflog would otherwise read as a phantom entry).
+func dropStashEntry(worktree, entry string) (bool, string) {
+	if out, err := gitCombined(worktree, "reflog", "delete", "--updateref", "--rewrite", entry); err != nil {
+		return false, firstNonEmpty(strings.TrimSpace(out), err.Error())
+	}
+	if stashCount(worktree) == 0 {
+		_, _ = gitCombined(worktree, "update-ref", "-d", hydraStashRef)
+	}
+	return true, ""
 }
 
 // mergeInProgress reports whether a merge is underway in worktree. Unlike a

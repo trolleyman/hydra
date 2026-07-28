@@ -137,10 +137,24 @@ own own-branch guard, so they're safe on codex/gemini without it.
   and **`git_merge_continue`** / **`git_merge_abort`** finish it. `continue` stages the
   still-unmerged paths itself (git won't conclude a merge while any remain) but refuses
   if any of them still contain `<<<<<<<` markers, so a conflict can't be committed raw.
+- **`git_stash`** (`op`: push / pop / apply / list / drop) - park uncommitted work and
+  bring it back; the way out of "your local changes would be overwritten by merge"
+  without discarding them or committing something half-done. **Entries are per-head.**
+  git's own `refs/stash` lives in the *common* dir, so every worktree shares one stash -
+  head A could push and head B pop, silently handing over the work and losing it for A
+  (verified: a stash pushed in one linked worktree is listed by another). These entries
+  hang off `refs/worktree/hydra-stash`, one of the few namespaces git keeps per-worktree,
+  so a sibling can't see or pop them. The mechanism is otherwise git's own: `git stash
+  create` builds the same commit, the ref's reflog is the same stack (addressed as the
+  familiar `stash@{N}`), and `git stash apply` reads it back. `include_untracked` stages
+  the untracked files rather than passing `-u` to `create`, which bails out entirely when
+  the tracked side is clean - so an untracked-only worktree would otherwise stash nothing;
+  they come back staged. Refused mid-merge/rebase, where the captured conflict state
+  would not restore cleanly.
 
 ### Readonly gate redirect
 
-In `readonly`, a raw `git reset`/`add`/`revert`/`rebase`/`cherry-pick`/`merge`/`commit` would
+In `readonly`, a raw `git reset`/`add`/`revert`/`rebase`/`cherry-pick`/`merge`/`stash`/`commit` would
 fail at the OS with a cryptic read-only-filesystem error. The gate (seeded with
 `HostMediatedGit`, from `gitIso.HostMediatedCommit`) instead **denies those
 subcommands with a message pointing at the matching `mcp__hydra__git_*` tool**. This

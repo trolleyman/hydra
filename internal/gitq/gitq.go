@@ -46,6 +46,7 @@ const (
 	OpMerge          Op = "merge"           // merge a ref INTO the head's branch
 	OpMergeContinue  Op = "merge_continue"  // conclude a conflicted merge after resolving
 	OpMergeAbort     Op = "merge_abort"     // abort an in-progress merge
+	OpStash          Op = "stash"           // set aside / restore / inspect uncommitted work
 )
 
 // AddSpec stages a file, optionally restricted to specific line ranges in the
@@ -95,6 +96,11 @@ type Request struct {
 	// merge (Message doubles as the merge-commit subject)
 	Ref  string `json:"ref,omitempty"`   // the ref merged INTO the head's branch
 	NoFF bool   `json:"no_ff,omitempty"` // force a merge commit even when it could fast-forward
+
+	// stash (Message doubles as the stash label on push)
+	Stash            string `json:"stash,omitempty"`             // push | pop | apply | list | drop
+	StashRef         string `json:"stash_ref,omitempty"`         // "stash@{N}"; empty = the most recent
+	IncludeUntracked bool   `json:"include_untracked,omitempty"` // stash push -u
 }
 
 // Result is the host's outcome for a Request: OK plus an agent-readable summary

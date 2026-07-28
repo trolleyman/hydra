@@ -88,6 +88,11 @@ type GitOpRequest struct {
 	// merge (Message doubles as the merge-commit subject)
 	Ref  string
 	NoFF bool
+
+	// stash (Message doubles as the stash label on push)
+	Stash            string
+	StashRef         string
+	IncludeUntracked bool
 }
 
 // GitAddSpec stages a file, optionally restricted to new-file line ranges.
@@ -303,7 +308,7 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		approved, msg := deps.RequestAccess(args.Name)
 		return textResult(msg, !approved)
 	case "git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick",
-		"git_merge", "git_merge_continue", "git_merge_abort":
+		"git_merge", "git_merge_continue", "git_merge_abort", "git_stash":
 		if deps.GitOp == nil {
 			return textResult(p.Name+" is not available in this session.", true)
 		}

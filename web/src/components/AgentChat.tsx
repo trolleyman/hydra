@@ -1,5 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   Bot,
@@ -933,6 +934,14 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
     case 'git_merge':
       // The --no-ff flag is in the heading, so the summary is just what came in.
       return { text: str('ref'), prose: false }
+    case 'git_stash': {
+      // The operation is in the heading; the summary is what it acted on - the
+      // label being saved, or the entry being restored/dropped.
+      const op = str('op') || 'push'
+      if (op === 'push') return str('message') ? { text: str('message'), prose: true } : null
+      if (op === 'list') return null
+      return { text: str('ref') || 'stash@{0}', prose: false }
+    }
     default:
       return null
   }
@@ -1095,6 +1104,7 @@ const GIT_TOOL_LABELS: Record<string, string> = {
   git_merge: 'git merge',
   git_merge_continue: 'git merge --continue',
   git_merge_abort: 'git merge --abort',
+  git_stash: 'git stash',
 }
 
 // gitToolHeading is GIT_TOOL_LABELS plus the flags this particular call used, so
@@ -1114,6 +1124,12 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
   }
   if (tool === 'git_commit' && input.amend === true) return `${label} --amend`
   if (tool === 'git_merge' && input.no_ff === true) return `${label} --no-ff`
+  if (tool === 'git_stash') {
+    // The sub-operation IS the command here - "git stash" alone says nothing
+    // about whether work was parked or restored.
+    const op = typeof input.op === 'string' && input.op ? input.op : 'push'
+    return `${label} ${op}`
+  }
   return label
 }
 
@@ -2228,6 +2244,24 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
     )
   }
 
+  if (tool === 'git_stash') {
+    const op = str('op') || 'push'
+    const entry = str('ref') || 'stash@{0}'
+    const note2 = {
+      push: <>Set the uncommitted changes aside; the worktree is now clean</>,
+      pop: <>Restored {entry} and removed the entry</>,
+      apply: <>Restored {entry}, keeping the entry</>,
+      drop: <>Discarded {entry}</>,
+      list: <>Listed this head&rsquo;s stash entries</>,
+    }[op]
+    return (
+      <div className={note}>
+        {note2 ?? <>Stash {op}</>}
+        {op !== 'list' ? <> &middot; private to this head</> : null}
+      </div>
+    )
+  }
+
   if (tool === 'git_merge') {
     // Direction is the thing worth stating: the tool only ever merges INTO this
     // head's branch, never the other way, so name both ends.
@@ -2419,6 +2453,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
+  mcp__hydra__git_stash: Archive,
 }
 
 function LowlitPath({ path }: { path: string }) {

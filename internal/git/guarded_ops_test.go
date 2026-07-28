@@ -354,3 +354,148 @@ func TestRunGuardedOpDispatchesMerge(t *testing.T) {
 		t.Errorf("expected a merge commit, got %q", parents)
 	}
 }
+
+// The stash must be PRIVATE to a head. git's own refs/stash lives in the shared
+// .git, so with plain `git stash` one head could push work and a sibling pop it;
+// these entries hang off refs/worktree/*, which git keeps per-worktree.
+func TestGuardedStashIsPrivatePerWorktree(t *testing.T) {
+	dir, run := opRepo(t)
+	// A second worktree standing in for a sibling head on the same repo.
+	sibling := filepath.Join(t.TempDir(), "sibling")
+	run("worktree", "add", "-q", "-b", "hydra/other", sibling)
+
+	write(t, dir, "seed.txt", "mine\n")
+	if ok, msg := GuardedStash(dir, "hydra/test", "push", "", "my work", false); !ok {
+		t.Fatalf("push failed: %s", msg)
+	}
+	if out := run("status", "--porcelain"); out != "" {
+		t.Errorf("worktree should be clean after a stash push, got %q", out)
+	}
+
+	// The sibling must see nothing - neither through the tool nor through git.
+	ok, msg := GuardedStash(sibling, "hydra/other", "list", "", "", false)
+	if !ok || !strings.Contains(msg, "empty") {
+		t.Errorf("sibling head sees a stash it should not: ok=%v msg=%q", ok, msg)
+	}
+	if ok, msg := GuardedStash(sibling, "hydra/other", "pop", "", "", false); ok {
+		t.Errorf("sibling head was able to pop this head's stash: %s", msg)
+	}
+
+	// And this head still gets its own work back.
+	if ok, msg := GuardedStash(dir, "hydra/test", "list", "", "", false); !ok || !strings.Contains(msg, "my work") {
+		t.Fatalf("list = %q (ok=%v), want our entry", msg, ok)
+	}
+	if ok, msg := GuardedStash(dir, "hydra/test", "pop", "", "", false); !ok {
+		t.Fatalf("pop failed: %s", msg)
+	}
+	if body := readFile(t, dir, "seed.txt"); body != "mine\n" {
+		t.Errorf("restored seed.txt = %q, want the stashed content", body)
+	}
+	// Popping the only entry empties the stash.
+	if ok, msg := GuardedStash(dir, "hydra/test", "list", "", "", false); !ok || !strings.Contains(msg, "empty") {
+		t.Errorf("stash should be empty after popping its only entry, got %q", msg)
+	}
+}
+
+func TestGuardedStashStackAndDrop(t *testing.T) {
+	dir, _ := opRepo(t)
+	for _, m := range []string{"first", "second"} {
+		write(t, dir, "seed.txt", m+"\n")
+		if ok, msg := GuardedStash(dir, "hydra/test", "push", "", m, false); !ok {
+			t.Fatalf("push %s failed: %s", m, msg)
+		}
+	}
+	ok, list := GuardedStash(dir, "hydra/test", "list", "", "", false)
+	if !ok || !strings.Contains(list, "stash@{0}") || !strings.Contains(list, "stash@{1}") {
+		t.Fatalf("list = %q, want two entries addressed as stash@{N}", list)
+	}
+	// Newest first: the last push is stash@{0}. (Matched on the whole entry line -
+	// the header itself contains the word "first".)
+	if !strings.Contains(list, "stash@{0}: second") || !strings.Contains(list, "stash@{1}: first") {
+		t.Errorf("list should be newest-first, got %q", list)
+	}
+
+	// apply keeps the entry; the older one is reachable by index.
+	if ok, msg := GuardedStash(dir, "hydra/test", "apply", "stash@{1}", "", false); !ok {
+		t.Fatalf("apply stash@{1} failed: %s", msg)
+	}
+	if body := readFile(t, dir, "seed.txt"); body != "first\n" {
+		t.Errorf("seed.txt = %q, want the older entry's content", body)
+	}
+	if _, list := GuardedStash(dir, "hydra/test", "list", "", "", false); !strings.Contains(list, "first") {
+		t.Error("apply must keep the entry")
+	}
+
+	if ok, msg := GuardedStash(dir, "hydra/test", "drop", "stash@{0}", "", false); !ok {
+		t.Fatalf("drop failed: %s", msg)
+	}
+	_, list = GuardedStash(dir, "hydra/test", "list", "", "", false)
+	if strings.Contains(list, "second") || !strings.Contains(list, "first") {
+		t.Errorf("after dropping stash@{0}, list = %q, want only the older entry", list)
+	}
+}
+
+func TestGuardedStashRejectsBadInput(t *testing.T) {
+	dir, run := opRepo(t)
+	if ok, msg := GuardedStash(dir, "hydra/test", "explode", "", "", false); ok || !strings.Contains(msg, "unknown stash operation") {
+		t.Errorf("unknown op should be refused, got ok=%v msg=%q", ok, msg)
+	}
+	if ok, msg := GuardedStash(dir, "hydra/test", "pop", "refs/heads/main", "", false); ok || !strings.Contains(msg, "not a stash reference") {
+		t.Errorf("a non-stash ref should be refused, got ok=%v msg=%q", ok, msg)
+	}
+	// Nothing to stash is a successful no-op, not a failure.
+	if ok, msg := GuardedStash(dir, "hydra/test", "push", "", "", false); !ok || !strings.Contains(msg, "Nothing to stash") {
+		t.Errorf("stashing a clean worktree = ok:%v %q, want a successful no-op", ok, msg)
+	}
+	// Wrong branch is refused like every other guarded op.
+	run("checkout", "-q", "-b", "main")
+	if ok, msg := GuardedStash(dir, "hydra/test", "list", "", "", false); ok || !strings.Contains(msg, "Refusing") {
+		t.Errorf("stash on the wrong branch should be refused, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+// Mid-merge the index holds conflict state a stash would capture and not restore
+// cleanly, so it is refused rather than silently making a mess.
+func TestGuardedStashRefusedMidMerge(t *testing.T) {
+	dir, run := opRepo(t)
+	run("checkout", "-q", "-b", "feature")
+	write(t, dir, "c.txt", "theirs\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "theirs")
+	run("checkout", "-q", "hydra/test")
+	write(t, dir, "c.txt", "ours\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "ours")
+	if ok, _ := GuardedMerge(dir, "hydra/test", "feature", "", false); ok {
+		t.Fatal("expected a conflict")
+	}
+	if ok, msg := GuardedStash(dir, "hydra/test", "push", "", "", false); ok || !strings.Contains(msg, "merge or rebase is in progress") {
+		t.Errorf("stashing mid-merge should be refused, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+func TestGuardedStashIncludeUntracked(t *testing.T) {
+	dir, run := opRepo(t)
+	write(t, dir, "new.txt", "untracked\n")
+	if ok, msg := GuardedStash(dir, "hydra/test", "push", "", "with untracked", true); !ok {
+		t.Fatalf("push failed: %s", msg)
+	}
+	if out := run("status", "--porcelain"); out != "" {
+		t.Errorf("untracked file should have been taken by the stash, status=%q", out)
+	}
+	if ok, msg := GuardedStash(dir, "hydra/test", "pop", "", "", true); !ok {
+		t.Fatalf("pop failed: %s", msg)
+	}
+	if body := readFile(t, dir, "new.txt"); body != "untracked\n" {
+		t.Errorf("new.txt = %q, want it restored", body)
+	}
+}
+
+func readFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
