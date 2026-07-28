@@ -1129,6 +1129,13 @@ func (s *SimulationServer) MarkAgentUnread(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GenerateAgentTitle fakes the title model with a fixed answer, after a short
+// delay so the button's in-flight state is actually visible in the simulator.
+func (s *SimulationServer) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	time.Sleep(1500 * time.Millisecond)
+	api.WriteJSON(w, http.StatusOK, api.GeneratedTitleResponse{Title: "Simulated generated title"})
+}
+
 func (s *SimulationServer) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }

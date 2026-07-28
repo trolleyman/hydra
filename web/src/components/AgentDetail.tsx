@@ -726,6 +726,7 @@ export function AgentDetail({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
+  const [generatingTitle, setGeneratingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
@@ -1457,6 +1458,21 @@ export function AgentDetail({
     setSavingTitle(false)
   }
 
+  // The rename box's "Generate" button: the same one-shot summary of the task
+  // prompt the spawn flow runs in the background, on demand. The result lands in
+  // the draft rather than the DB, so it's a suggestion the user can edit, accept
+  // with Enter, or throw away with Escape. Useful when the spawn-time generation
+  // never landed (offline, out of credits, daemon restarted mid-call) and the
+  // head kept its truncated prompt-derived title.
+  async function generateTitle() {
+    setGeneratingTitle(true)
+    const res = await runWithToast(() => api.default.generateAgentTitle(projectId ?? '', agent.id), {
+      errorPrefix: 'Failed to generate title',
+    })
+    if (res.ok) setTitleDraft(res.value.title)
+    setGeneratingTitle(false)
+  }
+
   // Changing the base branch is metadata-only: it updates what update-from-base
   // merges in and what the diff compares against, but does NOT rebase existing
   // commits (the user can do that with git if they want). The backend validates
@@ -1722,10 +1738,12 @@ export function AgentDetail({
           editing: editingTitle,
           draft: titleDraft,
           saving: savingTitle,
+          generating: generatingTitle,
           onStart: startEditingTitle,
           onChange: setTitleDraft,
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
+          onGenerate: generateTitle,
         }}
         actions={[
           ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),

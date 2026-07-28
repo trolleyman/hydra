@@ -14,6 +14,7 @@ import type { CommitRepositoryRequest } from '../models/CommitRepositoryRequest'
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
+import type { GeneratedTitleResponse } from '../models/GeneratedTitleResponse';
 import type { ListReviewsResponse } from '../models/ListReviewsResponse';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
@@ -1216,6 +1217,33 @@ export class DefaultService {
             errors: {
                 404: `Not Found`,
                 500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Generate a title for an agent from its task prompt
+     * Asks a cheap one-shot LLM call to summarise the agent's original task prompt into a short title - the same call the spawn flow makes in the background. This only RETURNS the title; it does not persist it, so the rename box can drop it in as a draft the user can edit or discard. Blocking (a few seconds) and best-effort: 502 means the model was unreachable or answered with something that doesn't read as a title.
+     * @param projectId Project ID
+     * @param id
+     * @returns GeneratedTitleResponse OK
+     * @throws ApiError
+     */
+    public generateAgentTitle(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<GeneratedTitleResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/generate-title',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                400: `Bad Request (e.g. the agent has no task prompt to summarise)`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+                502: `Bad Gateway (the title model failed or gave an unusable answer)`,
             },
         });
     }

@@ -745,6 +745,12 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
+// GeneratedTitleResponse defines model for GeneratedTitleResponse.
+type GeneratedTitleResponse struct {
+	// Title The generated title. Not persisted - the client offers it as a draft.
+	Title string `json:"title"`
+}
+
 // ListReviewsResponse The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
 type ListReviewsResponse struct {
 	// AuthStatus Live auth status line, when not authenticated / configured.
@@ -1945,6 +1951,9 @@ type ServerInterface interface {
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
 	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Generate a title for an agent from its task prompt
+	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
+	GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -2790,6 +2799,40 @@ func (siw *ServerInterfaceWrapper) SetDownstreamBranch(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetDownstreamBranch(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GenerateAgentTitle operation middleware
+func (siw *ServerInterfaceWrapper) GenerateAgentTitle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateAgentTitle(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4495,6 +4538,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/downstream-branch", wrapper.SetDownstreamBranch)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/generate-title", wrapper.GenerateAgentTitle)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
@@ -5262,6 +5306,60 @@ type SetDownstreamBranch404JSONResponse ErrorResponse
 func (response SetDownstreamBranch404JSONResponse) VisitSetDownstreamBranchResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitleRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type GenerateAgentTitleResponseObject interface {
+	VisitGenerateAgentTitleResponse(w http.ResponseWriter) error
+}
+
+type GenerateAgentTitle200JSONResponse GeneratedTitleResponse
+
+func (response GenerateAgentTitle200JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle400JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle400JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle404JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle404JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle500JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle500JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle502JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle502JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -6916,6 +7014,9 @@ type StrictServerInterface interface {
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
 	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
+	// Generate a title for an agent from its task prompt
+	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
+	GenerateAgentTitle(ctx context.Context, request GenerateAgentTitleRequestObject) (GenerateAgentTitleResponseObject, error)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
@@ -7633,6 +7734,33 @@ func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetDownstreamBranchResponseObject); ok {
 		if err := validResponse.VisitSetDownstreamBranchResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GenerateAgentTitle operation middleware
+func (sh *strictHandler) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request GenerateAgentTitleRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GenerateAgentTitle(ctx, request.(GenerateAgentTitleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GenerateAgentTitle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GenerateAgentTitleResponseObject); ok {
+		if err := validResponse.VisitGenerateAgentTitleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
