@@ -88,7 +88,7 @@ type Agent struct {
 	// spawns (also soft-deleted, but EndState "") never surface there.
 	EndState string
 
-	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// --- Non-local integration (MR/PR link, docs/non-local-integration.md) ---
 	// See model_unix.go for field docs.
 	DownstreamBranch   string
 	ReviewURL          string

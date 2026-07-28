@@ -94,10 +94,10 @@ type Agent struct {
 	// list shows only soft-deleted rows with a non-empty EndState, so aborted
 	// spawns (also soft-deleted, but EndState "") never surface there. A head merged
 	// remotely (its MR landed on the forge) is archived as "merged" too - the stored
-	// ReviewURL records that it came via an MR (NON_LOCAL_INTEGRATION.md 3.5).
+	// ReviewURL records that it came via an MR (docs/non-local-integration.md).
 	EndState string
 
-	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// --- Non-local integration (MR/PR link, docs/non-local-integration.md) ---
 	// The head<->MR link is optional and per-head: an unlinked head (all fields
 	// empty) behaves exactly as before, with direct local Merge available.
 

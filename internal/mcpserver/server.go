@@ -40,8 +40,8 @@ type Deps struct {
 	RequestAccess func(name string) (approved bool, message string)
 	// GetReview returns this head's current MR link + cached forge state (status,
 	// unresolved discussions), or nil when unavailable. Populated from the per-head
-	// review file the MR watcher writes; nil disables the review tools. See
-	// NON_LOCAL_INTEGRATION.md 3.5a.
+	// review file the MR watcher writes; nil disables the review tools.
+	// See docs/non-local-integration.md.
 	GetReview func() *ReviewFile
 	// GitOp performs a git write-operation on the head's OWN branch, inside its
 	// worktree - never another branch or a path outside the worktree. It backs the

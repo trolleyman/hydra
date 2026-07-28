@@ -671,7 +671,7 @@ paths:
       operationId: publishAgent
       description: >-
         Host-side, by the daemon, with the user's own credentials
-        (NON_LOCAL_INTEGRATION.md 3.3). Claims the head (publishing), runs the
+        (docs/non-local-integration.md). Claims the head (publishing), runs the
         local test gate (like merge; force bypasses), pushes hydra/<id> to the
         downstream branch on the remote, then creates the MR/PR if none exists.
         The local branch is untouched. Idempotent: re-publishing pushes again and
@@ -1557,7 +1557,7 @@ paths:
     post:
       summary: Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
       description: >
-        Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests
+        Arms "publish when green" (docs/non-local-integration.md): once local tests
         settle passing and the agent has finished, an unlinked head auto-opens a
         draft MR and a linked head auto-pushes (plain push only). Idempotent.
       operationId: armPublishWhenGreen
@@ -3023,7 +3023,7 @@ components:
           description: True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN #68.
         publish_when_green:
           type: boolean
-          description: True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+          description: True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
         downstream_branch:
           type: string
           description: The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
@@ -3032,7 +3032,7 @@ components:
 
     ReviewLink:
       type: object
-      description: The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+      description: The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
       required: [url, id, provider]
       properties:
         url:
@@ -3136,7 +3136,7 @@ components:
 
     ReviewConfigResponse:
       type: object
-      description: Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+      description: Resolved [review] config for a project plus live forge auth status (docs/non-local-integration.md).
       required: [configured, provider, remote, auth, default_action]
       properties:
         configured:

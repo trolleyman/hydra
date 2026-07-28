@@ -293,10 +293,10 @@ type AgentResponse struct {
 	ProjectPath string  `json:"project_path"`
 	Prompt      string  `json:"prompt"`
 
-	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
 	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
 
-	// Review The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+	// Review The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 	Review *ReviewLink `json:"review,omitempty"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
@@ -1144,7 +1144,7 @@ type ReviewConfig struct {
 	Squash             *bool   `json:"squash"`
 }
 
-// ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+// ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (docs/non-local-integration.md).
 type ReviewConfigResponse struct {
 	// Auth Auth method ("cli" | "token").
 	Auth string `json:"auth"`
@@ -1184,7 +1184,7 @@ type ReviewConfigResponse struct {
 	Squash            *bool   `json:"squash,omitempty"`
 }
 
-// ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+// ReviewLink The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 type ReviewLink struct {
 	// Adopted True when this head was spawned ON an existing PR/MR Hydra did not create (docs/pr-adoption.md). Such a head has no "Create MR" affordance and its downstream branch (the PR author's source branch) is not editable.
 	Adopted *bool `json:"adopted,omitempty"`

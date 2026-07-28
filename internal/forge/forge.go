@@ -1,5 +1,5 @@
 // Package forge is Hydra's thin abstraction over a code-review forge (GitHub /
-// GitLab) for the non-local integration flow (NON_LOCAL_INTEGRATION.md 3.3-3.5).
+// GitLab) for the non-local integration flow (docs/non-local-integration.md).
 // It is CLI-first: the default implementations shell out to `gh` / `glab` on the
 // host (which own auth, including self-hosted via their multi-host config), so
 // Hydra needs no OAuth code and no token in-sandbox. Everything here runs
@@ -62,7 +62,7 @@ type MergeOptions struct {
 	RemoveSourceBranch bool
 	// Auto enables the forge's own auto-merge (merge-when-pipeline-succeeds /
 	// GitHub auto-merge) instead of merging immediately - preferred where available
-	// because it respects merge trains and protected-branch rules (3.5).
+	// because it respects merge trains and protected-branch rules.
 	Auto bool
 }
 
@@ -85,7 +85,7 @@ type Status struct {
 }
 
 // Discussion is one unresolved review thread with file/line context, ready for an
-// agent to act on (get_review_comments / the "respond to review" prompt, 3.5a).
+// agent to act on (get_review_comments / the "respond to review" prompt).
 type Discussion struct {
 	ID     string
 	Author string
@@ -100,7 +100,7 @@ type Provider interface {
 	// Name is the provider identifier ("github" | "gitlab").
 	Name() string
 	// EnsureMR creates the MR/PR for opts.SourceBranch if none exists, else returns
-	// the existing one - idempotent, so re-publish is safe (3.3 step 6).
+	// the existing one - idempotent, so re-publish is safe.
 	EnsureMR(ctx context.Context, opts EnsureMROptions) (MR, error)
 	// Status returns the normalized state of the MR identified by id.
 	Status(ctx context.Context, repoDir, remote, id string) (Status, error)

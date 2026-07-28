@@ -472,7 +472,7 @@ export class DefaultService {
     }
     /**
      * Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
-     * Host-side, by the daemon, with the user's own credentials (NON_LOCAL_INTEGRATION.md 3.3). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
+     * Host-side, by the daemon, with the user's own credentials (docs/non-local-integration.md). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
      * @param projectId
      * @param id
      * @param force Bypass the local test gate (same semantics as merge's force).
@@ -1039,7 +1039,7 @@ export class DefaultService {
     }
     /**
      * Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-     * Arms "publish when green" (NON_LOCAL_INTEGRATION.md 3.5): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent.
+     * Arms "publish when green" (docs/non-local-integration.md): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent.
      *
      * @param projectId
      * @param id

@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+ * Resolved [review] config for a project plus live forge auth status (docs/non-local-integration.md).
  */
 export type ReviewConfigResponse = {
     /**

@@ -68,7 +68,7 @@ type Head struct {
 	// MergeWhenGreen is true when auto-merge is armed for this head (PLAN #68).
 	MergeWhenGreen bool
 
-	// --- Non-local integration (MR/PR link, NON_LOCAL_INTEGRATION.md 3.3) ---
+	// --- Non-local integration (MR/PR link, docs/non-local-integration.md) ---
 	// DownstreamBranch is the name the head's work is pushed AS (local stays
 	// hydra/<id>); "" until set.
 	DownstreamBranch string

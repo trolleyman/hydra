@@ -90,7 +90,7 @@ func GetDeployConfigPath(projectRoot string) string {
 // override layer with the same schema as config.toml. It is loaded as the fourth
 // config merge layer (defaults -> user -> project -> project-local) and, being
 // host-side and editable only by the user, is as trusted as the root config (it
-// participates in the unsafe_host trusted set). See NON_LOCAL_INTEGRATION.md 3.1.
+// participates in the unsafe_host trusted set). See docs/non-local-integration.md
 func GetProjectConfigLocalPath(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "config.local.toml")
 }
@@ -246,8 +246,8 @@ func GetChatThinkingJsonFromProjectRoot(projectRoot, id string) string {
 
 // GetReviewJsonFromProjectRoot returns the per-head review file the MR lifecycle
 // watcher writes (status + unresolved discussions) and the in-sandbox `hydra mcp`
-// server reads for get_review_status / get_review_comments (NON_LOCAL_INTEGRATION.md
-// 3.5a). Per-head by construction: it is bound only into that head's sandbox, so
+// server reads for get_review_status / get_review_comments
+// (docs/non-local-integration.md). Per-head by construction: it is bound only into that head's sandbox, so
 // the agent's identity comes from the channel, never a self-reported id. Lives
 // at .hydra/local/review/<id>.json.
 func GetReviewDirFromProjectRoot(projectRoot string) string {

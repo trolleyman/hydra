@@ -9,7 +9,7 @@ below describe how it works.
 
 Known follow-ups (not blockers): the `gh --json` fork-detection field names want
 a live-auth verification pass (see the CAVEAT in step 4); token/REST forge auth
-is still CLI-only; and the fetch-fresh spawn base (NON_LOCAL_INTEGRATION.md 3.6)
+is still CLI-only; and the fetch-fresh spawn base (non-local-integration.md)
 that keeps an adopted head's diff crisp remains unbuilt.
 
 ### The review file must be seeded AT SPAWN, not by the watcher
@@ -30,7 +30,7 @@ inode, so a write-and-rename would leave the agent reading a stale copy forever.
 
 The seed covers the first turn; freshness after that is the review tools'
 own job - each call now asks the daemon to re-read the MR from the forge
-(`internal/reviewq`, NON_LOCAL_INTEGRATION.md 3.5a) before answering, so an
+(`internal/reviewq`, non-local-integration.md) before answering, so an
 agent that pushes a fix and asks again sees the new comments rather than the
 30s watcher's last cache.
 
@@ -96,7 +96,7 @@ Setting `BaseBranch` to the PR's target branch is what makes the diff viewer sho
 **the whole PR** (target...`hydra/<id>`), your edits included, which is the right
 default for reviewing-and-fixing. It relies on the local target branch being
 reasonably fresh; the pre-existing "fetch-fresh spawn base" gap
-(NON_LOCAL_INTEGRATION.md 3.6) applies here too and is worth doing first or at the
+(non-local-integration.md) applies here too and is worth doing first or at the
 same time.
 
 ## Design
@@ -301,6 +301,6 @@ Each step is independently useful and independently shippable.
 5. **Web: PR picker + adopted-head labelling** in `SpawnForm.tsx` / `ReviewControls.tsx`.
 
 Steps 1-4 are roughly a day; step 5 is a modest component. Worth folding in the
-pre-existing **fetch-fresh spawn base** gap (NON_LOCAL_INTEGRATION.md 3.6) around step
+pre-existing **fetch-fresh spawn base** gap (non-local-integration.md) around step
 3, since an adopted head's diff quality depends directly on the local target branch not
 being stale.
