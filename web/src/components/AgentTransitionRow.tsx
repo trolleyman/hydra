@@ -24,7 +24,17 @@ export function AgentTransitionRow({ agentName, agentId, projectId, status, befo
           row. Without putting that back the two lines read as one cramped block
           - the trim fixes the title's alignment against its Bot but must not
           also close the gap to the status line. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
+      {/* items-BASELINE. This line mixes three kinds of box - a status chip at
+          12px, prose at 13px, and a mono branch pill at 0.9em - and centring
+          aligns each one's LINE BOX, which differs per type scale and per
+          padding. The three sat on three baselines ("merged" 1.8px below "into",
+          "main" 2.2px above it) and the row read as jumbled. Their text
+          baselines are what should agree.
+          The chips cooperate because neither is a flex container with
+          items-center: Badge's text-only variant is a plain span, and BranchPill
+          is an inline-block (see the note there) - a flex container would expose
+          no baseline at all and this would silently do nothing for the pill. */}
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
         {lead && <span>{withBranchPills(lead)}</span>}
         {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
         {after && <span>{withBranchPills(after)}</span>}
