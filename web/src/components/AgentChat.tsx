@@ -3148,7 +3148,7 @@ function SubagentTimeline({
         }
         if (it.kind === 'assistant')
           return (
-            <div key={it.id} className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
               <Markdown text={it.text} />
             </div>
           )
@@ -3311,7 +3311,7 @@ function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }
       {report.isError ? (
         <OutputPanel text={report.text} lang="" isError />
       ) : (
-        <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
           <Markdown text={report.text} />
         </div>
       )}
@@ -3387,7 +3387,7 @@ function FinishedReportCard({
           report.isError ? (
             <OutputPanel text={report.text} lang="" isError />
           ) : (
-            <div className={`leading-relaxed ${serif ? 'font-serif' : ''}`}>
+            <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
               <Markdown text={report.text} />
             </div>
           )
@@ -3516,7 +3516,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+              <div className={`break-words chat-leading-xs ${serif ? 'font-serif' : ''}`}>
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -8262,7 +8262,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool': {
@@ -8607,7 +8607,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               either one makes reparsed Markdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'assistant' && (
-            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'leading-relaxed'}`}>
+            <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>
               <Markdown text={closeOpenFence(stream.text)} linkCtx={chatLinkCtx} />
             </div>
           )}

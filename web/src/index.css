@@ -335,10 +335,35 @@ body {
    read as bigger text under the old system-serif fallback. A touch larger than
    the 13px pane base, with its own line-height. Code inside keeps its own mono
    class + em sizing. */
+/* Whole-pixel leading for prose that GROWS while a turn streams (agent text at
+   the 13px pane base, sub-agent text in its 12px cards, and .chat-serif below).
+   A ratio-based line box is fractional at these sizes - 13px x 1.625 = 21.125,
+   12px x 1.625 = 19.5, 14px x 1.6 = 22.4 - so every streamed line changes the
+   fractional part of the content height. The browser snaps a scroll offset to
+   the device-pixel grid, so a view pinned to the bottom lands a fraction of a
+   pixel differently each time and the last line - with the working indicator
+   under it - jiggles for the whole turn. A whole-pixel line box keeps that
+   fraction constant, so nothing moves.
+   Deliberately NOT applied to prose that only ever arrives complete (tool
+   results, commit messages, prompts): it cannot jiggle, and leaving it on
+   leading-relaxed keeps their density exactly as it was. Mono runs get their
+   own box because they set an em-relative size (0.85em-0.9em of a fractional
+   parent). The values match what the ratios produced, rounded. */
+.chat-leading {
+  line-height: 21px;
+}
+.chat-leading-xs {
+  line-height: 20px;
+}
 .chat-serif {
   font-family: var(--font-serif);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 22px;
+}
+.chat-leading :is(code, pre, .font-mono),
+.chat-leading-xs :is(code, pre, .font-mono),
+.chat-serif :is(code, pre, .font-mono) {
+  line-height: 18px;
 }
 .chat-serif strong,
 .chat-serif b {
