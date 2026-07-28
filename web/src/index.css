@@ -167,6 +167,31 @@ body {
   animation: lightbox-fade-out 240ms ease-in forwards;
 }
 
+/* The lifted-off-the-page shadow belongs to the lightbox, not to the thumbnail the
+   picture flew out of - so it fades with the darkness rather than snapping on the
+   instant the flight starts (and off again the instant it ends). It can't ride the
+   opacity fade above, which would take the picture with it, so the shadow itself is
+   animated: box-shadow interpolates, so this is just the same shadow at zero alpha.
+   The end value matches Tailwind's shadow-2xl, which the element keeps wearing once
+   the animation hands back over. */
+@keyframes lightbox-shadow-in {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+}
+
+@keyframes lightbox-shadow-out {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+}
+
+.lightbox-shadow-in {
+  animation: lightbox-shadow-in 200ms ease-out;
+}
+
+.lightbox-shadow-out {
+  animation: lightbox-shadow-out 240ms ease-in forwards;
+}
+
 /* The fallback when there is nothing on screen to fly from or to - no thumbnail in
    view, no edge previews (they're dropped below `lg`), or reduced motion: the media
    slides in from the side you're heading toward (--lb-from, set per navigation) and
@@ -184,6 +209,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .lightbox-slide,
+  .lightbox-shadow-in,
   .lightbox-fade-in { animation: none; }
 }
 

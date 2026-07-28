@@ -101,7 +101,7 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             }}
             className="relative block w-full cursor-zoom-in"
           >
-            <CheckerLayer className="rounded-md" />
+            <CheckerLayer />
             <img
               src={url}
               loading="lazy"

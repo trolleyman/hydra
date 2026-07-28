@@ -350,6 +350,10 @@ export function ImageLightbox({
   // element that only appears later, like the "previous" preview once you leave the
   // first image, fades in when it mounts, which is the right treatment for it too.)
   const chromeFade = closing ? 'lightbox-fade-out' : 'lightbox-fade-in'
+  // The picture's own drop shadow is chrome too, but it can't ride an opacity fade
+  // (that would fade the picture with it), so it gets the same timing as its own
+  // box-shadow animation - see index.css.
+  const shadowFade = closing ? 'lightbox-shadow-out' : 'lightbox-shadow-in'
   const sidePreview = (dir: 'prev' | 'next') => {
     // Only rendered when a sibling exists in that direction (no wrap), so the index
     // is always in range.
@@ -494,7 +498,7 @@ export function ImageLightbox({
               // LIGHTBOX_MEDIA_CLASS marks the frame as the picture's own box (it hugs
               // the image exactly at rest), so a flight measures the picture rather
               // than the full-width wrapper it is centred in.
-              className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl`}
+              className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl ${shadowFade}`}
               maxWidth={hasSiblings ? '80vw' : '90vw'}
               maxHeight="85vh"
               onVerticalSlide={followFrameSlide}

@@ -12,11 +12,17 @@ import { checkerStyle } from './artifactDiffShared'
 // Its parent must be positioned and hug the media (the tiles' `relative` media box,
 // the lightbox's wrapper around its <img>). The picture on top needs to be positioned
 // too - `relative`/`absolute` - to paint above this layer.
+//
+// The radius is deliberately one pixel TIGHTER than the `rounded-md` the media above
+// it carries, because this layer sits one pixel inside it: two rounded rectangles are
+// only concentric when the inner radius is the outer one minus the inset, and matching
+// them exactly instead let the checkerboard bulge past the picture's rounded corners -
+// a little light nick in each corner.
 export function CheckerLayer({ className, style }: {
   className?: string
   /** Overrides the checkerboard itself; defaults to the subtle in-page one. The
    *  lightbox passes a bolder pattern that reads on its dark backdrop. */
   style?: React.CSSProperties
 }) {
-  return <div aria-hidden className={`absolute inset-px pointer-events-none ${className ?? ''}`} style={style ?? checkerStyle} />
+  return <div aria-hidden className={`absolute inset-px rounded-[5px] pointer-events-none ${className ?? ''}`} style={style ?? checkerStyle} />
 }

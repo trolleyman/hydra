@@ -11,12 +11,13 @@ const rect = (left: number, top: number, width: number, height: number): Rect =>
 // Apply a `translate(...) scale(...)` string to a box the way the browser does:
 // scale about the box's own centre, then translate.
 function apply(box: Rect, transform: string): Rect {
-  const m = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)$/.exec(transform)
+  const m = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)(?:, ([\d.]+))?\)$/.exec(transform)
   if (!m) throw new Error(`unexpected transform: ${transform}`)
-  const [dx, dy, s] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const [dx, dy, sx] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const sy = m[4] === undefined ? sx : Number(m[4])
   const cx = box.left + box.width / 2 + dx
   const cy = box.top + box.height / 2 + dy
-  return { left: cx - (box.width * s) / 2, top: cy - (box.height * s) / 2, width: box.width * s, height: box.height * s }
+  return { left: cx - (box.width * sx) / 2, top: cy - (box.height * sy) / 2, width: box.width * sx, height: box.height * sy }
 }
 
 describe('flipTransform', () => {
@@ -32,12 +33,25 @@ describe('flipTransform', () => {
 
   it('is an identity for a box that is already where it is going', () => {
     const box = rect(10, 20, 300, 200)
-    expect(flipTransform(box, box)).toBe('translate(0px, 0px) scale(1)')
+    expect(flipTransform(box, box)).toBe('translate(0px, 0px) scale(1, 1)')
   })
 
-  it('scales uniformly (no stretch) when the two boxes disagree on aspect', () => {
+  it('lands exactly even when the two boxes disagree slightly on aspect', () => {
+    // Both ends measure the same picture, but through different framing (a 1px border
+    // on one of them), so the ratios differ in the third decimal. A single averaged
+    // scale would land a pixel or two out and jump; per-axis lands on the nose.
+    const current = rect(605, 79, 390, 776)
+    const target = rect(854, 196, 329, 656)
+    const out = apply(current, flipTransform(current, target)!)
+    expect(out.left).toBeCloseTo(target.left)
+    expect(out.top).toBeCloseTo(target.top)
+    expect(out.width).toBeCloseTo(target.width)
+    expect(out.height).toBeCloseTo(target.height)
+  })
+
+  it('scales uniformly (no stretch) when the two boxes really disagree on aspect', () => {
     // A cover-cropped thumbnail: the flight must keep the picture undistorted rather
-    // than squashing it on the way, so one scale is used for both axes.
+    // than squashing it into a shape it never has, so one scale is used for both axes.
     const t = flipTransform(rect(0, 0, 400, 400), rect(0, 0, 200, 100))!
     expect(t).toMatch(/scale\(0\.35\)$/) // sqrt(0.5 * 0.25) ~ 0.3536
   })
