@@ -9,6 +9,7 @@ import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
 import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useImageLightbox } from '../stores/imageLightboxStore'
+import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
@@ -146,10 +147,10 @@ function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
 }
 
 // MarkdownImage renders a markdown image. Anything that resolves is shown at its
-// natural size (capped to the column) and opens in the app-wide lightbox on
-// click; anything that doesn't - an unservable path, or a scratch file that has
-// since been reclaimed - degrades to a muted chip naming it, rather than the
-// browser's broken-image icon.
+// logical size (natural px / the @2x density in its name, capped to the column)
+// and opens in the app-wide lightbox on click; anything that doesn't - an
+// unservable path, or a scratch file that has since been reclaimed - degrades to
+// a muted chip naming it, rather than the browser's broken-image icon.
 function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
   const openLightbox = useImageLightbox()
   // The source that failed to load, rather than a bare flag: a streamed message
@@ -158,6 +159,9 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const url = src ? resolveImageSrc(src, ctx) : null
   const label = alt || (src ? src.split('/').pop() || src : 'image')
+  const density = densityFromPath(src)
+  const natural = useNaturalSize(url)
+  const logical = natural ? logicalSize(natural, density) : null
   if (!url || failedSrc === src) {
     return (
       <span
@@ -173,13 +177,22 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
     <img
       src={url}
       alt={label}
+      // Laid out at its LOGICAL size: physical px / the @2x density in the name,
+      // so a 2x capture is the same size as a 1x one, just sharp. The size is
+      // measured off-screen first (useNaturalSize) so the visible image gets its
+      // width on the FIRST layout instead of painting big and snapping smaller.
+      width={logical?.w}
+      height={logical?.h}
+      // A ring, NOT a border: with border-box sizing a 1px border eats 2px out of
+      // the content box the width attr set, and the browser then resamples the
+      // image into the remainder (420 -> 418x199.047), softening every pixel.
+      className="my-1 max-w-full h-auto rounded-md ring-1 ring-gray-200 dark:ring-gray-600/40 cursor-zoom-in"
       // The path as written, so copy-as-markdown gives back the source rather
       // than the blob URL we rewrote it to (lib/copyMarkdown).
       data-md-src={src}
       loading="lazy"
       onError={() => setFailedSrc(src ?? null)}
-      onClick={() => openLightbox([{ url, filename: label, size: 0 }])}
-      className="my-1 max-w-full h-auto rounded-md border border-gray-200 dark:border-gray-600/40 cursor-zoom-in"
+      onClick={() => openLightbox([{ url, filename: label, size: 0, dpi: density }])}
     />
   )
 }

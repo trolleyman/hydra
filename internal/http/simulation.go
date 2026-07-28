@@ -3451,7 +3451,7 @@ var simChatEvents = []string{
 	// to (inside the head's private /tmp). The chat markdown renderer resolves that
 	// through the agent-files endpoint and shows the picture inline - see
 	// MarkdownImage / HandleAgentFileBlob.
-	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover.png)\n\nNo console errors."}]}}`,
+	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."}]}}`,
 	// A background Bash command plus its completion <task-notification>
 	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
 	// deduped to ONE notice chip). The notification carries the <output-file>
