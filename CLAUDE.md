@@ -111,25 +111,32 @@ it doesn't have (~1.7px high at top-bar size). Put `.optical-center`
 what gets centred is the cap-to-baseline box you actually see. Browsers without
 `text-box` support ignore it and render as before, so it can't regress anything.
 
-**It shrinks the label's box, so it is only safe when nothing depends on that
-box's height.** An audit of every icon+label row in the app found exactly two
-ways this bites, and between them they ruled out every site outside the top bar:
+The trimmed box is **smaller than the ink**: a `y`/`p`/`j` hangs below it, a tall
+`l`/`d` pokes above. The class already handles the consequence that bites -
+`truncate` is `overflow: hidden`, which sliced descenders clean off ("project"
+rendered as "proiect") - by padding the box and taking the same amount straight
+back out with a negative margin, so the glyphs have room inside the clip while
+the layout still sees the trimmed height. So it is safe on a truncating label.
 
-1. **The label truncates.** Tailwind's `truncate` sets `overflow: hidden`, which
-   on a cap-trimmed box slices the descenders clean off - "project" renders as
-   "proiect". This covers the sidebar project row, the repository file tree, the
-   diff file tree, and the preview/service rows.
-2. **The row's height comes from the label.** A row with only `py-*` shrinks and
-   reflows everything under it (the Settings headings go 20px -> 16px).
+**What it does not undo: a row whose height comes only from its label gets a
+couple of px shorter**, because shrinking that box is the whole point. That is
+usually fine (the file trees just read a touch denser); give the row its own
+height (`h-7`/`h-8`, as the top-bar buttons do) if it isn't. Not for prose
+either - trimming a multi-line block collapses the leading between its lines.
 
-So: use it on a label inside a container with its OWN height (`h-7`/`h-8` like
-the top-bar buttons) whose label does not clip its overflow - `whitespace-nowrap`
-is fine, `truncate` is not. Not on prose either: trimming a multi-line block
-collapses the leading between its lines.
+Applied at: the top-bar action buttons, the repository + diff file trees, the
+sidebar project path, the collapsible card headers (previews / services / tests),
+the Settings section headings, and the chat rows beside a `WorkSpark`.
 
-Where it does apply, reach for it rather than nudging with `relative top-[Npx]` -
-a hardcoded nudge is tuned to whichever font happened to load when you measured
-it, and this UI's font stack resolves differently per OS.
+**Correct the label, never the icon.** Both work - trimming the text down and
+nudging the mark up land in the same place - but the trim derives the offset from
+the font's own cap height, where a `-mt-px` / `relative top-[Npx]` on the icon is
+a constant tuned to one size in whichever font happened to load when it was
+measured, and this UI's stack resolves differently per OS. So the icon stays
+honestly centred and the label carries the class. Note the trim needs LINE BOXES
+to act on: a flex container has none, so a label wrapper that is itself
+`flex items-center gap-*` must become an inline span (with the gap moved onto its
+separator) before the class does anything - see the chat result footer.
 
 ### No raw control bytes in source
 
@@ -187,8 +194,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
   tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
   (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go` +
   `head_status.go`, `internal/reviewq` on-demand refresh,
-  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs`; also lists
-  what is deliberately NOT built)
+  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs` /
+  `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks

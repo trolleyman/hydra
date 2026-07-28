@@ -498,7 +498,7 @@ function TreeRow({
           {showIcons && (node.artifact === 'dir'
             ? <Images className="w-4 h-4 shrink-0 text-pink-500" />
             : isOpen ? <FolderOpen className="w-4 h-4 shrink-0 text-blue-500" /> : <Folder className="w-4 h-4 shrink-0 text-blue-500" />)}
-          <span className="truncate">{node.name}</span>
+          <span className="truncate optical-center">{node.name}</span>
         </button>
         {isOpen && node.children.map((child) => (
           <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} fileLink={fileLink} showIcons={showIcons} />
@@ -523,7 +523,7 @@ function TreeRow({
       {showIcons
         ? <Icon className={`w-4 h-4 shrink-0 ${className}`} />
         : <FileIcon className="w-4 h-4 shrink-0 text-gray-400" />}
-      <span className="truncate">{node.name}</span>
+      <span className="truncate optical-center">{node.name}</span>
     </Link>
   )
 }

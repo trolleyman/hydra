@@ -417,6 +417,15 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// Intra-line "word diff" tints. A changed line already carries a faint whole-row
+// tint (bg-*-50); these darker spans mark the exact characters that differ so the
+// eye lands on the actual edit rather than re-reading the whole line. Deletions
+// read red, additions green - the same red/green language as the row. Shared by
+// the diff viewer and the chat's Edit card so an edit is marked up identically
+// wherever it is read.
+export const WORD_DEL_CLASS = 'rounded-[2px] bg-red-300/45 dark:bg-red-400/25'
+export const WORD_ADD_CLASS = 'rounded-[2px] bg-green-300/45 dark:bg-green-400/25'
+
 // applyWordRanges overlays <span class="..."> wrappers around the given
 // character ranges of already syntax-highlighted line HTML. It walks the HTML
 // counting plain-text characters (an entity like &amp; counts as one), so the

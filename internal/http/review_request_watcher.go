@@ -93,6 +93,10 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 				res = s.headStatusText(ctx, id)
 			case reviewq.OpTestLogs:
 				res = s.testLogsText(ctx, id, r)
+			case reviewq.OpRunTests:
+				res = s.runTestsText(ctx, id, r)
+			case reviewq.OpRunArtifacts:
+				res = s.runArtifactsText(ctx, id, r)
 			default:
 				if refresh == nil {
 					v := s.refreshReviewOnDemand(ctx, id)

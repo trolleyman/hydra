@@ -131,6 +131,67 @@ function heredocFlags(cmd: string): Uint8Array {
   return flags
 }
 
+// topLevelStatements cuts a script into the statements the shell runs one after
+// another: the pieces separated by `;`, `&&`, `||`, `|`, `&` and newlines at
+// paren depth 0, outside quotes and heredoc bodies.
+//
+// "Top level" is the point. A statement inside `(...)` runs in a SUBSHELL, so
+// what it does to the shell's state - a `cd`, an export - dies with it, and a
+// heredoc body is data. Used to follow the working directory across a session's
+// commands (lib/shellCwd), which is only sound for the statements that actually
+// affect the shell.
+export function topLevelStatements(cmd: string): string[] {
+  const flags = heredocFlags(cmd)
+  const out: string[] = []
+  let current = ''
+  let parens = 0
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  const push = () => {
+    if (current.trim()) out.push(current.trim())
+    current = ''
+  }
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]
+    if (flags[i] === HEREDOC_BODY) continue
+    if (escaped) {
+      current += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      current += ch
+      escaped = true
+      continue
+    }
+    if (ch === "'" && !inDouble) {
+      current += ch
+      inSingle = !inSingle
+      continue
+    }
+    if (ch === '"' && !inSingle) {
+      current += ch
+      inDouble = !inDouble
+      continue
+    }
+    if (inSingle || inDouble) {
+      current += ch
+      continue
+    }
+    if (ch === '(') parens++
+    else if (ch === ')' && parens > 0) parens--
+    else if (parens === 0 && (ch === '\n' || ch === ';' || ch === '|' || ch === '&')) {
+      push()
+      if ((ch === '&' || ch === '|') && cmd[i + 1] === ch) i++
+      continue
+    }
+    current += ch
+  }
+  push()
+  return out
+}
+
 // bareWordAt returns the unquoted lowercase word starting at i, provided it is a
 // whole token (the character after it delimits). The caller is responsible for
 // only asking when i is in command position - in `echo done` the `done` is an

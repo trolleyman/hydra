@@ -41,7 +41,9 @@ import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
+import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
+import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
+import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
@@ -75,6 +77,8 @@ import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval
 import { selectionToMarkdown } from '../lib/copyMarkdown'
 import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
+import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
+import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing
 // on the same terminal WebSocket - {"type":"claude_event"} frames carrying
@@ -266,7 +270,10 @@ type ChatItem =
   // print what was actually sent rather than a reconstruction of it (see
   // toolRawJson). They cost one wrapper object per card: the heavy part of a
   // result is its text, and that string is shared with `result`, not copied.
-  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown }
+  // Both arrive with the RESULT rather than the call: editPatch is an Edit's
+  // unified patch (the call itself only knows the two strings - see lib/editDiff),
+  // cwdAfter the directory the shell was left in (see lib/shellCwd).
+  | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown; editPatch?: EditHunk[]; cwdAfter?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
   // result is the tool_result once answered.
@@ -411,6 +418,21 @@ interface ProviderEvent {
   // The durable conversation-record id (transcript + stdout share it). Tracked
   // as the anchor for load-older history paging (item 25).
   uuid?: string
+  // The working directory the CLI recorded for this entry. The Bash tool runs
+  // ONE shell for a whole session, so this is the only record of where a command
+  // ran - and it is read from the TOOL RESULT entry, where it is the directory
+  // AFTER the command. (On the assistant entry carrying the tool_use it is
+  // stamped at flush time and can land either side of the call, so it is
+  // ignored.) Absent from live stdout lines on some CLI versions, in which case
+  // the chat infers the directory instead - see lib/shellCwd.
+  cwd?: string
+  // Set on the events normalizedToProviderEvents rebuilds from the backend
+  // timeline: THIS object is Hydra's reconstruction, not a line a provider sent,
+  // so Raw must not present it as one. The provider's own entry (the recorded
+  // line minus its message content) rides on `entry` where the backend captured
+  // one - see internal/chat/claude.go.
+  synthesizedEvent?: boolean
+  entry?: unknown
   // stop_reason on a complete assistant message: "end_turn"/"tool_use" are
   // normal, "max_tokens" means the reply was truncated, "refusal" a safety stop
   // - only the abnormal ones are surfaced (item: turn footer).
@@ -434,6 +456,15 @@ interface ProviderEvent {
   // backfill/history path never sees the duplicate and needs no eviction.
   retractedMessageUuids?: string[]
   retracted_message_uuids?: string[]
+  // The tool's own structured result, riding on a user envelope alongside its
+  // tool_result block. Only the Edit slice of it is used - its unified patch,
+  // which is what lets an Edit card show the file's real line numbers (see
+  // lib/editDiff). Both spellings again: stdout stream-json writes it
+  // snake_case, the persisted transcript camelCase. The normalized path instead
+  // delivers the patch pre-extracted by the daemon, as `editPatch`.
+  tool_use_result?: unknown
+  toolUseResult?: unknown
+  editPatch?: EditHunk[] | null
   // "none" when the CLI is authed with an OAuth subscription - then
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
@@ -634,6 +665,13 @@ function cleanSubagentReport(text: string): string {
     .trimEnd()
 }
 
+// entryString reads one field off a relayed provider entry (see ProviderEvent.entry).
+function entryString(entry: unknown, key: string): string {
+  if (!entry || typeof entry !== 'object') return ''
+  const value = (entry as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : ''
+}
+
 // Bridge the provider-neutral backend timeline into the mature presentation
 // reducer while Claude's legacy wire format is being retired. Provider details
 // stop at this boundary; paging and live delivery use the same conversion.
@@ -654,6 +692,14 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
     isSidechain: p.sidechain === true,
     agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
     parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
+    // The provider's own recorded entry, when the backend captured one. The
+    // fields the presentation needs are read off it rather than being copied up
+    // one by one - `cwd` (see lib/shellCwd) is the first, and whatever a future
+    // CLI adds is already here. `p.cwd` is the older spelling, kept for events
+    // stored before the entry was relayed.
+    entry: p.entry && typeof p.entry === 'object' ? p.entry : undefined,
+    cwd: entryString(p.entry, 'cwd') || (typeof p.cwd === 'string' ? p.cwd : '') || undefined,
+    synthesizedEvent: true,
   }
   const text = typeof p.text === 'string' ? p.text : contentText(p.content)
   const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
@@ -702,7 +748,9 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
       const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
       // Same rule for the result: `content` is Claude's verbatim tool_result
       // payload; anything reconstructed from output/status is not a block.
-      return [{ ...base, type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed', synthetic: p.content == null }] } }]
+      // `patch` rides on the event, not the block - it is Hydra's extract of the
+      // tool's structured result, not something the provider put in the block.
+      return [{ ...base, type: 'user', editPatch: parseEditPatch(p.patch), message: { content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: p.is_error === true || p.status === 'failed', synthetic: p.content == null }] } }]
     }
     case 'plan_updated': {
       // Claude exposes its TaskCreate/TaskUpdate calls as ordinary tool cards;
@@ -1277,11 +1325,59 @@ function keptRawBlock(block: ClaudeContentBlock, value: unknown): unknown {
   delete rest.synthetic
   return rest
 }
-function rawUseBlock(block: ClaudeContentBlock): unknown {
-  return keptRawBlock(block, block)
+
+// inEntry puts a block back inside the ENTRY the CLI recorded it in - the line's
+// envelope (type, uuid, timestamp, cwd, sidechain markers, the message's id and
+// usage) with `message.content` narrowed to this one block.
+//
+// Raw used to show the bare block, which meant everything the CLI wrote around
+// it was invisible: `cwd` - the only record of which directory a command ran in
+// - was there in the transcript all along and could not be seen. Wrapping,
+// rather than copying chosen fields up, keeps Raw honest as the CLI adds fields
+// nobody here has heard of yet.
+//
+// Narrowed to one block because a card is one tool call: an assistant message
+// routinely carries several tool_use blocks (plus its text), and each of those
+// is its own card, showing its own entry.
+function inEntry(entry: unknown, block: unknown): unknown {
+  if (block === undefined || !entry || typeof entry !== 'object') return block
+  const out = { ...(entry as Record<string, unknown>) }
+  const message = out.message && typeof out.message === 'object' ? (out.message as Record<string, unknown>) : {}
+  out.message = { ...message, content: [block] }
+  return out
 }
-function rawResultBlock(block: ClaudeContentBlock): unknown {
-  return keptRawBlock(block, scrubRawImageData(block))
+// providerEntry is the recorded line a card should show its block inside of.
+// An event parsed straight off the wire IS that line; one rebuilt from the
+// backend timeline is not, and carries the real entry separately (or nothing at
+// all, for a provider whose raw shape is handled elsewhere - Codex's `_raw`).
+function providerEntry(ev: ProviderEvent): unknown {
+  return ev.synthesizedEvent ? ev.entry : ev
+}
+function rawUseBlock(block: ClaudeContentBlock, entry?: unknown): unknown {
+  return inEntry(entry, keptRawBlock(block, block))
+}
+function rawResultBlock(block: ClaudeContentBlock, entry?: unknown): unknown {
+  return inEntry(entry, keptRawBlock(block, scrubRawImageData(block)))
+}
+
+// eventEditPatch pulls an Edit's unified patch off a user envelope, from
+// whichever wire shape delivered it: pre-extracted by the daemon on the
+// normalized path, or dug out of the raw stream-json line's tool_use_result on
+// the legacy one. Returns null for every other tool - the oldString/newString
+// pair is what tells an Edit's result apart from a Write's (whose patch is the
+// whole new file, already rendered as the card's content).
+//
+// The envelope carries one result with nothing naming which block it belongs
+// to, so it is only attributable when the message holds a single tool_result
+// (matching the daemon's own rule).
+function eventEditPatch(ev: ProviderEvent, blocks: ClaudeContentBlock[]): EditHunk[] | null {
+  if (blocks.filter((b) => b.type === 'tool_result').length !== 1) return null
+  if (ev.editPatch !== undefined) return ev.editPatch
+  const res = ev.tool_use_result ?? ev.toolUseResult
+  if (!res || typeof res !== 'object') return null
+  const r = res as { oldString?: unknown; newString?: unknown; structuredPatch?: unknown }
+  if (typeof r.oldString !== 'string' || typeof r.newString !== 'string') return null
+  return parseEditPatch(r.structuredPatch)
 }
 
 // toolRawJson builds the Raw panel's text for a tool card - the provider's own
@@ -2010,31 +2106,127 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
   return <GutterCodePanel nums={parsed.nums} code={parsed.code} lang={lang} />
 }
 
-// EditDiffPanel shows an Edit's old_string and new_string as two syntax-
-// highlighted blocks side by side (old left, new right; stacked on a narrow
-// pane), tinted red/green like a diff. No line numbers - the strings are
-// fragments, not whole files. A "replace all" chip surfaces the replace_all flag.
-function EditDiffPanel({ oldStr, newStr, lang, replaceAll }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean }) {
-  const oldHtml = useMemo(() => highlightHtml(oldStr, lang), [oldStr, lang])
-  const newHtml = useMemo(() => highlightHtml(newStr, lang), [newStr, lang])
-  const block = (label: string, str: string, html: string | null, tone: 'old' | 'new') => (
-    <div className="flex-1 min-w-0">
-      <div className={`mb-0.5 text-[10px] font-semibold tracking-wide select-none ${tone === 'old' ? 'text-red-500/80 dark:text-red-400/80' : 'text-emerald-600/80 dark:text-emerald-400/80'}`}>
-        {label}
-      </div>
-      {html != null
-        ? <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`} dangerouslySetInnerHTML={{ __html: html }} />
-        : <pre className={`rounded-md border whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200 ${tone === 'old' ? 'border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20' : 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-900/40 dark:bg-emerald-950/20'}`}>{str || ' '}</pre>}
+// FileViewBody renders one file view's slice of a read-shaped shell command's
+// output (see lib/fileViewCommand): the file's own line numbers in the gutter,
+// highlighted by its extension. A `cat -n` brings its numbers with it, and a
+// plain `tail` knows no line numbers at all - it still gets the highlighting.
+function FileViewBody({ section }: { section: FileViewSection }) {
+  const lang = langFromPath(section.path)
+  const text = section.lines.join('\n')
+  if (section.lines.length === 0) return <OutputPanel text="" lang="" />
+  if (section.numbered) return <ReadOutputPanel text={text} lang={lang} />
+  if (section.start == null) return <OutputPanel text={text} lang={lang} />
+  const start = section.start
+  return <GutterCodePanel nums={section.lines.map((_, i) => String(start + i))} code={section.lines} lang={lang} />
+}
+
+// FileViewSections renders the file content a read-shaped shell command printed,
+// one block per file it looked at. Each block is captioned with the step that
+// produced it: the card header calls this a Read, so the command it is really a
+// Read of belongs where you can see it without opening the Raw JSON - and with
+// several files in one call, that caption is also what tells them apart.
+function FileViewSections({ sections }: { sections: FileViewSection[] }) {
+  return (
+    <div className="space-y-1.5">
+      {sections.map((section, i) => (
+        <div key={i}>
+          {/* Plain non-interactive truncated text: native title is the right
+              tool here (see the tooltip conventions in CLAUDE.md). */}
+          <div
+            className="mb-0.5 truncate font-mono text-[10px] text-stone-400 dark:text-stone-500 select-none"
+            title={section.command}
+          >
+            {section.command}
+          </div>
+          <FileViewBody section={section} />
+        </div>
+      ))}
     </div>
   )
+}
+
+// EditDiffPanel shows an Edit as a unified diff instead of two disembodied
+// blobs: lines the edit leaves alone are context, the rest are -/+ rows, and
+// the characters that actually changed are marked with the same word-diff
+// highlight the diff viewer uses (lib/wordDiff).
+//
+// The rows come from the CLI's own patch when the result carried one - which is
+// what puts the file's REAL line numbers in the gutter and adds the few lines
+// of surrounding context the agent never quoted. While the call is still
+// running (or against a provider that sends no patch) the two strings are
+// diffed here instead and the gutter is dropped: nothing in a fragment says
+// where in the file it sits, and 1..N numbers would be a lie. See lib/editDiff.
+//
+// A "replace all" chip surfaces the replace_all flag.
+const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]'
+function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
+  const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
+  const numbered = useMemo(() => hasLineNumbers(rows), [rows])
+  // Each side is highlighted as ONE run of code, not line by line, so a
+  // multi-line construct (a block comment, a template string) colourises
+  // correctly - and each side is reassembled whole (context lines belong to
+  // both) so neither is highlighted as if the other side's lines were missing.
+  const html = useMemo(() => {
+    const oldSrc: string[] = []
+    const newSrc: string[] = []
+    const pick = rows.map((r) => {
+      if (r.type !== 'add') oldSrc.push(r.content)
+      if (r.type !== 'del') newSrc.push(r.content)
+      return r.type === 'del' ? oldSrc.length - 1 : newSrc.length - 1
+    })
+    const oldLines = highlightLines(oldSrc.join('\n'), lang || 'plaintext')
+    const newLines = highlightLines(newSrc.join('\n'), lang || 'plaintext')
+    return rows.map((r, i) => (r.type === 'del' ? oldLines[pick[i]] : newLines[pick[i]]) ?? '')
+  }, [rows, lang])
   return (
     <div className="space-y-1">
       {replaceAll && (
         <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
       )}
-      <div className="flex flex-col sm:flex-row gap-1.5">
-        {block('Old', oldStr, oldHtml, 'old')}
-        {block('New', newStr, newHtml, 'new')}
+      <div className={`${PANEL_CLASS} max-h-64 overflow-auto py-1.5`}>
+        {/* data-copy-code / data-copy-line: grid cells are not block elements,
+            so without them a copy hands over every line run together (see
+            lib/copyMarkdown). The -/+ marker sits INSIDE the copied cell and
+            the line numbers outside it, so what you copy is a diff you can
+            paste, not a column of numbers. */}
+        <div data-copy-code className={`grid ${numbered ? 'grid-cols-[auto_auto_1fr]' : 'grid-cols-[1fr]'} text-[11px] leading-4 font-mono`}>
+          {rows.map((row, i) => {
+            if (row.type === 'gap') {
+              return (
+                <span key={i} className="col-span-full select-none px-2 text-stone-400 dark:text-stone-600 border-y border-stone-200/70 dark:border-white/[0.06] my-0.5">
+                  ...
+                </span>
+              )
+            }
+            const isAdd = row.type === 'add'
+            const isDel = row.type === 'del'
+            const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
+            const marker = isAdd ? '+' : isDel ? '-' : ' '
+            const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-stone-300 dark:text-stone-700'
+            const code = row.ranges?.length
+              ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
+              : html[i]
+            return (
+              <Fragment key={i}>
+                {numbered && (
+                  <>
+                    {/* Each number column carries its own right-hand rule, so
+                        the old and new sides are separated the same way the
+                        diff viewer's unified gutter separates them (see
+                        UNIFIED_LINE_NUM_CLASS). min-h keeps a blank line one
+                        row tall. */}
+                    <span className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
+                    <span className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
+                  </>
+                )}
+                <span data-copy-line className={`min-w-0 whitespace-pre-wrap break-words pl-1.5 pr-2 text-stone-800 dark:text-stone-200 ${bg}`}>
+                  <span className={`select-none mr-1 ${markerCls}`}>{marker}</span>
+                  <span dangerouslySetInnerHTML={{ __html: code }} />
+                </span>
+              </Fragment>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -2484,6 +2676,7 @@ function LowlitPath({ path }: { path: string }) {
 const ToolCard = memo(function ToolCard({
   item,
   worktree,
+  shellCwd = null,
   recipientId = '',
   recipientLabel = '',
   recipientRunning = false,
@@ -2491,6 +2684,9 @@ const ToolCard = memo(function ToolCard({
 }: {
   item: Extract<ChatItem, { kind: 'tool' }>
   worktree: string | null
+  // The directory this command ran in, tracked across the session's shell (see
+  // lib/shellCwd) - null when it isn't known.
+  shellCwd?: string | null
   recipientId?: string
   recipientLabel?: string
   recipientRunning?: boolean
@@ -2540,7 +2736,27 @@ const ToolCard = memo(function ToolCard({
   // `&&` chaining it) is noise worth dropping.
   const bashSource = trimWorktreePaths(hostRunScript ?? command, worktree)
   const bashIndent = useChatBashIndentStore((s) => s.indent)
-  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
+  // The directory the command ran in, as a `cd` line above the script. The
+  // agent's shell persists across its whole session, so the tracked directory
+  // (lib/shellCwd) is often nowhere near the worktree - and a command reads
+  // completely differently depending on where it ran: `cd web && node x.ts`
+  // fails in web/ and works at the root. Shown only when it differs from the
+  // worktree, is known, and the script does not immediately set it itself; a
+  // host run always runs in the worktree whatever the agent's shell is doing.
+  //
+  // A command that OPENS with `cd <the worktree>` pins itself there, so the
+  // shell's directory does not matter and nothing is prepended. That leading cd
+  // trims to `cd .` and is dropped as noise - but a `cd .` the agent wrote
+  // literally (Codex, whose `.` means the cwd it reported) is a different thing
+  // and still gets its reported directory shown.
+  const rawSource = unwrapBashLoginCommand(hostRunScript ?? command)
+  const pinnedToWorktree = dropNoopCd(bashSource) !== bashSource && !/^[ \t]*cd[ \t]+(['"]?)\.\/?\1[ \t]*(?:&&|;|\n)/.test(rawSource)
+  const effectiveCwd = commandCwd || shellCwd || ''
+  const cwdPreamble =
+    isHostRun || pinnedToWorktree || !effectiveCwd || effectiveCwd === worktree
+      ? ''
+      : collapseHome(trimWorktreePaths(effectiveCwd, worktree))
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, cwdPreamble, bashIndent) : ''
   const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
   const interactiveTranscript = isBash && !isHostRunTool && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
@@ -2552,6 +2768,35 @@ const ToolCard = memo(function ToolCard({
     : isBash && typeof input?.description === 'string'
       ? (input.description as string)
       : ''
+
+  // A Bash step that only LOOKS at files (`sed -n 40,110p f`, `cat f`, `head
+  // -50 f`) is a Read spelled in shell - the shape every agent without a Read
+  // tool has to use. Such a card takes the Read presentation: the file and its
+  // line range in the header, and the output rendered as numbered, syntax-
+  // highlighted source instead of a wall of anonymous terminal text.
+  //
+  // The parse is of the COMMAND alone, so the header settles the moment the call
+  // starts rather than flipping shape when the output lands; the split of the
+  // output is separate, and when it disagrees with the script only the body
+  // falls back to the plain command + output panels (see lib/fileViewCommand).
+  //
+  // Plain consts, not useMemo: both derive from `item`, which the reducer
+  // mutates in place (see the ToolCard memo note), and a manual dependency on a
+  // mutated value makes the React compiler skip optimizing the WHOLE card. It
+  // memoizes these for us instead.
+  const fileViewSteps = isBash && !isHostRun ? parseFileViewScript(unwrapBashLoginCommand(bashSource)) : null
+  const fileViews = fileViewSteps?.flatMap((s) => (s.kind === 'view' ? [s.view] : [])) ?? []
+  const isReadShell = fileViews.length > 0
+  // Deduped: several ranges of ONE file are one file in the header.
+  const readShellPaths: string[] = []
+  for (const view of fileViews) {
+    const path = collapseHome(trimWorktreePaths(view.path, worktree))
+    if (!readShellPaths.includes(path)) readShellPaths.push(path)
+  }
+  const fileViewSections =
+    fileViewSteps && renderedResult !== undefined && !item.isError
+      ? splitFileViewOutput(fileViewSteps, stripAnsi(renderedResult))
+      : null
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is
@@ -2575,7 +2820,17 @@ const ToolCard = memo(function ToolCard({
   // Only for the single-file form: ranges pooled across several files would read
   // as one list belonging to none of them.
   const gitAddLines = gitAddSpecList.length === 1 ? gitAddSpecList[0].lines : []
-  const lineInfo = isRead ? readLineInfo(input) : gitAddLines.length > 0 ? `lines ${gitAddLines.join(', ')}` : ''
+  // A read-shaped shell command fills the same slot from its own range. Only
+  // when it looked at ONE file: several ranges pooled in the header would read
+  // as one list belonging to none of them (as for git_add above), and each
+  // section states its own command anyway.
+  const lineInfo = isRead
+    ? readLineInfo(input)
+    : fileViews.length === 1
+      ? fileViewLineInfo(fileViews[0])
+      : gitAddLines.length > 0
+        ? `lines ${gitAddLines.join(', ')}`
+        : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -2629,14 +2884,17 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryPaths = isFileChanges
-    ? changedPaths
-    : gitAddPaths.length > 0
-      ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
-      : isPathSummary
-        ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
-        : []
+    isReadShell ||
+    (!isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string'))
+  const summaryPaths = isReadShell
+    ? readShellPaths
+    : isFileChanges
+      ? changedPaths
+      : gitAddPaths.length > 0
+        ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
+        : isPathSummary
+          ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+          : []
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
@@ -2646,11 +2904,14 @@ const ToolCard = memo(function ToolCard({
   // A single-file git_add is the same case as a plain Read: its header already
   // carries the path and the line ranges, so the panel would only repeat them.
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
-  const hideInput = simpleRead || emptyInput || gitAddSimple
+  // A read-shaped shell command whose output split cleanly needs no Command
+  // panel either: every section is captioned with the step that produced it, so
+  // the panel would print the same script twice.
+  const hideInput = simpleRead || emptyInput || gitAddSimple || fileViewSections !== null
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
-  const hasInput = isBash || !hideInput
-  const Icon = isHostRun ? ShieldAlert : TOOL_ICONS[item.name] ?? Wrench
+  const hasInput = fileViewSections !== null ? false : isBash || !hideInput
+  const Icon = isHostRun ? ShieldAlert : isReadShell ? FileText : TOOL_ICONS[item.name] ?? Wrench
 
   // The security gate may have parked THIS call for the user (a host-run, an
   // unvetted MCP tool, ...). When it has, the card answers for itself instead of
@@ -2674,6 +2935,13 @@ const ToolCard = memo(function ToolCard({
   const rawJson = useMemo(
     () => (showRaw ? toolRawJson(item.input, item.rawUse, item.rawResult, visibleResult) : ''),
     [showRaw, item.input, item.rawUse, item.rawResult, visibleResult],
+  )
+  // The patch's lines get the same worktree-path trim as every other path the
+  // card prints, and the copy is memoized so the diff rows aren't rebuilt on
+  // every render.
+  const editHunks = useMemo(
+    () => item.editPatch?.map((h) => ({ ...h, lines: h.lines.map((l) => trimWorktreePaths(l, worktree)) })),
+    [item.editPatch, worktree],
   )
 
   return (
@@ -2702,7 +2970,7 @@ const ToolCard = memo(function ToolCard({
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : isReadShell ? 'Read' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
@@ -2758,7 +3026,7 @@ const ToolCard = memo(function ToolCard({
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <>
-              {isBash ? (
+              {isBash && !fileViewSections ? (
                 <div>
                   {interactiveTranscript && (
                     <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -2790,6 +3058,7 @@ const ToolCard = memo(function ToolCard({
                   newStr={trimWorktreePaths(input!.new_string as string, worktree)}
                   lang={fileLang}
                   replaceAll={input!.replace_all === true}
+                  hunks={editHunks}
                 />
               ) : isSendMessage && input ? (
                 <SendMessageFields
@@ -2861,6 +3130,8 @@ const ToolCard = memo(function ToolCard({
                           ? <WebSearchOutput text={renderedResult} serif={serif} />
                         : isWebFetch && !item.isError
                           ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                        : fileViewSections
+                          ? <FileViewSections sections={fileViewSections} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
@@ -3103,6 +3374,31 @@ interface SubagentLinks {
   openSubView: (key: string) => void
 }
 
+// shellCwdsFor follows the working directory across a list of chat items, so
+// each Bash card can show where its command actually ran (lib/shellCwd). The
+// agent's shell is ONE process for the whole session: a `cd` in an early step is
+// still in force much later, and a command that reads as nonsense at the
+// worktree ("cd web" failing) makes sense once you can see the shell was already
+// there. A sub-agent has its own shell, so each timeline tracks its own.
+function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, string | null> {
+  const steps: ShellStep[] = []
+  for (const it of items) {
+    if (it.kind !== 'tool' || it.name !== 'Bash') continue
+    const input = (typeof it.input === 'object' && it.input !== null ? it.input : {}) as Record<string, unknown>
+    if (typeof input.command !== 'string' || !input.command) continue
+    steps.push({
+      id: it.toolUseId,
+      command: input.command,
+      cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
+      output: it.result ?? it.runningOutput,
+      cwdAfter: it.cwdAfter,
+      failed: it.isError === true,
+      background: input.run_in_background === true,
+    })
+  }
+  return trackShellCwds(steps, worktree)
+}
+
 // SubagentTimeline renders a sub-agent's inner steps (thinking / tool calls /
 // replies), shared by the folded SubagentCard and the full SubagentChatView.
 // skipId drops one inner item (the assistant message shown separately as the
@@ -3120,6 +3416,7 @@ function SubagentTimeline({
   skipId?: number
   links?: SubagentLinks
 }) {
+  const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
   return (
     <>
       {sub.items.map((it) => {
@@ -3144,7 +3441,7 @@ function SubagentTimeline({
               />
             )
           if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
-          return <ToolCard key={it.id} item={it} worktree={worktree} />
+          return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
         }
         if (it.kind === 'assistant')
           return (
@@ -3606,7 +3903,7 @@ function SubagentChatView({
       {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap">
           <WorkSpark />
-          <span className="chat-text-shimmer font-medium min-w-0 truncate">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
+          <span className="chat-text-shimmer font-medium min-w-0 truncate optical-center">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -4354,7 +4651,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     if (lastTs != null) tsOut?.set(id, lastTs)
     items.push({ ...claimOrphanResult(link, raw), id } as ChatItem)
   }
-  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[], raw?: unknown) => {
+  const patchTool = (toolUseId: string, text: string, isError: boolean, images: string[], raw?: unknown, editPatch?: EditHunk[] | null, cwdAfter?: string) => {
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i]
       if (it.kind === 'tool' && it.toolUseId === toolUseId) {
@@ -4362,6 +4659,8 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         it.isError = isError
         it.resultImages = images.length ? images : undefined
         it.rawResult = raw
+        it.editPatch = editPatch ?? undefined
+        it.cwdAfter = cwdAfter
         return
       }
       if (it.kind === 'question' && it.toolUseId === toolUseId) {
@@ -4373,7 +4672,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     // batch's own older neighbour). Hold the result for whichever batch builds
     // it - the card is created by a LATER, older page, so patching forward is
     // the only way it can ever show its result.
-    stashOrphanResult(link, toolUseId, { result: text, isError, images, raw })
+    stashOrphanResult(link, toolUseId, { result: text, isError, images, raw, editPatch })
   }
   // Distinct task-notifications already rendered in this batch: the CLI records
   // each one several times (queue-operation, attachment, sometimes a consumed
@@ -4518,11 +4817,12 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         if (content.trim()) routeUser(content, ev.isMeta)
         continue
       }
+      const editPatch = eventEditPatch(ev, content ?? [])
       for (const block of content ?? []) {
         if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
-          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block))
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
         }
       }
     } else if (ev.type === 'assistant') {
@@ -4563,7 +4863,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
           // Task* ops fall through to a normal tool card (like any other tool);
           // only the panel state is latest-wins, and that is driven by the live
           // reducer's replay, not this older page.
-          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block, providerEntry(ev)) })
         }
       }
       // Turn-footer synthesis (item: historical usage): roll this message's
@@ -4612,12 +4912,18 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
 interface SettledMessagesProps {
   items: ChatItem[]
   liveFromId: number | null
-  renderItem: (item: ChatItem) => ReactNode
+  renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   serif: boolean
   connected: boolean
   worktreePath: string | null
   subByToolUse: Record<string, SubagentView>
   subagents: Record<string, SubagentView>
+  // Where each Bash command ran (lib/shellCwd). Handed to the rows one value at
+  // a time rather than read through the ref, because it is the one input that
+  // can change for an OLD row: a late result revealing a `cd` that failed, or
+  // older history loading in and moving the baseline. Per-row values keep that
+  // from re-rendering the whole transcript every time a command is appended.
+  shellCwds: Map<string, string | null>
 }
 
 // One settled row, memo'd per item so appending a new message renders ONLY the
@@ -4630,7 +4936,8 @@ interface SettledMessagesProps {
 interface SettledRowProps {
   item: ChatItem
   animate: boolean
-  renderItem: (item: ChatItem) => ReactNode
+  renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
+  shellCwd: string | null
   serif: boolean
   connected: boolean
   worktreePath: string | null
@@ -4646,7 +4953,7 @@ function isChatMessage(item: ChatItem): boolean {
 }
 
 const SettledRow = memo(
-  function SettledRow({ item, animate, renderItem }: SettledRowProps) {
+  function SettledRow({ item, animate, renderItem, shellCwd }: SettledRowProps) {
     return (
       <div
         // Marks the row as a scroll target for alignToLastMessage; absent on
@@ -4654,7 +4961,7 @@ const SettledRow = memo(
         data-chat-message={isChatMessage(item) ? '' : undefined}
         className={animate ? 'animate-chat-item-in' : undefined}
       >
-        {renderItem(item)}
+        {renderItem(item, shellCwd)}
       </div>
     )
   },
@@ -4662,6 +4969,7 @@ const SettledRow = memo(
     a.item === b.item &&
     a.animate === b.animate &&
     a.renderItem === b.renderItem &&
+    a.shellCwd === b.shellCwd &&
     a.serif === b.serif &&
     a.connected === b.connected &&
     a.worktreePath === b.worktreePath &&
@@ -4670,7 +4978,7 @@ const SettledRow = memo(
 )
 
 const SettledMessages = memo(
-  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents }: SettledMessagesProps) {
+  function SettledMessages({ items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
     return (
       <>
         {items.map((item) => (
@@ -4679,6 +4987,7 @@ const SettledMessages = memo(
             item={item}
             animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
             renderItem={renderItem}
+            shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
             serif={serif}
             connected={connected}
             worktreePath={worktreePath}
@@ -4693,6 +5002,7 @@ const SettledMessages = memo(
     a.items === b.items &&
     a.liveFromId === b.liveFromId &&
     a.renderItem === b.renderItem &&
+    a.shellCwds === b.shellCwds &&
     a.serif === b.serif &&
     a.connected === b.connected &&
     a.worktreePath === b.worktreePath &&
@@ -5446,7 +5756,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       scheduleSubFlush()
     }
-    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
+    const patchSubTool = (sub: SubagentView, toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown, editPatch?: EditHunk[] | null, cwdAfter?: string) => {
       const resultImages = images.length > 0 ? images : undefined
       // Replace the item with a fresh object (not an in-place mutation): the
       // memoized ToolCard compares its `item` prop by reference, so mutating the
@@ -5455,7 +5765,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       for (let i = 0; i < sub.items.length; i++) {
         const it = sub.items[i]
         if (it.kind === 'tool' && it.toolUseId === toolUseId) {
-          sub.items[i] = { ...it, result, isError, resultImages, rawResult: raw }
+          sub.items[i] = { ...it, result, isError, resultImages, rawResult: raw, editPatch: editPatch ?? undefined, cwdAfter }
           break
         }
       }
@@ -5635,14 +5945,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (!sub.prompt && t.trim()) sub.prompt = t
         }
         if (typeof content === 'string') takePrompt(content)
-        else
+        else {
+          const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text) takePrompt(block.text)
             else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
             }
           }
+        }
       } else if (ev.type === 'assistant') {
         const content = ev.message?.content
         if (Array.isArray(content)) {
@@ -5663,7 +5975,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
               sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
             } else if (block.type === 'tool_use' && block.id) {
-              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
+              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block, providerEntry(ev)) })
             }
           }
         }
@@ -5676,7 +5988,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       scheduleSubFlush()
     }
 
-    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown) => {
+    const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown, editPatch?: EditHunk[] | null, cwdAfter?: string) => {
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
       // rendered.
@@ -5688,6 +6000,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         inPending.isError = isError
         inPending.resultImages = resultImages
         inPending.rawResult = raw
+        inPending.editPatch = editPatch ?? undefined
+        inPending.cwdAfter = cwdAfter
         return
       }
       if (inPending && inPending.kind === 'question') {
@@ -5698,12 +6012,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // page - so a result whose card was never built belongs to a page the
       // user has not scrolled back to yet. Hold it for that page.
       if (!toolResults.known.has(toolUseId)) {
-        stashOrphanResult(toolResults, toolUseId, { result, isError, images, raw })
+        stashOrphanResult(toolResults, toolUseId, { result, isError, images, raw, editPatch })
         return
       }
       setItems((prev) =>
         prev.map((it) => {
-          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages, rawResult: raw }
+          if (it.kind === 'tool' && it.toolUseId === toolUseId) return { ...it, result, isError, resultImages, rawResult: raw, editPatch: editPatch ?? undefined, cwdAfter }
           if (it.kind === 'question' && it.toolUseId === toolUseId) return { ...it, result }
           return it
         }),
@@ -6184,12 +6498,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '')
             return
           }
+          const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
               routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block))
+              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
               if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
               if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
@@ -6292,7 +6607,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     scheduleSubFlush()
                   }
                 }
-                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid, rawUse: rawUseBlock(block) })
+                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid, rawUse: rawUseBlock(block, providerEntry(ev)) })
               }
             }
           }
@@ -8135,7 +8450,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return parts
   }
 
-  function renderChatItem(item: ChatItem): ReactNode {
+  // Where each Bash command ran, followed across the session's one shell. The
+  // worktree is only the right starting point once the WHOLE conversation is
+  // loaded - with older history still unread the shell could have been left
+  // anywhere, so the tracking starts out knowing nothing and re-anchors on the
+  // first absolute `cd` (which is exactly what an agent's defensive
+  // `cd <the worktree> && ...` prefix is).
+  const shellCwds = useMemo(
+    () => shellCwdsFor(items, allHistoryLoaded ? worktreePath : null),
+    [items, worktreePath, allHistoryLoaded],
+  )
+
+  function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
         return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
@@ -8315,7 +8641,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             />
           )
         }
-        return <ToolCard item={item} worktree={worktreePath} />
+        return <ToolCard item={item} worktree={worktreePath} shellCwd={shellCwd} />
       }
       case 'subagent': {
         // A sub-agent with no parent Task card (its meta lacked a tool_use id).
@@ -8378,9 +8704,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return (
             <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
               <WorkSpark still />
+              {/* Inline, not a flex row: `.optical-center` trims a block's line
+                  boxes, and a flex container has none - so the separator carries
+                  the spacing that `gap-1.5` used to. */}
               {segs.map((s, i) => (
-                <span key={i} className="flex items-center gap-1.5">
-                  {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
+                <span key={i} className="optical-center">
+                  {i > 0 && <span className="text-stone-300 dark:text-stone-600 mx-1.5">·</span>}
                   {s}
                 </span>
               ))}
@@ -8495,7 +8824,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // are passed to SettledMessages explicitly (and listed in its comparator).
   const renderItemRef = useRef(renderChatItem)
   renderItemRef.current = renderChatItem
-  const renderItem = useCallback((item: ChatItem) => renderItemRef.current(item), [])
+  const renderItem = useCallback((item: ChatItem, shellCwd?: string | null) => renderItemRef.current(item, shellCwd), [])
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
@@ -8596,6 +8925,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             worktreePath={worktreePath}
             subByToolUse={subByToolUse}
             subagents={subagents}
+            shellCwds={shellCwds}
           />
           {/* The in-flight streamed block: markdown-rendered live (with a
               virtual closing fence while inside a code block); streamed thinking
@@ -8627,10 +8957,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap animate-chat-item-in">
               <WorkSpark />
-              <span className="chat-text-shimmer font-medium shrink-0">{turnVerb}...</span>
+              <span className="chat-text-shimmer font-medium shrink-0 optical-center">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
-              <span className="min-w-0 truncate text-stone-400 dark:text-stone-500 tabular-nums">
+              <span className="min-w-0 truncate text-stone-400 dark:text-stone-500 tabular-nums optical-center">
                 ({formatDuration(elapsed * 1000)}
                 {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
                 {stream?.kind === 'thinking' ? ' · Thinking...' : ''})

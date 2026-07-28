@@ -35,14 +35,23 @@
    Progressive enhancement: unsupported browsers (Firefox as of writing) simply
    ignore it and render exactly as before, so this can never make things worse.
 
-   It SHRINKS the label's box, so only use it where nothing depends on that box's
-   height (see CLAUDE.md for the audit): the container must set its own height
-   (h-7/h-8, like the top-bar buttons), and the label must not clip its overflow -
-   `whitespace-nowrap` is fine, `truncate` is not, because `overflow: hidden` on a
-   cap-trimmed box slices the descenders off ("project" -> "proiect"). Not on
-   running prose either: trimming collapses the leading between lines. */
+   The trimmed box is SMALLER THAN THE INK: a `y`/`p`/`j` now hangs below it and a
+   tall `l`/`d` pokes above it. That is harmless until something clips the box -
+   Tailwind's `truncate` is `overflow: hidden`, which sliced the descenders clean
+   off ("project" rendered as "proiect"). The padding gives those glyphs room
+   inside the clip; the equal negative margin takes it straight back out of the
+   layout, so the box the row sees is still the trimmed one and no row grows.
+   0.35em clears a typical descender (~0.25em) and the ascender-over-cap gap
+   (~0.1em) with room to spare.
+
+   What it does NOT undo: a row whose height comes only from its label still gets
+   a couple of px shorter, because shrinking that box is the entire point. Give
+   the row its own height if that matters. Not for running prose either - trimming
+   a multi-line block collapses the leading between its lines. */
 .optical-center {
   text-box: trim-both cap alphabetic;
+  padding-block: 0.35em;
+  margin-block: -0.35em;
 }
 
 :root {
