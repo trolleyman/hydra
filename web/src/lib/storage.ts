@@ -68,6 +68,12 @@ export const StorageKeys = {
   // a wrapped long line apart from a genuinely new one. Client-only, global
   // (localStorage, like Theme). See lib/chatPrefs.
   chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
+  // Spaces the shell-command formatter indents a block body by when it lays a
+  // one-line for/while/if/case out over several lines - in the chat transcript
+  // and on the security approval card. A bare number ('0' = flush left); absent
+  // = the built-in 4. Client-only, global (localStorage, like Theme). See
+  // lib/chatPrefs + lib/bashFormat.
+  chatBashIndent: 'hydra-chat-bash-indent',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an

@@ -83,6 +83,47 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay(command)).toBe(command)
   })
 
+  it('lays a case out with one arm per line', () => {
+    expect(formatBashForDisplay('case $x in a) echo a ;; b|c) echo bc ;; *) echo other ;; esac')).toBe(
+      'case $x in\n    a) echo a ;;\n    b|c) echo bc ;;\n    *) echo other ;;\nesac',
+    )
+  })
+
+  it('indents the rest of a multi-command case arm under its pattern', () => {
+    expect(formatBashForDisplay('case $x in a) echo one; echo two ;; esac')).toBe(
+      'case $x in\n    a) echo one\n        echo two ;;\nesac',
+    )
+  })
+
+  it.each([
+    // A parenthesised pattern, and the `;&` / `;;&` fall-through terminators.
+    ['case $x in (a) echo a ;; esac', 'case $x in\n    (a) echo a ;;\nesac'],
+    ['case $x in a) echo a ;& *) echo b ;; esac', 'case $x in\n    a) echo a ;&\n    *) echo b ;;\nesac'],
+    ['case $x in a) echo a ;;& *) echo b ;; esac', 'case $x in\n    a) echo a ;;&\n    *) echo b ;;\nesac'],
+    // The final `;;` is optional, so `esac` has to close the arm as well.
+    ['case $x in a) echo a; esac', 'case $x in\n    a) echo a\nesac'],
+  ])('formats the case in %j', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it('nests a case inside a loop body', () => {
+    expect(formatBashForDisplay('for f in *; do case $f in *.gz) gunzip $f ;; *) wc -l $f ;; esac; done')).toBe(
+      'for f in *; do\n    case $f in\n        *.gz) gunzip $f ;;\n        *) wc -l $f ;;\n    esac\ndone',
+    )
+  })
+
+  it('does not mistake a subshell or substitution for a case pattern', () => {
+    expect(formatBashForDisplay('(cd web && echo $(date)); echo done')).toBe('(cd web &&\necho $(date))\necho done')
+  })
+
+  it.each([
+    [0, 'for i in 1; do\necho $i\ndone'],
+    [2, 'for i in 1; do\n  echo $i\ndone'],
+    [8, 'for i in 1; do\n        echo $i\ndone'],
+  ])('indents a block body by %i spaces', (indent, expected) => {
+    expect(formatBashForDisplay('for i in 1; do echo $i; done', '', indent)).toBe(expected)
+  })
+
   it('lays a for loop out over its own indented lines', () => {
     expect(formatBashForDisplay('cd /path && for i in 1 2 3; do echo $i; done')).toBe(
       'cd /path &&\nfor i in 1 2 3; do\n    echo $i\ndone',
