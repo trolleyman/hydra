@@ -9,6 +9,8 @@ import {
 } from 'react'
 import { renderMarkdownSource } from '../lib/markdown'
 import { applyEdit, enterEdit, ensureCaretVisible, moveCaret, visualLineTarget } from '../lib/textareaEdit'
+import { autoPairEdit, backspacePairEdit } from '../lib/autoPair'
+import { useAutoPairStore } from '../lib/composerPrefs'
 
 type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'> & {
   value: string
@@ -42,9 +44,10 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
 //
 // It also carries the editing behaviours every composer shares (lib/textareaEdit):
 // Enter continues a markdown list, Home/End walk VISUAL lines, and the caret's
-// line is kept fully in view (padding included) when the box scrolls. The
-// consumer's own onKeyDown runs first and wins - a handler that calls
-// preventDefault (Enter-to-send, Ctrl+Enter-to-submit) is left alone.
+// line is kept fully in view (padding included) when the box scrolls. Plus
+// auto-pairing (lib/autoPair), when the Browser setting is on. The consumer's own
+// onKeyDown runs first and wins - a handler that calls preventDefault
+// (Enter-to-send, Ctrl+Enter-to-submit) is left alone.
 export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTextareaProps>(
   function HighlightedTextarea(
     {
@@ -66,6 +69,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
     const innerRef = useRef<HTMLTextAreaElement>(null)
     const backdropRef = useRef<HTMLDivElement>(null)
     useImperativeHandle(ref, () => innerRef.current as HTMLTextAreaElement)
+    const autoPair = useAutoPairStore((s) => s.enabled)
 
     function syncScroll() {
       const ta = innerRef.current
@@ -75,9 +79,32 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       bd.scrollLeft = ta.scrollLeft
     }
 
+    // Auto-pairing (lib/autoPair), when the preference is on: a typed opener
+    // brings its closer along, a typed closer steps over the one already there,
+    // Backspace between an empty pair clears both, and a mark typed over a
+    // selection wraps it. Returns whether it handled the key. Skipped for
+    // shortcuts (Cmd, or Ctrl without Alt - AltGr sets both) and mid-composition,
+    // where the "key" is not a character the user is typing into the text.
+    function pairingKeys(e: React.KeyboardEvent<HTMLTextAreaElement>): boolean {
+      if (!autoPair || e.nativeEvent.isComposing || e.metaKey || (e.ctrlKey && !e.altKey)) return false
+      const ta = e.currentTarget
+      const start = ta.selectionStart ?? 0
+      const end = ta.selectionEnd ?? 0
+      const edit =
+        e.key === 'Backspace'
+          ? backspacePairEdit(ta.value, start, end)
+          : autoPairEdit(e.key, ta.value, start, end)
+      if (!edit) return false
+      e.preventDefault()
+      applyEdit(ta, edit)
+      requestAnimationFrame(() => ensureCaretVisible(ta))
+      return true
+    }
+
     // The shared editing keys, run only after the consumer's own onKeyDown has
     // passed on the keystroke (see the component comment).
     function editingKeys(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+      if (pairingKeys(e)) return
       const ta = e.currentTarget
       if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const edit = enterEdit(ta.value, ta.selectionStart ?? 0, ta.selectionEnd ?? 0)
