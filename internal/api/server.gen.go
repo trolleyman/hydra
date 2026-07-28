@@ -821,7 +821,7 @@ type PolicyConfig struct {
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 
-	// GitIsolation How much of the repo's shared .git the head may write: "off" (default, writable) or "readonly" (whole .git bound read-only, commits host-mediated). Unset inherits the default (off). See docs/git-isolation.md.
+	// GitIsolation How much of the repo's shared .git the head may write: "readonly" (default, whole .git bound read-only, commits host-mediated) or "off" (writable). Unset inherits the default (readonly). See docs/git-isolation.md.
 	GitIsolation *string `json:"git_isolation"`
 
 	// KnownTools Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
@@ -1352,7 +1352,7 @@ type SpawnAgentRequest struct {
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`
 
-	// GitIsolation How much of the repo's shared .git this head may write (see docs/git-isolation.md). "off" (default) writable; "readonly" locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue). Omitted inherits the agent-type policy default.
+	// GitIsolation How much of the repo's shared .git this head may write (see docs/git-isolation.md). "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. Omitted inherits the agent-type policy default.
 	GitIsolation *string `json:"git_isolation,omitempty"`
 
 	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3... suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
