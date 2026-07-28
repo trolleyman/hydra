@@ -312,6 +312,42 @@ describe('reduceHistoryEvents across page boundaries', () => {
 
 })
 
+// The CLI logs an isMeta record every time it downscales an image before sending
+// it. It never reaches stdout, so it arrives only via the transcript backfill -
+// which appends onto an already-filled event log, landing a mid-turn note at the
+// very END of the conversation, as an "Injected context" card hanging off a
+// finished answer. The daemon drops it now, but existing event logs still hold
+// it, so the reducer has to drop it too.
+describe('the image-downscale notice is not injected context', () => {
+  const meta = (text: string) => [{ type: 'user', isMeta: true, message: { content: [{ type: 'text', text }] } }]
+  const alloc = () => {
+    let id = -1
+    return () => id--
+  }
+
+  it('drops the notice in both the shapes the CLI writes it', () => {
+    expect(reduceHistoryEvents(meta('[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]'), alloc())).toHaveLength(0)
+    expect(reduceHistoryEvents(
+      [{ type: 'user', isMeta: true, message: { content: '[Image: original 1384x3128, displayed at 885x2000. Multiply coordinates by 1.56 to map to original image.]' } }],
+      alloc(),
+    )).toHaveLength(0)
+  })
+
+  it('keeps injected context that is not the notice', () => {
+    expect(reduceHistoryEvents(meta('some other injected context'), alloc())).toMatchObject([{ kind: 'meta' }])
+    // Only the CLI's bookkeeping shape goes; a bracketed image mention stays.
+    expect(reduceHistoryEvents(meta('[Image: /tmp/shot.png]'), alloc())).toMatchObject([{ kind: 'meta' }])
+  })
+
+  it('keeps a real user turn that quotes the notice', () => {
+    const items = reduceHistoryEvents(
+      [{ type: 'user', message: { content: [{ type: 'text', text: '[Image: original 2088x160, displayed at 2000x153. Multiply coordinates by 1.04 to map to original image.]' }] } }],
+      alloc(),
+    )
+    expect(items).toMatchObject([{ kind: 'user' }])
+  })
+})
+
 // A ToolSearch card's header used to show the raw query, i.e. the wire tool name
 // with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
 describe('summarizeToolSearchQuery', () => {

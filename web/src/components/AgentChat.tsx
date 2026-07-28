@@ -71,7 +71,7 @@ import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
-import { parseUploadAttachments } from '../lib/uploadAttachments'
+import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
@@ -4819,9 +4819,17 @@ const MetaCard = memo(function MetaCard({ text }: { text: string }) {
 // ChatItem: a skill body -> a SkillCard, anything else -> a generic MetaCard.
 // Shared by the live and history reducers so both agree. Returns null for empty
 // text (nothing to show).
+//
+// It also returns null for the CLI's image-downscale notice - a note to the
+// model about mapping coordinates back, useless to a reader. New conversations
+// never record it (the daemon drops it, see claudestream.IsHiddenChatMessage),
+// but it is already in existing event logs, and there it is worse than noise:
+// having missed the live stream it was backfilled at the very END of the log, so
+// it rendered as an "Injected context" card hanging off a finished answer, as if
+// something had been injected after it.
 function routeMetaText(text: string): DistributiveOmit<ChatItem, 'id'> | null {
   const t = text.trim()
-  if (!t) return null
+  if (!t || isImageResizeNotice(t)) return null
   const skill = detectSkillBody(t)
   if (skill) return { kind: 'skill', name: skill.name, text: skill.body }
   return { kind: 'meta', text: t }

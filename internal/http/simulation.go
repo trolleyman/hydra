@@ -3909,6 +3909,13 @@ var simChatEvents = []string{
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
+	// The bookkeeping record the CLI logs for the image it just downscaled. It
+	// writes one to the transcript WITHOUT emitting it on stdout, so it reaches
+	// the chat only through the history backfill - i.e. appended at the tail of
+	// an already-filled event log, where it rendered as an "Injected context"
+	// card hanging off a finished answer. IsHiddenChatMessage drops it, so the
+	// chat must render NOTHING for this line.
+	`{"type":"user","uuid":"sim-image-resize","message":{"role":"user","content":"[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"},"isMeta":true}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
 	// An assistant reply that embeds a screenshot IT took, by the path it wrote it
 	// to (inside the head's private /tmp). The chat markdown renderer resolves that

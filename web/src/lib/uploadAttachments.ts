@@ -17,6 +17,20 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?)$/i
 // image.]" - harness plumbing, not user content (item 41).
 const IMAGE_PLACEHOLDER_RE = /\[Image:[^\]]*\]/g
 
+// The same placeholder, but as a whole machine-injected (isMeta) message rather
+// than a fragment inside a user turn: the CLI logs one every time it downscales
+// an image it is about to send, including images IT read itself. Deliberately
+// stricter than IMAGE_PLACEHOLDER_RE above - that one strips a fragment out of
+// text the user still sees, where over-matching costs a few characters, while a
+// match here drops a whole card, where over-matching would silently swallow
+// context. So this anchors on the two dimension pairs that make the record the
+// CLI's own bookkeeping, and leaves the tail free to be reworded.
+const IMAGE_RESIZE_NOTICE_RE = /^\[Image: original \d+x\d+, displayed at \d+x\d+\./
+
+export function isImageResizeNotice(text: string): boolean {
+  return IMAGE_RESIZE_NOTICE_RE.test(text.trim())
+}
+
 // parseUploadAttachments splits a submitted message into its display text and
 // the upload attachments it references. Upload paths are lifted out as chips,
 // the image placeholder is dropped, and the leftover text is tidied so removing
