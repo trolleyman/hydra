@@ -1,4 +1,4 @@
-import { createFileRoute, useBlocker, useCanGoBack, useRouter } from '@tanstack/react-router'
+import { createFileRoute, useCanGoBack, useRouter } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
@@ -10,7 +10,9 @@ import { useToastStore } from '../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
+  FloatingSaveBar,
 } from '../components/SettingsComponents'
+import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { PageTopBar } from '../components/PageTopBar'
 import { Tooltip } from '../components/Tooltip'
 import { BrowserSections } from '../components/settings/BrowserSections'
@@ -55,23 +57,7 @@ function SettingsPage() {
     return JSON.stringify(config) !== baseConfig
   }, [config, baseConfig])
 
-  useBlocker({
-    shouldBlockFn: () => {
-      if (hasUnsavedChanges) {
-        return !window.confirm('You have unsaved changes. Discard them?')
-      }
-      return false
-    },
-    enableBeforeUnload: true,
-  })
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) { e.preventDefault(); e.returnValue = '' }
-    }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedChanges])
+  useUnsavedChangesGuard(hasUnsavedChanges)
 
   useEffect(() => {
     if (!effectiveProjectId) return
@@ -188,6 +174,9 @@ function SettingsPage() {
           )}
         </div>
       </div>
+      {/* The only sign the page is holding a draft - without it the navigation
+          blocker's "discard them?" confirm arrives out of nowhere. */}
+      <FloatingSaveBar visible={tab !== 'browser' && hasUnsavedChanges} saving={saving} onSave={handleSave} />
     </div>
   )
 }

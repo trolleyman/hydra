@@ -10,6 +10,7 @@ import { usePushStatus } from '../lib/usePushStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { useArchivedAgents } from '../lib/useArchivedAgents'
 import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
+import { hasUnsavedWork } from '../lib/unsavedChanges'
 import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { touchProject } from '../lib/projectRecency'
 import { useAgentNotifications } from '../lib/useAgentNotifications'
@@ -689,7 +690,11 @@ function RootLayout() {
     // spawn from the sidebar doesn't yank them away from their current work -
     // the new agent just appears in the list. If nothing is selected (e.g. the
     // project home / repository view), select it so the spawn isn't a no-op.
-    if (currentProjectId && !selectedAgentId) {
+    // A page holding an unsaved draft (settings) counts as current work too:
+    // navigating there would trip its blocker, so pressing Spawn would ask the
+    // user to discard edits they never meant to leave behind. The new head
+    // still shows up in the sidebar, so the spawn isn't invisible.
+    if (currentProjectId && !selectedAgentId && !hasUnsavedWork()) {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
     }
   }, [addAgent, currentProjectId, selectedAgentId, navigate])
